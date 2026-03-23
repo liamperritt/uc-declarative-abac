@@ -48,15 +48,28 @@ def _build_tags_query(catalog_names: list[str]) -> str:
 
 
 def _build_privileges_query(catalog_names: list[str]) -> str:
-    """Build a query for privileges across the given catalogs."""
+    """Build a UNION ALL query across privilege system tables for the given catalogs."""
     in_clause = _build_catalog_in_clause(catalog_names)
-    return (
-        f"SELECT grantor_type AS securable_type, "
-        f"  table_catalog || '.' || table_schema || '.' || table_name AS securable_full_name, "
-        f"  grantee AS principal, privilege_type "
+    parts = [
+        f"SELECT 'CATALOG' AS securable_type, catalog_name AS securable_full_name, "
+        f"grantee, privilege_type "
+        f"FROM system.information_schema.catalog_privileges "
+        f"WHERE catalog_name IN {in_clause} AND inherited_from = 'NONE'",
+
+        f"SELECT 'SCHEMA' AS securable_type, "
+        f"concat(catalog_name, '.', schema_name) AS securable_full_name, "
+        f"grantee, privilege_type "
+        f"FROM system.information_schema.schema_privileges "
+        f"WHERE catalog_name IN {in_clause} AND inherited_from = 'NONE'",
+
+        f"SELECT 'TABLE' AS securable_type, "
+        f"concat(table_catalog, '.', table_schema, '.', table_name) AS securable_full_name, "
+        f"grantee, privilege_type "
         f"FROM system.information_schema.table_privileges "
-        f"WHERE table_catalog IN {in_clause}"
-    )
+        f"WHERE table_catalog IN {in_clause} AND inherited_from = 'NONE'",
+    ]
+    inner = " UNION ALL ".join(parts)
+    return f"SELECT securable_type, securable_full_name, grantee, privilege_type FROM ({inner})"
 
 
 def _parse_tag_rows(rows: list[list[str]]) -> set[SecurableTag]:

@@ -45,12 +45,9 @@ def run(
     config = ConfigFile.model_validate(resolved)
     catalog_names = list(config.catalogs.keys())
 
-    # 2. Create helpers and compile desired tags (needed by both workflows)
+    # 2. Parallel initial fetch (tags, privileges, and principals concurrently)
     uc_helper = UnityCatalogHelper(workspace_client, warehouse_id)
     acct_helper = AccountHelper(account_client)
-    desired_tags = compile_desired_tags(config)
-
-    # 3. Parallel initial fetch (tags, privileges, and principals concurrently)
     with ThreadPoolExecutor() as pool:
         actual_tags_f = pool.submit(uc_helper.fetch_actual_tags, catalog_names)
         actual_privs_f = pool.submit(uc_helper.fetch_actual_privileges, catalog_names)
@@ -59,13 +56,16 @@ def run(
         actual_privileges = actual_privs_f.result()
         principals_f.result()
 
-    # 4. Compute diffs
+    # 3. Tags workflow
+    desired_tags = compile_desired_tags(config)
     tag_diff = compute_tag_diff(desired_tags, actual_tags)
+
+    # 4. Privileges workflow
     desired_privileges = compile_desired_privileges(config, desired_tags)
     acct_helper.validate_principals(extract_principals(desired_privileges))
     privilege_diff = compute_privilege_diff(desired_privileges, actual_privileges)
 
-    # 5. Log and execute
+    # 5. Log and execute (sequential)
     change_logger = ChangeLogger(dry_run=dry_run)
     if not dry_run:
         execute_tag_diff(uc_helper, tag_diff, change_logger)

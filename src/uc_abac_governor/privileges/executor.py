@@ -23,20 +23,27 @@ def _resolve_principal(acct_helper: AccountHelper, principal: str) -> str:
         return principal
 
 
+def _quote_securable(full_name: str) -> str:
+    """Backtick-quote each segment of a dot-delimited securable name."""
+    return ".".join(f"`{seg}`" for seg in full_name.split("."))
+
+
 def _build_grant_sql(priv: SecurablePrivilege, resolved_principal: str) -> str:
     """Build a GRANT SQL statement for a single privilege."""
+    quoted = _quote_securable(priv.securable_full_name)
     return (
         f"GRANT {priv.privilege_type} "
-        f"ON {priv.securable_type.value} {priv.securable_full_name} "
+        f"ON {priv.securable_type.value} {quoted} "
         f"TO `{resolved_principal}`"
     )
 
 
 def _build_revoke_sql(priv: SecurablePrivilege, resolved_principal: str) -> str:
     """Build a REVOKE SQL statement for a single privilege."""
+    quoted = _quote_securable(priv.securable_full_name)
     return (
         f"REVOKE {priv.privilege_type} "
-        f"ON {priv.securable_type.value} {priv.securable_full_name} "
+        f"ON {priv.securable_type.value} {quoted} "
         f"FROM `{resolved_principal}`"
     )
 

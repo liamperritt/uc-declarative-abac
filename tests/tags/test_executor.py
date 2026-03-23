@@ -19,10 +19,10 @@ def _parse_sql(sql: str):
 
 
 def _assert_sql_contains(sql: str, *fragments: str):
-    """Assert that every fragment appears in the SQL string (case-insensitive)."""
-    upper = sql.upper()
+    """Assert that every fragment appears in the SQL string (case-insensitive, ignoring backticks)."""
+    normalised = sql.upper().replace("`", "")
     for fragment in fragments:
-        assert fragment.upper() in upper, (
+        assert fragment.upper() in normalised, (
             f"Expected {fragment!r} in SQL: {sql}"
         )
 
@@ -59,6 +59,9 @@ def test_tag_executor_generates_set_tags_sql_for_adds():
         _assert_sql_contains(sql_text, "SET TAGS", "my_catalog", "env", "prod")
     else:
         _assert_sql_contains(sql, "ALTER", "CATALOG", "SET TAGS", "my_catalog", "env", "prod")
+
+    # Securable name should be backtick-quoted
+    assert "`my_catalog`" in sql
 
     uc_helper.execute_sql.assert_called_once_with(sql)
 

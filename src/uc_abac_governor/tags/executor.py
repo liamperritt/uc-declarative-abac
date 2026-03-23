@@ -18,6 +18,11 @@ def _format_tag_entry(tag: SecurableTag) -> str:
     return f"'{tag.tag_name}' = '{tag.tag_value}'"
 
 
+def _quote_securable(full_name: str) -> str:
+    """Backtick-quote each segment of a dot-delimited securable name."""
+    return ".".join(f"`{seg}`" for seg in full_name.split("."))
+
+
 def _build_set_tags_sql(
     securable_type: SecurableType,
     securable_full_name: str,
@@ -25,7 +30,8 @@ def _build_set_tags_sql(
 ) -> str:
     """Build an ALTER SET TAGS statement for a batch of tags on one securable."""
     entries = ", ".join(sorted(_format_tag_entry(t) for t in tags))
-    return f"ALTER {securable_type.value} {securable_full_name} SET TAGS ({entries})"
+    quoted = _quote_securable(securable_full_name)
+    return f"ALTER {securable_type.value} {quoted} SET TAGS ({entries})"
 
 
 def _build_unset_tags_sql(
@@ -35,7 +41,8 @@ def _build_unset_tags_sql(
 ) -> str:
     """Build an ALTER UNSET TAGS statement for a batch of tags on one securable."""
     entries = ", ".join(sorted(f"'{t.tag_name}'" for t in tags))
-    return f"ALTER {securable_type.value} {securable_full_name} UNSET TAGS ({entries})"
+    quoted = _quote_securable(securable_full_name)
+    return f"ALTER {securable_type.value} {quoted} UNSET TAGS ({entries})"
 
 
 def _group_by_securable(

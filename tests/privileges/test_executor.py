@@ -9,10 +9,10 @@ from uc_abac_governor.types import PrincipalValidationError, SecurableType
 
 
 def _assert_sql_contains(sql: str, *fragments: str):
-    """Assert that every fragment appears in the SQL string (case-insensitive)."""
-    upper = sql.upper()
+    """Assert that every fragment appears in the SQL string (case-insensitive, ignoring backticks)."""
+    normalised = sql.upper().replace("`", "")
     for fragment in fragments:
-        assert fragment.upper() in upper, (
+        assert fragment.upper() in normalised, (
             f"Expected {fragment!r} in SQL: {sql}"
         )
 
@@ -65,8 +65,9 @@ def test_privilege_executor_generates_grant_sql():
     sql = stmts[0]
 
     _assert_sql_contains(sql, "GRANT", "SELECT", "TABLE", "catalog.schema.orders", "data_analysts")
-    # GRANT statements use the TO keyword
     _assert_sql_contains(sql, "TO")
+    # Securable name should be backtick-quoted
+    assert "`catalog`.`schema`.`orders`" in sql
     uc_helper.execute_sql.assert_called_once_with(sql)
 
 

@@ -250,6 +250,9 @@ def test_uc_helper_privileges_query_is_valid_sql():
     assert "SECURABLE_FULL_NAME" in sql_upper
     assert "PRIVILEGE_TYPE" in sql_upper
 
+    # Should NOT reference grantor_type (wrong column)
+    assert "GRANTOR_TYPE" not in sql_upper
+
     # Catalog name should appear in WHERE clause
     assert "'my_catalog'" in sql
 
