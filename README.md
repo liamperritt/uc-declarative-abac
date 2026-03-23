@@ -430,6 +430,8 @@ Not all object types are managed the same way:
 
 Mask and filter policies are currently additive-only because Unity Catalog does not yet expose a system table to track existing mask/filter policy assignments. Once UC adds this capability, the engine will handle removals for these policy types as well, matching the behaviour of tags and grants.
 
+> **Important — tag and grant drift:** For catalogs governed by this project, the engine treats the YAML configs as the sole source of truth for tags and privilege grants. If a tag or grant is manually added to an object in a governed catalog (e.g. via the Databricks UI or a direct SQL statement), the engine will remove it on the next run to re-sync with the declared config. All tag assignments and privilege grants for governed catalogs must be managed through these YAML files.
+
 ---
 
 *Define governance in YAML. Version it. Deploy it.*
