@@ -85,3 +85,49 @@ Multiple tags on a policy use AND semantics — all must match.
 - Unit tests for YAML parsing, $ref resolution, override merging, and diff computation
 - Integration tests require a Databricks workspace with Unity Catalog
 - Use `pytest` as the test framework
+
+## Implementation approach
+
+See `docs/implementation_design.md` for the full implementation plan.
+
+This project uses **Test-Driven Development (TDD)** with a three-agent pattern:
+
+### Agent roles
+
+- **Manager agent** (you, the main Claude agent) — orchestrates the TDD cycle:
+  - Scaffolds models, dataclasses, stubs, and test infrastructure (Phase 1)
+  - Dispatches work to tester and implementer sub-agents
+  - Runs `pytest` after each sub-agent to verify red/green status
+  - Performs the **refactor** step once all tests for a module are green
+  - Tracks progress and advances to the next module
+
+- **Tester agent** (sub-agent) — writes a single test case. Give it:
+  - The test case name and description from the implementation design
+  - The public API signature of the function/method under test
+  - The relevant state/model dataclasses
+  - The test file path and any existing fixtures from `conftest.py`
+  - It must NOT write any production code
+
+- **Implementer agent** (sub-agent) — implements just enough code to pass the failing test. Give it:
+  - The failing test (file path + test name)
+  - The stub file to implement in
+  - The relevant models/dataclasses
+  - The test output showing the failure
+  - It must NOT modify tests or refactor
+
+### TDD cycle per module
+
+```
+For each test case in the module:
+  1. Spawn Tester agent → writes one test
+  2. Run pytest → confirm RED (test fails against stub)
+  3. Spawn Implementer agent → implements just enough to pass
+  4. Run pytest → confirm GREEN (test passes)
+  5. Repeat for next test case
+
+Once all tests for the module are green:
+  6. Review implementation and REFACTOR if needed
+  7. Run pytest → confirm all tests still green after refactor
+```
+
+You may run tester and implementer agents in parallel for independent test cases where there are no dependencies between them.
