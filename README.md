@@ -13,6 +13,8 @@ Configs are split into two namespaces:
 
 Definitions define *what* exists; resources define *where* it gets deployed.
 
+> **Note:** Definitions are not mandatory. You can define all of your governance directly under `resources:` without using `definitions:` at all. Definitions exist to reduce config duplication when the same logical objects appear in multiple places — for example, an ABAC policy that is applied across many catalogs, schemas that are replicated across environment catalogs (dev, test, prod), or bronze tables that exist across multiple locale-based schemas.
+
 ## What You Can Define in YAML
 
 ### Definitions (catalog-agnostic templates)
