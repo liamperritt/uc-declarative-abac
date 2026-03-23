@@ -76,6 +76,8 @@ resources:
               comment: This table only exists in TEST
 ```
 
+> **Note:** Overrides replace top-level keys in their entirety — they do not merge into nested structures. For example, you cannot override a single tag; you must specify all tags. The same applies to `tables`, `volumes`, `functions`, and any other list or map field.
+
 ### Definitions
 
 Definition configs are catalog-agnostic, reusable templates (schemas, tables, volumes, functions, policies).
@@ -195,7 +197,7 @@ definitions:
 
 Table definitions support two approaches to row-level and column-level security:
 
-1. **Directly applied functions** (shown above) — `filter` and `mask` specify a fully qualified UC function name (e.g. `platform.abac.is_not_eu_region`) that is applied directly to the table or column. This is an alternative to tag-based ABAC policies and gives you explicit, per-table/per-column control.
+1. **Directly applied functions** (shown above) — `filter` and `mask` specify a fully qualified UC function name (e.g. `platform.shared.reports_to_current_user`) that is applied directly to the table or column. This is an alternative to tag-based ABAC policies and gives you explicit, per-table/per-column control.
 2. **Tag-based ABAC policies** — instead of specifying functions directly, you tag columns and tables and let policy definitions match against those tags to apply masking, filtering, and grants across all matching objects (see [policy definitions](#policy-definitions)).
 
 Column-level fields:
@@ -372,9 +374,6 @@ resources:
         - $ref: $defs/policies/shared|mask_pii_email
       schemas:
         - $ref: $defs/schemas/operations|sales
-          tables:
-            - $ref: $defs/tables/operations|sales|orders
-            - $ref: $defs/tables/operations|sales|quotes
         - $ref: $defs/schemas/people|hr
         - $ref: $defs/schemas/platform|landing
 
@@ -390,9 +389,12 @@ resources:
         env: test
       policies:
         - $ref: $defs/policies/shared|mask_pii_email
-          function: test_analytics.abac.mask_pii_email
+          function: platform_test.abac.mask_pii_email
       schemas:
         - $ref: $defs/schemas/operations|sales
+          tables:
+            - $ref: $defs/tables/operations|sales|orders
+            - $ref: $defs/tables/operations|sales|quotes
         - $ref: $defs/schemas/people|hr
         - $ref: $defs/schemas/platform|landing
         - $ref: $defs/schemas/platform|shared
