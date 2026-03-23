@@ -38,6 +38,18 @@ Definitions define *what* exists; resources define *where* it gets deployed.
 - **Tags** — key-value or valueless tags (using `~`) applied to any object.
 - **RFA destinations** — configure where access requests are sent for governed objects.
 
+### Principal naming conventions
+
+When specifying principals for `owner`, `to`, `except`, or grant targets, use the identifier that Unity Catalog expects:
+
+| Principal type | Identifier to use | Example |
+|----------------|-------------------|---------|
+| **User** | Email / username | `jane.doe@company.com` |
+| **Group** | Display name | `data_engineers` |
+| **Service principal** | Display name | `sp_data_governor` |
+
+> **Note:** Service principal display names must be unique within the account. If two service principals share the same display name, the engine cannot resolve the intended principal and the deployment will fail.
+
 ## How It Works
 
 | Use case | Flow |
