@@ -8,8 +8,8 @@ Instead of managing grants, tags, and policies manually in the Databricks worksp
 
 Configs are split into two namespaces:
 
-- **`definitions:`** — catalog-agnostic, reusable definitions (schemas, tables, volumes, functions, policies).
-- **`resources:`** — concrete, deployable instances (catalogs and their contents) that compose definitions into real UC objects.
+- **`definitions:`** — catalog-agnostic, reusable templateds (schemas, tables, volumes, functions, policies).
+- **`resources:`** — concrete, deployable instances (e.g., catalogs and their contents) that can compose definitions into real UC objects.
 
 Definitions define *what* exists; resources define *where* it gets deployed.
 
@@ -52,7 +52,13 @@ You maintain YAML as the source of truth; the engine turns it into UC objects an
 
 Configs use **dictionaries keyed by definition IDs**. The recommended convention is to use `|`-delimited keys (e.g. `operations|sales`, `operations|sales|orders`, `platform|shared|mask_pii_email`), following the same pattern as the Databricks Terraform provider which uses `|` for composite resource IDs (e.g. `<metastore_id>|<name>` for UC connections). However, the `|` delimiter is a convention only and is not enforced by the engine — keys can be any valid YAML string. These keys are the stable identity for each entity and let you reference entities across files via `$ref: $defs/<type>/<key>` syntax (inspired by JSON Schema's `$defs` and `$ref` keywords).
 
-To override default values, a `$ref` entry can include additional fields alongside the reference. These fields override the corresponding values from the definition, letting you customise a single instance without modifying the shared definition. For example, you can override `owner`, `rfa_destination`, `comment`, `tags`, or `function` on a per-catalog or per-resource basis. Unspecified fields fall back to the definition.
+The `name` field determines the unqualified object name created in Databricks/Unity Catalog. For resources, `name` is optional — if omitted, the dictionary key is used as the name (e.g. a governed tag keyed `pii` with no name specified will be created with the name `pii`).
+
+Any definition type (schemas, tables, volumes, functions, mask/filter policy) can be promoted to a concrete resource by placing it under `resources:` with a `$ref` to the definition and a fixed `catalog`/`schema`. This is useful when you need a specific deployed instance outside of a catalog composition.
+
+### Overrides
+
+Any `$ref` entry can include additional fields alongside the reference. These fields override the corresponding values from the definition, letting you customise a single instance without modifying the shared definition. For example, you can override `owner`, `rfa_destination`, `comment`, `tags`, or `function` on a per-catalog or per-resource basis. Unspecified fields fall back to the definition.
 
 Overrides also support recursive references — you can nest `$ref` entries within an override to further customise child objects. For example, overriding a schema's `tables` list with specific table references that themselves carry overrides:
 
@@ -63,18 +69,18 @@ resources:
       comment: TEST Operations catalog
       schemas:
         - $ref: $defs/schemas/operations|sales
-          names: sales_staging
+          name: sales_staging
           tables:
             - $ref: $defs/tables/operations|sales|orders
             - $ref: $defs/tables/operations|sales|quotes
               comment: This table only exists in TEST
 ```
 
-The `name` field determines the unqualified object name created in Databricks/Unity Catalog. For resources, `name` is optional — if omitted, the dictionary key is used as the name (e.g. a governed tag keyed `pii` with no name specified will be created with the name `pii`).
+### Definitions
 
-Any definition type (schemas, tables, volumes, functions, mask/filter policy) can be promoted to a concrete resource by placing it under `resources:` with a `$ref` to the definition and a fixed `catalog`/`schema`. This is useful when you need a specific deployed instance outside of a catalog composition.
+Definition configs are catalog-agnostic, reusable templates (schemas, tables, volumes, functions, policies).
 
-### schema definitions
+#### Schema definitions
 
 Schema definitions are catalog-agnostic templates: name, comment, owner, tags, and RFA. Key convention: `<domain>|<schema_name>` (e.g. `operations|sales`, `people|hr`). Each schema definition lists the **tables**, **volumes**, and/or **functions** it contains as `$ref` entries. Catalogs reference which schema definitions to instantiate; the engine creates each schema and its listed children in every catalog that includes it.
 
@@ -145,7 +151,7 @@ resources:
       catalog: platform_test
 ```
 
-### table definitions
+#### Table definitions
 
 Tables are defined in a flat dictionary under `definitions: tables:`. Key convention: `<logical_catalog/domain>|<schema_name>|<table_name>` (e.g. `operations|sales|orders`).
 
@@ -203,7 +209,7 @@ Table-level fields (in addition to the common fields `name`, `comment`, `owner`,
 - **`filter`** — a fully- or partially-qualified UC function name to apply as a row filter directly on the table.
 - **`columns`** — list of column-level configurations (see above).
 
-### volume definitions
+#### Volume definitions
 
 Volumes are defined under `definitions: volumes:`. Key convention: `<logical_catalog/domain>|<schema_name>|<volume_name>` (e.g. `platform|landing|raw_events`).
 
@@ -226,7 +232,7 @@ resources:
       catalog: platform_prod
 ```
 
-### function definitions
+#### function definitions
 
 Functions are defined under `definitions: functions:`. Key convention: `<logical_catalog/domain>|<schema_name>|<function_name>` (e.g. `platform|shared|mask_pii_email`). Policy definitions point to these functions by their fully qualified UC name.
 
@@ -244,7 +250,7 @@ definitions:
       return: "CONCAT('***', SUBSTRING(address, -4))"
 ```
 
-### policy definitions
+#### Policy definitions
 
 Policies are defined under `definitions: policies:`. Key convention: `<logical_catalog/domain>|<policy_name>` (e.g. `shared|mask_pii_email`). Three types:
 
@@ -308,7 +314,11 @@ If a policy specifies multiple tags, the policy is only applied to objects that 
 
 Policy definitions are catalog-agnostic. Catalogs reference which policies to apply via `$ref` entries, and can override fields (e.g. `function`) per catalog.
 
-### governed tags
+### Resources
+
+Resource configs are concrete, deployable instances (e.g., catalogs and their contents) that can compose definitions into real UC objects.
+
+#### Governed tags
 
 Governed tags are Unity Catalog tag keys with a controlled set of allowed values. They are defined under `resources: governed_tags:` (not definitions) because they are account-level singletons—there is no catalog-scoped variant. The dictionary key is the tag key name as it will appear in Unity Catalog.
 
@@ -343,7 +353,7 @@ resources:
 
 Once a governed tag is created, you can apply it to tables, columns, schemas, and other UC objects via the `tags:` field on any definition or resource. Policies then match against these tag key-value pairs (e.g. `pii: email`, `classification: confidential`) to enforce masking, filtering, or grants.
 
-### catalogs
+#### Catalogs
 
 Catalogs are defined under `resources: catalogs:` and compose schema definitions and policy definitions into a deployable unit. Each catalog lists the schemas to instantiate and the policies to apply, with optional per-catalog overrides on any `$ref` entry.
 
