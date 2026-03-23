@@ -22,10 +22,11 @@ def compute_tag_diff(desired: set[SecurableTag], actual: set[SecurableTag]) -> T
 
     to_add = {desired_by_key[k] for k in desired_keys - actual_keys}
     to_remove = {actual_by_key[k] for k in actual_keys - desired_keys}
-    to_update = {
-        desired_by_key[k]
-        for k in desired_keys & actual_keys
+    update_keys = {
+        k for k in desired_keys & actual_keys
         if desired_by_key[k].tag_value != actual_by_key[k].tag_value
     }
+    to_update = {desired_by_key[k] for k in update_keys}
+    old_values = {k: actual_by_key[k].tag_value for k in update_keys}
 
-    return TagDiff(to_add=to_add, to_update=to_update, to_remove=to_remove)
+    return TagDiff(to_add=to_add, to_update=to_update, to_remove=to_remove, old_values=old_values)

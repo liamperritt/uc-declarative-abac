@@ -14,6 +14,7 @@ from uc_abac_governor.privileges.differ import compute_privilege_diff
 from uc_abac_governor.privileges.executor import execute_privilege_diff
 from uc_abac_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
 from uc_abac_governor.resolver import resolve_refs
+from uc_abac_governor.logger import ChangeLogger
 from uc_abac_governor.tags.compiler import compile_desired_tags
 from uc_abac_governor.tags.differ import compute_tag_diff
 from uc_abac_governor.tags.executor import execute_tag_diff
@@ -64,14 +65,14 @@ def run(
     acct_helper.validate_principals(extract_principals(desired_privileges))
     privilege_diff = compute_privilege_diff(desired_privileges, actual_privileges)
 
-    # 5. Execute diffs in parallel
+    # 5. Log and execute
+    change_logger = ChangeLogger(dry_run=dry_run)
     if not dry_run:
-        with ThreadPoolExecutor() as pool:
-            tag_exec_f = pool.submit(execute_tag_diff, uc_helper, tag_diff)
-            priv_exec_f = pool.submit(
-                execute_privilege_diff, uc_helper, acct_helper, privilege_diff
-            )
-            tag_exec_f.result()
-            priv_exec_f.result()
+        execute_tag_diff(uc_helper, tag_diff, change_logger)
+        execute_privilege_diff(uc_helper, acct_helper, privilege_diff, change_logger)
+    else:
+        change_logger.log_tag_changes(tag_diff)
+        change_logger.log_privilege_changes(privilege_diff)
+    change_logger.log_summary()
 
     return tag_diff, privilege_diff

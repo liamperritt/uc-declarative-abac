@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from uc_abac_governor.helpers.unity_catalog import UnityCatalogHelper
+    from uc_abac_governor.logger import ChangeLogger
 
 from uc_abac_governor.tags.state import SecurableTag, TagDiff
 from uc_abac_governor.types import SecurableType
@@ -47,10 +48,15 @@ def _group_by_securable(
     return groups
 
 
-def execute_tag_diff(uc_helper: UnityCatalogHelper, diff: TagDiff) -> list[str]:
+def execute_tag_diff(
+    uc_helper: UnityCatalogHelper,
+    diff: TagDiff,
+    change_logger: ChangeLogger,
+) -> list[str]:
     """Generate and execute ALTER SET/UNSET TAGS SQL from a TagDiff.
 
     Batches tags per securable where possible.
+    Logs each change after successful execution.
     Returns the list of SQL statements executed.
     """
     statements: list[str] = []
@@ -58,13 +64,23 @@ def execute_tag_diff(uc_helper: UnityCatalogHelper, diff: TagDiff) -> list[str]:
     # SET TAGS for adds and updates combined
     set_tags = diff.to_add | diff.to_update
     for (sec_type, sec_name), tags in _group_by_securable(set_tags).items():
-        statements.append(_build_set_tags_sql(sec_type, sec_name, tags))
+        stmt = _build_set_tags_sql(sec_type, sec_name, tags)
+        uc_helper.execute_sql(stmt)
+        statements.append(stmt)
+        for tag in tags:
+            if tag in diff.to_add:
+                change_logger.log_tag_add(tag)
+            else:
+                change_logger.log_tag_update(tag, diff.old_values.get(
+                    (tag.securable_type, tag.securable_full_name, tag.tag_name)
+                ))
 
     # UNSET TAGS for removes
     for (sec_type, sec_name), tags in _group_by_securable(diff.to_remove).items():
-        statements.append(_build_unset_tags_sql(sec_type, sec_name, tags))
-
-    for stmt in statements:
+        stmt = _build_unset_tags_sql(sec_type, sec_name, tags)
         uc_helper.execute_sql(stmt)
+        statements.append(stmt)
+        for tag in tags:
+            change_logger.log_tag_remove(tag)
 
     return statements

@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import sqlglot
 
+from uc_abac_governor.logger import ChangeLogger
 from uc_abac_governor.tags.executor import execute_tag_diff
 from uc_abac_governor.tags.state import SecurableTag, TagDiff
 from uc_abac_governor.types import SecurableType
@@ -45,7 +46,7 @@ def test_tag_executor_generates_set_tags_sql_for_adds():
         },
     )
 
-    stmts = execute_tag_diff(uc_helper, diff)
+    stmts = execute_tag_diff(uc_helper, diff, ChangeLogger())
 
     assert len(stmts) == 1
     sql = stmts[0]
@@ -81,7 +82,7 @@ def test_tag_executor_generates_set_tags_sql_for_updates():
         },
     )
 
-    stmts = execute_tag_diff(uc_helper, diff)
+    stmts = execute_tag_diff(uc_helper, diff, ChangeLogger())
 
     assert len(stmts) == 1
     sql = stmts[0]
@@ -115,7 +116,7 @@ def test_tag_executor_generates_unset_tags_sql_for_removes():
         },
     )
 
-    stmts = execute_tag_diff(uc_helper, diff)
+    stmts = execute_tag_diff(uc_helper, diff, ChangeLogger())
 
     assert len(stmts) == 1
     sql = stmts[0]
@@ -152,7 +153,7 @@ def test_tag_executor_handles_valueless_tags():
         },
     )
 
-    stmts = execute_tag_diff(uc_helper, diff)
+    stmts = execute_tag_diff(uc_helper, diff, ChangeLogger())
 
     assert len(stmts) == 1
     sql = stmts[0]
@@ -191,7 +192,7 @@ def test_tag_executor_batches_tags_per_securable():
         },
     )
 
-    stmts = execute_tag_diff(uc_helper, diff)
+    stmts = execute_tag_diff(uc_helper, diff, ChangeLogger())
 
     # Only one statement should be generated for the single securable.
     assert len(stmts) == 1
@@ -231,7 +232,7 @@ def test_tag_executor_returns_all_executed_statements():
         },
     )
 
-    stmts = execute_tag_diff(uc_helper, diff)
+    stmts = execute_tag_diff(uc_helper, diff, ChangeLogger())
 
     # Exactly two statements: one SET TAGS, one UNSET TAGS.
     assert len(stmts) == 2
@@ -257,7 +258,7 @@ def test_tag_executor_executes_nothing_given_empty_diff():
     uc_helper = MagicMock()
     diff = TagDiff()
 
-    stmts = execute_tag_diff(uc_helper, diff)
+    stmts = execute_tag_diff(uc_helper, diff, ChangeLogger())
 
     assert stmts == []
     uc_helper.execute_sql.assert_not_called()

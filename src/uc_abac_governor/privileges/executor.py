@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from uc_abac_governor.helpers.account import AccountHelper
     from uc_abac_governor.helpers.unity_catalog import UnityCatalogHelper
+    from uc_abac_governor.logger import ChangeLogger
 
 from uc_abac_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
 from uc_abac_governor.types import PrincipalValidationError
@@ -44,10 +45,12 @@ def execute_privilege_diff(
     uc_helper: UnityCatalogHelper,
     acct_helper: AccountHelper,
     diff: PrivilegeDiff,
+    change_logger: ChangeLogger,
 ) -> list[str]:
     """Generate and execute GRANT/REVOKE SQL from a PrivilegeDiff.
 
     Uses acct_helper to resolve SP display names to application IDs.
+    Logs each change after successful execution.
     Returns the list of SQL statements executed.
     """
     statements: list[str] = []
@@ -57,11 +60,13 @@ def execute_privilege_diff(
         stmt = _build_grant_sql(priv, resolved)
         uc_helper.execute_sql(stmt)
         statements.append(stmt)
+        change_logger.log_grant(priv)
 
     for priv in diff.to_revoke:
         resolved = _resolve_principal(acct_helper, priv.principal)
         stmt = _build_revoke_sql(priv, resolved)
         uc_helper.execute_sql(stmt)
         statements.append(stmt)
+        change_logger.log_revoke(priv)
 
     return statements

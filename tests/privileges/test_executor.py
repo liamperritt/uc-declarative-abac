@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+from uc_abac_governor.logger import ChangeLogger
 from uc_abac_governor.privileges.executor import execute_privilege_diff
 from uc_abac_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
 from uc_abac_governor.types import PrincipalValidationError, SecurableType
@@ -58,7 +59,7 @@ def test_privilege_executor_generates_grant_sql():
         },
     )
 
-    stmts = execute_privilege_diff(uc_helper, acct_helper, diff)
+    stmts = execute_privilege_diff(uc_helper, acct_helper, diff, ChangeLogger())
 
     assert len(stmts) == 1
     sql = stmts[0]
@@ -90,7 +91,7 @@ def test_privilege_executor_generates_revoke_sql():
         },
     )
 
-    stmts = execute_privilege_diff(uc_helper, acct_helper, diff)
+    stmts = execute_privilege_diff(uc_helper, acct_helper, diff, ChangeLogger())
 
     assert len(stmts) == 1
     sql = stmts[0]
@@ -124,7 +125,7 @@ def test_privilege_executor_resolves_sp_display_name_to_application_id():
         },
     )
 
-    stmts = execute_privilege_diff(uc_helper, acct_helper, diff)
+    stmts = execute_privilege_diff(uc_helper, acct_helper, diff, ChangeLogger())
 
     assert len(stmts) == 1
     sql = stmts[0]
@@ -164,7 +165,7 @@ def test_privilege_executor_returns_all_executed_statements():
         },
     )
 
-    stmts = execute_privilege_diff(uc_helper, acct_helper, diff)
+    stmts = execute_privilege_diff(uc_helper, acct_helper, diff, ChangeLogger())
 
     # Exactly two statements: one GRANT, one REVOKE.
     assert len(stmts) == 2
@@ -192,7 +193,7 @@ def test_privilege_executor_executes_nothing_given_empty_diff():
 
     diff = PrivilegeDiff()
 
-    stmts = execute_privilege_diff(uc_helper, acct_helper, diff)
+    stmts = execute_privilege_diff(uc_helper, acct_helper, diff, ChangeLogger())
 
     assert stmts == []
     uc_helper.execute_sql.assert_not_called()
