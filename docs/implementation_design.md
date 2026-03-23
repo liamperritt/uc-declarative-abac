@@ -60,13 +60,20 @@ Once all tests for the module are green:
   7. Manager runs pytest → confirms all tests still green after refactor
 ```
 
+### Refactoring objectives
+
+When refactoring, prioritise:
+- **Minimise nesting and cognitive complexity** — extract logic into well-named helper functions to keep top-level functions flat
+- **Prefer immutability** — helper functions should return new values rather than modifying state passed in as arguments
+
 The manager may run the tester and implementer for independent test cases in parallel where there are no dependencies between them (e.g., multiple simple differ tests).
 
 ### Test conventions
 
 Tests are the functional requirements. They:
 - Only test **public methods/functions** — never assert on private internals
-- Use **BDD-style names**: `test_<class_or_module>_<does_action>` or `test_<class_or_module>_<does_action>_when_<state>`
+- **Root-level functions only** — no test classes
+- Use **BDD-style names**: `test_<class_or_module>_<does_behaviour>` or `test_<class_or_module>_<does_behaviour>_when_<state>` — the prefix is the class or module name (e.g. `test_discovery_`, `test_config_file_`, `test_uc_helper_`), never an individual function name — functions/methods are behaviours of a class or module
 - **Do not couple to SQL syntax** — use `sqlglot` to parse generated SQL and assert on structural components (table names, column refs, statement type, clauses) rather than exact string matches
 - **Do not couple to internal structure** — assert on inputs and outputs of public interfaces, not how the code is organised internally
 

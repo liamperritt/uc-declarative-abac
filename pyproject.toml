@@ -22,6 +22,7 @@ packages = ["src/uc_abac_governor"]
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "pytest-cov>=7.0",
     "sqlglot>=20.0",
     "ruff>=0.4",
 ]
@@ -29,6 +30,7 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+addopts = "--cov=uc_abac_governor --cov-report=term-missing"
 
 [tool.ruff]
 target-version = "py311"

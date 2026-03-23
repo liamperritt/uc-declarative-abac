@@ -79,12 +79,17 @@ Multiple tags on a policy use AND semantics — all must match.
 - Prefer SQL via Databricks SQL connector for UC operations (CREATE, ALTER, GRANT, etc.)
 - Query UC system tables (not API) to determine current deployed state
 - Keep the engine idempotent — running the same configs twice should produce no changes on the second run
+- Minimise nesting and cognitive complexity — extract logic into well-named helper functions to keep top-level functions flat
+- Prefer immutability — helper functions should return new values rather than modifying state passed in as arguments
 
 ## Testing
 
 - Unit tests for YAML parsing, $ref resolution, override merging, and diff computation
 - Integration tests require a Databricks workspace with Unity Catalog
 - Use `pytest` as the test framework
+- Test functions are root-level functions (no test classes)
+- Test naming convention: `test_<class_or_module>_<does_behaviour>` or `test_<class_or_module>_<does_behaviour>_when_<state>` — the prefix is the class or module name (e.g. `test_discovery_`, `test_config_file_`, `test_uc_helper_`), never an individual function name — functions/methods are behaviours of a class or module
+- Use block comments (`# ---` separator lines) to visually group tests by the class or function they target within a test file
 
 ## Implementation approach
 
