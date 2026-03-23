@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from uc_abac_governor.tags.state import SecurableTag, TagDiff
+from uc_governor.tags.state import SecurableTag, TagDiff
 
 
 def compute_tag_diff(desired: set[SecurableTag], actual: set[SecurableTag]) -> TagDiff:

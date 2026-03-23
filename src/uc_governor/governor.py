@@ -5,20 +5,20 @@ from pathlib import Path
 
 from databricks.sdk import AccountClient, WorkspaceClient
 
-from uc_abac_governor.discovery import discover_yaml_files, load_raw_configs
-from uc_abac_governor.helpers.account import AccountHelper
-from uc_abac_governor.helpers.unity_catalog import UnityCatalogHelper
-from uc_abac_governor.models import ConfigFile
-from uc_abac_governor.privileges.compiler import compile_desired_privileges
-from uc_abac_governor.privileges.differ import compute_privilege_diff
-from uc_abac_governor.privileges.executor import execute_privilege_diff
-from uc_abac_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
-from uc_abac_governor.resolver import resolve_refs
-from uc_abac_governor.logger import ChangeLogger
-from uc_abac_governor.tags.compiler import compile_desired_tags
-from uc_abac_governor.tags.differ import compute_tag_diff
-from uc_abac_governor.tags.executor import execute_tag_diff
-from uc_abac_governor.tags.state import TagDiff
+from uc_governor.discovery import discover_yaml_files, load_raw_configs
+from uc_governor.helpers.account import AccountHelper
+from uc_governor.helpers.unity_catalog import UnityCatalogHelper
+from uc_governor.models import ConfigFile
+from uc_governor.privileges.compiler import compile_desired_privileges
+from uc_governor.privileges.differ import compute_privilege_diff
+from uc_governor.privileges.executor import execute_privilege_diff
+from uc_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
+from uc_governor.resolver import resolve_refs
+from uc_governor.logger import ChangeLogger
+from uc_governor.tags.compiler import compile_desired_tags
+from uc_governor.tags.differ import compute_tag_diff
+from uc_governor.tags.executor import execute_tag_diff
+from uc_governor.tags.state import TagDiff
 
 
 def extract_principals(privileges: set[SecurablePrivilege]) -> list[str]:

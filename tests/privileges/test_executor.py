@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from uc_abac_governor.logger import ChangeLogger
-from uc_abac_governor.privileges.executor import execute_privilege_diff
-from uc_abac_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
-from uc_abac_governor.types import PrincipalValidationError, SecurableType
+from uc_governor.logger import ChangeLogger
+from uc_governor.privileges.executor import execute_privilege_diff
+from uc_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
+from uc_governor.types import PrincipalValidationError, SecurableType
 
 
 def _assert_sql_contains(sql: str, *fragments: str):

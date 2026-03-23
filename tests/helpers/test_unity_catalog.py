@@ -5,10 +5,10 @@ from unittest.mock import MagicMock
 import sqlglot
 from databricks.sdk.service.sql import Disposition
 
-from uc_abac_governor.helpers.unity_catalog import UnityCatalogHelper
-from uc_abac_governor.privileges.state import SecurablePrivilege
-from uc_abac_governor.tags.state import SecurableTag
-from uc_abac_governor.types import SecurableType
+from uc_governor.helpers.unity_catalog import UnityCatalogHelper
+from uc_governor.privileges.state import SecurablePrivilege
+from uc_governor.tags.state import SecurableTag
+from uc_governor.types import SecurableType
 
 WAREHOUSE_ID = "test-warehouse-id"
 

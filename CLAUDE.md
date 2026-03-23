@@ -1,4 +1,4 @@
-# UC ABAC Governor — Development Guide
+# UC Governor — Development Guide
 
 ## Project overview
 

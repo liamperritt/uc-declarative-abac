@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from databricks.sdk import AccountClient
 
-from uc_abac_governor.types import DuplicateServicePrincipalError, PrincipalValidationError
+from uc_governor.types import DuplicateServicePrincipalError, PrincipalValidationError
 
 
 class AccountHelper:

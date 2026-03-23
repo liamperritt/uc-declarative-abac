@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from uc_abac_governor.privileges.differ import compute_privilege_diff
-from uc_abac_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
-from uc_abac_governor.types import SecurableType
+from uc_governor.privileges.differ import compute_privilege_diff
+from uc_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
+from uc_governor.types import SecurableType
 
 
 # ---------------------------------------------------------------------------

@@ -3,10 +3,10 @@ from __future__ import annotations
 import logging
 from unittest.mock import MagicMock
 
-from uc_abac_governor.privileges.state import SecurablePrivilege
-from uc_abac_governor.logger import ChangeLogger
-from uc_abac_governor.tags.state import SecurableTag
-from uc_abac_governor.types import SecurableType
+from uc_governor.privileges.state import SecurablePrivilege
+from uc_governor.logger import ChangeLogger
+from uc_governor.tags.state import SecurableTag
+from uc_governor.types import SecurableType
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +262,7 @@ def test_change_logger_logs_dry_run_summary() -> None:
 
 def test_change_logger_logs_tag_changes() -> None:
     """log_tag_changes logs all adds, updates, and removes from a TagDiff."""
-    from uc_abac_governor.tags.state import TagDiff
+    from uc_governor.tags.state import TagDiff
 
     cl, mock_logger = _make_change_logger()
 
@@ -297,7 +297,7 @@ def test_change_logger_logs_tag_changes() -> None:
 
 def test_change_logger_logs_privilege_changes() -> None:
     """log_privilege_changes logs all grants and revokes from a PrivilegeDiff."""
-    from uc_abac_governor.privileges.state import PrivilegeDiff
+    from uc_governor.privileges.state import PrivilegeDiff
 
     cl, mock_logger = _make_change_logger()
 

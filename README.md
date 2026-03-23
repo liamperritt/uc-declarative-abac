@@ -1,6 +1,6 @@
-# UC ABAC Governor
+# UC Governor
 
-The UC ABAC Governor lets Databricks customers define their Attribute-Based Access Control (ABAC) governance rules and mappings via **declarative YAML files**. Define once, version in Git, and deploy to Unity Catalog—including as a **GitHub Action** from a repo containing your YAML configs.
+The UC Governor lets Databricks customers define their Attribute-Based Access Control (ABAC) governance rules and mappings via **declarative YAML files**. Define once, version in Git, and deploy to Unity Catalog—including as a **GitHub Action** from a repo containing your YAML configs.
 
 ## Overview
 
@@ -40,7 +40,7 @@ Definitions define *what* exists; resources define *where* it gets deployed.
 
 ### Principal naming conventions
 
-When specifying principals for `owner`, `to`, `except`, or grant targets, use the identifier that Unity Catalog expects:
+When specifying principals for `owner`, `to`, `except`, or grant targets, use the appropriate identifier for the type of principal:
 
 | Principal type | Identifier to use | Example |
 |----------------|-------------------|---------|

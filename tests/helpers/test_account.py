@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from uc_abac_governor.helpers.account import AccountHelper
-from uc_abac_governor.types import DuplicateServicePrincipalError, PrincipalValidationError
+from uc_governor.helpers.account import AccountHelper
+from uc_governor.types import DuplicateServicePrincipalError, PrincipalValidationError
 
 
 # ---------------------------------------------------------------------------

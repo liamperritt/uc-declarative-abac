@@ -1,4 +1,4 @@
-# MVP Implementation Design — UC ABAC Governor
+# MVP Implementation Design — UC Governor
 
 ## Context
 
@@ -85,7 +85,7 @@ Tests are the functional requirements. They:
 uc-abac-governor/
 ├── pyproject.toml
 ├── src/
-│   └── uc_abac_governor/
+│   └── uc_governor/
 │       ├── __init__.py
 │       ├── __main__.py                # CLI entry point
 │       ├── governor.py                # Top-level orchestrator
@@ -155,7 +155,7 @@ Dev:
 
 ### Step 1: Project scaffolding
 
-Create `pyproject.toml`, `src/uc_abac_governor/__init__.py`, all `__init__.py` files, `tests/__init__.py`.
+Create `pyproject.toml`, `src/uc_governor/__init__.py`, all `__init__.py` files, `tests/__init__.py`.
 
 ### Step 2: `models.py` — Pydantic config models (shared)
 
@@ -558,7 +558,7 @@ All custom exceptions inherit from `GovernorError` (defined in `types.py`), allo
 
 ## Logging
 
-Use Python's `logging` module throughout. The governor configures a logger at the package level (`uc_abac_governor`).
+Use Python's `logging` module throughout. The governor configures a logger at the package level (`uc_governor`).
 
 | Level | Usage |
 |-------|-------|
@@ -583,5 +583,5 @@ Dry-run mode logs planned changes at `INFO` level with a `[DRY RUN]` prefix.
 ## Verification
 
 1. **Unit tests:** `pytest tests/` after each red-green cycle
-2. **Dry-run mode:** `python -m uc_abac_governor --config-dir ./configs --warehouse-id <id> --dry-run`
+2. **Dry-run mode:** `python -m uc_governor --config-dir ./configs --warehouse-id <id> --dry-run`
 3. **Integration test (manual):** Run against a Databricks workspace with a test catalog, verify tags and grants are applied correctly, run again to verify idempotency

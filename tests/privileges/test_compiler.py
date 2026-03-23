@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from uc_abac_governor.models import ConfigFile
-from uc_abac_governor.privileges.compiler import compile_desired_privileges
-from uc_abac_governor.privileges.state import SecurablePrivilege
-from uc_abac_governor.tags.state import SecurableTag
-from uc_abac_governor.types import SecurableType
+from uc_governor.models import ConfigFile
+from uc_governor.privileges.compiler import compile_desired_privileges
+from uc_governor.privileges.state import SecurablePrivilege
+from uc_governor.tags.state import SecurableTag
+from uc_governor.types import SecurableType
 
 
 # ---------------------------------------------------------------------------

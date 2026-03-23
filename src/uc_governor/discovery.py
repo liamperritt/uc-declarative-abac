@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from uc_abac_governor.types import DuplicateKeyError
+from uc_governor.types import DuplicateKeyError
 
 
 def discover_yaml_files(root: Path) -> list[Path]:

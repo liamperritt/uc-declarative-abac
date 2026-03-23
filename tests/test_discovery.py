@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from uc_abac_governor.discovery import discover_yaml_files, load_raw_configs
-from uc_abac_governor.types import DuplicateKeyError
+from uc_governor.discovery import discover_yaml_files, load_raw_configs
+from uc_governor.types import DuplicateKeyError
 
 
 # ---------------------------------------------------------------------------

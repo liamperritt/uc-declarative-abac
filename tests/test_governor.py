@@ -5,10 +5,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from uc_abac_governor.governor import run
-from uc_abac_governor.privileges.state import PrivilegeDiff
-from uc_abac_governor.tags.state import TagDiff
-from uc_abac_governor.types import PrincipalValidationError
+from uc_governor.governor import run
+from uc_governor.privileges.state import PrivilegeDiff
+from uc_governor.tags.state import TagDiff
+from uc_governor.types import PrincipalValidationError
 
 
 # ---------------------------------------------------------------------------

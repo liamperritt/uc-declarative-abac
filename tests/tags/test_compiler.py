@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from uc_abac_governor.models import ConfigFile
-from uc_abac_governor.tags.compiler import compile_desired_tags
-from uc_abac_governor.tags.state import SecurableTag
-from uc_abac_governor.types import SecurableType
+from uc_governor.models import ConfigFile
+from uc_governor.tags.compiler import compile_desired_tags
+from uc_governor.tags.state import SecurableTag
+from uc_governor.types import SecurableType
 
 
 # ---------------------------------------------------------------------------
