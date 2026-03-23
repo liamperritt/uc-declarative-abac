@@ -1,0 +1,386 @@
+from __future__ import annotations
+
+import time
+from unittest.mock import MagicMock
+
+import pytest
+
+from uc_abac_governor.governor import run
+from uc_abac_governor.privileges.state import PrivilegeDiff
+from uc_abac_governor.tags.state import TagDiff
+from uc_abac_governor.types import PrincipalValidationError
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_mock_group(display_name: str) -> MagicMock:
+    """Create a mock group object with a display_name attribute."""
+    group = MagicMock()
+    group.display_name = display_name
+    return group
+
+
+def _catalog_with_tags_config() -> dict:
+    """A minimal YAML dict: one catalog with tags on catalog and a schema."""
+    return {
+        "resources": {
+            "catalogs": {
+                "my_catalog": {
+                    "tags": {"env": "prod"},
+                    "schemas": [
+                        {"name": "sales", "tags": {"team": "data"}},
+                    ],
+                }
+            }
+        }
+    }
+
+
+def _catalog_with_grant_policy_config() -> dict:
+    """A YAML dict with a grant policy that matches on a tag."""
+    return {
+        "resources": {
+            "catalogs": {
+                "my_catalog": {
+                    "tags": {"env": "prod"},
+                    "schemas": [
+                        {"name": "sales", "tags": {"team": "data"}},
+                    ],
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["SELECT"],
+                            "to": ["data_engineers"],
+                            "tags": {"team": "data"},
+                        },
+                    ],
+                }
+            }
+        }
+    }
+
+
+def _catalog_with_tags_and_grants_config() -> dict:
+    """A YAML dict that exercises both tags and privilege workflows."""
+    return {
+        "resources": {
+            "catalogs": {
+                "my_catalog": {
+                    "tags": {"env": "prod"},
+                    "schemas": [
+                        {"name": "sales", "tags": {"team": "data"}},
+                    ],
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["SELECT"],
+                            "to": ["data_engineers"],
+                            "tags": {"team": "data"},
+                        },
+                    ],
+                }
+            }
+        }
+    }
+
+
+def _setup_mock_workspace_empty_state(mock_workspace_client: MagicMock) -> None:
+    """Configure the mock workspace client to return empty actual state."""
+    result_mock = MagicMock()
+    result_mock.result.data_array = []
+
+    def _capture_and_return(*args, **kwargs):
+        statement = kwargs.get("statement", args[0] if args else None)
+        if statement:
+            mock_workspace_client.executed_sql.append(statement)
+        return result_mock
+
+    mock_workspace_client.statement_execution.execute_statement.side_effect = (
+        _capture_and_return
+    )
+
+
+def _setup_mock_account_with_group(
+    mock_account_client: MagicMock, group_name: str
+) -> None:
+    """Configure the mock account client to return a single group."""
+    mock_account_client.groups.list.return_value = [_make_mock_group(group_name)]
+
+
+# ---------------------------------------------------------------------------
+# End-to-end workflows
+# ---------------------------------------------------------------------------
+
+
+def test_governor_runs_tags_workflow_end_to_end(
+    tmp_yaml_dir, mock_workspace_client, mock_account_client
+):
+    """YAML configs with tagged catalog -> tag_diff.to_add is non-empty, SQL was executed."""
+    root = tmp_yaml_dir({"resources/catalog.yaml": _catalog_with_tags_config()})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _setup_mock_account_with_group(mock_account_client, "data_engineers")
+
+    tag_diff, _ = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        account_client=mock_account_client,
+        warehouse_id="test-warehouse-id",
+    )
+
+    assert isinstance(tag_diff, TagDiff)
+    assert len(tag_diff.to_add) > 0, "Expected tags to be added for the tagged catalog"
+
+    executed = mock_workspace_client.executed_sql
+    set_tags_stmts = [s for s in executed if "SET TAGS" in s.upper()]
+    assert len(set_tags_stmts) > 0, (
+        f"Expected SET TAGS SQL to be executed, got: {executed}"
+    )
+
+
+def test_governor_runs_privileges_workflow_end_to_end(
+    tmp_yaml_dir, mock_workspace_client, mock_account_client
+):
+    """YAML with grant policy + tagged objects, empty actual privileges -> privilege_diff.to_grant is non-empty."""
+    root = tmp_yaml_dir(
+        {"resources/catalog.yaml": _catalog_with_grant_policy_config()}
+    )
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _setup_mock_account_with_group(mock_account_client, "data_engineers")
+
+    _, privilege_diff = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        account_client=mock_account_client,
+        warehouse_id="test-warehouse-id",
+    )
+
+    assert isinstance(privilege_diff, PrivilegeDiff)
+    assert len(privilege_diff.to_grant) > 0, (
+        "Expected privileges to be granted for the grant policy"
+    )
+
+    executed = mock_workspace_client.executed_sql
+    grant_stmts = [s for s in executed if s.upper().startswith("GRANT")]
+    assert len(grant_stmts) > 0, (
+        f"Expected GRANT SQL to be executed, got: {executed}"
+    )
+
+
+def test_governor_runs_both_domains_independently(
+    tmp_yaml_dir, mock_workspace_client, mock_account_client
+):
+    """Both tag and privilege changes are computed; verify both diffs are populated."""
+    root = tmp_yaml_dir(
+        {"resources/catalog.yaml": _catalog_with_tags_and_grants_config()}
+    )
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _setup_mock_account_with_group(mock_account_client, "data_engineers")
+
+    tag_diff, privilege_diff = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        account_client=mock_account_client,
+        warehouse_id="test-warehouse-id",
+    )
+
+    assert len(tag_diff.to_add) >= 2, (
+        f"Expected at least 2 tags to add, got {len(tag_diff.to_add)}: {tag_diff.to_add}"
+    )
+    assert len(privilege_diff.to_grant) >= 1, (
+        f"Expected at least 1 privilege to grant, got {len(privilege_diff.to_grant)}: "
+        f"{privilege_diff.to_grant}"
+    )
+
+    executed = mock_workspace_client.executed_sql
+    assert any("SET TAGS" in s.upper() for s in executed), (
+        "Expected SET TAGS SQL to be executed"
+    )
+    assert any(s.upper().startswith("GRANT") for s in executed), (
+        "Expected GRANT SQL to be executed"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Idempotency and state sync
+# ---------------------------------------------------------------------------
+
+
+def test_governor_produces_empty_diffs_when_in_sync(
+    tmp_yaml_dir, mock_workspace_client, mock_account_client
+):
+    """When actual state matches desired, both diffs are empty and no SQL is executed."""
+    root = tmp_yaml_dir(
+        {"resources/catalog.yaml": _catalog_with_grant_policy_config()}
+    )
+
+    actual_tags = [
+        ["CATALOG", "my_catalog", "env", "prod"],
+        ["SCHEMA", "my_catalog.sales", "team", "data"],
+    ]
+    actual_privileges = [
+        ["SCHEMA", "my_catalog.sales", "data_engineers", "SELECT"],
+    ]
+
+    def _return_matching_state(*args, **kwargs):
+        statement = kwargs.get("statement", args[0] if args else None)
+        if statement:
+            mock_workspace_client.executed_sql.append(statement)
+        result = MagicMock()
+        upper = (statement or "").upper()
+        if "TAG" in upper:
+            result.result.data_array = actual_tags
+        elif "PRIVILEGE" in upper or "GRANT" in upper:
+            result.result.data_array = actual_privileges
+        else:
+            result.result.data_array = []
+        return result
+
+    mock_workspace_client.statement_execution.execute_statement.side_effect = (
+        _return_matching_state
+    )
+    _setup_mock_account_with_group(mock_account_client, "data_engineers")
+
+    tag_diff, privilege_diff = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        account_client=mock_account_client,
+        warehouse_id="test-warehouse-id",
+    )
+
+    assert tag_diff.to_add == set()
+    assert tag_diff.to_update == set()
+    assert tag_diff.to_remove == set()
+    assert privilege_diff.to_grant == set()
+    assert privilege_diff.to_revoke == set()
+
+    mutation_stmts = [
+        s
+        for s in mock_workspace_client.executed_sql
+        if any(kw in s.upper() for kw in ["ALTER", "GRANT ", "REVOKE"])
+    ]
+    assert mutation_stmts == [], (
+        f"Expected no mutation SQL when in sync, got: {mutation_stmts}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Validation and safety
+# ---------------------------------------------------------------------------
+
+
+def test_governor_validates_principals_before_applying(
+    tmp_yaml_dir, mock_workspace_client, mock_account_client
+):
+    """Policy references unknown principal -> PrincipalValidationError, no SQL executed."""
+    root = tmp_yaml_dir(
+        {"resources/catalog.yaml": _catalog_with_grant_policy_config()}
+    )
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+
+    mock_account_client.users.list.return_value = []
+    mock_account_client.groups.list.return_value = []
+    mock_account_client.service_principals.list.return_value = []
+
+    with pytest.raises(PrincipalValidationError):
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            account_client=mock_account_client,
+            warehouse_id="test-warehouse-id",
+        )
+
+    grant_revoke = [
+        s
+        for s in mock_workspace_client.executed_sql
+        if s.upper().startswith("GRANT") or s.upper().startswith("REVOKE")
+    ]
+    assert grant_revoke == [], (
+        f"Expected no GRANT/REVOKE SQL when principal validation fails, got: {grant_revoke}"
+    )
+
+
+def test_governor_dry_run_does_not_execute_sql(
+    tmp_yaml_dir, mock_workspace_client, mock_account_client
+):
+    """dry_run=True -> diffs are computed but no mutation SQL is executed."""
+    root = tmp_yaml_dir(
+        {"resources/catalog.yaml": _catalog_with_tags_and_grants_config()}
+    )
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _setup_mock_account_with_group(mock_account_client, "data_engineers")
+
+    tag_diff, privilege_diff = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        account_client=mock_account_client,
+        warehouse_id="test-warehouse-id",
+        dry_run=True,
+    )
+
+    assert isinstance(tag_diff, TagDiff)
+    assert isinstance(privilege_diff, PrivilegeDiff)
+
+    mutation_stmts = [
+        s
+        for s in mock_workspace_client.executed_sql
+        if any(kw in s.upper() for kw in ["ALTER", "GRANT ", "REVOKE"])
+    ]
+    assert mutation_stmts == [], (
+        f"Expected no mutation SQL in dry-run mode, got: {mutation_stmts}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Parallelism
+# ---------------------------------------------------------------------------
+
+
+def test_governor_fetches_tags_privileges_and_principals_in_parallel(
+    tmp_yaml_dir, mock_workspace_client, mock_account_client
+):
+    """Mock delays on fetch methods; total elapsed < sum of delays proves parallelism."""
+    root = tmp_yaml_dir(
+        {"resources/catalog.yaml": _catalog_with_tags_and_grants_config()}
+    )
+
+    delay_seconds = 0.3
+    total_sequential_time = delay_seconds * 3
+
+    def _slow_execute(*args, **kwargs):
+        statement = kwargs.get("statement", args[0] if args else None)
+        if statement and statement.strip().upper().startswith("SELECT"):
+            time.sleep(delay_seconds)
+        if statement:
+            mock_workspace_client.executed_sql.append(statement)
+        result = MagicMock()
+        result.result.data_array = []
+        return result
+
+    mock_workspace_client.statement_execution.execute_statement.side_effect = (
+        _slow_execute
+    )
+
+    def _slow_list_groups():
+        time.sleep(delay_seconds)
+        return [_make_mock_group("data_engineers")]
+
+    mock_account_client.groups.list.side_effect = _slow_list_groups
+    mock_account_client.users.list.return_value = []
+    mock_account_client.service_principals.list.return_value = []
+
+    start = time.monotonic()
+    run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        account_client=mock_account_client,
+        warehouse_id="test-warehouse-id",
+    )
+    elapsed = time.monotonic() - start
+
+    assert elapsed < total_sequential_time, (
+        f"Fetches appear to be sequential: elapsed {elapsed:.2f}s >= "
+        f"total sequential time {total_sequential_time:.2f}s"
+    )

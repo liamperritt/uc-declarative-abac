@@ -12,4 +12,7 @@ def compute_privilege_diff(
     - to_grant: desired privileges not in actual
     - to_revoke: actual privileges not in desired
     """
-    raise NotImplementedError
+    return PrivilegeDiff(
+        to_grant=desired - actual,
+        to_revoke=actual - desired,
+    )

@@ -1,0 +1,174 @@
+from __future__ import annotations
+
+from uc_abac_governor.privileges.differ import compute_privilege_diff
+from uc_abac_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
+from uc_abac_governor.types import SecurableType
+
+
+# ---------------------------------------------------------------------------
+# Privileges to grant
+# ---------------------------------------------------------------------------
+
+
+def test_privilege_differ_computes_privileges_to_grant():
+    """A desired privilege not present in actual appears in to_grant."""
+    desired = {
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="catalog.schema.orders",
+            principal="data_analysts",
+            privilege_type="SELECT",
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="catalog.sales",
+            principal="data_engineers",
+            privilege_type="USE_SCHEMA",
+        ),
+    }
+    actual = {
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="catalog.schema.orders",
+            principal="data_analysts",
+            privilege_type="SELECT",
+        ),
+    }
+
+    diff = compute_privilege_diff(desired, actual)
+
+    assert diff.to_grant == {
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="catalog.sales",
+            principal="data_engineers",
+            privilege_type="USE_SCHEMA",
+        ),
+    }
+    assert diff.to_revoke == set()
+
+
+# ---------------------------------------------------------------------------
+# Privileges to revoke
+# ---------------------------------------------------------------------------
+
+
+def test_privilege_differ_computes_privileges_to_revoke():
+    """An actual privilege not present in desired appears in to_revoke."""
+    desired = {
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="my_catalog",
+            principal="data_analysts",
+            privilege_type="USE_CATALOG",
+        ),
+    }
+    actual = {
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="my_catalog",
+            principal="data_analysts",
+            privilege_type="USE_CATALOG",
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="catalog.sales.orders",
+            principal="temp_users",
+            privilege_type="SELECT",
+        ),
+    }
+
+    diff = compute_privilege_diff(desired, actual)
+
+    assert diff.to_grant == set()
+    assert diff.to_revoke == {
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="catalog.sales.orders",
+            principal="temp_users",
+            privilege_type="SELECT",
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# In-sync — empty diff
+# ---------------------------------------------------------------------------
+
+
+def test_privilege_differ_returns_empty_diff_when_in_sync():
+    """Identical desired and actual sets produce an entirely empty diff."""
+    privileges = {
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="my_catalog",
+            principal="data_analysts",
+            privilege_type="USE_CATALOG",
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="catalog.sales.orders",
+            principal="data_engineers",
+            privilege_type="SELECT",
+        ),
+    }
+
+    diff = compute_privilege_diff(privileges, privileges)
+
+    assert diff == PrivilegeDiff()
+
+
+# ---------------------------------------------------------------------------
+# Empty desired
+# ---------------------------------------------------------------------------
+
+
+def test_privilege_differ_handles_empty_desired():
+    """Empty desired with non-empty actual produces only to_revoke entries."""
+    actual = {
+        SecurablePrivilege(
+            securable_type=SecurableType.VOLUME,
+            securable_full_name="catalog.landing.raw_events",
+            principal="data_engineers",
+            privilege_type="READ_VOLUME",
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="catalog.sales.orders",
+            principal="data_analysts",
+            privilege_type="SELECT",
+        ),
+    }
+
+    diff = compute_privilege_diff(set(), actual)
+
+    assert diff.to_revoke == actual
+    assert diff.to_grant == set()
+
+
+# ---------------------------------------------------------------------------
+# Empty actual
+# ---------------------------------------------------------------------------
+
+
+def test_privilege_differ_handles_empty_actual():
+    """Non-empty desired with empty actual produces only to_grant entries."""
+    desired = {
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="my_catalog",
+            principal="data_analysts",
+            privilege_type="USE_CATALOG",
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="my_catalog.sales",
+            principal="data_engineers",
+            privilege_type="USE_SCHEMA",
+        ),
+    }
+
+    diff = compute_privilege_diff(desired, set())
+
+    assert diff.to_grant == desired
+    assert diff.to_revoke == set()

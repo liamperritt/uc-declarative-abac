@@ -455,11 +455,11 @@ Tests use `sqlglot` to parse generated SQL and assert on structural properties r
 
 #### Test cases (`test_unity_catalog.py`):
 
-1. **`test_uc_helper_fetch_actual_tags_returns_tags_from_query_results`** — given mock query results representing tag rows, `fetch_actual_tags` returns the correct set of `SecurableTag` dataclasses
-2. **`test_uc_helper_fetch_actual_tags_returns_empty_given_no_rows`** — when the query returns no rows, returns an empty set
-3. **`test_uc_helper_fetch_actual_privileges_returns_privileges_from_query_results`** — given mock query results representing privilege rows, `fetch_actual_privileges` returns the correct set of `SecurablePrivilege` dataclasses
-4. **`test_uc_helper_fetch_actual_privileges_returns_empty_given_no_rows`** — when the query returns no rows, returns an empty set
-5. **`test_uc_helper_execute_sql_passes_statement_to_workspace_client`** — `execute_sql` calls the workspace client's statement execution API with the given SQL
+1. **`test_uc_helper_fetches_actual_tags_from_query_results`** — given mock query results representing tag rows, `fetch_actual_tags` returns the correct set of `SecurableTag` dataclasses
+2. **`test_uc_helper_fetches_no_tags_given_no_rows`** — when the query returns no rows, returns an empty set
+3. **`test_uc_helper_fetches_actual_privileges_from_query_results`** — given mock query results representing privilege rows, `fetch_actual_privileges` returns the correct set of `SecurablePrivilege` dataclasses
+4. **`test_uc_helper_ffetches_no_privieleges_given_no_rows`** — when the query returns no rows, returns an empty set
+5. **`test_uc_helper_passes_statement_to_workspace_client`** — `execute_sql` calls the workspace client's statement execution API with the given SQL
 6. **`test_uc_helper_uses_external_links_disposition`** — the fetch methods use `EXTERNAL_LINKS` disposition when calling the statement execution API
 7. **`test_uc_helper_queries_scoped_to_provided_catalog_names`** — the SQL passed to the API includes the provided catalog names (parsed via sqlglot to verify the WHERE/IN clause references them)
 8. **`test_uc_helper_caches_tags_after_fetch`** — calling `fetch_actual_tags` twice with the same catalog names only executes the SQL query once; the second call returns the cached result
@@ -469,15 +469,15 @@ Tests use `sqlglot` to parse generated SQL and assert on structural properties r
 
 #### Test cases (`test_account.py`):
 
-1. **`test_account_helper_fetch_principals_caches_users`** — after `fetch_principals`, user emails are available for validation
-2. **`test_account_helper_fetch_principals_caches_groups`** — after `fetch_principals`, group display names are available for validation
-3. **`test_account_helper_fetch_principals_caches_service_principals`** — after `fetch_principals`, SP display names are available for validation
-4. **`test_account_helper_validate_principal_returns_true_for_known_principal`** — returns `True` for a principal that exists in the cache
-5. **`test_account_helper_validate_principal_returns_false_for_unknown_principal`** — returns `False` for a name not in any cache
-6. **`test_account_helper_validate_principals_raises_on_unknown_names`** — given a list with unrecognised names, raises an error listing all bad names
-7. **`test_account_helper_raises_on_duplicate_service_principal_display_names`** — if two SPs have the same display name, `fetch_principals` raises an error
-8. **`test_account_helper_get_sp_application_id_returns_id_for_known_sp`** — returns the `application_id` for a cached service principal display name
-9. **`test_account_helper_get_sp_application_id_raises_for_unknown_sp`** — raises an error if the display name is not a known service principal
+1. **`test_account_helper_fetches_and_caches_users`** — after `fetch_principals`, user emails are available for validation
+2. **`test_account_helper_fetches_and_caches_groups`** — after `fetch_principals`, group display names are available for validation
+3. **`test_account_helper_fetches_and_caches_service_principals`** — after `fetch_principals`, SP display names are available for validation
+4. **`test_account_helper_validates_known_principal`** — returns `True` for a principal that exists in the cache
+5. **`test_account_helper_invalidates_unknown_principal`** — returns `False` for a name not in any cache
+6. **`test_account_helper_invalidates_principals_with_invalid_names`** — given a list with unrecognised names, raises an error listing all bad names
+7. **`test_account_helper_fails_to_get_sp_application_id_on_duplicate_display_names`** — if two SPs have the same display name, `fetch_principals` raises an error
+8. **`test_account_helper_gets_sp_application_id_for_known_sp`** — returns the `application_id` for a cached service principal display name
+9. **`test_account_helper_fails_to_get_sp_application_id_for_unknown_sp`** — raises an error if the display name is not a known service principal
 
 ### Module 11: `governor.py` (integration-level)
 

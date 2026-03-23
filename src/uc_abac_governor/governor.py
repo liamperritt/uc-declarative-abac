@@ -1,10 +1,22 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from databricks.sdk import AccountClient, WorkspaceClient
 
+from uc_abac_governor.discovery import discover_yaml_files, load_raw_configs
+from uc_abac_governor.helpers.account import AccountHelper
+from uc_abac_governor.helpers.unity_catalog import UnityCatalogHelper
+from uc_abac_governor.models import ConfigFile
+from uc_abac_governor.privileges.compiler import compile_desired_privileges
+from uc_abac_governor.privileges.differ import compute_privilege_diff
+from uc_abac_governor.privileges.executor import execute_privilege_diff
 from uc_abac_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
+from uc_abac_governor.resolver import resolve_refs
+from uc_abac_governor.tags.compiler import compile_desired_tags
+from uc_abac_governor.tags.differ import compute_tag_diff
+from uc_abac_governor.tags.executor import execute_tag_diff
 from uc_abac_governor.tags.state import TagDiff
 
 
@@ -25,4 +37,41 @@ def run(
     Returns the computed (TagDiff, PrivilegeDiff) for both domains.
     In dry-run mode, diffs are computed but no SQL is executed.
     """
-    raise NotImplementedError
+    # 1. Discover + load + resolve YAML
+    paths = discover_yaml_files(config_dir)
+    raw_defs, raw_resources = load_raw_configs(paths)
+    resolved = resolve_refs(raw_defs, raw_resources)
+    config = ConfigFile.model_validate(resolved)
+    catalog_names = list(config.catalogs.keys())
+
+    # 2. Create helpers and compile desired tags (needed by both workflows)
+    uc_helper = UnityCatalogHelper(workspace_client, warehouse_id)
+    acct_helper = AccountHelper(account_client)
+    desired_tags = compile_desired_tags(config)
+
+    # 3. Parallel initial fetch (tags, privileges, and principals concurrently)
+    with ThreadPoolExecutor() as pool:
+        actual_tags_f = pool.submit(uc_helper.fetch_actual_tags, catalog_names)
+        actual_privs_f = pool.submit(uc_helper.fetch_actual_privileges, catalog_names)
+        principals_f = pool.submit(acct_helper.fetch_principals)
+        actual_tags = actual_tags_f.result()
+        actual_privileges = actual_privs_f.result()
+        principals_f.result()
+
+    # 4. Compute diffs
+    tag_diff = compute_tag_diff(desired_tags, actual_tags)
+    desired_privileges = compile_desired_privileges(config, desired_tags)
+    acct_helper.validate_principals(extract_principals(desired_privileges))
+    privilege_diff = compute_privilege_diff(desired_privileges, actual_privileges)
+
+    # 5. Execute diffs in parallel
+    if not dry_run:
+        with ThreadPoolExecutor() as pool:
+            tag_exec_f = pool.submit(execute_tag_diff, uc_helper, tag_diff)
+            priv_exec_f = pool.submit(
+                execute_privilege_diff, uc_helper, acct_helper, privilege_diff
+            )
+            tag_exec_f.result()
+            priv_exec_f.result()
+
+    return tag_diff, privilege_diff

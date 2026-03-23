@@ -154,3 +154,36 @@ def test_catalog_config_allows_optional_fields():
     assert catalog.tags is None
     assert catalog.schemas is None
     assert catalog.policies is None
+
+
+def test_config_file_injects_name_from_catalog_dict_key():
+    """When a catalog has no 'name' field, the dict key is used as the name."""
+    data = {
+        "catalogs": {
+            "operations_prod": {
+                "tags": {"env": "prod"},
+            },
+            "operations_test": {
+                "tags": {"env": "test"},
+            },
+        },
+    }
+    config = ConfigFile.model_validate(data)
+
+    assert config.catalogs["operations_prod"].name == "operations_prod"
+    assert config.catalogs["operations_test"].name == "operations_test"
+
+
+def test_config_file_preserves_explicit_catalog_name():
+    """When a catalog has an explicit 'name' field, it is preserved."""
+    data = {
+        "catalogs": {
+            "ops_prod": {
+                "name": "operations_production",
+                "tags": {"env": "prod"},
+            },
+        },
+    }
+    config = ConfigFile.model_validate(data)
+
+    assert config.catalogs["ops_prod"].name == "operations_production"
