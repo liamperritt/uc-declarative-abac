@@ -27,14 +27,14 @@ Definitions define *what* exists; resources define *where* it gets deployed.
 
 - **Governed tags** — UC governed tags with allowed values, owners, and comments.
 - **Catalogs** — compose schema and policy definitions into deployable units, with per-catalog overrides.
-- **Schemas, tables, volumes, functions** — concrete instances that can reference relevant definitions.
+- **Schemas, tables, volumes, functions, mask/filter policies** — concrete instances that can reference relevant definitions.
 
 ### Metadata on all objects
 
 - **Owners** — set or update owners on catalogs, schemas, tables, volumes, and functions.
 - **Comments** — manage descriptions on UC objects.
 - **Tags** — key-value or valueless tags (using `~`) applied to any object.
-- **RFA email addresses** — configure where access requests are sent for governed objects.
+- **RFA destinations** — configure where access requests are sent for governed objects.
 
 ## How It Works
 
