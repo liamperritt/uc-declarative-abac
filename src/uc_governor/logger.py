@@ -51,7 +51,7 @@ class ChangeLogger:
     def log_error(self, error: ExecutionError) -> None:
         """Log and collect an execution error."""
         self._errors.append(error)
-        self._log_info(f"[ERROR] {error.statement}: {error.exception}")
+        self._log_info(f"[ERROR] {error.context}: {error.exception}")
 
     def log_summary(self) -> None:
         """Log a summary of all changes recorded so far."""

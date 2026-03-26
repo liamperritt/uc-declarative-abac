@@ -75,7 +75,7 @@ def execute_tag_diff(
         try:
             uc_helper.execute_sql(stmt)
         except Exception as exc:
-            change_logger.log_error(ExecutionError(statement=stmt, exception=exc))
+            change_logger.log_error(ExecutionError(context=stmt, exception=exc))
             continue
         statements.append(stmt)
         for tag in tags:
@@ -92,7 +92,7 @@ def execute_tag_diff(
         try:
             uc_helper.execute_sql(stmt)
         except Exception as exc:
-            change_logger.log_error(ExecutionError(statement=stmt, exception=exc))
+            change_logger.log_error(ExecutionError(context=stmt, exception=exc))
             continue
         statements.append(stmt)
         for tag in tags:

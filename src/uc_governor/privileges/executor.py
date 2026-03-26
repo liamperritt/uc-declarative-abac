@@ -68,7 +68,7 @@ def execute_privilege_diff(
         try:
             uc_helper.execute_sql(stmt)
         except Exception as exc:
-            change_logger.log_error(ExecutionError(statement=stmt, exception=exc))
+            change_logger.log_error(ExecutionError(context=stmt, exception=exc))
             continue
         statements.append(stmt)
         change_logger.log_grant(priv)
@@ -79,7 +79,7 @@ def execute_privilege_diff(
         try:
             uc_helper.execute_sql(stmt)
         except Exception as exc:
-            change_logger.log_error(ExecutionError(statement=stmt, exception=exc))
+            change_logger.log_error(ExecutionError(context=stmt, exception=exc))
             continue
         statements.append(stmt)
         change_logger.log_revoke(priv)

@@ -8,7 +8,7 @@ import pytest
 from uc_governor.governor import run
 from uc_governor.privileges.state import PrivilegeDiff
 from uc_governor.tags.state import TagDiff
-from uc_governor.types import PrincipalValidationError
+from uc_governor.types import ExecutionBatchError, PrincipalValidationError
 
 
 # ---------------------------------------------------------------------------
@@ -274,7 +274,7 @@ def test_governor_produces_empty_diffs_when_in_sync(
 def test_governor_validates_principals_before_applying(
     tmp_yaml_dir, mock_workspace_client, mock_account_client
 ):
-    """Policy references unknown principal -> PrincipalValidationError, no SQL executed."""
+    """Policy references unknown principal -> ExecutionBatchError, no GRANT/REVOKE SQL executed."""
     root = tmp_yaml_dir(
         {"resources/catalog.yaml": _catalog_with_grant_policy_config()}
     )
@@ -284,7 +284,7 @@ def test_governor_validates_principals_before_applying(
     mock_account_client.groups.list.return_value = []
     mock_account_client.service_principals.list.return_value = []
 
-    with pytest.raises(PrincipalValidationError):
+    with pytest.raises(ExecutionBatchError):
         run(
             config_dir=root,
             workspace_client=mock_workspace_client,
@@ -429,4 +429,115 @@ def test_governor_raises_execution_batch_error_when_sql_fails(
 
     assert len(exc_info.value.errors) > 0, (
         "Expected at least one ExecutionError in the batch"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Principal validation error collection
+# ---------------------------------------------------------------------------
+
+
+def _catalog_with_two_grant_policies_config() -> dict:
+    return {
+        "resources": {
+            "catalogs": {
+                "my_catalog": {
+                    "tags": {"env": "prod"},
+                    "schemas": [
+                        {"name": "sales", "tags": {"team": "data"}},
+                    ],
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["SELECT"],
+                            "to": ["data_engineers"],
+                            "tags": {"team": "data"},
+                        },
+                        {
+                            "type": "grant",
+                            "privileges": ["MODIFY"],
+                            "to": ["ghost_team"],
+                            "tags": {"team": "data"},
+                        },
+                    ],
+                }
+            }
+        }
+    }
+
+
+def test_governor_collects_unknown_principal_errors(
+    tmp_yaml_dir, mock_workspace_client, mock_account_client
+):
+    """Unknown principals are collected as errors in ExecutionBatchError, not raised as PrincipalValidationError."""
+    from uc_governor.types import ExecutionBatchError, ExecutionError
+
+    root = tmp_yaml_dir(
+        {"resources/catalog.yaml": _catalog_with_grant_policy_config()}
+    )
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+
+    # No groups/users/SPs -> "data_engineers" is unknown
+    mock_account_client.users.list.return_value = []
+    mock_account_client.groups.list.return_value = []
+    mock_account_client.service_principals.list.return_value = []
+
+    with pytest.raises(ExecutionBatchError) as exc_info:
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            account_client=mock_account_client,
+            warehouse_id="test-warehouse-id",
+        )
+
+    # At least one error should be a PrincipalValidationError
+    principal_errors = [
+        e for e in exc_info.value.errors
+        if isinstance(e.exception, PrincipalValidationError)
+    ]
+    assert len(principal_errors) > 0, (
+        f"Expected at least one PrincipalValidationError in errors, got: {exc_info.value.errors}"
+    )
+
+
+def test_governor_continues_with_valid_principals_when_some_are_unknown(
+    tmp_yaml_dir, mock_workspace_client, mock_account_client
+):
+    """Valid principals get GRANT SQL executed; unknown ones become errors in ExecutionBatchError."""
+    from uc_governor.types import ExecutionBatchError
+
+    root = tmp_yaml_dir(
+        {"resources/catalog.yaml": _catalog_with_two_grant_policies_config()}
+    )
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+
+    # Only "data_engineers" exists; "ghost_team" does not
+    mock_account_client.groups.list.return_value = [_make_mock_group("data_engineers")]
+    mock_account_client.users.list.return_value = []
+    mock_account_client.service_principals.list.return_value = []
+
+    with pytest.raises(ExecutionBatchError) as exc_info:
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            account_client=mock_account_client,
+            warehouse_id="test-warehouse-id",
+        )
+
+    # GRANT SQL should have been executed for the valid principal
+    grant_stmts = [
+        s for s in mock_workspace_client.executed_sql
+        if s.upper().startswith("GRANT") and "data_engineers" in s
+    ]
+    assert len(grant_stmts) > 0, (
+        f"Expected GRANT SQL for data_engineers, got: {mock_workspace_client.executed_sql}"
+    )
+
+    # The batch error should contain a PrincipalValidationError for ghost_team
+    principal_errors = [
+        e for e in exc_info.value.errors
+        if isinstance(e.exception, PrincipalValidationError)
+    ]
+    assert len(principal_errors) > 0, (
+        f"Expected PrincipalValidationError for ghost_team in errors, got: {exc_info.value.errors}"
     )

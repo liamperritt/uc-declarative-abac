@@ -47,11 +47,15 @@ class AccountHelper:
 
     def validate_principals(self, names: list[str]) -> None:
         """Validate a list of principal names. Raises PrincipalValidationError listing all unknown names."""
-        unknown = [name for name in names if not self.validate_principal(name)]
+        unknown = self.find_unknown_principals(names)
         if unknown:
             raise PrincipalValidationError(
                 f"Unknown principals: {', '.join(unknown)}"
             )
+
+    def find_unknown_principals(self, names: list[str]) -> list[str]:
+        """Return the subset of principal names that do not exist in the account."""
+        return [name for name in names if not self.validate_principal(name)]
 
     def get_sp_application_id(self, display_name: str) -> str:
         """Return the application_id for a service principal given its display name.

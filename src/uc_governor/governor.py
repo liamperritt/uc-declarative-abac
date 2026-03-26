@@ -19,7 +19,7 @@ from uc_governor.tags.compiler import compile_desired_tags
 from uc_governor.tags.differ import compute_tag_diff
 from uc_governor.tags.executor import execute_tag_diff
 from uc_governor.tags.state import TagDiff
-from uc_governor.types import ExecutionBatchError
+from uc_governor.types import ExecutionBatchError, ExecutionError, PrincipalValidationError
 
 
 def extract_principals(privileges: set[SecurablePrivilege]) -> list[str]:
@@ -63,11 +63,17 @@ def run(
 
     # 4. Privileges workflow
     desired_privileges = compile_desired_privileges(config, desired_tags)
-    acct_helper.validate_principals(extract_principals(desired_privileges))
+    change_logger = ChangeLogger(dry_run=dry_run)
+    unknown = set(acct_helper.find_unknown_principals(extract_principals(desired_privileges)))
+    for name in unknown:
+        change_logger.log_error(ExecutionError(
+            context=f"Validate principal '{name}'",
+            exception=PrincipalValidationError(f"Principal '{name}' not found in account"),
+        ))
+    desired_privileges = {p for p in desired_privileges if p.principal not in unknown}
     privilege_diff = compute_privilege_diff(desired_privileges, actual_privileges)
 
     # 5. Log and execute (sequential)
-    change_logger = ChangeLogger(dry_run=dry_run)
     if not dry_run:
         execute_tag_diff(uc_helper, tag_diff, change_logger)
         execute_privilege_diff(uc_helper, acct_helper, privilege_diff, change_logger)

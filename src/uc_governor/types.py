@@ -35,7 +35,7 @@ class DuplicateServicePrincipalError(GovernorError):
 class ExecutionError:
     """A single error that occurred during SQL execution."""
 
-    statement: str
+    context: str
     exception: Exception
 
 
@@ -49,5 +49,5 @@ class ExecutionBatchError(GovernorError):
     def _build_message(self) -> str:
         lines = [f"{len(self.errors)} SQL statement(s) failed during execution:"]
         for err in self.errors:
-            lines.append(f"  - {err.statement}: {err.exception}")
+            lines.append(f"  - {err.context}: {err.exception}")
         return "\n".join(lines)

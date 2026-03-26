@@ -335,7 +335,7 @@ def _make_execution_error(
     from uc_governor.types import ExecutionError
 
     return ExecutionError(
-        statement=statement,
+        context=statement,
         exception=exception or RuntimeError("SQL execution failed"),
     )
 

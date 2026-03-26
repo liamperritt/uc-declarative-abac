@@ -184,3 +184,35 @@ def test_account_helper_fails_to_get_sp_application_id_for_unknown_sp() -> None:
 
     with pytest.raises(PrincipalValidationError):
         helper.get_sp_application_id("nonexistent-sp")
+
+
+# ---------------------------------------------------------------------------
+# find_unknown_principals
+# ---------------------------------------------------------------------------
+
+
+def test_account_helper_find_unknown_principals_returns_unknown_names() -> None:
+    """Returns only the names that do not exist in the account."""
+    client = _make_account_client(
+        groups=[_make_group("data_engineers")],
+    )
+    helper = AccountHelper(client)
+    helper.fetch_principals()
+
+    result = helper.find_unknown_principals(["data_engineers", "ghost_team"])
+
+    assert result == ["ghost_team"]
+
+
+def test_account_helper_find_unknown_principals_returns_empty_when_all_valid() -> None:
+    """Returns an empty list when every principal exists in the account."""
+    client = _make_account_client(
+        users=[_make_user("alice@example.com")],
+        groups=[_make_group("data_engineers")],
+    )
+    helper = AccountHelper(client)
+    helper.fetch_principals()
+
+    result = helper.find_unknown_principals(["alice@example.com", "data_engineers"])
+
+    assert result == []
