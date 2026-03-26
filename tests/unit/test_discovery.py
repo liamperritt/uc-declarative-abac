@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from uc_abac_governor.discovery import discover_yaml_files, load_raw_configs
-from uc_abac_governor.types import DuplicateKeyError
+from uc_abac_governor.types import DuplicateKeyError, DuplicateResourceError
 
 
 # ---------------------------------------------------------------------------
@@ -162,3 +162,31 @@ def test_discovery_ignores_files_with_no_definitions_or_resources(tmp_yaml_dir):
 
     assert "schemas" in definitions
     assert "ops|sales" in definitions["schemas"]
+
+
+# ---------------------------------------------------------------------------
+# Duplicate catalog resource keys
+# ---------------------------------------------------------------------------
+
+
+def test_discovery_rejects_duplicate_catalog_resource_keys(tmp_yaml_dir):
+    """Given two files defining the same catalog resource key, raises DuplicateResourceError."""
+    root = tmp_yaml_dir({
+        "file1.yaml": {
+            "resources": {
+                "catalogs": {
+                    "my_catalog": {"tags": {"env": "prod"}}
+                }
+            }
+        },
+        "file2.yaml": {
+            "resources": {
+                "catalogs": {
+                    "my_catalog": {"tags": {"env": "test"}}
+                }
+            }
+        },
+    })
+    paths = discover_yaml_files(root)
+    with pytest.raises(DuplicateResourceError):
+        load_raw_configs(paths)

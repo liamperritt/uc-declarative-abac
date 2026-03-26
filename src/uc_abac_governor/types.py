@@ -65,6 +65,10 @@ class DuplicateKeyError(GovernorError):
     """Raised when duplicate definition keys are found across YAML files."""
 
 
+class DuplicateResourceError(GovernorError):
+    """Raised when duplicate resource names are detected within the same parent."""
+
+
 class PrincipalValidationError(GovernorError):
     """Raised when one or more principal names cannot be found in the account."""
 

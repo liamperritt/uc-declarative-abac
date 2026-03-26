@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from uc_abac_governor.models import ResourcesConfig
+from uc_abac_governor.types import DuplicateResourceError
 
 
 def _minimal_catalog(**overrides):
@@ -522,3 +523,109 @@ def test_column_config_has_full_name():
         }
     })
     assert config.catalogs["my_catalog"].schemas[0].tables[0].columns[0].full_name == "my_catalog.sales.orders.email"
+
+
+# ---------------------------------------------------------------------------
+# Duplicate resource detection
+# ---------------------------------------------------------------------------
+
+
+def test_catalog_config_rejects_duplicate_schema_names():
+    """Two schemas with the same name under one catalog raise DuplicateResourceError."""
+    with pytest.raises(DuplicateResourceError):
+        ResourcesConfig.model_validate({
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {"name": "sales"},
+                        {"name": "sales"},
+                    ],
+                }
+            }
+        })
+
+
+def test_schema_config_rejects_duplicate_table_names():
+    """Two tables with the same name under one schema raise DuplicateResourceError."""
+    with pytest.raises(DuplicateResourceError):
+        ResourcesConfig.model_validate({
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {"name": "orders"},
+                                {"name": "orders"},
+                            ],
+                        }
+                    ],
+                }
+            }
+        })
+
+
+def test_schema_config_rejects_duplicate_volume_names():
+    """Two volumes with the same name under one schema raise DuplicateResourceError."""
+    with pytest.raises(DuplicateResourceError):
+        ResourcesConfig.model_validate({
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "landing",
+                            "volumes": [
+                                {"name": "files"},
+                                {"name": "files"},
+                            ],
+                        }
+                    ],
+                }
+            }
+        })
+
+
+def test_table_config_rejects_duplicate_column_names():
+    """Two columns with the same name under one table raise DuplicateResourceError."""
+    with pytest.raises(DuplicateResourceError):
+        ResourcesConfig.model_validate({
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "columns": [
+                                        {"name": "email"},
+                                        {"name": "email"},
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        })
+
+
+def test_catalog_config_allows_same_name_in_different_parents():
+    """Two tables named 'orders' in different schemas should NOT raise an error."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "schemas": [
+                    {
+                        "name": "sales",
+                        "tables": [{"name": "orders"}],
+                    },
+                    {
+                        "name": "marketing",
+                        "tables": [{"name": "orders"}],
+                    },
+                ],
+            }
+        }
+    })
+    assert len(config.catalogs["my_cat"].schemas) == 2

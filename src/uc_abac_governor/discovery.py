@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from uc_abac_governor.types import DuplicateKeyError
+from uc_abac_governor.types import DuplicateKeyError, DuplicateResourceError
 
 
 def discover_yaml_files(root: Path) -> list[Path]:
@@ -30,7 +30,8 @@ def _merge_block(namespace: str, block: dict, registry: dict) -> dict:
         existing = {**merged.get(sub_key, {})}
         for entry_key, entry_val in entries.items():
             if entry_key in existing:
-                raise DuplicateKeyError(
+                exc_cls = DuplicateResourceError if namespace == "resources" else DuplicateKeyError
+                raise exc_cls(
                     f"Duplicate key '{entry_key}' in {namespace}.{sub_key}"
                 )
             existing[entry_key] = entry_val

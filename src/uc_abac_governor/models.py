@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, computed_field, field_validator, model_validator
 
-from uc_abac_governor.types import PrivilegeType
+from uc_abac_governor.types import DuplicateResourceError, PrivilegeType
 
 
 def _coerce_null_tag_values(tags: dict | None) -> dict | None:
@@ -14,6 +14,19 @@ def _coerce_null_tag_values(tags: dict | None) -> dict | None:
     if tags is None:
         return None
     return {k: (v if v is not None else "") for k, v in tags.items()}
+
+
+def _check_duplicate_names(items: list, child_label: str, parent_label: str) -> None:
+    """Raise DuplicateResourceError if any two dicts in items share the same 'name'."""
+    seen: set[str] = set()
+    for item in items:
+        if isinstance(item, dict):
+            name = item.get("name", "")
+            if name in seen:
+                raise DuplicateResourceError(
+                    f"Duplicate {child_label} name '{name}' in {parent_label}"
+                )
+            seen.add(name)
 
 
 class GrantPolicyConfig(BaseModel):
@@ -50,7 +63,10 @@ class SecurableConfig(BaseModel):
     @computed_field
     @property
     @abstractmethod
-    def full_name(self) -> str: ...
+    def full_name(self) -> str:
+        raise NotImplementedError(
+            "Subclasses of SecurableConfig must implement the 'full_name' property."
+        )
 
     @field_validator("tags", mode="before")
     @classmethod
@@ -91,6 +107,11 @@ class TableConfig(SecurableConfig):
         catalog_name = data.get("catalog_name", "")
         schema_name = data.get("schema_name", "")
         table_name = data.get("name", "")
+        _check_duplicate_names(
+            data.get("columns", []) or [],
+            "column",
+            f"table '{table_name}'",
+        )
         for policy_dict in data.get("policies", []) or []:
             if isinstance(policy_dict, dict):
                 policy_dict.setdefault("catalog_name", catalog_name)
@@ -120,6 +141,16 @@ class SchemaConfig(SecurableConfig):
     def _inject_parent_names(cls, data: dict) -> dict:
         catalog_name = data.get("catalog_name", "")
         schema_name = data.get("name", "")
+        _check_duplicate_names(
+            data.get("tables", []) or [],
+            "table",
+            f"schema '{schema_name}'",
+        )
+        _check_duplicate_names(
+            data.get("volumes", []) or [],
+            "volume",
+            f"schema '{schema_name}'",
+        )
         for policy_dict in data.get("policies", []) or []:
             if isinstance(policy_dict, dict):
                 policy_dict.setdefault("catalog_name", catalog_name)
@@ -151,6 +182,11 @@ class CatalogConfig(SecurableConfig):
         if not isinstance(data, dict):
             return data
         catalog_name = data.get("name", "")
+        _check_duplicate_names(
+            data.get("schemas", []) or [],
+            "schema",
+            f"catalog '{catalog_name}'",
+        )
         for schema_dict in data.get("schemas", []) or []:
             if isinstance(schema_dict, dict):
                 schema_dict.setdefault("catalog_name", catalog_name)
