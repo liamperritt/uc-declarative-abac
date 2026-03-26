@@ -1,6 +1,6 @@
 # UC ABAC Governor
 
-The UC ABAC Governor lets Databricks customers define their Attribute-Based Access Control (ABAC) governance rules and mappings via **declarative YAML files**. Define once, version in Git, and deploy to Unity Catalog—including as a **GitHub Action** from a repo containing your YAML configs.
+The UC ABAC Governor lets Databricks customers define their Attribute-Based Access Control (ABAC) governance model via **declarative YAML files**. Define once, version in Git, and deploy to Unity Catalog—including as a **GitHub Action** from a repo containing your YAML configs.
 
 ## Overview
 
