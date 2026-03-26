@@ -1,0 +1,10 @@
+definitions:
+  policies:
+    shared|grant_bronze_access:
+      type: grant
+      privileges:
+        - USE_SCHEMA
+      to:
+        - sp_uc_governor_test
+      tags:
+        zone: bronze

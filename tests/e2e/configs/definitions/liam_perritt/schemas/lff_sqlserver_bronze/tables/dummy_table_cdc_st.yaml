@@ -1,0 +1,7 @@
+definitions:
+  tables:
+    liam_perritt|lff_sqlserver_bronze|dummy_table_cdc_st:
+      name: dummy_table_cdc_st
+      tags:
+        classification: internal
+        pipeline: lff

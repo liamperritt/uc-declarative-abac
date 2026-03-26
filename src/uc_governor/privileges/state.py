@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from uc_governor.types import SecurableType
+from uc_governor.types import Principal, SecurableType
 
 
 @dataclass(frozen=True)
 class SecurablePrivilege:
     securable_type: SecurableType
     securable_full_name: str
-    principal: str
+    principal: Principal
     privilege_type: str
 
 

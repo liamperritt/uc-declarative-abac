@@ -1,0 +1,11 @@
+definitions:
+  policies:
+    shared|grant_schema_access:
+      type: grant
+      privileges:
+        - USE_SCHEMA
+        - SELECT
+      to:
+        - j.wang@databricks.com
+      tags:
+        team: platform

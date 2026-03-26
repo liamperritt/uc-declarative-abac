@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -103,11 +103,13 @@ def _setup_mock_workspace_empty_state(mock_workspace_client: MagicMock) -> None:
     )
 
 
-def _setup_mock_account_with_group(
-    mock_account_client: MagicMock, group_name: str
+def _setup_mock_principals(
+    mock_workspace_client: MagicMock, group_name: str
 ) -> None:
-    """Configure the mock account client to return a single group."""
-    mock_account_client.groups.list.return_value = [_make_mock_group(group_name)]
+    """Configure the mock workspace client's SCIM API to return a single group."""
+    mock_workspace_client.groups.list.return_value = [_make_mock_group(group_name)]
+    mock_workspace_client.users.list.return_value = []
+    mock_workspace_client.service_principals.list.return_value = []
 
 
 # ---------------------------------------------------------------------------
@@ -116,17 +118,16 @@ def _setup_mock_account_with_group(
 
 
 def test_governor_runs_tags_workflow_end_to_end(
-    tmp_yaml_dir, mock_workspace_client, mock_account_client
-):
+    tmp_yaml_dir, mock_workspace_client):
     """YAML configs with tagged catalog -> tag_diff.to_add is non-empty, SQL was executed."""
     root = tmp_yaml_dir({"resources/catalog.yaml": _catalog_with_tags_config()})
     _setup_mock_workspace_empty_state(mock_workspace_client)
-    _setup_mock_account_with_group(mock_account_client, "data_engineers")
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
 
     tag_diff, _ = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
-        account_client=mock_account_client,
+
         warehouse_id="test-warehouse-id",
     )
 
@@ -141,19 +142,18 @@ def test_governor_runs_tags_workflow_end_to_end(
 
 
 def test_governor_runs_privileges_workflow_end_to_end(
-    tmp_yaml_dir, mock_workspace_client, mock_account_client
-):
+    tmp_yaml_dir, mock_workspace_client):
     """YAML with grant policy + tagged objects, empty actual privileges -> privilege_diff.to_grant is non-empty."""
     root = tmp_yaml_dir(
         {"resources/catalog.yaml": _catalog_with_grant_policy_config()}
     )
     _setup_mock_workspace_empty_state(mock_workspace_client)
-    _setup_mock_account_with_group(mock_account_client, "data_engineers")
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
 
     _, privilege_diff = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
-        account_client=mock_account_client,
+
         warehouse_id="test-warehouse-id",
     )
 
@@ -170,19 +170,18 @@ def test_governor_runs_privileges_workflow_end_to_end(
 
 
 def test_governor_runs_both_domains_independently(
-    tmp_yaml_dir, mock_workspace_client, mock_account_client
-):
+    tmp_yaml_dir, mock_workspace_client):
     """Both tag and privilege changes are computed; verify both diffs are populated."""
     root = tmp_yaml_dir(
         {"resources/catalog.yaml": _catalog_with_tags_and_grants_config()}
     )
     _setup_mock_workspace_empty_state(mock_workspace_client)
-    _setup_mock_account_with_group(mock_account_client, "data_engineers")
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
 
     tag_diff, privilege_diff = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
-        account_client=mock_account_client,
+
         warehouse_id="test-warehouse-id",
     )
 
@@ -208,9 +207,9 @@ def test_governor_runs_both_domains_independently(
 # ---------------------------------------------------------------------------
 
 
+@patch("uc_governor.helpers.unity_catalog._fetch_external_links_rows")
 def test_governor_produces_empty_diffs_when_in_sync(
-    tmp_yaml_dir, mock_workspace_client, mock_account_client
-):
+    mock_fetch, tmp_yaml_dir, mock_workspace_client):
     """When actual state matches desired, both diffs are empty and no SQL is executed."""
     root = tmp_yaml_dir(
         {"resources/catalog.yaml": _catalog_with_grant_policy_config()}
@@ -224,29 +223,24 @@ def test_governor_produces_empty_diffs_when_in_sync(
         ["SCHEMA", "my_catalog.sales", "data_engineers", "SELECT"],
     ]
 
-    def _return_matching_state(*args, **kwargs):
-        statement = kwargs.get("statement", args[0] if args else None)
-        if statement:
-            mock_workspace_client.executed_sql.append(statement)
-        result = MagicMock()
-        upper = (statement or "").upper()
-        if "TAG" in upper:
-            result.result.data_array = actual_tags
-        elif "PRIVILEGE" in upper or "GRANT" in upper:
-            result.result.data_array = actual_privileges
-        else:
-            result.result.data_array = []
-        return result
+    call_count = 0
 
-    mock_workspace_client.statement_execution.execute_statement.side_effect = (
-        _return_matching_state
-    )
-    _setup_mock_account_with_group(mock_account_client, "data_engineers")
+    def _return_rows_by_call_order(response):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return actual_tags
+        elif call_count == 2:
+            return actual_privileges
+        return []
+
+    mock_fetch.side_effect = _return_rows_by_call_order
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
 
     tag_diff, privilege_diff = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
-        account_client=mock_account_client,
+
         warehouse_id="test-warehouse-id",
     )
 
@@ -272,23 +266,22 @@ def test_governor_produces_empty_diffs_when_in_sync(
 
 
 def test_governor_validates_principals_before_applying(
-    tmp_yaml_dir, mock_workspace_client, mock_account_client
-):
+    tmp_yaml_dir, mock_workspace_client):
     """Policy references unknown principal -> ExecutionBatchError, no GRANT/REVOKE SQL executed."""
     root = tmp_yaml_dir(
         {"resources/catalog.yaml": _catalog_with_grant_policy_config()}
     )
     _setup_mock_workspace_empty_state(mock_workspace_client)
 
-    mock_account_client.users.list.return_value = []
-    mock_account_client.groups.list.return_value = []
-    mock_account_client.service_principals.list.return_value = []
+    mock_workspace_client.users.list.return_value = []
+    mock_workspace_client.groups.list.return_value = []
+    mock_workspace_client.service_principals.list.return_value = []
 
     with pytest.raises(ExecutionBatchError):
         run(
             config_dir=root,
             workspace_client=mock_workspace_client,
-            account_client=mock_account_client,
+    
             warehouse_id="test-warehouse-id",
         )
 
@@ -303,19 +296,18 @@ def test_governor_validates_principals_before_applying(
 
 
 def test_governor_dry_run_does_not_execute_sql(
-    tmp_yaml_dir, mock_workspace_client, mock_account_client
-):
+    tmp_yaml_dir, mock_workspace_client):
     """dry_run=True -> diffs are computed but no mutation SQL is executed."""
     root = tmp_yaml_dir(
         {"resources/catalog.yaml": _catalog_with_tags_and_grants_config()}
     )
     _setup_mock_workspace_empty_state(mock_workspace_client)
-    _setup_mock_account_with_group(mock_account_client, "data_engineers")
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
 
     tag_diff, privilege_diff = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
-        account_client=mock_account_client,
+
         warehouse_id="test-warehouse-id",
         dry_run=True,
     )
@@ -339,8 +331,7 @@ def test_governor_dry_run_does_not_execute_sql(
 
 
 def test_governor_fetches_tags_privileges_and_principals_in_parallel(
-    tmp_yaml_dir, mock_workspace_client, mock_account_client
-):
+    tmp_yaml_dir, mock_workspace_client):
     """Mock delays on fetch methods; total elapsed < sum of delays proves parallelism."""
     root = tmp_yaml_dir(
         {"resources/catalog.yaml": _catalog_with_tags_and_grants_config()}
@@ -363,19 +354,19 @@ def test_governor_fetches_tags_privileges_and_principals_in_parallel(
         _slow_execute
     )
 
-    def _slow_list_groups():
+    def _slow_list_groups(**kwargs):
         time.sleep(delay_seconds)
         return [_make_mock_group("data_engineers")]
 
-    mock_account_client.groups.list.side_effect = _slow_list_groups
-    mock_account_client.users.list.return_value = []
-    mock_account_client.service_principals.list.return_value = []
+    mock_workspace_client.groups.list.side_effect = _slow_list_groups
+    mock_workspace_client.users.list.return_value = []
+    mock_workspace_client.service_principals.list.return_value = []
 
     start = time.monotonic()
     run(
         config_dir=root,
         workspace_client=mock_workspace_client,
-        account_client=mock_account_client,
+
         warehouse_id="test-warehouse-id",
     )
     elapsed = time.monotonic() - start
@@ -392,8 +383,7 @@ def test_governor_fetches_tags_privileges_and_principals_in_parallel(
 
 
 def test_governor_raises_execution_batch_error_when_sql_fails(
-    tmp_yaml_dir, mock_workspace_client, mock_account_client
-):
+    tmp_yaml_dir, mock_workspace_client):
     """When mutation SQL fails, governor.run() raises ExecutionBatchError with collected errors."""
     from uc_governor.types import ExecutionBatchError
 
@@ -417,13 +407,13 @@ def test_governor_raises_execution_batch_error_when_sql_fails(
     mock_workspace_client.statement_execution.execute_statement.side_effect = (
         _fail_mutations
     )
-    _setup_mock_account_with_group(mock_account_client, "data_engineers")
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
 
     with pytest.raises(ExecutionBatchError) as exc_info:
         run(
             config_dir=root,
             workspace_client=mock_workspace_client,
-            account_client=mock_account_client,
+    
             warehouse_id="test-warehouse-id",
         )
 
@@ -467,8 +457,7 @@ def _catalog_with_two_grant_policies_config() -> dict:
 
 
 def test_governor_collects_unknown_principal_errors(
-    tmp_yaml_dir, mock_workspace_client, mock_account_client
-):
+    tmp_yaml_dir, mock_workspace_client):
     """Unknown principals are collected as errors in ExecutionBatchError, not raised as PrincipalValidationError."""
     from uc_governor.types import ExecutionBatchError, ExecutionError
 
@@ -478,15 +467,15 @@ def test_governor_collects_unknown_principal_errors(
     _setup_mock_workspace_empty_state(mock_workspace_client)
 
     # No groups/users/SPs -> "data_engineers" is unknown
-    mock_account_client.users.list.return_value = []
-    mock_account_client.groups.list.return_value = []
-    mock_account_client.service_principals.list.return_value = []
+    mock_workspace_client.users.list.return_value = []
+    mock_workspace_client.groups.list.return_value = []
+    mock_workspace_client.service_principals.list.return_value = []
 
     with pytest.raises(ExecutionBatchError) as exc_info:
         run(
             config_dir=root,
             workspace_client=mock_workspace_client,
-            account_client=mock_account_client,
+    
             warehouse_id="test-warehouse-id",
         )
 
@@ -501,8 +490,7 @@ def test_governor_collects_unknown_principal_errors(
 
 
 def test_governor_continues_with_valid_principals_when_some_are_unknown(
-    tmp_yaml_dir, mock_workspace_client, mock_account_client
-):
+    tmp_yaml_dir, mock_workspace_client):
     """Valid principals get GRANT SQL executed; unknown ones become errors in ExecutionBatchError."""
     from uc_governor.types import ExecutionBatchError
 
@@ -512,15 +500,15 @@ def test_governor_continues_with_valid_principals_when_some_are_unknown(
     _setup_mock_workspace_empty_state(mock_workspace_client)
 
     # Only "data_engineers" exists; "ghost_team" does not
-    mock_account_client.groups.list.return_value = [_make_mock_group("data_engineers")]
-    mock_account_client.users.list.return_value = []
-    mock_account_client.service_principals.list.return_value = []
+    mock_workspace_client.groups.list.return_value = [_make_mock_group("data_engineers")]
+    mock_workspace_client.users.list.return_value = []
+    mock_workspace_client.service_principals.list.return_value = []
 
     with pytest.raises(ExecutionBatchError) as exc_info:
         run(
             config_dir=root,
             workspace_client=mock_workspace_client,
-            account_client=mock_account_client,
+    
             warehouse_id="test-warehouse-id",
         )
 

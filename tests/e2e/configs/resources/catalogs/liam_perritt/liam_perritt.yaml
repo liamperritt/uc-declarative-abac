@@ -1,0 +1,12 @@
+resources:
+  catalogs:
+    liam_perritt:
+      tags:
+        env: test
+        managed_by: uc_governor
+      policies:
+        - $ref: $defs/policies/shared|grant_use_catalog
+      schemas:
+        - $ref: $defs/schemas/liam_perritt|default
+        - $ref: $defs/schemas/liam_perritt|lff_sqlserver_bronze
+        - $ref: $defs/schemas/liam_perritt|sqlserver_lff

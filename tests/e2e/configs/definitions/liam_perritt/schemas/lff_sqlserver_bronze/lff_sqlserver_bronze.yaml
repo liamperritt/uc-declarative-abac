@@ -1,0 +1,14 @@
+definitions:
+  schemas:
+    liam_perritt|lff_sqlserver_bronze:
+      name: lff_sqlserver_bronze
+      tags:
+        team: data_engineering
+        zone: bronze
+      policies:
+        - $ref: $defs/policies/shared|grant_bronze_access
+      tables:
+        - $ref: $defs/tables/liam_perritt|lff_sqlserver_bronze|dummy_cdc_sink
+        - $ref: $defs/tables/liam_perritt|lff_sqlserver_bronze|dummy_table_cdc_st
+      volumes:
+        - $ref: $defs/volumes/liam_perritt|lff_sqlserver_bronze|test

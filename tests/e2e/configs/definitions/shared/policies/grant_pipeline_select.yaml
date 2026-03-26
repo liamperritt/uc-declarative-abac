@@ -1,0 +1,10 @@
+definitions:
+  policies:
+    shared|grant_pipeline_select:
+      type: grant
+      privileges:
+        - SELECT
+      to:
+        - uc_governor_test_team
+      tags:
+        pipeline: lff

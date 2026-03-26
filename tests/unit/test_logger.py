@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 from uc_governor.privileges.state import SecurablePrivilege
 from uc_governor.logger import ChangeLogger
 from uc_governor.tags.state import SecurableTag
-from uc_governor.types import SecurableType
+from uc_governor.types import Principal, PrincipalType, SecurableType
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +49,7 @@ def _make_tag(
 def _make_privilege(
     securable_type: SecurableType = SecurableType.SCHEMA,
     securable_full_name: str = "my_catalog.sales",
-    principal: str = "data_engineers",
+    principal: Principal = Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
     privilege_type: str = "SELECT",
 ) -> SecurablePrivilege:
     return SecurablePrivilege(
@@ -152,7 +152,7 @@ def test_change_logger_logs_grant() -> None:
     priv = _make_privilege(
         securable_type=SecurableType.SCHEMA,
         securable_full_name="my_catalog.sales",
-        principal="data_engineers",
+        principal=Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
         privilege_type="SELECT",
     )
     cl.log_grant(priv)
@@ -173,7 +173,7 @@ def test_change_logger_logs_revoke() -> None:
     priv = _make_privilege(
         securable_type=SecurableType.TABLE,
         securable_full_name="my_catalog.sales.orders",
-        principal="temp_users",
+        principal=Principal(PrincipalType.GROUP, "temp_users", "temp_users"),
         privilege_type="MODIFY",
     )
     cl.log_revoke(priv)
@@ -301,8 +301,8 @@ def test_change_logger_logs_privilege_changes() -> None:
 
     cl, mock_logger = _make_change_logger()
 
-    grant_priv = _make_privilege(principal="team_a", privilege_type="SELECT")
-    revoke_priv = _make_privilege(principal="team_b", privilege_type="MODIFY")
+    grant_priv = _make_privilege(principal=Principal(PrincipalType.GROUP, "team_a", "team_a"), privilege_type="SELECT")
+    revoke_priv = _make_privilege(principal=Principal(PrincipalType.GROUP, "team_b", "team_b"), privilege_type="MODIFY")
 
     diff = PrivilegeDiff(
         to_grant={grant_priv},
@@ -408,4 +408,32 @@ def test_change_logger_summary_excludes_errors_when_none() -> None:
     summary = messages[-1]
     assert "failed" not in summary.lower()
     assert "error" not in summary.lower()
+
+
+# ---------------------------------------------------------------------------
+# Principal display name in logs
+# ---------------------------------------------------------------------------
+
+
+def test_change_logger_uses_principal_display_name_in_grant_log() -> None:
+    """log_grant uses the Principal's display_name (not identifier) in the log message."""
+    from uc_governor.types import Principal, PrincipalType
+
+    cl, mock_logger = _make_change_logger()
+    priv = SecurablePrivilege(
+        securable_type=SecurableType.TABLE,
+        securable_full_name="catalog.schema.orders",
+        principal=Principal(PrincipalType.SERVICE_PRINCIPAL, "app-id-123", "my-etl-sp"),
+        privilege_type="SELECT",
+    )
+    cl.log_grant(priv)
+
+    messages = _info_messages(mock_logger)
+    assert len(messages) == 1
+    msg = messages[0]
+
+    # The display name must appear in the log
+    assert "my-etl-sp" in msg
+    # The system identifier must NOT appear in the log
+    assert "app-id-123" not in msg
 

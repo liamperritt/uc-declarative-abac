@@ -11,6 +11,26 @@ class SecurableType(str, Enum):
     VOLUME = "VOLUME"
 
 
+class PrincipalType(str, Enum):
+    USER = "USER"
+    GROUP = "GROUP"
+    SERVICE_PRINCIPAL = "SERVICE_PRINCIPAL"
+
+
+@dataclass(frozen=True)
+class Principal:
+    """Represents a workspace principal with both its system identifier and display name.
+
+    - User: identifier=username, display_name=display_name
+    - Group: identifier=display_name, display_name=display_name
+    - Service Principal: identifier=application_id, display_name=display_name
+    """
+
+    principal_type: PrincipalType
+    identifier: str
+    display_name: str
+
+
 class GovernorError(Exception):
     """Base exception for all governor errors."""
 

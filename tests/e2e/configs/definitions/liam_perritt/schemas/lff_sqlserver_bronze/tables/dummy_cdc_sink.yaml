@@ -1,0 +1,9 @@
+definitions:
+  tables:
+    liam_perritt|lff_sqlserver_bronze|dummy_cdc_sink:
+      name: dummy_cdc_sink
+      tags:
+        classification: internal
+        pipeline: lff
+      policies:
+        - $ref: $defs/policies/shared|grant_pipeline_select

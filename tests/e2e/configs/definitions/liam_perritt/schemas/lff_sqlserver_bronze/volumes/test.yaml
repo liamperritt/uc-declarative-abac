@@ -1,0 +1,6 @@
+definitions:
+  volumes:
+    liam_perritt|lff_sqlserver_bronze|test:
+      name: test
+      tags:
+        zone: landing

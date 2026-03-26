@@ -4,7 +4,7 @@ import logging
 
 from uc_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
 from uc_governor.tags.state import SecurableTag, TagDiff
-from uc_governor.types import ExecutionError
+from uc_governor.types import ExecutionError, Principal
 
 _default_logger = logging.getLogger("uc_governor")
 
@@ -101,24 +101,32 @@ class ChangeLogger:
     # Privilege logging
     # ------------------------------------------------------------------
 
+    def _principal_name(self, principal: object) -> str:
+        """Return the display name for a principal (str or Principal object)."""
+        if isinstance(principal, Principal):
+            return principal.display_name
+        return str(principal)
+
     def log_grant(self, privilege: SecurablePrivilege) -> None:
         """Log a privilege being granted."""
         self._privileges_granted += 1
         prefix = "[GRANT]" if self._dry_run else "[GRANTED]"
+        name = self._principal_name(privilege.principal)
         self._log_info(
             f"{prefix} {privilege.privilege_type} on "
             f"{privilege.securable_type.value} {privilege.securable_full_name} "
-            f"to {privilege.principal}"
+            f"to {name}"
         )
 
     def log_revoke(self, privilege: SecurablePrivilege) -> None:
         """Log a privilege being revoked."""
         self._privileges_revoked += 1
         prefix = "[REVOKE]" if self._dry_run else "[REVOKED]"
+        name = self._principal_name(privilege.principal)
         self._log_info(
             f"{prefix} {privilege.privilege_type} on "
             f"{privilege.securable_type.value} {privilege.securable_full_name} "
-            f"from {privilege.principal}"
+            f"from {name}"
         )
 
     # ------------------------------------------------------------------

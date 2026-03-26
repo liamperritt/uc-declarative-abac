@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import sqlglot
 from databricks.sdk.service.sql import Disposition
@@ -59,13 +59,15 @@ def _make_mock_workspace_client(data_array: list[list[str]] | None = None) -> Ma
 # ---------------------------------------------------------------------------
 
 
-def test_uc_helper_fetches_actual_tags_from_query_results():
+@patch("uc_governor.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetches_actual_tags_from_query_results(mock_fetch):
     """Mock returns tag rows -> correct set of SecurableTag."""
     rows = [
         ["CATALOG", "my_catalog", "env", "prod"],
         ["TABLE", "my_catalog.sales.orders", "pii", "true"],
     ]
-    client = _make_mock_workspace_client(data_array=rows)
+    mock_fetch.return_value = rows
+    client = _make_mock_workspace_client()
     helper = UnityCatalogHelper(client, WAREHOUSE_ID)
 
     result = helper.fetch_actual_tags(["my_catalog"])
@@ -150,8 +152,8 @@ def test_uc_helper_tags_query_is_valid_sql():
     sql = _get_executed_sql(client)
     stmt = _parse_sql(sql)
 
-    # Should be a SELECT statement
-    assert isinstance(stmt, sqlglot.exp.Select)
+    # Should be a valid SQL statement (UNION ALL of SELECTs)
+    assert isinstance(stmt, (sqlglot.exp.Select, sqlglot.exp.Union))
 
     # Should reference all four tag system tables
     tables = _get_table_names(stmt)
@@ -177,13 +179,15 @@ def test_uc_helper_tags_query_is_valid_sql():
 # ---------------------------------------------------------------------------
 
 
-def test_uc_helper_fetches_actual_privileges_from_query_results():
+@patch("uc_governor.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetches_actual_privileges_from_query_results(mock_fetch):
     """Mock returns privilege rows -> correct set of SecurablePrivilege."""
     rows = [
         ["CATALOG", "my_catalog", "data_engineers", "USE_CATALOG"],
         ["SCHEMA", "my_catalog.sales", "analysts", "SELECT"],
     ]
-    client = _make_mock_workspace_client(data_array=rows)
+    mock_fetch.return_value = rows
+    client = _make_mock_workspace_client()
     helper = UnityCatalogHelper(client, WAREHOUSE_ID)
 
     result = helper.fetch_actual_privileges(["my_catalog"])

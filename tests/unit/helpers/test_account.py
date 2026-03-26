@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from uc_governor.helpers.account import AccountHelper
+from uc_governor.helpers.workspace import WorkspaceHelper
 from uc_governor.types import DuplicateServicePrincipalError, PrincipalValidationError
 
 
@@ -45,7 +45,7 @@ def _make_account_client(
 
 
 # ---------------------------------------------------------------------------
-# AccountHelper.fetch_principals
+# WorkspaceHelper.fetch_principals
 # ---------------------------------------------------------------------------
 
 
@@ -54,7 +54,7 @@ def test_account_helper_fetches_and_caches_users() -> None:
     client = _make_account_client(
         users=[_make_user("alice@example.com"), _make_user("bob@example.com")],
     )
-    helper = AccountHelper(client)
+    helper = WorkspaceHelper(client)
     helper.fetch_principals()
     helper.fetch_principals()  # second call should use cache
 
@@ -68,7 +68,7 @@ def test_account_helper_fetches_and_caches_groups() -> None:
     client = _make_account_client(
         groups=[_make_group("data_engineers"), _make_group("analysts")],
     )
-    helper = AccountHelper(client)
+    helper = WorkspaceHelper(client)
     helper.fetch_principals()
     helper.fetch_principals()  # second call should use cache
 
@@ -82,7 +82,7 @@ def test_account_helper_fetches_and_caches_service_principals() -> None:
     client = _make_account_client(
         service_principals=[_make_sp("my-sp", "app-id-123")],
     )
-    helper = AccountHelper(client)
+    helper = WorkspaceHelper(client)
     helper.fetch_principals()
     helper.fetch_principals()  # second call should use cache
 
@@ -90,22 +90,38 @@ def test_account_helper_fetches_and_caches_service_principals() -> None:
     assert client.service_principals.list.call_count == 1
 
 
-def test_account_helper_fails_to_get_sp_application_id_on_duplicate_display_names() -> None:
-    """Two SPs with same display_name -> fetch_principals raises DuplicateServicePrincipalError."""
+def test_workspace_helper_warns_on_duplicate_sp_display_names() -> None:
+    """Two SPs with same display_name -> fetch_principals succeeds but logs warning."""
     client = _make_account_client(
         service_principals=[
             _make_sp("duplicate-sp", "app-001"),
             _make_sp("duplicate-sp", "app-002"),
         ],
     )
-    helper = AccountHelper(client)
+    helper = WorkspaceHelper(client)
+    helper.fetch_principals()
+
+    # The SP is still recognized as valid
+    assert helper.validate_principal("duplicate-sp") is True
+
+
+def test_workspace_helper_raises_on_get_application_id_for_duplicate_sp() -> None:
+    """get_sp_application_id raises DuplicateServicePrincipalError for ambiguous SPs."""
+    client = _make_account_client(
+        service_principals=[
+            _make_sp("duplicate-sp", "app-001"),
+            _make_sp("duplicate-sp", "app-002"),
+        ],
+    )
+    helper = WorkspaceHelper(client)
+    helper.fetch_principals()
 
     with pytest.raises(DuplicateServicePrincipalError):
-        helper.fetch_principals()
+        helper.get_sp_application_id("duplicate-sp")
 
 
 # ---------------------------------------------------------------------------
-# AccountHelper.validate_principal
+# WorkspaceHelper.validate_principal
 # ---------------------------------------------------------------------------
 
 
@@ -116,7 +132,7 @@ def test_account_helper_validates_known_principal() -> None:
         groups=[_make_group("data_engineers")],
         service_principals=[_make_sp("etl-runner", "app-001")],
     )
-    helper = AccountHelper(client)
+    helper = WorkspaceHelper(client)
     helper.fetch_principals()
 
     assert helper.validate_principal("alice@example.com") is True
@@ -129,7 +145,7 @@ def test_account_helper_invalidates_unknown_principal() -> None:
     client = _make_account_client(
         users=[_make_user("alice@example.com")],
     )
-    helper = AccountHelper(client)
+    helper = WorkspaceHelper(client)
     helper.fetch_principals()
 
     assert helper.validate_principal("nobody@example.com") is False
@@ -141,7 +157,7 @@ def test_account_helper_invalidates_principals_with_invalid_names() -> None:
         users=[_make_user("alice@example.com")],
         groups=[_make_group("data_engineers")],
     )
-    helper = AccountHelper(client)
+    helper = WorkspaceHelper(client)
     helper.fetch_principals()
 
     with pytest.raises(PrincipalValidationError) as exc_info:
@@ -159,7 +175,7 @@ def test_account_helper_invalidates_principals_with_invalid_names() -> None:
 
 
 # ---------------------------------------------------------------------------
-# AccountHelper.get_sp_application_id
+# WorkspaceHelper.get_sp_application_id
 # ---------------------------------------------------------------------------
 
 
@@ -168,7 +184,7 @@ def test_account_helper_gets_sp_application_id_for_known_sp() -> None:
     client = _make_account_client(
         service_principals=[_make_sp("etl-runner", "app-42")],
     )
-    helper = AccountHelper(client)
+    helper = WorkspaceHelper(client)
     helper.fetch_principals()
 
     assert helper.get_sp_application_id("etl-runner") == "app-42"
@@ -179,7 +195,7 @@ def test_account_helper_fails_to_get_sp_application_id_for_unknown_sp() -> None:
     client = _make_account_client(
         service_principals=[_make_sp("etl-runner", "app-42")],
     )
-    helper = AccountHelper(client)
+    helper = WorkspaceHelper(client)
     helper.fetch_principals()
 
     with pytest.raises(PrincipalValidationError):
@@ -196,7 +212,7 @@ def test_account_helper_find_unknown_principals_returns_unknown_names() -> None:
     client = _make_account_client(
         groups=[_make_group("data_engineers")],
     )
-    helper = AccountHelper(client)
+    helper = WorkspaceHelper(client)
     helper.fetch_principals()
 
     result = helper.find_unknown_principals(["data_engineers", "ghost_team"])
@@ -210,9 +226,83 @@ def test_account_helper_find_unknown_principals_returns_empty_when_all_valid() -
         users=[_make_user("alice@example.com")],
         groups=[_make_group("data_engineers")],
     )
-    helper = AccountHelper(client)
+    helper = WorkspaceHelper(client)
     helper.fetch_principals()
 
     result = helper.find_unknown_principals(["alice@example.com", "data_engineers"])
 
     assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Principal resolution
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_helper_resolves_user_by_name() -> None:
+    """resolve_by_name returns a Principal with USER type for a known user."""
+    from uc_governor.types import Principal, PrincipalType
+
+    client = _make_account_client(users=[_make_user("jane@co.com")])
+    helper = WorkspaceHelper(client)
+    helper.fetch_principals()
+
+    result = helper.resolve_by_name("jane@co.com")
+
+    assert result == Principal(PrincipalType.USER, "jane@co.com", "jane@co.com")
+
+
+def test_workspace_helper_resolves_group_by_name() -> None:
+    """resolve_by_name returns a Principal with GROUP type for a known group."""
+    from uc_governor.types import Principal, PrincipalType
+
+    client = _make_account_client(groups=[_make_group("data_engineers")])
+    helper = WorkspaceHelper(client)
+    helper.fetch_principals()
+
+    result = helper.resolve_by_name("data_engineers")
+
+    assert result == Principal(PrincipalType.GROUP, "data_engineers", "data_engineers")
+
+
+def test_workspace_helper_resolves_sp_by_name() -> None:
+    """resolve_by_name returns a Principal with SP type, using application_id as identifier."""
+    from uc_governor.types import Principal, PrincipalType
+
+    client = _make_account_client(
+        service_principals=[_make_sp("my-sp", "app-123")],
+    )
+    helper = WorkspaceHelper(client)
+    helper.fetch_principals()
+
+    result = helper.resolve_by_name("my-sp")
+
+    assert result == Principal(PrincipalType.SERVICE_PRINCIPAL, "app-123", "my-sp")
+
+
+def test_workspace_helper_resolves_sp_by_identifier() -> None:
+    """resolve_by_identifier returns a Principal for a known SP application_id."""
+    from uc_governor.types import Principal, PrincipalType
+
+    client = _make_account_client(
+        service_principals=[_make_sp("my-sp", "app-123")],
+    )
+    helper = WorkspaceHelper(client)
+    helper.fetch_principals()
+
+    result = helper.resolve_by_identifier("app-123")
+
+    assert result == Principal(PrincipalType.SERVICE_PRINCIPAL, "app-123", "my-sp")
+
+
+def test_workspace_helper_resolves_user_by_identifier() -> None:
+    """resolve_by_identifier returns a Principal for a known user email."""
+    from uc_governor.types import Principal, PrincipalType
+
+    client = _make_account_client(users=[_make_user("jane@co.com")])
+    helper = WorkspaceHelper(client)
+    helper.fetch_principals()
+
+    result = helper.resolve_by_identifier("jane@co.com")
+
+    assert result == Principal(PrincipalType.USER, "jane@co.com", "jane@co.com")

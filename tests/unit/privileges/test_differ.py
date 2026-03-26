@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uc_governor.privileges.differ import compute_privilege_diff
 from uc_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
-from uc_governor.types import SecurableType
+from uc_governor.types import Principal, PrincipalType, SecurableType
 
 
 # ---------------------------------------------------------------------------
@@ -16,13 +16,13 @@ def test_privilege_differ_computes_privileges_to_grant():
         SecurablePrivilege(
             securable_type=SecurableType.TABLE,
             securable_full_name="catalog.schema.orders",
-            principal="data_analysts",
+            principal=Principal(PrincipalType.GROUP, "data_analysts", "data_analysts"),
             privilege_type="SELECT",
         ),
         SecurablePrivilege(
             securable_type=SecurableType.SCHEMA,
             securable_full_name="catalog.sales",
-            principal="data_engineers",
+            principal=Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
             privilege_type="USE_SCHEMA",
         ),
     }
@@ -30,7 +30,7 @@ def test_privilege_differ_computes_privileges_to_grant():
         SecurablePrivilege(
             securable_type=SecurableType.TABLE,
             securable_full_name="catalog.schema.orders",
-            principal="data_analysts",
+            principal=Principal(PrincipalType.GROUP, "data_analysts", "data_analysts"),
             privilege_type="SELECT",
         ),
     }
@@ -41,7 +41,7 @@ def test_privilege_differ_computes_privileges_to_grant():
         SecurablePrivilege(
             securable_type=SecurableType.SCHEMA,
             securable_full_name="catalog.sales",
-            principal="data_engineers",
+            principal=Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
             privilege_type="USE_SCHEMA",
         ),
     }
@@ -59,7 +59,7 @@ def test_privilege_differ_computes_privileges_to_revoke():
         SecurablePrivilege(
             securable_type=SecurableType.CATALOG,
             securable_full_name="my_catalog",
-            principal="data_analysts",
+            principal=Principal(PrincipalType.GROUP, "data_analysts", "data_analysts"),
             privilege_type="USE_CATALOG",
         ),
     }
@@ -67,13 +67,13 @@ def test_privilege_differ_computes_privileges_to_revoke():
         SecurablePrivilege(
             securable_type=SecurableType.CATALOG,
             securable_full_name="my_catalog",
-            principal="data_analysts",
+            principal=Principal(PrincipalType.GROUP, "data_analysts", "data_analysts"),
             privilege_type="USE_CATALOG",
         ),
         SecurablePrivilege(
             securable_type=SecurableType.TABLE,
             securable_full_name="catalog.sales.orders",
-            principal="temp_users",
+            principal=Principal(PrincipalType.GROUP, "temp_users", "temp_users"),
             privilege_type="SELECT",
         ),
     }
@@ -85,7 +85,7 @@ def test_privilege_differ_computes_privileges_to_revoke():
         SecurablePrivilege(
             securable_type=SecurableType.TABLE,
             securable_full_name="catalog.sales.orders",
-            principal="temp_users",
+            principal=Principal(PrincipalType.GROUP, "temp_users", "temp_users"),
             privilege_type="SELECT",
         ),
     }
@@ -102,13 +102,13 @@ def test_privilege_differ_returns_empty_diff_when_in_sync():
         SecurablePrivilege(
             securable_type=SecurableType.CATALOG,
             securable_full_name="my_catalog",
-            principal="data_analysts",
+            principal=Principal(PrincipalType.GROUP, "data_analysts", "data_analysts"),
             privilege_type="USE_CATALOG",
         ),
         SecurablePrivilege(
             securable_type=SecurableType.TABLE,
             securable_full_name="catalog.sales.orders",
-            principal="data_engineers",
+            principal=Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
             privilege_type="SELECT",
         ),
     }
@@ -129,13 +129,13 @@ def test_privilege_differ_handles_empty_desired():
         SecurablePrivilege(
             securable_type=SecurableType.VOLUME,
             securable_full_name="catalog.landing.raw_events",
-            principal="data_engineers",
+            principal=Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
             privilege_type="READ_VOLUME",
         ),
         SecurablePrivilege(
             securable_type=SecurableType.TABLE,
             securable_full_name="catalog.sales.orders",
-            principal="data_analysts",
+            principal=Principal(PrincipalType.GROUP, "data_analysts", "data_analysts"),
             privilege_type="SELECT",
         ),
     }
@@ -157,13 +157,13 @@ def test_privilege_differ_handles_empty_actual():
         SecurablePrivilege(
             securable_type=SecurableType.CATALOG,
             securable_full_name="my_catalog",
-            principal="data_analysts",
+            principal=Principal(PrincipalType.GROUP, "data_analysts", "data_analysts"),
             privilege_type="USE_CATALOG",
         ),
         SecurablePrivilege(
             securable_type=SecurableType.SCHEMA,
             securable_full_name="my_catalog.sales",
-            principal="data_engineers",
+            principal=Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
             privilege_type="USE_SCHEMA",
         ),
     }

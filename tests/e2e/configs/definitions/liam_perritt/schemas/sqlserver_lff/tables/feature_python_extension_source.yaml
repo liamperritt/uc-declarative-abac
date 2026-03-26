@@ -1,0 +1,6 @@
+definitions:
+  tables:
+    liam_perritt|sqlserver_lff|feature_python_extension_source:
+      name: feature_python_extension_source
+      tags:
+        classification: internal

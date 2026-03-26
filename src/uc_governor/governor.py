@@ -3,10 +3,10 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from databricks.sdk import AccountClient, WorkspaceClient
+from databricks.sdk import WorkspaceClient
 
 from uc_governor.discovery import discover_yaml_files, load_raw_configs
-from uc_governor.helpers.account import AccountHelper
+from uc_governor.helpers.workspace import WorkspaceHelper
 from uc_governor.helpers.unity_catalog import UnityCatalogHelper
 from uc_governor.models import ConfigFile
 from uc_governor.privileges.compiler import compile_desired_privileges
@@ -27,10 +27,62 @@ def extract_principals(privileges: set[SecurablePrivilege]) -> list[str]:
     return list({p.principal for p in privileges})
 
 
+def _try_resolve_identifier(ws_helper: WorkspaceHelper, identifier: str) -> bool:
+    """Return True if the identifier can be resolved to a known principal."""
+    try:
+        ws_helper.resolve_by_identifier(identifier)
+        return True
+    except PrincipalValidationError:
+        return False
+
+
+def _resolve_privileges(
+    ws_helper: WorkspaceHelper,
+    desired_privileges: set[SecurablePrivilege],
+    actual_privileges: set[SecurablePrivilege],
+    change_logger: ChangeLogger,
+) -> tuple[set[SecurablePrivilege], set[SecurablePrivilege]]:
+    """Resolve string principals to Principal objects for both desired and actual privileges.
+
+    Unknown desired principals are logged as errors and excluded.
+    Actual principals that cannot be resolved (e.g. deleted users) are silently excluded.
+    Returns (resolved_desired, resolved_actual).
+    """
+    unknown = set(ws_helper.find_unknown_principals(extract_principals(desired_privileges)))
+    for name in unknown:
+        change_logger.log_error(ExecutionError(
+            context=f"Validate principal '{name}'",
+            exception=PrincipalValidationError(f"Principal '{name}' not found in account"),
+        ))
+
+    resolved_desired = {
+        SecurablePrivilege(
+            securable_type=p.securable_type,
+            securable_full_name=p.securable_full_name,
+            principal=ws_helper.resolve_by_name(p.principal),
+            privilege_type=p.privilege_type,
+        )
+        for p in desired_privileges
+        if p.principal not in unknown
+    }
+
+    resolved_actual = {
+        SecurablePrivilege(
+            securable_type=p.securable_type,
+            securable_full_name=p.securable_full_name,
+            principal=ws_helper.resolve_by_identifier(p.principal),
+            privilege_type=p.privilege_type,
+        )
+        for p in actual_privileges
+        if _try_resolve_identifier(ws_helper, p.principal)
+    }
+
+    return resolved_desired, resolved_actual
+
+
 def run(
     config_dir: Path,
     workspace_client: WorkspaceClient,
-    account_client: AccountClient,
     warehouse_id: str,
     dry_run: bool = False,
 ) -> tuple[TagDiff, PrivilegeDiff]:
@@ -47,12 +99,13 @@ def run(
     catalog_names = list(config.catalogs.keys())
 
     # 2. Parallel initial fetch (tags, privileges, and principals concurrently)
+    change_logger = ChangeLogger(dry_run=dry_run)
     uc_helper = UnityCatalogHelper(workspace_client, warehouse_id)
-    acct_helper = AccountHelper(account_client)
+    ws_helper = WorkspaceHelper(workspace_client)
     with ThreadPoolExecutor() as pool:
         actual_tags_f = pool.submit(uc_helper.fetch_actual_tags, catalog_names)
         actual_privs_f = pool.submit(uc_helper.fetch_actual_privileges, catalog_names)
-        principals_f = pool.submit(acct_helper.fetch_principals)
+        principals_f = pool.submit(ws_helper.fetch_principals)
         actual_tags = actual_tags_f.result()
         actual_privileges = actual_privs_f.result()
         principals_f.result()
@@ -61,22 +114,17 @@ def run(
     desired_tags = compile_desired_tags(config)
     tag_diff = compute_tag_diff(desired_tags, actual_tags)
 
-    # 4. Privileges workflow
+    # 4. Privileges workflow — resolve string principals to Principal objects
     desired_privileges = compile_desired_privileges(config, desired_tags)
-    change_logger = ChangeLogger(dry_run=dry_run)
-    unknown = set(acct_helper.find_unknown_principals(extract_principals(desired_privileges)))
-    for name in unknown:
-        change_logger.log_error(ExecutionError(
-            context=f"Validate principal '{name}'",
-            exception=PrincipalValidationError(f"Principal '{name}' not found in account"),
-        ))
-    desired_privileges = {p for p in desired_privileges if p.principal not in unknown}
-    privilege_diff = compute_privilege_diff(desired_privileges, actual_privileges)
+    resolved_desired, resolved_actual = _resolve_privileges(
+        ws_helper, desired_privileges, actual_privileges, change_logger,
+    )
+    privilege_diff = compute_privilege_diff(resolved_desired, resolved_actual)
 
     # 5. Log and execute (sequential)
     if not dry_run:
         execute_tag_diff(uc_helper, tag_diff, change_logger)
-        execute_privilege_diff(uc_helper, acct_helper, privilege_diff, change_logger)
+        execute_privilege_diff(uc_helper, privilege_diff, change_logger)
     else:
         change_logger.log_tag_changes(tag_diff)
         change_logger.log_privilege_changes(privilege_diff)

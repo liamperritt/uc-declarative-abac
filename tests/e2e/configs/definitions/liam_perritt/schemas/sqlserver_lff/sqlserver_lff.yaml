@@ -1,0 +1,8 @@
+definitions:
+  schemas:
+    liam_perritt|sqlserver_lff:
+      name: sqlserver_lff
+      tags:
+        team: data_engineering
+      tables:
+        - $ref: $defs/tables/liam_perritt|sqlserver_lff|feature_python_extension_source

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
+
+import requests
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.service.sql import Disposition
+from databricks.sdk.service.sql import Disposition, StatementResponse
 
 from uc_governor.privileges.state import SecurablePrivilege
 from uc_governor.tags.state import SecurableTag
@@ -17,34 +20,22 @@ def _build_catalog_in_clause(catalog_names: list[str]) -> str:
 def _build_tags_query(catalog_names: list[str]) -> str:
     """Build a UNION ALL query across all tag system tables for the given catalogs."""
     in_clause = _build_catalog_in_clause(catalog_names)
-    tag_tables = [
-        "catalog_tags",
-        "schema_tags",
-        "table_tags",
-        "volume_tags",
-    ]
+    full_name_exprs = {
+        "catalog_tags": ("CATALOG", "catalog_name"),
+        "schema_tags": ("SCHEMA", "concat(catalog_name, '.', schema_name)"),
+        "table_tags": ("TABLE", "concat(catalog_name, '.', schema_name, '.', table_name)"),
+        "volume_tags": ("VOLUME", "concat(catalog_name, '.', schema_name, '.', volume_name)"),
+    }
     parts = []
-    for table in tag_tables:
+    for table, (sec_type, full_name_expr) in full_name_exprs.items():
         parts.append(
-            f"SELECT tag_name, tag_value, catalog_name, schema_name, "
-            f"  CASE WHEN '{table}' = 'catalog_tags' THEN 'CATALOG' "
-            f"      WHEN '{table}' = 'schema_tags' THEN 'SCHEMA' "
-            f"      WHEN '{table}' = 'table_tags' THEN 'TABLE' "
-            f"      WHEN '{table}' = 'volume_tags' THEN 'VOLUME' "
-            f"  END AS securable_type, "
-            f"  CASE WHEN '{table}' = 'catalog_tags' THEN catalog_name "
-            f"      WHEN '{table}' = 'schema_tags' THEN concat(catalog_name, '.', schema_name) "
-            f"      WHEN '{table}' = 'table_tags' THEN concat(catalog_name, '.', schema_name, '.', table_name) "
-            f"      WHEN '{table}' = 'volume_tags' THEN concat(catalog_name, '.', schema_name, '.', volume_name) "
-            f"  END AS securable_full_name "
+            f"SELECT '{sec_type}' AS securable_type, "
+            f"{full_name_expr} AS securable_full_name, "
+            f"tag_name, tag_value "
             f"FROM system.information_schema.{table} "
             f"WHERE catalog_name IN {in_clause}"
         )
-    inner = " UNION ALL ".join(parts)
-    return (
-        f"SELECT securable_type, securable_full_name, tag_name, tag_value "
-        f"FROM ({inner})"
-    )
+    return " UNION ALL ".join(parts)
 
 
 def _build_privileges_query(catalog_names: list[str]) -> str:
@@ -98,6 +89,18 @@ def _parse_privilege_rows(rows: list[list[str]]) -> set[SecurablePrivilege]:
     }
 
 
+def _fetch_external_links_rows(response: StatementResponse) -> list[list[str]]:
+    """Fetch all rows from a statement response using external links."""
+    rows: list[list[str]] = []
+    if not response.result or not response.result.external_links:
+        return rows
+    for link in response.result.external_links:
+        resp = requests.get(link.external_link, headers=link.http_headers)
+        resp.raise_for_status()
+        rows.extend(json.loads(resp.text))
+    return rows
+
+
 class UnityCatalogHelper:
     """Wraps WorkspaceClient for querying UC state and executing SQL.
 
@@ -124,8 +127,9 @@ class UnityCatalogHelper:
             statement=sql,
             warehouse_id=self._warehouse_id,
             disposition=Disposition.EXTERNAL_LINKS,
+            wait_timeout="30s",
         )
-        rows = response.result.data_array or []
+        rows = _fetch_external_links_rows(response)
         self._tags_cache = _parse_tag_rows(rows)
         return self._tags_cache
 
@@ -143,8 +147,9 @@ class UnityCatalogHelper:
             statement=sql,
             warehouse_id=self._warehouse_id,
             disposition=Disposition.EXTERNAL_LINKS,
+            wait_timeout="30s",
         )
-        rows = response.result.data_array or []
+        rows = _fetch_external_links_rows(response)
         self._privileges_cache = _parse_privilege_rows(rows)
         return self._privileges_cache
 

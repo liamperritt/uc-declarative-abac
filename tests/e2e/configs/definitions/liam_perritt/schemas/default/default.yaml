@@ -1,0 +1,10 @@
+definitions:
+  schemas:
+    liam_perritt|default:
+      name: default
+      tags:
+        team: platform
+      policies:
+        - $ref: $defs/policies/shared|grant_schema_access
+      tables:
+        - $ref: $defs/tables/liam_perritt|default|batch_table

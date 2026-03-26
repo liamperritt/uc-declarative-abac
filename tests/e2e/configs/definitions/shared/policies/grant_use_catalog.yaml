@@ -1,0 +1,10 @@
+definitions:
+  policies:
+    shared|grant_use_catalog:
+      type: grant
+      privileges:
+        - USE_CATALOG
+      to:
+        - uc_governor_test_team
+      tags:
+        managed_by: uc_governor

@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 from uc_governor.logger import ChangeLogger
 from uc_governor.privileges.executor import execute_privilege_diff
 from uc_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
-from uc_governor.types import PrincipalValidationError, SecurableType
+from uc_governor.types import Principal, PrincipalType, SecurableType
 
 
 def _assert_sql_contains(sql: str, *fragments: str):
@@ -17,27 +17,6 @@ def _assert_sql_contains(sql: str, *fragments: str):
         )
 
 
-def _make_acct_helper(sp_mapping: dict[str, str] | None = None):
-    """Create a mock AccountHelper.
-
-    *sp_mapping* maps service-principal display names to application IDs.
-    Principals not in the mapping raise PrincipalValidationError (i.e. they
-    are not service principals).
-    """
-    sp_mapping = sp_mapping or {}
-    acct_helper = MagicMock()
-
-    def _resolve(display_name: str) -> str:
-        if display_name in sp_mapping:
-            return sp_mapping[display_name]
-        raise PrincipalValidationError(
-            f"{display_name} is not a service principal"
-        )
-
-    acct_helper.get_sp_application_id.side_effect = _resolve
-    return acct_helper
-
-
 # ---------------------------------------------------------------------------
 # 1. GRANT SQL generation
 # ---------------------------------------------------------------------------
@@ -46,20 +25,20 @@ def _make_acct_helper(sp_mapping: dict[str, str] | None = None):
 def test_privilege_executor_generates_grant_sql():
     """to_grant privileges produce GRANT statements with correct components."""
     uc_helper = MagicMock()
-    acct_helper = _make_acct_helper()
+
 
     diff = PrivilegeDiff(
         to_grant={
             SecurablePrivilege(
                 securable_type=SecurableType.TABLE,
                 securable_full_name="catalog.schema.orders",
-                principal="data_analysts",
+                principal=Principal(PrincipalType.GROUP, "data_analysts", "data_analysts"),
                 privilege_type="SELECT",
             ),
         },
     )
 
-    stmts = execute_privilege_diff(uc_helper, acct_helper, diff, ChangeLogger())
+    stmts = execute_privilege_diff(uc_helper, diff, ChangeLogger())
 
     assert len(stmts) == 1
     sql = stmts[0]
@@ -79,20 +58,20 @@ def test_privilege_executor_generates_grant_sql():
 def test_privilege_executor_generates_revoke_sql():
     """to_revoke privileges produce REVOKE statements with correct components."""
     uc_helper = MagicMock()
-    acct_helper = _make_acct_helper()
+
 
     diff = PrivilegeDiff(
         to_revoke={
             SecurablePrivilege(
                 securable_type=SecurableType.SCHEMA,
                 securable_full_name="catalog.sales",
-                principal="temp_users",
+                principal=Principal(PrincipalType.GROUP, "temp_users", "temp_users"),
                 privilege_type="USE_SCHEMA",
             ),
         },
     )
 
-    stmts = execute_privilege_diff(uc_helper, acct_helper, diff, ChangeLogger())
+    stmts = execute_privilege_diff(uc_helper, diff, ChangeLogger())
 
     assert len(stmts) == 1
     sql = stmts[0]
@@ -111,22 +90,20 @@ def test_privilege_executor_generates_revoke_sql():
 def test_privilege_executor_resolves_sp_display_name_to_application_id():
     """When a principal is a service principal, the executor uses its application_id."""
     uc_helper = MagicMock()
-    acct_helper = _make_acct_helper(
-        sp_mapping={"my-etl-service": "abcd1234-0000-0000-0000-000000000001"}
-    )
+
 
     diff = PrivilegeDiff(
         to_grant={
             SecurablePrivilege(
                 securable_type=SecurableType.CATALOG,
                 securable_full_name="my_catalog",
-                principal="my-etl-service",
+                principal=Principal(PrincipalType.SERVICE_PRINCIPAL, "abcd1234-0000-0000-0000-000000000001", "my-etl-service"),
                 privilege_type="USE_CATALOG",
             ),
         },
     )
 
-    stmts = execute_privilege_diff(uc_helper, acct_helper, diff, ChangeLogger())
+    stmts = execute_privilege_diff(uc_helper, diff, ChangeLogger())
 
     assert len(stmts) == 1
     sql = stmts[0]
@@ -145,14 +122,14 @@ def test_privilege_executor_resolves_sp_display_name_to_application_id():
 def test_privilege_executor_returns_all_executed_statements():
     """The return list contains every SQL statement that was executed."""
     uc_helper = MagicMock()
-    acct_helper = _make_acct_helper()
+
 
     diff = PrivilegeDiff(
         to_grant={
             SecurablePrivilege(
                 securable_type=SecurableType.TABLE,
                 securable_full_name="catalog.schema.orders",
-                principal="data_analysts",
+                principal=Principal(PrincipalType.GROUP, "data_analysts", "data_analysts"),
                 privilege_type="SELECT",
             ),
         },
@@ -160,13 +137,13 @@ def test_privilege_executor_returns_all_executed_statements():
             SecurablePrivilege(
                 securable_type=SecurableType.VOLUME,
                 securable_full_name="catalog.landing.raw_events",
-                principal="data_engineers",
+                principal=Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
                 privilege_type="READ_VOLUME",
             ),
         },
     )
 
-    stmts = execute_privilege_diff(uc_helper, acct_helper, diff, ChangeLogger())
+    stmts = execute_privilege_diff(uc_helper, diff, ChangeLogger())
 
     # Exactly two statements: one GRANT, one REVOKE.
     assert len(stmts) == 2
@@ -190,11 +167,11 @@ def test_privilege_executor_returns_all_executed_statements():
 def test_privilege_executor_executes_nothing_given_empty_diff():
     """An empty PrivilegeDiff should produce no SQL and no execute_sql calls."""
     uc_helper = MagicMock()
-    acct_helper = _make_acct_helper()
+
 
     diff = PrivilegeDiff()
 
-    stmts = execute_privilege_diff(uc_helper, acct_helper, diff, ChangeLogger())
+    stmts = execute_privilege_diff(uc_helper, diff, ChangeLogger())
 
     assert stmts == []
     uc_helper.execute_sql.assert_not_called()
@@ -208,7 +185,7 @@ def test_privilege_executor_executes_nothing_given_empty_diff():
 def test_privilege_executor_continues_after_sql_failure():
     """When one SQL call fails, execution continues and the error is collected."""
     uc_helper = MagicMock()
-    acct_helper = _make_acct_helper()
+
     call_count = {"n": 0}
 
     def _fail_first(sql):
@@ -225,19 +202,19 @@ def test_privilege_executor_continues_after_sql_failure():
             SecurablePrivilege(
                 securable_type=SecurableType.TABLE,
                 securable_full_name="catalog.schema.orders",
-                principal="data_analysts",
+                principal=Principal(PrincipalType.GROUP, "data_analysts", "data_analysts"),
                 privilege_type="SELECT",
             ),
             SecurablePrivilege(
                 securable_type=SecurableType.SCHEMA,
                 securable_full_name="catalog.sales",
-                principal="data_engineers",
+                principal=Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
                 privilege_type="USE_SCHEMA",
             ),
         },
     )
 
-    stmts = execute_privilege_diff(uc_helper, acct_helper, diff, change_logger)
+    stmts = execute_privilege_diff(uc_helper, diff, change_logger)
 
     # Both calls were attempted
     assert uc_helper.execute_sql.call_count == 2
@@ -251,7 +228,7 @@ def test_privilege_executor_continues_after_sql_failure():
 def test_privilege_executor_collects_all_errors():
     """When all SQL calls fail, all errors are collected and no statements returned."""
     uc_helper = MagicMock()
-    acct_helper = _make_acct_helper()
+
     uc_helper.execute_sql.side_effect = RuntimeError("SQL execution failed")
 
     change_logger = ChangeLogger()
@@ -261,19 +238,19 @@ def test_privilege_executor_collects_all_errors():
             SecurablePrivilege(
                 securable_type=SecurableType.TABLE,
                 securable_full_name="catalog.schema.orders",
-                principal="data_analysts",
+                principal=Principal(PrincipalType.GROUP, "data_analysts", "data_analysts"),
                 privilege_type="SELECT",
             ),
             SecurablePrivilege(
                 securable_type=SecurableType.SCHEMA,
                 securable_full_name="catalog.sales",
-                principal="data_engineers",
+                principal=Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
                 privilege_type="USE_SCHEMA",
             ),
         },
     )
 
-    stmts = execute_privilege_diff(uc_helper, acct_helper, diff, change_logger)
+    stmts = execute_privilege_diff(uc_helper, diff, change_logger)
 
     # Both calls were attempted
     assert uc_helper.execute_sql.call_count == 2
@@ -281,3 +258,35 @@ def test_privilege_executor_collects_all_errors():
     assert len(change_logger.errors) == 2
     # No successful statements
     assert stmts == []
+
+
+# ---------------------------------------------------------------------------
+# Principal identifier in SQL
+# ---------------------------------------------------------------------------
+
+
+def test_privilege_executor_uses_principal_identifier_in_grant_sql():
+    """When principal is a Principal object, the SQL uses its identifier (not display_name)."""
+    from uc_governor.types import Principal, PrincipalType
+
+    uc_helper = MagicMock()
+
+
+    priv = SecurablePrivilege(
+        securable_type=SecurableType.TABLE,
+        securable_full_name="catalog.schema.orders",
+        principal=Principal(PrincipalType.SERVICE_PRINCIPAL, "app-id-123", "my-etl-sp"),
+        privilege_type="SELECT",
+    )
+
+    diff = PrivilegeDiff(to_grant={priv})
+
+    stmts = execute_privilege_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    sql = stmts[0]
+
+    # The system identifier must appear in the SQL
+    assert "app-id-123" in sql
+    # The display name must NOT appear in the SQL
+    assert "my-etl-sp" not in sql
