@@ -22,7 +22,7 @@ from uc_governor.tags.state import TagDiff
 from uc_governor.types import ExecutionBatchError, ExecutionError, PrincipalValidationError
 
 
-def extract_principals(privileges: set[SecurablePrivilege]) -> list[str]:
+def _extract_principals(privileges: set[SecurablePrivilege]) -> list[str]:
     """Extract unique principal display names from a set of desired privileges."""
     return list({p.principal.name for p in privileges})
 
@@ -48,11 +48,11 @@ def _resolve_privileges(
     Actual principals that cannot be resolved (e.g. deleted users) are silently excluded.
     Returns (resolved_desired, resolved_actual).
     """
-    unknown = set(ws_helper.find_unknown_principals(extract_principals(desired_privileges)))
+    unknown = set(ws_helper.find_unknown_principals(_extract_principals(desired_privileges)))
     for name in unknown:
         change_logger.log_error(ExecutionError(
             context=f"Validate principal '{name}'",
-            exception=PrincipalValidationError(f"Principal '{name}' not found in account"),
+            exception=PrincipalValidationError(f"Principal '{name}' not found in workspace"),
         ))
 
     resolved_desired = {

@@ -89,8 +89,12 @@ def _catalog_with_tags_and_grants_config() -> dict:
 
 def _setup_mock_workspace_empty_state(mock_workspace_client: MagicMock) -> None:
     """Configure the mock workspace client to return empty actual state."""
+    from databricks.sdk.service.sql import StatementState
+
     result_mock = MagicMock()
+    result_mock.status.state = StatementState.SUCCEEDED
     result_mock.result.data_array = []
+    result_mock.result.external_links = []
 
     def _capture_and_return(*args, **kwargs):
         statement = kwargs.get("statement", args[0] if args else None)
@@ -341,13 +345,17 @@ def test_governor_fetches_tags_privileges_and_principals_in_parallel(
     total_sequential_time = delay_seconds * 3
 
     def _slow_execute(*args, **kwargs):
+        from databricks.sdk.service.sql import StatementState
+
         statement = kwargs.get("statement", args[0] if args else None)
         if statement and statement.strip().upper().startswith("SELECT"):
             time.sleep(delay_seconds)
         if statement:
             mock_workspace_client.executed_sql.append(statement)
         result = MagicMock()
+        result.status.state = StatementState.SUCCEEDED
         result.result.data_array = []
+        result.result.external_links = []
         return result
 
     mock_workspace_client.statement_execution.execute_statement.side_effect = (
@@ -392,6 +400,8 @@ def test_governor_raises_execution_batch_error_when_sql_fails(
     )
 
     def _fail_mutations(*args, **kwargs):
+        from databricks.sdk.service.sql import StatementState
+
         statement = kwargs.get("statement", args[0] if args else None)
         if statement:
             mock_workspace_client.executed_sql.append(statement)
@@ -401,7 +411,9 @@ def test_governor_raises_execution_batch_error_when_sql_fails(
             raise RuntimeError("SQL execution failed")
         # State fetch queries succeed with empty results
         result = MagicMock()
+        result.status.state = StatementState.SUCCEEDED
         result.result.data_array = []
+        result.result.external_links = []
         return result
 
     mock_workspace_client.statement_execution.execute_statement.side_effect = (

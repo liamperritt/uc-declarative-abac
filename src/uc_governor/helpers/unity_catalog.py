@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+import time
 
 import requests
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.service.sql import Disposition, StatementResponse
+from databricks.sdk.service.sql import Disposition, StatementResponse, StatementState
 
 from uc_governor.privileges.state import SecurablePrivilege
 from uc_governor.tags.state import SecurableTag
-from uc_governor.types import SecurableType
+from uc_governor.types import GovernorError, SecurableType
+
+_POLL_INTERVAL_SECONDS = 10
 
 
 def _build_catalog_in_clause(catalog_names: list[str]) -> str:
@@ -114,6 +117,30 @@ class UnityCatalogHelper:
         self._tags_cache: set[SecurableTag] | None = None
         self._privileges_cache: set[SecurablePrivilege] | None = None
 
+    def _execute_and_poll(self, statement: str) -> StatementResponse:
+        """Execute a SQL statement with hybrid polling for long-running queries.
+
+        Waits up to 50s for results. If the query is still running, polls
+        every 10s via get_statement until it completes.
+        Raises GovernorError on FAILED or CANCELED states.
+        """
+        response = self._client.statement_execution.execute_statement(
+            statement=statement,
+            warehouse_id=self._warehouse_id,
+            disposition=Disposition.EXTERNAL_LINKS,
+            wait_timeout="50s",
+            on_wait_timeout="CONTINUE",
+        )
+        while response.status.state in (StatementState.PENDING, StatementState.RUNNING):
+            time.sleep(_POLL_INTERVAL_SECONDS)
+            response = self._client.statement_execution.get_statement(response.statement_id)
+
+        if response.status.state != StatementState.SUCCEEDED:
+            error_msg = getattr(response.status.error, "message", "Unknown error")
+            raise GovernorError(f"SQL query failed ({response.status.state}): {error_msg}")
+
+        return response
+
     def fetch_actual_tags(self, catalog_names: list[str]) -> set[SecurableTag]:
         """Query system tables for all tags on securables in the given catalogs.
 
@@ -122,13 +149,7 @@ class UnityCatalogHelper:
         if self._tags_cache is not None:
             return self._tags_cache
 
-        sql = _build_tags_query(catalog_names)
-        response = self._client.statement_execution.execute_statement(
-            statement=sql,
-            warehouse_id=self._warehouse_id,
-            disposition=Disposition.EXTERNAL_LINKS,
-            wait_timeout="30s",
-        )
+        response = self._execute_and_poll(_build_tags_query(catalog_names))
         rows = _fetch_external_links_rows(response)
         self._tags_cache = _parse_tag_rows(rows)
         return self._tags_cache
@@ -142,20 +163,11 @@ class UnityCatalogHelper:
         if self._privileges_cache is not None:
             return self._privileges_cache
 
-        sql = _build_privileges_query(catalog_names)
-        response = self._client.statement_execution.execute_statement(
-            statement=sql,
-            warehouse_id=self._warehouse_id,
-            disposition=Disposition.EXTERNAL_LINKS,
-            wait_timeout="30s",
-        )
+        response = self._execute_and_poll(_build_privileges_query(catalog_names))
         rows = _fetch_external_links_rows(response)
         self._privileges_cache = _parse_privilege_rows(rows)
         return self._privileges_cache
 
     def execute_sql(self, statement: str) -> None:
         """Execute a SQL statement via the Statement Execution API."""
-        self._client.statement_execution.execute_statement(
-            statement=statement,
-            warehouse_id=self._warehouse_id,
-        )
+        self._execute_and_poll(statement)

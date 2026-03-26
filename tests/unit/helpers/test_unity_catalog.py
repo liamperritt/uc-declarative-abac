@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
+import pytest
 import sqlglot
-from databricks.sdk.service.sql import Disposition
+from databricks.sdk.service.sql import Disposition, StatementState
 
 from uc_governor.helpers.unity_catalog import UnityCatalogHelper
 from uc_governor.privileges.state import SecurablePrivilege
 from uc_governor.tags.state import SecurableTag
-from uc_governor.types import SecurableType
+from uc_governor.types import GovernorError, SecurableType
 
 WAREHOUSE_ID = "test-warehouse-id"
 
@@ -46,6 +47,7 @@ def _make_mock_workspace_client(data_array: list[list[str]] | None = None) -> Ma
     client = MagicMock()
 
     response = MagicMock()
+    response.status.state = StatementState.SUCCEEDED
     response.result.data_array = data_array if data_array is not None else []
     response.result.external_links = []
     response.manifest.schema.columns = []
@@ -279,4 +281,133 @@ def test_uc_helper_passes_statement_to_workspace_client():
     assert "CREATE SCHEMA my_catalog.new_schema" in (
         call_kwargs.kwargs.get("statement", ""),
         *(call_kwargs.args if call_kwargs.args else []),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Hybrid polling
+# ---------------------------------------------------------------------------
+
+
+def _make_statement_response(
+    state: StatementState,
+    statement_id: str = "stmt-123",
+    error_message: str | None = None,
+) -> MagicMock:
+    """Build a mock StatementResponse with the given state and optional error."""
+    response = MagicMock()
+    response.status.state = state
+    response.statement_id = statement_id
+    response.result.data_array = []
+    response.result.external_links = []
+    response.manifest.schema.columns = []
+    if error_message is not None:
+        response.status.error.message = error_message
+    else:
+        response.status.error = None
+    return response
+
+
+@patch("uc_governor.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_returns_results_when_query_completes_within_timeout(mock_fetch):
+    """When execute_statement returns SUCCEEDED, results are returned without polling."""
+    tag_rows = [
+        ["CATALOG", "my_catalog", "env", "prod"],
+    ]
+    mock_fetch.return_value = tag_rows
+
+    response = _make_statement_response(StatementState.SUCCEEDED)
+    client = MagicMock()
+    client.statement_execution.execute_statement.return_value = response
+
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+    result = helper.fetch_actual_tags(["my_catalog"])
+
+    # Should NOT have polled via get_statement
+    client.statement_execution.get_statement.assert_not_called()
+
+    # Should have returned the parsed tags
+    expected = {
+        SecurableTag(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="my_catalog",
+            tag_name="env",
+            tag_value="prod",
+        ),
+    }
+    assert result == expected
+
+
+@patch("time.sleep")
+@patch("uc_governor.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_polls_for_results_when_query_exceeds_timeout(mock_fetch, mock_sleep):
+    """When execute_statement returns PENDING, polls get_statement until SUCCEEDED."""
+    tag_rows = [
+        ["TABLE", "my_catalog.sales.orders", "pii", "true"],
+    ]
+
+    # execute_statement returns PENDING
+    initial_response = _make_statement_response(StatementState.PENDING, statement_id="stmt-123")
+    client = MagicMock()
+    client.statement_execution.execute_statement.return_value = initial_response
+
+    # First poll: RUNNING, second poll: SUCCEEDED
+    running_response = _make_statement_response(StatementState.RUNNING, statement_id="stmt-123")
+    succeeded_response = _make_statement_response(StatementState.SUCCEEDED, statement_id="stmt-123")
+    client.statement_execution.get_statement.side_effect = [running_response, succeeded_response]
+
+    # _fetch_external_links_rows returns rows for the final succeeded response
+    mock_fetch.return_value = tag_rows
+
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+    result = helper.fetch_actual_tags(["my_catalog"])
+
+    # Should have polled exactly 2 times
+    assert client.statement_execution.get_statement.call_count == 2
+    client.statement_execution.get_statement.assert_any_call("stmt-123")
+
+    # Should have slept with the polling interval (10s)
+    mock_sleep.assert_called_with(10)
+
+    # Should return parsed results
+    assert len(result) == 1
+
+
+@patch("uc_governor.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_raises_on_failed_query(mock_fetch):
+    """When execute_statement returns FAILED, a GovernorError is raised."""
+    mock_fetch.return_value = []
+
+    response = _make_statement_response(
+        StatementState.FAILED,
+        error_message="Something went wrong",
+    )
+    client = MagicMock()
+    client.statement_execution.execute_statement.return_value = response
+
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    with pytest.raises((GovernorError, RuntimeError)):
+        helper.fetch_actual_tags(["my_catalog"])
+
+
+@patch("uc_governor.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_uses_continue_on_wait_timeout(mock_fetch):
+    """execute_statement is called with on_wait_timeout=CONTINUE for hybrid polling."""
+    mock_fetch.return_value = []
+
+    response = _make_statement_response(StatementState.SUCCEEDED)
+    client = MagicMock()
+    client.statement_execution.execute_statement.return_value = response
+
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+    helper.fetch_actual_tags(["my_catalog"])
+
+    call_kwargs = client.statement_execution.execute_statement.call_args.kwargs
+    on_wait_timeout = call_kwargs.get("on_wait_timeout")
+    assert on_wait_timeout is not None, "on_wait_timeout kwarg not passed to execute_statement"
+    # Accept either the enum value or its string representation
+    on_wait_str = str(on_wait_timeout).upper() if on_wait_timeout else ""
+    assert "CONTINUE" in on_wait_str, (
+        f"Expected on_wait_timeout to contain CONTINUE, got {on_wait_timeout}"
     )

@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, PropertyMock
 
 import pytest
 import yaml
+from databricks.sdk.service.sql import StatementState
 
 
 # ---------------------------------------------------------------------------
@@ -30,7 +31,9 @@ def mock_workspace_client() -> MagicMock:
         statement = kwargs.get("statement", args[0] if args else None)
         if statement:
             client.executed_sql.append(statement)
-        return MagicMock()
+        response = MagicMock()
+        response.status.state = StatementState.SUCCEEDED
+        return response
 
     client.statement_execution.execute_statement.side_effect = _capture_sql
 
