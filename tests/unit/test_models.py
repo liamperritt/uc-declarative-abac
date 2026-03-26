@@ -24,7 +24,7 @@ def _full_config():
                     {
                         "name": "analyst_read",
                         "type": "grant",
-                        "privileges": ["SELECT", "USAGE"],
+                        "privileges": ["select", "use_schema"],
                         "to": ["analysts"],
                         "tags": {"domain": "analytics"},
                     }
@@ -66,7 +66,7 @@ def test_config_file_validates_valid_config():
     assert catalog.name == "analytics"
     assert catalog.tags == {"domain": "analytics", "env": "prod"}
     assert len(catalog.policies) == 1
-    assert catalog.policies[0].privileges == ["SELECT", "USAGE"]
+    assert catalog.policies[0].privileges == ["select", "use_schema"]
     assert len(catalog.schemas) == 1
     schema = catalog.schemas[0]
     assert schema.name == "sales"
@@ -121,7 +121,7 @@ def test_grant_policy_config_rejects_missing_to():
                 "policies": [
                     {
                         "type": "grant",
-                        "privileges": ["SELECT"],
+                        "privileges": ["select"],
                         "tags": {"domain": "analytics"},
                     }
                 ],
@@ -205,7 +205,7 @@ def test_schema_config_accepts_policies():
                         "policies": [
                             {
                                 "type": "grant",
-                                "privileges": ["SELECT"],
+                                "privileges": ["select"],
                                 "to": ["analysts"],
                                 "tags": {"team": "data"},
                             }
@@ -235,7 +235,7 @@ def test_table_config_accepts_policies():
                                 "policies": [
                                     {
                                         "type": "grant",
-                                        "privileges": ["MODIFY"],
+                                        "privileges": ["modify"],
                                         "to": ["writers"],
                                         "tags": {"sales": None},
                                     }

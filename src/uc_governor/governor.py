@@ -22,6 +22,7 @@ from uc_governor.tags.state import TagDiff
 from uc_governor.types import (
     ExecutionBatchError,
     ExecutionError,
+    PrivilegeType,
     PrincipalValidationError,
 )
 
@@ -76,11 +77,15 @@ def _resolve_actual_privileges(
             principal = ws_helper.resolve_by_identifier(p.principal)
         except PrincipalValidationError:
             continue
+        try:
+            privilege_type = PrivilegeType(p.privilege_type.lower())
+        except ValueError:
+            continue  # Skip privileges not in our supported set
         resolved.add(SecurablePrivilege(
             securable_type=p.securable_type,
             securable_full_name=p.securable_full_name,
             principal=principal,
-            privilege_type=p.privilege_type,
+            privilege_type=privilege_type,
         ))
     return resolved
 

@@ -3,7 +3,7 @@ definitions:
     abac|grant_pipeline_select:
       type: grant
       privileges:
-        - SELECT
+        - select
       to:
         - uc_governor_test_team
       tags:

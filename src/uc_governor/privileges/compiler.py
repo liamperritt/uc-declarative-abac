@@ -50,7 +50,7 @@ class CompiledPrivilege:
     securable_type: SecurableType
     securable_full_name: str
     principal: str
-    privilege_type: str
+    privilege_type: PrivilegeType
 
 
 def compile_desired_privileges(
@@ -112,19 +112,16 @@ def _match_policies(
             if not required.issubset(actual_tags):
                 continue
             allowed = SECURABLE_TYPE_PRIVILEGE_MAP.get(sec_type)
-            all_known = {p.value for p in PrivilegeType}
             for principal_name in policy.to:
                 for privilege in policy.privileges:
-                    priv_upper = privilege.upper()
-                    # Skip only if the privilege is known AND not valid for this securable type
-                    if priv_upper in all_known and allowed is not None and priv_upper not in {p.value for p in allowed}:
+                    if allowed is not None and privilege not in allowed:
                         continue
                     result.add(
                         CompiledPrivilege(
                             securable_type=sec_type,
                             securable_full_name=full_name,
                             principal=principal_name,
-                            privilege_type=priv_upper,
+                            privilege_type=privilege,
                         )
                     )
     return result

@@ -3,7 +3,7 @@ definitions:
     abac|grant_bronze_access:
       type: grant
       privileges:
-        - USE_SCHEMA
+        - use_schema
       to:
         - sp_uc_governor_test
       tags:

@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 from uc_governor.logger import ChangeLogger
 from uc_governor.privileges.executor import execute_privilege_diff
 from uc_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
-from uc_governor.types import Principal, PrincipalType, SecurableType
+from uc_governor.types import Principal, PrincipalType, PrivilegeType, SecurableType
 
 
 def _assert_sql_contains(sql: str, *fragments: str):
@@ -33,7 +33,7 @@ def test_privilege_executor_generates_grant_sql():
                 securable_type=SecurableType.TABLE,
                 securable_full_name="catalog.schema.orders",
                 principal=Principal(PrincipalType.GROUP, "data_analysts", "data_analysts"),
-                privilege_type="SELECT",
+                privilege_type=PrivilegeType.SELECT,
             ),
         },
     )
@@ -66,7 +66,7 @@ def test_privilege_executor_generates_revoke_sql():
                 securable_type=SecurableType.SCHEMA,
                 securable_full_name="catalog.sales",
                 principal=Principal(PrincipalType.GROUP, "temp_users", "temp_users"),
-                privilege_type="USE_SCHEMA",
+                privilege_type=PrivilegeType.USE_SCHEMA,
             ),
         },
     )
@@ -98,7 +98,7 @@ def test_privilege_executor_resolves_sp_display_name_to_application_id():
                 securable_type=SecurableType.CATALOG,
                 securable_full_name="my_catalog",
                 principal=Principal(PrincipalType.SERVICE_PRINCIPAL, "abcd1234-0000-0000-0000-000000000001", "my-etl-service"),
-                privilege_type="USE_CATALOG",
+                privilege_type=PrivilegeType.USE_CATALOG,
             ),
         },
     )
@@ -130,7 +130,7 @@ def test_privilege_executor_returns_all_executed_statements():
                 securable_type=SecurableType.TABLE,
                 securable_full_name="catalog.schema.orders",
                 principal=Principal(PrincipalType.GROUP, "data_analysts", "data_analysts"),
-                privilege_type="SELECT",
+                privilege_type=PrivilegeType.SELECT,
             ),
         },
         to_revoke={
@@ -138,7 +138,7 @@ def test_privilege_executor_returns_all_executed_statements():
                 securable_type=SecurableType.VOLUME,
                 securable_full_name="catalog.landing.raw_events",
                 principal=Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
-                privilege_type="READ_VOLUME",
+                privilege_type=PrivilegeType.READ_VOLUME,
             ),
         },
     )
@@ -203,13 +203,13 @@ def test_privilege_executor_continues_after_sql_failure():
                 securable_type=SecurableType.TABLE,
                 securable_full_name="catalog.schema.orders",
                 principal=Principal(PrincipalType.GROUP, "data_analysts", "data_analysts"),
-                privilege_type="SELECT",
+                privilege_type=PrivilegeType.SELECT,
             ),
             SecurablePrivilege(
                 securable_type=SecurableType.SCHEMA,
                 securable_full_name="catalog.sales",
                 principal=Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
-                privilege_type="USE_SCHEMA",
+                privilege_type=PrivilegeType.USE_SCHEMA,
             ),
         },
     )
@@ -239,13 +239,13 @@ def test_privilege_executor_collects_all_errors():
                 securable_type=SecurableType.TABLE,
                 securable_full_name="catalog.schema.orders",
                 principal=Principal(PrincipalType.GROUP, "data_analysts", "data_analysts"),
-                privilege_type="SELECT",
+                privilege_type=PrivilegeType.SELECT,
             ),
             SecurablePrivilege(
                 securable_type=SecurableType.SCHEMA,
                 securable_full_name="catalog.sales",
                 principal=Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
-                privilege_type="USE_SCHEMA",
+                privilege_type=PrivilegeType.USE_SCHEMA,
             ),
         },
     )
@@ -276,7 +276,7 @@ def test_privilege_executor_uses_principal_identifier_in_grant_sql():
         securable_type=SecurableType.TABLE,
         securable_full_name="catalog.schema.orders",
         principal=Principal(PrincipalType.SERVICE_PRINCIPAL, "app-id-123", "my-etl-sp"),
-        privilege_type="SELECT",
+        privilege_type=PrivilegeType.SELECT,
     )
 
     diff = PrivilegeDiff(to_grant={priv})

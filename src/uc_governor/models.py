@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, model_validator
 
+from uc_governor.types import PrivilegeType
+
 
 class SecurableConfig(BaseModel):
     """Base model for all UC securable configs. Not intended to be instantiated directly."""
@@ -21,20 +23,20 @@ class VolumeConfig(SecurableConfig):
 
 
 class TableConfig(SecurableConfig):
-    columns: list[ColumnConfig] | None = None
     policies: list[GrantPolicyConfig] | None = None
+    columns: list[ColumnConfig] | None = None
 
 
 class SchemaConfig(SecurableConfig):
+    policies: list[GrantPolicyConfig] | None = None
     tables: list[TableConfig] | None = None
     volumes: list[VolumeConfig] | None = None
-    policies: list[GrantPolicyConfig] | None = None
 
 
 class GrantPolicyConfig(BaseModel):
     name: str | None = None
     type: Literal["grant"]
-    privileges: list[str]
+    privileges: list[PrivilegeType]
     to: list[str]
     tags: dict[str, str | None]
 

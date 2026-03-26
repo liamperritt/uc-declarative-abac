@@ -52,7 +52,7 @@ def _catalog_with_grant_policy_config() -> dict:
                     "policies": [
                         {
                             "type": "grant",
-                            "privileges": ["SELECT"],
+                            "privileges": ["select"],
                             "to": ["data_engineers"],
                             "tags": {"team": "data"},
                         },
@@ -76,7 +76,7 @@ def _catalog_with_tags_and_grants_config() -> dict:
                     "policies": [
                         {
                             "type": "grant",
-                            "privileges": ["SELECT"],
+                            "privileges": ["select"],
                             "to": ["data_engineers"],
                             "tags": {"team": "data"},
                         },
@@ -224,7 +224,7 @@ def test_governor_produces_empty_diffs_when_in_sync(
         ["SCHEMA", "my_catalog.sales", "team", "data"],
     ]
     actual_privileges = [
-        ["SCHEMA", "my_catalog.sales", "data_engineers", "SELECT"],
+        ["SCHEMA", "my_catalog.sales", "data_engineers", "select"],
     ]
 
     call_count = 0
@@ -451,13 +451,13 @@ def _catalog_with_two_grant_policies_config() -> dict:
                     "policies": [
                         {
                             "type": "grant",
-                            "privileges": ["SELECT"],
+                            "privileges": ["select"],
                             "to": ["data_engineers"],
                             "tags": {"team": "data"},
                         },
                         {
                             "type": "grant",
-                            "privileges": ["MODIFY"],
+                            "privileges": ["modify"],
                             "to": ["ghost_team"],
                             "tags": {"team": "data"},
                         },

@@ -19,7 +19,7 @@ def _build_grant_sql(priv: SecurablePrivilege) -> str:
     """Build a GRANT SQL statement for a single privilege."""
     quoted = _quote_securable(priv.securable_full_name)
     return (
-        f"GRANT {priv.privilege_type} "
+        f"GRANT {priv.privilege_type.upper()} "
         f"ON {priv.securable_type.value} {quoted} "
         f"TO `{priv.principal.identifier}`"
     )
@@ -29,7 +29,7 @@ def _build_revoke_sql(priv: SecurablePrivilege) -> str:
     """Build a REVOKE SQL statement for a single privilege."""
     quoted = _quote_securable(priv.securable_full_name)
     return (
-        f"REVOKE {priv.privilege_type} "
+        f"REVOKE {priv.privilege_type.upper()} "
         f"ON {priv.securable_type.value} {quoted} "
         f"FROM `{priv.principal.identifier}`"
     )

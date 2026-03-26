@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from uc_governor.types import Principal, SecurableType
+from uc_governor.types import Principal, PrivilegeType, SecurableType
 
 
 @dataclass(frozen=True)
@@ -10,7 +10,7 @@ class SecurablePrivilege:
     securable_type: SecurableType
     securable_full_name: str
     principal: Principal
-    privilege_type: str
+    privilege_type: PrivilegeType
 
 
 @dataclass

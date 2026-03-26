@@ -3,7 +3,7 @@ definitions:
     abac|grant_use_catalog:
       type: grant
       privileges:
-        - USE_CATALOG
+        - use_catalog
       to:
         - uc_governor_test_team
       tags:

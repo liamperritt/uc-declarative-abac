@@ -4,7 +4,7 @@ from uc_governor.models import ConfigFile
 from uc_governor.privileges.compiler import CompiledPrivilege, compile_desired_privileges
 from uc_governor.privileges.state import SecurablePrivilege
 from uc_governor.tags.state import SecurableTag
-from uc_governor.types import SecurableType
+from uc_governor.types import PrivilegeType, SecurableType
 
 
 # ---------------------------------------------------------------------------
@@ -22,7 +22,7 @@ def test_privilege_compiler_computes_privileges_from_policy():
                     "policies": [
                         {
                             "type": "grant",
-                            "privileges": ["SELECT", "MODIFY"],
+                            "privileges": ["select", "modify"],
                             "to": ["analysts", "engineers"],
                             "tags": {"sales": None},
                         }
@@ -54,25 +54,25 @@ def test_privilege_compiler_computes_privileges_from_policy():
             securable_type=SecurableType.TABLE,
             securable_full_name="my_catalog.default.orders",
             principal="analysts",
-            privilege_type="SELECT",
+            privilege_type=PrivilegeType.SELECT,
         ),
         CompiledPrivilege(
             securable_type=SecurableType.TABLE,
             securable_full_name="my_catalog.default.orders",
             principal="analysts",
-            privilege_type="MODIFY",
+            privilege_type=PrivilegeType.MODIFY,
         ),
         CompiledPrivilege(
             securable_type=SecurableType.TABLE,
             securable_full_name="my_catalog.default.orders",
             principal="engineers",
-            privilege_type="SELECT",
+            privilege_type=PrivilegeType.SELECT,
         ),
         CompiledPrivilege(
             securable_type=SecurableType.TABLE,
             securable_full_name="my_catalog.default.orders",
             principal="engineers",
-            privilege_type="MODIFY",
+            privilege_type=PrivilegeType.MODIFY,
         ),
     }
 
@@ -91,7 +91,7 @@ def test_privilege_compiler_policy_uses_and_semantics_for_multiple_tags():
                     "policies": [
                         {
                             "type": "grant",
-                            "privileges": ["SELECT"],
+                            "privileges": ["select"],
                             "to": ["team"],
                             "tags": {"a": "x", "b": "y"},
                         }
@@ -131,7 +131,7 @@ def test_privilege_compiler_policy_uses_and_semantics_for_multiple_tags():
             securable_type=SecurableType.TABLE,
             securable_full_name="cat.s.table_both",
             principal="team",
-            privilege_type="SELECT",
+            privilege_type=PrivilegeType.SELECT,
         ),
     }
 
@@ -150,7 +150,7 @@ def test_privilege_compiler_policy_skips_objects_without_matching_tags():
                     "policies": [
                         {
                             "type": "grant",
-                            "privileges": ["SELECT"],
+                            "privileges": ["select"],
                             "to": ["team"],
                             "tags": {"env": "prod"},
                         }
@@ -188,13 +188,13 @@ def test_privilege_compiler_handles_multiple_policies_per_catalog():
                     "policies": [
                         {
                             "type": "grant",
-                            "privileges": ["SELECT"],
+                            "privileges": ["select"],
                             "to": ["readers"],
                             "tags": {"public": None},
                         },
                         {
                             "type": "grant",
-                            "privileges": ["MODIFY"],
+                            "privileges": ["modify"],
                             "to": ["writers"],
                             "tags": {"writable": None},
                         },
@@ -226,13 +226,13 @@ def test_privilege_compiler_handles_multiple_policies_per_catalog():
             securable_type=SecurableType.TABLE,
             securable_full_name="cat.s.t1",
             principal="readers",
-            privilege_type="SELECT",
+            privilege_type=PrivilegeType.SELECT,
         ),
         CompiledPrivilege(
             securable_type=SecurableType.TABLE,
             securable_full_name="cat.s.t2",
             principal="writers",
-            privilege_type="MODIFY",
+            privilege_type=PrivilegeType.MODIFY,
         ),
     }
 
@@ -289,7 +289,7 @@ def test_privilege_compiler_matches_against_desired_tags():
                     "policies": [
                         {
                             "type": "grant",
-                            "privileges": ["SELECT"],
+                            "privileges": ["select"],
                             "to": ["team"],
                             "tags": {"env": "prod"},
                         }
@@ -333,7 +333,7 @@ def test_privilege_compiler_matches_schema_level_policy():
                             "policies": [
                                 {
                                     "type": "grant",
-                                    "privileges": ["SELECT"],
+                                    "privileges": ["select"],
                                     "to": ["data_engineers"],
                                     "tags": {"team": "data"},
                                 }
@@ -360,7 +360,7 @@ def test_privilege_compiler_matches_schema_level_policy():
         securable_type=SecurableType.SCHEMA,
         securable_full_name="my_catalog.sales",
         principal="data_engineers",
-        privilege_type="SELECT",
+        privilege_type=PrivilegeType.SELECT,
     ) in result
 
 
@@ -380,7 +380,7 @@ def test_privilege_compiler_matches_table_level_policy():
                                     "policies": [
                                         {
                                             "type": "grant",
-                                            "privileges": ["MODIFY"],
+                                            "privileges": ["modify"],
                                             "to": ["sales_team"],
                                             "tags": {"sales": None},
                                         }
@@ -409,7 +409,7 @@ def test_privilege_compiler_matches_table_level_policy():
         securable_type=SecurableType.TABLE,
         securable_full_name="my_catalog.sales.orders",
         principal="sales_team",
-        privilege_type="MODIFY",
+        privilege_type=PrivilegeType.MODIFY,
     ) in result
 
 
@@ -422,7 +422,7 @@ def test_privilege_compiler_collects_policies_from_all_levels():
                     "policies": [
                         {
                             "type": "grant",
-                            "privileges": ["USAGE"],
+                            "privileges": ["use_catalog"],
                             "to": ["all_users"],
                             "tags": {"env": "prod"},
                         }
@@ -433,7 +433,7 @@ def test_privilege_compiler_collects_policies_from_all_levels():
                             "policies": [
                                 {
                                     "type": "grant",
-                                    "privileges": ["SELECT"],
+                                    "privileges": ["select"],
                                     "to": ["data_engineers"],
                                     "tags": {"team": "data"},
                                 }
@@ -444,7 +444,7 @@ def test_privilege_compiler_collects_policies_from_all_levels():
                                     "policies": [
                                         {
                                             "type": "grant",
-                                            "privileges": ["MODIFY"],
+                                            "privileges": ["modify"],
                                             "to": ["sales_team"],
                                             "tags": {"sales": None},
                                         }
@@ -486,19 +486,19 @@ def test_privilege_compiler_collects_policies_from_all_levels():
         securable_type=SecurableType.CATALOG,
         securable_full_name="my_catalog",
         principal="all_users",
-        privilege_type="USAGE",
+        privilege_type=PrivilegeType.USE_CATALOG,
     ) in result
     assert CompiledPrivilege(
         securable_type=SecurableType.SCHEMA,
         securable_full_name="my_catalog.sales",
         principal="data_engineers",
-        privilege_type="SELECT",
+        privilege_type=PrivilegeType.SELECT,
     ) in result
     assert CompiledPrivilege(
         securable_type=SecurableType.TABLE,
         securable_full_name="my_catalog.sales.orders",
         principal="sales_team",
-        privilege_type="MODIFY",
+        privilege_type=PrivilegeType.MODIFY,
     ) in result
 
 
@@ -516,7 +516,7 @@ def test_privilege_compiler_emits_compiled_privilege_type():
                     "policies": [
                         {
                             "type": "grant",
-                            "privileges": ["SELECT"],
+                            "privileges": ["select"],
                             "to": ["my_team"],
                             "tags": {"dept": "eng"},
                         }
@@ -558,7 +558,7 @@ def test_privilege_compiler_filters_incompatible_privilege_for_volume():
                     "policies": [
                         {
                             "type": "grant",
-                            "privileges": ["SELECT", "READ_VOLUME"],
+                            "privileges": ["select", "read_volume"],
                             "to": ["team"],
                             "tags": {"zone": "landing"},
                         }
@@ -583,11 +583,11 @@ def test_privilege_compiler_filters_incompatible_privilege_for_volume():
         securable_type=SecurableType.VOLUME,
         securable_full_name="cat.raw.events",
         principal="team",
-        privilege_type="READ_VOLUME",
+        privilege_type=PrivilegeType.READ_VOLUME,
     ) in result
 
     # SELECT is not valid on a VOLUME — must be excluded
-    select_privileges = {p for p in result if p.privilege_type == "SELECT"}
+    select_privileges = {p for p in result if p.privilege_type == PrivilegeType.SELECT}
     assert select_privileges == set()
 
 
@@ -600,7 +600,7 @@ def test_privilege_compiler_allows_select_on_table():
                     "policies": [
                         {
                             "type": "grant",
-                            "privileges": ["SELECT", "READ_VOLUME"],
+                            "privileges": ["select", "read_volume"],
                             "to": ["team"],
                             "tags": {"zone": "landing"},
                         }
@@ -625,11 +625,11 @@ def test_privilege_compiler_allows_select_on_table():
         securable_type=SecurableType.TABLE,
         securable_full_name="cat.raw.events",
         principal="team",
-        privilege_type="SELECT",
+        privilege_type=PrivilegeType.SELECT,
     ) in result
 
     # READ_VOLUME is not valid on a TABLE — must be excluded
-    read_volume_privileges = {p for p in result if p.privilege_type == "READ_VOLUME"}
+    read_volume_privileges = {p for p in result if p.privilege_type == PrivilegeType.READ_VOLUME}
     assert read_volume_privileges == set()
 
 
@@ -642,7 +642,7 @@ def test_privilege_compiler_allows_all_privileges_on_any_securable():
                     "policies": [
                         {
                             "type": "grant",
-                            "privileges": ["ALL_PRIVILEGES"],
+                            "privileges": ["all_privileges"],
                             "to": ["team"],
                             "tags": {"zone": "landing"},
                         }
@@ -667,5 +667,5 @@ def test_privilege_compiler_allows_all_privileges_on_any_securable():
         securable_type=SecurableType.VOLUME,
         securable_full_name="cat.raw.files",
         principal="team",
-        privilege_type="ALL_PRIVILEGES",
+        privilege_type=PrivilegeType.ALL_PRIVILEGES,
     ) in result

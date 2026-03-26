@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 from uc_governor.privileges.state import SecurablePrivilege
 from uc_governor.logger import ChangeLogger
 from uc_governor.tags.state import SecurableTag
-from uc_governor.types import Principal, PrincipalType, SecurableType
+from uc_governor.types import Principal, PrincipalType, PrivilegeType, SecurableType
 
 
 # ---------------------------------------------------------------------------
@@ -50,7 +50,7 @@ def _make_privilege(
     securable_type: SecurableType = SecurableType.SCHEMA,
     securable_full_name: str = "my_catalog.sales",
     principal: Principal = Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
-    privilege_type: str = "SELECT",
+    privilege_type: str | PrivilegeType = PrivilegeType.SELECT,
 ) -> SecurablePrivilege:
     return SecurablePrivilege(
         securable_type=securable_type,
@@ -153,7 +153,7 @@ def test_change_logger_logs_grant() -> None:
         securable_type=SecurableType.SCHEMA,
         securable_full_name="my_catalog.sales",
         principal=Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
-        privilege_type="SELECT",
+        privilege_type=PrivilegeType.SELECT,
     )
     cl.log_grant(priv)
 
@@ -174,7 +174,7 @@ def test_change_logger_logs_revoke() -> None:
         securable_type=SecurableType.TABLE,
         securable_full_name="my_catalog.sales.orders",
         principal=Principal(PrincipalType.GROUP, "temp_users", "temp_users"),
-        privilege_type="MODIFY",
+        privilege_type=PrivilegeType.MODIFY,
     )
     cl.log_revoke(priv)
 
@@ -222,8 +222,8 @@ def test_change_logger_logs_summary() -> None:
     cl.log_tag_add(_make_tag(tag_name="b"))
     cl.log_tag_update(_make_tag(tag_name="c", tag_value="new"), old_value="old")
     cl.log_tag_remove(_make_tag(tag_name="d"))
-    cl.log_grant(_make_privilege(privilege_type="SELECT"))
-    cl.log_revoke(_make_privilege(privilege_type="MODIFY"))
+    cl.log_grant(_make_privilege(privilege_type=PrivilegeType.SELECT))
+    cl.log_revoke(_make_privilege(privilege_type=PrivilegeType.MODIFY))
     cl.log_summary()
 
     messages = _info_messages(mock_logger)
@@ -243,7 +243,7 @@ def test_change_logger_logs_dry_run_summary() -> None:
     cl.log_tag_add(_make_tag(tag_name="a"))
     cl.log_tag_add(_make_tag(tag_name="b"))
     cl.log_tag_update(_make_tag(tag_name="c", tag_value="new"), old_value="old")
-    cl.log_grant(_make_privilege(privilege_type="SELECT"))
+    cl.log_grant(_make_privilege(privilege_type=PrivilegeType.SELECT))
     cl.log_summary()
 
     messages = _info_messages(mock_logger)
@@ -301,8 +301,8 @@ def test_change_logger_logs_privilege_changes() -> None:
 
     cl, mock_logger = _make_change_logger()
 
-    grant_priv = _make_privilege(principal=Principal(PrincipalType.GROUP, "team_a", "team_a"), privilege_type="SELECT")
-    revoke_priv = _make_privilege(principal=Principal(PrincipalType.GROUP, "team_b", "team_b"), privilege_type="MODIFY")
+    grant_priv = _make_privilege(principal=Principal(PrincipalType.GROUP, "team_a", "team_a"), privilege_type=PrivilegeType.SELECT)
+    revoke_priv = _make_privilege(principal=Principal(PrincipalType.GROUP, "team_b", "team_b"), privilege_type=PrivilegeType.MODIFY)
 
     diff = PrivilegeDiff(
         to_grant={grant_priv},
@@ -424,7 +424,7 @@ def test_change_logger_uses_principal_display_name_in_grant_log() -> None:
         securable_type=SecurableType.TABLE,
         securable_full_name="catalog.schema.orders",
         principal=Principal(PrincipalType.SERVICE_PRINCIPAL, "app-id-123", "my-etl-sp"),
-        privilege_type="SELECT",
+        privilege_type=PrivilegeType.SELECT,
     )
     cl.log_grant(priv)
 
