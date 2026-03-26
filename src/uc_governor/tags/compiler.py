@@ -32,11 +32,12 @@ def compile_desired_tags(config: ConfigFile) -> set[SecurableTag]:
     """
     tags: set[SecurableTag] = set()
 
-    for cat_key, catalog in config.catalogs.items():
-        tags |= _emit_tags(SecurableType.CATALOG, cat_key, catalog)
+    for catalog in config.catalogs.values():
+        cat_name = catalog.name
+        tags |= _emit_tags(SecurableType.CATALOG, cat_name, catalog)
 
         for schema in catalog.schemas or []:
-            schema_full = f"{cat_key}.{schema.name}"
+            schema_full = f"{cat_name}.{schema.name}"
             tags |= _emit_tags(SecurableType.SCHEMA, schema_full, schema)
 
             for table in schema.tables or []:

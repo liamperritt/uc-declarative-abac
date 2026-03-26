@@ -44,13 +44,18 @@ def _build_tag_index(
 
 
 def _collect_policies(config: ConfigFile) -> list[GrantPolicyConfig]:
-    """Gather all grant policies across all catalogs."""
-    return [
-        policy
-        for catalog in config.catalogs.values()
-        if catalog.policies
-        for policy in catalog.policies
-    ]
+    """Gather all grant policies across all catalogs, schemas, and tables."""
+    policies: list[GrantPolicyConfig] = []
+    for catalog in config.catalogs.values():
+        if catalog.policies:
+            policies.extend(catalog.policies)
+        for schema in catalog.schemas or []:
+            if schema.policies:
+                policies.extend(schema.policies)
+            for table in schema.tables or []:
+                if table.policies:
+                    policies.extend(table.policies)
+    return policies
 
 
 def _match_policies(

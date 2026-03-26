@@ -22,11 +22,13 @@ class VolumeConfig(SecurableConfig):
 
 class TableConfig(SecurableConfig):
     columns: list[ColumnConfig] | None = None
+    policies: list[GrantPolicyConfig] | None = None
 
 
 class SchemaConfig(SecurableConfig):
     tables: list[TableConfig] | None = None
     volumes: list[VolumeConfig] | None = None
+    policies: list[GrantPolicyConfig] | None = None
 
 
 class GrantPolicyConfig(BaseModel):
@@ -40,6 +42,11 @@ class GrantPolicyConfig(BaseModel):
 class CatalogConfig(SecurableConfig):
     policies: list[GrantPolicyConfig] | None = None
     schemas: list[SchemaConfig] | None = None
+
+
+# Rebuild models that use forward references to GrantPolicyConfig
+TableConfig.model_rebuild()
+SchemaConfig.model_rebuild()
 
 
 class ConfigFile(BaseModel):

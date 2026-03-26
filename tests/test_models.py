@@ -187,3 +187,67 @@ def test_config_file_preserves_explicit_catalog_name():
     config = ConfigFile.model_validate(data)
 
     assert config.catalogs["ops_prod"].name == "operations_production"
+
+
+# ---------------------------------------------------------------------------
+# Schema and table policies
+# ---------------------------------------------------------------------------
+
+
+def test_schema_config_accepts_policies():
+    """A schema with a policies list containing one grant policy parses successfully."""
+    data = {
+        "catalogs": {
+            "cat": {
+                "schemas": [
+                    {
+                        "name": "sales",
+                        "policies": [
+                            {
+                                "type": "grant",
+                                "privileges": ["SELECT"],
+                                "to": ["analysts"],
+                                "tags": {"team": "data"},
+                            }
+                        ],
+                    }
+                ],
+            }
+        }
+    }
+    config = ConfigFile.model_validate(data)
+
+    schema = config.catalogs["cat"].schemas[0]
+    assert len(schema.policies) == 1
+
+
+def test_table_config_accepts_policies():
+    """A table with a policies list containing one grant policy parses successfully."""
+    data = {
+        "catalogs": {
+            "cat": {
+                "schemas": [
+                    {
+                        "name": "default",
+                        "tables": [
+                            {
+                                "name": "orders",
+                                "policies": [
+                                    {
+                                        "type": "grant",
+                                        "privileges": ["MODIFY"],
+                                        "to": ["writers"],
+                                        "tags": {"sales": None},
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        }
+    }
+    config = ConfigFile.model_validate(data)
+
+    table = config.catalogs["cat"].schemas[0].tables[0]
+    assert len(table.policies) == 1

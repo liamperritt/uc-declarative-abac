@@ -98,7 +98,7 @@ Definition configs are catalog-agnostic, reusable templates (schemas, tables, vo
 
 #### Schema definitions
 
-Schema definitions are catalog-agnostic templates: name, comment, owner, tags, and RFA. Key convention: `<domain>|<schema_name>` (e.g. `operations|sales`, `people|hr`). Each schema definition lists the **tables**, **volumes**, and/or **functions** it contains as `$ref` entries. Catalogs reference which schema definitions to instantiate; the engine creates each schema and its listed children in every catalog that includes it.
+Schema definitions are catalog-agnostic templates: name, comment, owner, tags, policies, and RFA. Key convention: `<domain>|<schema_name>` (e.g. `operations|sales`, `people|hr`). Each schema definition lists the **tables**, **volumes**, **functions**, and/or **policies** it contains as `$ref` entries. Catalogs reference which schema definitions to instantiate; the engine creates each schema and its listed children in every catalog that includes it.
 
 ```yaml
 # definitions/operations/schemas/sales/sales.yaml
@@ -110,6 +110,8 @@ definitions:
       owner: sales_engineering
       tags:
         operations: ~
+      policies:
+        - $ref: $defs/policies/shared|grant_read_on_sales
       tables:
         - $ref: $defs/tables/operations|sales|orders
           rfa_destination: sales-data2@company.com
@@ -183,6 +185,8 @@ definitions:
         classification: internal
         sales: ~
       rfa_destination: sales-data@company.com
+      policies:
+        - $ref: $defs/policies/shared|mask_pii_email
 
 # definitions/people/schemas/hr/tables/employees.yaml
 definitions:
@@ -224,6 +228,7 @@ Column-level fields:
 Table-level fields (in addition to the common fields `name`, `comment`, `owner`, `tags`, `rfa_destination`):
 - **`filter`** — a fully- or partially-qualified UC function name to apply as a row filter directly on the table.
 - **`columns`** — list of column-level configurations (see above).
+- **`policies`** — list of policy `$ref` entries or inline policies scoped to this table.
 
 #### Volume definitions
 
@@ -331,7 +336,7 @@ definitions:
 
 If a policy specifies multiple tags, the policy is only applied to objects that match **all** of the listed tags (AND semantics). For example, a policy with `tags: { pii: email, classification: confidential }` would only apply to objects tagged with both `pii: email` and `classification: confidential`.
 
-Policy definitions are catalog-agnostic. Catalogs reference which policies to apply via `$ref` entries, and can override fields (e.g. `function`) per catalog.
+Policy definitions are catalog-agnostic. Catalogs, schemas, and tables reference which policies to apply via `$ref` entries in their `policies:` list, and can override fields (e.g. `function`) per instance. When a policy is attached at a given level, it is scoped to match only the tagged objects within that level — a policy on a schema only matches objects within that schema, a policy on a table only matches that table and its columns.
 
 ### Resources
 
@@ -374,7 +379,7 @@ Once a governed tag is created, you can apply it to tables, columns, schemas, an
 
 #### Catalogs
 
-Catalogs are defined under `resources: catalogs:` and compose schema definitions and policy definitions into a deployable unit. Each catalog lists the schemas to instantiate and the policies to apply, with optional per-catalog overrides on any `$ref` entry.
+Catalogs are defined under `resources: catalogs:` and compose schema definitions and policy definitions into a deployable unit. Each catalog lists the schemas to instantiate and the policies to apply, with optional per-catalog overrides on any `$ref` entry. Policies can also be attached at the schema and table level for finer-grained scoping.
 
 ```yaml
 # resources/catalogs/operations/operations_prod.yaml

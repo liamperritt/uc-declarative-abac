@@ -313,3 +313,190 @@ def test_privilege_compiler_matches_against_desired_tags():
     result = compile_desired_privileges(config, desired_tags=set())
 
     assert result == set()
+
+
+# ---------------------------------------------------------------------------
+# Schema and table level policies
+# ---------------------------------------------------------------------------
+
+
+def test_privilege_compiler_matches_schema_level_policy():
+    """A grant policy on a schema matches against desired tags for that schema."""
+    config = ConfigFile.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tags": {"team": "data"},
+                            "policies": [
+                                {
+                                    "type": "grant",
+                                    "privileges": ["SELECT"],
+                                    "to": ["data_engineers"],
+                                    "tags": {"team": "data"},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="my_catalog.sales",
+            tag_name="team",
+            tag_value="data",
+        ),
+    }
+
+    result = compile_desired_privileges(config, desired_tags)
+
+    assert SecurablePrivilege(
+        securable_type=SecurableType.SCHEMA,
+        securable_full_name="my_catalog.sales",
+        principal="data_engineers",
+        privilege_type="SELECT",
+    ) in result
+
+
+def test_privilege_compiler_matches_table_level_policy():
+    """A grant policy on a table matches against desired tags for that table."""
+    config = ConfigFile.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "tags": {"sales": None},
+                                    "policies": [
+                                        {
+                                            "type": "grant",
+                                            "privileges": ["MODIFY"],
+                                            "to": ["sales_team"],
+                                            "tags": {"sales": None},
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="my_catalog.sales.orders",
+            tag_name="sales",
+            tag_value=None,
+        ),
+    }
+
+    result = compile_desired_privileges(config, desired_tags)
+
+    assert SecurablePrivilege(
+        securable_type=SecurableType.TABLE,
+        securable_full_name="my_catalog.sales.orders",
+        principal="sales_team",
+        privilege_type="MODIFY",
+    ) in result
+
+
+def test_privilege_compiler_collects_policies_from_all_levels():
+    """Policies at catalog, schema, and table levels all produce privileges."""
+    config = ConfigFile.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["USAGE"],
+                            "to": ["all_users"],
+                            "tags": {"env": "prod"},
+                        }
+                    ],
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "policies": [
+                                {
+                                    "type": "grant",
+                                    "privileges": ["SELECT"],
+                                    "to": ["data_engineers"],
+                                    "tags": {"team": "data"},
+                                }
+                            ],
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "policies": [
+                                        {
+                                            "type": "grant",
+                                            "privileges": ["MODIFY"],
+                                            "to": ["sales_team"],
+                                            "tags": {"sales": None},
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="my_catalog",
+            tag_name="env",
+            tag_value="prod",
+        ),
+        SecurableTag(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="my_catalog.sales",
+            tag_name="team",
+            tag_value="data",
+        ),
+        SecurableTag(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="my_catalog.sales.orders",
+            tag_name="sales",
+            tag_value=None,
+        ),
+    }
+
+    result = compile_desired_privileges(config, desired_tags)
+
+    assert len(result) >= 3
+    assert SecurablePrivilege(
+        securable_type=SecurableType.CATALOG,
+        securable_full_name="my_catalog",
+        principal="all_users",
+        privilege_type="USAGE",
+    ) in result
+    assert SecurablePrivilege(
+        securable_type=SecurableType.SCHEMA,
+        securable_full_name="my_catalog.sales",
+        principal="data_engineers",
+        privilege_type="SELECT",
+    ) in result
+    assert SecurablePrivilege(
+        securable_type=SecurableType.TABLE,
+        securable_full_name="my_catalog.sales.orders",
+        principal="sales_team",
+        privilege_type="MODIFY",
+    ) in result

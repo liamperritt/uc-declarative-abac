@@ -209,14 +209,44 @@ def test_tag_compiler_emits_no_tags_when_none_defined():
 # ---------------------------------------------------------------------------
 
 
-def test_tag_compiler_uses_catalog_dict_key_for_full_name():
-    """The catalog dict key — not the explicit name field — is used as the first
-    segment of securable_full_name for catalogs, schemas, tables, and volumes."""
+def test_tag_compiler_uses_catalog_name_for_full_names_when_name_differs_from_key():
+    """When a catalog's name differs from its dict key, the explicit name is
+    used as the catalog segment in full names for the catalog and nested schemas."""
+    config = ConfigFile.model_validate(
+        {
+            "catalogs": {
+                "ops_prod": {
+                    "name": "operations_production",
+                    "tags": {"env": "prod"},
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tags": {"team": "data"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    result = compile_desired_tags(config)
+
+    full_names = {tag.securable_full_name for tag in result}
+    assert "operations_production" in full_names, (
+        "Catalog full name should use the explicit name"
+    )
+    assert "operations_production.sales" in full_names, (
+        "Schema full name should use the catalog's explicit name"
+    )
+
+
+def test_tag_compiler_defaults_to_dict_key_when_catalog_name_omitted():
+    """When no explicit name is set, the catalog dict key is used as the
+    catalog segment in securable_full_name for all nested objects."""
     config = ConfigFile.model_validate(
         {
             "catalogs": {
                 "cat_key": {
-                    "name": "cat_explicit_name",
                     "tags": {"env": "prod"},
                     "schemas": [
                         {
