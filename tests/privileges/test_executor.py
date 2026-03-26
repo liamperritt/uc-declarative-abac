@@ -198,3 +198,86 @@ def test_privilege_executor_executes_nothing_given_empty_diff():
 
     assert stmts == []
     uc_helper.execute_sql.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Error collection
+# ---------------------------------------------------------------------------
+
+
+def test_privilege_executor_continues_after_sql_failure():
+    """When one SQL call fails, execution continues and the error is collected."""
+    uc_helper = MagicMock()
+    acct_helper = _make_acct_helper()
+    call_count = {"n": 0}
+
+    def _fail_first(sql):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise RuntimeError("SQL execution failed")
+
+    uc_helper.execute_sql.side_effect = _fail_first
+
+    change_logger = ChangeLogger()
+
+    diff = PrivilegeDiff(
+        to_grant={
+            SecurablePrivilege(
+                securable_type=SecurableType.TABLE,
+                securable_full_name="catalog.schema.orders",
+                principal="data_analysts",
+                privilege_type="SELECT",
+            ),
+            SecurablePrivilege(
+                securable_type=SecurableType.SCHEMA,
+                securable_full_name="catalog.sales",
+                principal="data_engineers",
+                privilege_type="USE_SCHEMA",
+            ),
+        },
+    )
+
+    stmts = execute_privilege_diff(uc_helper, acct_helper, diff, change_logger)
+
+    # Both calls were attempted
+    assert uc_helper.execute_sql.call_count == 2
+    # One error collected
+    assert change_logger.has_errors is True
+    assert len(change_logger.errors) == 1
+    # Only the successful statement is returned
+    assert len(stmts) == 1
+
+
+def test_privilege_executor_collects_all_errors():
+    """When all SQL calls fail, all errors are collected and no statements returned."""
+    uc_helper = MagicMock()
+    acct_helper = _make_acct_helper()
+    uc_helper.execute_sql.side_effect = RuntimeError("SQL execution failed")
+
+    change_logger = ChangeLogger()
+
+    diff = PrivilegeDiff(
+        to_grant={
+            SecurablePrivilege(
+                securable_type=SecurableType.TABLE,
+                securable_full_name="catalog.schema.orders",
+                principal="data_analysts",
+                privilege_type="SELECT",
+            ),
+            SecurablePrivilege(
+                securable_type=SecurableType.SCHEMA,
+                securable_full_name="catalog.sales",
+                principal="data_engineers",
+                privilege_type="USE_SCHEMA",
+            ),
+        },
+    )
+
+    stmts = execute_privilege_diff(uc_helper, acct_helper, diff, change_logger)
+
+    # Both calls were attempted
+    assert uc_helper.execute_sql.call_count == 2
+    # Both errors collected
+    assert len(change_logger.errors) == 2
+    # No successful statements
+    assert stmts == []

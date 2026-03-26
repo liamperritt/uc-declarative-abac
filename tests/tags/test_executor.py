@@ -265,3 +265,85 @@ def test_tag_executor_executes_nothing_given_empty_diff():
 
     assert stmts == []
     uc_helper.execute_sql.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Error collection
+# ---------------------------------------------------------------------------
+
+
+def test_tag_executor_continues_after_sql_failure():
+    """When one SQL call fails, execution continues and the error is collected."""
+    uc_helper = MagicMock()
+    call_count = {"n": 0}
+
+    def _fail_first(sql):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise RuntimeError("SQL execution failed")
+
+    uc_helper.execute_sql.side_effect = _fail_first
+
+    change_logger = ChangeLogger()
+
+    # Two tags on DIFFERENT securables so they produce two separate SQL statements
+    diff = TagDiff(
+        to_add={
+            SecurableTag(
+                securable_type=SecurableType.CATALOG,
+                securable_full_name="cat_a",
+                tag_name="env",
+                tag_value="prod",
+            ),
+            SecurableTag(
+                securable_type=SecurableType.SCHEMA,
+                securable_full_name="cat_b.schema_b",
+                tag_name="team",
+                tag_value="data",
+            ),
+        },
+    )
+
+    stmts = execute_tag_diff(uc_helper, diff, change_logger)
+
+    # Both calls were attempted
+    assert uc_helper.execute_sql.call_count == 2
+    # One error collected
+    assert change_logger.has_errors is True
+    assert len(change_logger.errors) == 1
+    # Only the successful statement is returned
+    assert len(stmts) == 1
+
+
+def test_tag_executor_collects_all_errors():
+    """When all SQL calls fail, all errors are collected and no statements returned."""
+    uc_helper = MagicMock()
+    uc_helper.execute_sql.side_effect = RuntimeError("SQL execution failed")
+
+    change_logger = ChangeLogger()
+
+    diff = TagDiff(
+        to_add={
+            SecurableTag(
+                securable_type=SecurableType.CATALOG,
+                securable_full_name="cat_a",
+                tag_name="env",
+                tag_value="prod",
+            ),
+            SecurableTag(
+                securable_type=SecurableType.SCHEMA,
+                securable_full_name="cat_b.schema_b",
+                tag_name="team",
+                tag_value="data",
+            ),
+        },
+    )
+
+    stmts = execute_tag_diff(uc_helper, diff, change_logger)
+
+    # Both calls were attempted
+    assert uc_helper.execute_sql.call_count == 2
+    # Both errors collected
+    assert len(change_logger.errors) == 2
+    # No successful statements
+    assert stmts == []

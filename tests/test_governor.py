@@ -384,3 +384,49 @@ def test_governor_fetches_tags_privileges_and_principals_in_parallel(
         f"Fetches appear to be sequential: elapsed {elapsed:.2f}s >= "
         f"total sequential time {total_sequential_time:.2f}s"
     )
+
+
+# ---------------------------------------------------------------------------
+# Error collection
+# ---------------------------------------------------------------------------
+
+
+def test_governor_raises_execution_batch_error_when_sql_fails(
+    tmp_yaml_dir, mock_workspace_client, mock_account_client
+):
+    """When mutation SQL fails, governor.run() raises ExecutionBatchError with collected errors."""
+    from uc_governor.types import ExecutionBatchError
+
+    root = tmp_yaml_dir(
+        {"resources/catalog.yaml": _catalog_with_tags_and_grants_config()}
+    )
+
+    def _fail_mutations(*args, **kwargs):
+        statement = kwargs.get("statement", args[0] if args else None)
+        if statement:
+            mock_workspace_client.executed_sql.append(statement)
+        upper = (statement or "").upper().strip()
+        # Mutation statements should fail
+        if upper.startswith(("ALTER", "GRANT", "REVOKE")):
+            raise RuntimeError("SQL execution failed")
+        # State fetch queries succeed with empty results
+        result = MagicMock()
+        result.result.data_array = []
+        return result
+
+    mock_workspace_client.statement_execution.execute_statement.side_effect = (
+        _fail_mutations
+    )
+    _setup_mock_account_with_group(mock_account_client, "data_engineers")
+
+    with pytest.raises(ExecutionBatchError) as exc_info:
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            account_client=mock_account_client,
+            warehouse_id="test-warehouse-id",
+        )
+
+    assert len(exc_info.value.errors) > 0, (
+        "Expected at least one ExecutionError in the batch"
+    )

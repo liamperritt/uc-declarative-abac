@@ -4,6 +4,7 @@ import logging
 
 from uc_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
 from uc_governor.tags.state import SecurableTag, TagDiff
+from uc_governor.types import ExecutionError
 
 _default_logger = logging.getLogger("uc_governor")
 
@@ -35,6 +36,22 @@ class ChangeLogger:
         self._tags_removed = 0
         self._privileges_granted = 0
         self._privileges_revoked = 0
+        self._errors: list[ExecutionError] = []
+
+    @property
+    def errors(self) -> list[ExecutionError]:
+        """Return all collected execution errors."""
+        return list(self._errors)
+
+    @property
+    def has_errors(self) -> bool:
+        """Return True if any execution errors have been collected."""
+        return len(self._errors) > 0
+
+    def log_error(self, error: ExecutionError) -> None:
+        """Log and collect an execution error."""
+        self._errors.append(error)
+        self._log_info(f"[ERROR] {error.statement}: {error.exception}")
 
     def log_summary(self) -> None:
         """Log a summary of all changes recorded so far."""
@@ -157,6 +174,8 @@ class ChangeLogger:
             sections.append("Tags: " + ", ".join(tag_parts))
         if priv_parts:
             sections.append("Privileges: " + ", ".join(priv_parts))
+        if self._errors:
+            sections.append(f"Errors: {len(self._errors)} failed")
 
         return " | ".join(sections)
 

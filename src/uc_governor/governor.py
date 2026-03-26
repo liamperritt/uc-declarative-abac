@@ -19,6 +19,7 @@ from uc_governor.tags.compiler import compile_desired_tags
 from uc_governor.tags.differ import compute_tag_diff
 from uc_governor.tags.executor import execute_tag_diff
 from uc_governor.tags.state import TagDiff
+from uc_governor.types import ExecutionBatchError
 
 
 def extract_principals(privileges: set[SecurablePrivilege]) -> list[str]:
@@ -74,5 +75,8 @@ def run(
         change_logger.log_tag_changes(tag_diff)
         change_logger.log_privilege_changes(privilege_diff)
     change_logger.log_summary()
+
+    if change_logger.has_errors:
+        raise ExecutionBatchError(change_logger.errors)
 
     return tag_diff, privilege_diff

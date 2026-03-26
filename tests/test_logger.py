@@ -322,3 +322,90 @@ def test_change_logger_logs_privilege_changes() -> None:
     assert "SELECT" in combined
     assert "MODIFY" in combined
 
+
+# ---------------------------------------------------------------------------
+# Error tracking
+# ---------------------------------------------------------------------------
+
+
+def _make_execution_error(
+    statement: str = "GRANT SELECT ON TABLE `cat`.`s`.`t` TO `user`",
+    exception: Exception | None = None,
+) -> "ExecutionError":
+    from uc_governor.types import ExecutionError
+
+    return ExecutionError(
+        statement=statement,
+        exception=exception or RuntimeError("SQL execution failed"),
+    )
+
+
+def test_change_logger_collects_errors() -> None:
+    """log_error() collects ExecutionError instances accessible via .errors."""
+    from uc_governor.types import ExecutionError
+
+    cl, _ = _make_change_logger()
+    err1 = _make_execution_error(statement="ALTER CATALOG `c` SET TAGS ('a')")
+    err2 = _make_execution_error(statement="GRANT SELECT ON TABLE `c`.`s`.`t` TO `u`")
+
+    cl.log_error(err1)
+    cl.log_error(err2)
+
+    assert cl.errors == [err1, err2]
+
+
+def test_change_logger_has_errors_returns_false_when_no_errors() -> None:
+    """has_errors is False on a fresh ChangeLogger."""
+    cl, _ = _make_change_logger()
+    assert cl.has_errors is False
+
+
+def test_change_logger_has_errors_returns_true_after_error_logged() -> None:
+    """has_errors is True after at least one error is logged."""
+    cl, _ = _make_change_logger()
+    cl.log_error(_make_execution_error())
+    assert cl.has_errors is True
+
+
+def test_change_logger_logs_error_message() -> None:
+    """log_error() logs an [ERROR] prefixed message via the logger."""
+    cl, mock_logger = _make_change_logger()
+    cl.log_error(_make_execution_error())
+
+    messages = _info_messages(mock_logger)
+    assert any("[ERROR]" in msg for msg in messages), (
+        f"Expected an [ERROR] message in: {messages}"
+    )
+
+
+def test_change_logger_summary_includes_error_count() -> None:
+    """Summary includes the error count when errors have been logged."""
+    cl, mock_logger = _make_change_logger()
+
+    # 1 success
+    cl.log_tag_add(_make_tag(tag_name="a"))
+    # 2 errors
+    cl.log_error(_make_execution_error(statement="stmt1"))
+    cl.log_error(_make_execution_error(statement="stmt2"))
+
+    cl.log_summary()
+
+    messages = _info_messages(mock_logger)
+    summary = messages[-1]
+    assert "2 failed" in summary.lower() or "2 error" in summary.lower(), (
+        f"Expected error count in summary: {summary}"
+    )
+
+
+def test_change_logger_summary_excludes_errors_when_none() -> None:
+    """Summary does not mention failures when no errors were logged."""
+    cl, mock_logger = _make_change_logger()
+
+    cl.log_tag_add(_make_tag(tag_name="a"))
+    cl.log_summary()
+
+    messages = _info_messages(mock_logger)
+    summary = messages[-1]
+    assert "failed" not in summary.lower()
+    assert "error" not in summary.lower()
+

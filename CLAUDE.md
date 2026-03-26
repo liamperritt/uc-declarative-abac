@@ -95,7 +95,7 @@ Multiple tags on a policy use AND semantics — all must match.
 
 See `docs/implementation_design.md` for the full implementation plan.
 
-This project uses **Test-Driven Development (TDD)** with a three-agent pattern:
+This project uses **Test-Driven Development (TDD)** with a three-agent pattern. **All implementation plans must follow TDD** — when creating a new plan, structure it around the TDD cycle (stubs → tester agent → RED → implementer agent → GREEN → refactor).
 
 ### Agent roles
 

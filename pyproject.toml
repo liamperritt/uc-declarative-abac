@@ -32,6 +32,9 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "--cov=uc_governor --cov-report=term-missing"
 
+[tool.uv]
+index-url = "https://pypi-proxy.dev.databricks.com/simple/"
+
 [tool.ruff]
 target-version = "py311"
 src = ["src", "tests"]

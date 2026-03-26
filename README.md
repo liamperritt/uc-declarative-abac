@@ -277,7 +277,10 @@ Policies are defined under `definitions: policies:`. Key convention: `<logical_c
 Policy fields:
 - **`to`** — the principals the policy is applied to (e.g. who sees the masked value, who gets the row filter applied, or who receives the grant).
 - **`except`** — principals exempted from the policy (applicable to `mask` and `filter` types only). Exempted principals see the original unmasked data or unfiltered rows.
-- **`privileges`** — (`grant` type only) the UC privileges to assign. Supported values: `select`, `modify`, `create_table`, `create_schema`, `create_function`, `create_volume`, `use_catalog`, `use_schema`, `read_files`, `write_files`, `all_privileges`.
+- **`privileges`** — (`grant` type only) the UC privileges to assign. Supported values: `select`, `modify`, `create_table`, `create_schema`, `create_function`, `create_volume`, `use_catalog`, `use_schema`, `read_volume`, `write_volume`, `execute`, `all_privileges`, `external_use_schema`, `manage`.
+
+    > **Note:** For ease of use, several abstracted privilege names expand to multiple UC privileges: **`read`** grants `select`, `read_volume`, and `execute`; **`edit`** grants `modify`, `write_volume`, and `refresh`; and **`create`** grants `create_function`, `create_table`, `create_materialized_view`, `create_volume`, `create_model`, and `create_model_version`.
+
 - **`expiry_date`** — (`grant` type only) ISO 8601 date (`YYYY-MM-DD`) after which the grant is automatically revoked.
 
 ```yaml

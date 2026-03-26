@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from uc_governor.logger import ChangeLogger
 
 from uc_governor.tags.state import SecurableTag, TagDiff
-from uc_governor.types import SecurableType
+from uc_governor.types import ExecutionError, SecurableType
 
 
 def _format_tag_entry(tag: SecurableTag) -> str:
@@ -72,7 +72,11 @@ def execute_tag_diff(
     set_tags = diff.to_add | diff.to_update
     for (sec_type, sec_name), tags in _group_by_securable(set_tags).items():
         stmt = _build_set_tags_sql(sec_type, sec_name, tags)
-        uc_helper.execute_sql(stmt)
+        try:
+            uc_helper.execute_sql(stmt)
+        except Exception as exc:
+            change_logger.log_error(ExecutionError(statement=stmt, exception=exc))
+            continue
         statements.append(stmt)
         for tag in tags:
             if tag in diff.to_add:
@@ -85,7 +89,11 @@ def execute_tag_diff(
     # UNSET TAGS for removes
     for (sec_type, sec_name), tags in _group_by_securable(diff.to_remove).items():
         stmt = _build_unset_tags_sql(sec_type, sec_name, tags)
-        uc_helper.execute_sql(stmt)
+        try:
+            uc_helper.execute_sql(stmt)
+        except Exception as exc:
+            change_logger.log_error(ExecutionError(statement=stmt, exception=exc))
+            continue
         statements.append(stmt)
         for tag in tags:
             change_logger.log_tag_remove(tag)

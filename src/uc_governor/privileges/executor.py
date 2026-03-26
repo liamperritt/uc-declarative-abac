@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from uc_governor.logger import ChangeLogger
 
 from uc_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
-from uc_governor.types import PrincipalValidationError
+from uc_governor.types import ExecutionError, PrincipalValidationError
 
 
 def _resolve_principal(acct_helper: AccountHelper, principal: str) -> str:
@@ -65,14 +65,22 @@ def execute_privilege_diff(
     for priv in diff.to_grant:
         resolved = _resolve_principal(acct_helper, priv.principal)
         stmt = _build_grant_sql(priv, resolved)
-        uc_helper.execute_sql(stmt)
+        try:
+            uc_helper.execute_sql(stmt)
+        except Exception as exc:
+            change_logger.log_error(ExecutionError(statement=stmt, exception=exc))
+            continue
         statements.append(stmt)
         change_logger.log_grant(priv)
 
     for priv in diff.to_revoke:
         resolved = _resolve_principal(acct_helper, priv.principal)
         stmt = _build_revoke_sql(priv, resolved)
-        uc_helper.execute_sql(stmt)
+        try:
+            uc_helper.execute_sql(stmt)
+        except Exception as exc:
+            change_logger.log_error(ExecutionError(statement=stmt, exception=exc))
+            continue
         statements.append(stmt)
         change_logger.log_revoke(priv)
 
