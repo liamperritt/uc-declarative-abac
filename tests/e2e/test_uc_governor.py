@@ -125,7 +125,7 @@ def test_uc_governor_dry_run(
     )
 
 
-def test_uc_governor_deploy_and_idempotency(
+def test_uc_governor_deploy(
     config_dir: Path,
     workspace_client: WorkspaceClient,
     warehouse_id: str,
