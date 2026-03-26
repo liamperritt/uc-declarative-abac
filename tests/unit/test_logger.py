@@ -80,7 +80,7 @@ def test_change_logger_logs_tag_add() -> None:
     assert len(messages) == 1
     msg = messages[0]
     assert "ADDED" in msg
-    assert "[Catalog my_catalog]" in msg
+    assert "[CATALOG my_catalog]" in msg
     assert "env='prod'" in msg
 
 
@@ -112,7 +112,7 @@ def test_change_logger_logs_tag_update_with_old_value() -> None:
     assert len(messages) == 1
     msg = messages[0]
     assert "UPDATED" in msg
-    assert "[Table my_catalog.sales.orders]" in msg
+    assert "[TABLE my_catalog.sales.orders]" in msg
     assert "classification='internal'" in msg
     assert "classification='confidential'" in msg
     assert "->" in msg
@@ -133,7 +133,7 @@ def test_change_logger_logs_tag_remove() -> None:
     assert len(messages) == 1
     msg = messages[0]
     assert "REMOVED" in msg
-    assert "[Schema my_catalog.sales]" in msg
+    assert "[SCHEMA my_catalog.sales]" in msg
     assert "deprecated" in msg
 
 
@@ -157,7 +157,7 @@ def test_change_logger_logs_grant() -> None:
     assert len(messages) == 1
     msg = messages[0]
     assert "GRANTED" in msg
-    assert "[Schema my_catalog.sales]" in msg
+    assert "[SCHEMA my_catalog.sales]" in msg
     assert "select" in msg
     assert "'data_engineers'" in msg
 
@@ -177,7 +177,7 @@ def test_change_logger_logs_revoke() -> None:
     assert len(messages) == 1
     msg = messages[0]
     assert "REVOKED" in msg
-    assert "[Table my_catalog.sales.orders]" in msg
+    assert "[TABLE my_catalog.sales.orders]" in msg
     assert "modify" in msg
     assert "'temp_users'" in msg
 
@@ -460,11 +460,11 @@ def test_change_logger_logs_tags_ordered_by_type_then_name() -> None:
     assert len(messages) == 5
 
     # Expected order: CATALOG, SCHEMA (cat.s_a), SCHEMA (cat.s_z), TABLE, VOLUME
-    assert "Catalog" in messages[0] and "cat" in messages[0]
-    assert "Schema" in messages[1] and "cat.s_a" in messages[1]
-    assert "Schema" in messages[2] and "cat.s_z" in messages[2]
-    assert "Table" in messages[3] and "cat.s.table_a" in messages[3]
-    assert "Volume" in messages[4] and "cat.s.vol_b" in messages[4]
+    assert "CATALOG" in messages[0] and "cat" in messages[0]
+    assert "SCHEMA" in messages[1] and "cat.s_a" in messages[1]
+    assert "SCHEMA" in messages[2] and "cat.s_z" in messages[2]
+    assert "TABLE" in messages[3] and "cat.s.table_a" in messages[3]
+    assert "VOLUME" in messages[4] and "cat.s.vol_b" in messages[4]
 
 
 def test_change_logger_logs_privileges_ordered_by_type_then_name() -> None:
@@ -508,8 +508,8 @@ def test_change_logger_logs_privileges_ordered_by_type_then_name() -> None:
     assert len(messages) == 4
 
     # Expected order: CATALOG, SCHEMA, TABLE, VOLUME
-    assert "Catalog" in messages[0] and "cat" in messages[0]
-    assert "Schema" in messages[1] and "cat.s_a" in messages[1]
-    assert "Table" in messages[2] and "cat.s.table_b" in messages[2]
-    assert "Volume" in messages[3] and "cat.s.vol_a" in messages[3]
+    assert "CATALOG" in messages[0] and "cat" in messages[0]
+    assert "SCHEMA" in messages[1] and "cat.s_a" in messages[1]
+    assert "TABLE" in messages[2] and "cat.s.table_b" in messages[2]
+    assert "VOLUME" in messages[3] and "cat.s.vol_a" in messages[3]
 
