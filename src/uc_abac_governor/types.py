@@ -69,6 +69,10 @@ class DuplicateResourceError(GovernorError):
     """Raised when duplicate resource names are detected within the same parent."""
 
 
+class UnreferencedDefinitionError(GovernorError):
+    """Raised when definitions exist that are not referenced by any $ref."""
+
+
 class PrincipalValidationError(GovernorError):
     """Raised when one or more principal names cannot be found in the account."""
 

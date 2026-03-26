@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from uc_abac_governor.types import ResolutionError
+from uc_abac_governor.types import ResolutionError, UnreferencedDefinitionError
 
 
 def resolve_refs(definitions: dict, resources: dict) -> dict:
@@ -17,29 +17,48 @@ def resolve_refs(definitions: dict, resources: dict) -> dict:
 
     Returns a flat dict ready for ResourcesConfig.model_validate(),
     i.e. {"catalogs": {...}} with all refs resolved and definitions stripped.
+
+    Raises UnreferencedDefinitionError if any definitions are not referenced.
     """
-    return _resolve_node(definitions, resources)
+    referenced: set[str] = set()
+    result = _resolve_node(definitions, resources, referenced)
+
+    all_refs = {
+        f"$defs/{def_type}/{def_key}"
+        for def_type, entries in definitions.items()
+        if isinstance(entries, dict)
+        for def_key in entries
+    }
+    unreferenced = all_refs - referenced
+    if unreferenced:
+        keys = sorted(unreferenced)
+        raise UnreferencedDefinitionError(
+            f"Unreferenced definitions: {', '.join(keys)}"
+        )
+
+    return result
 
 
-def _resolve_node(definitions: dict, node: Any) -> Any:
+def _resolve_node(definitions: dict, node: Any, referenced: set[str]) -> Any:
     """Recursively resolve $ref entries within an arbitrary node."""
     if isinstance(node, dict):
-        return _resolve_dict(definitions, node)
+        return _resolve_dict(definitions, node, referenced)
     if isinstance(node, list):
-        return [_resolve_node(definitions, item) for item in node]
+        return [_resolve_node(definitions, item, referenced) for item in node]
     return node
 
 
-def _resolve_dict(definitions: dict, node: dict) -> dict:
+def _resolve_dict(definitions: dict, node: dict, referenced: set[str]) -> dict:
     """Resolve a single dict node, handling $ref if present."""
     if "$ref" in node:
-        return _resolve_ref(definitions, node)
-    return {key: _resolve_node(definitions, value) for key, value in node.items()}
+        return _resolve_ref(definitions, node, referenced)
+    return {key: _resolve_node(definitions, value, referenced) for key, value in node.items()}
 
 
-def _resolve_ref(definitions: dict, node: dict) -> dict:
+def _resolve_ref(definitions: dict, node: dict, referenced: set[str]) -> dict:
     """Look up a $ref, apply overrides, and recursively resolve the result."""
     ref_path = node["$ref"]
+    referenced.add(ref_path)
     definition = _lookup_definition(definitions, ref_path)
     resolved = copy.deepcopy(definition)
 
@@ -48,7 +67,7 @@ def _resolve_ref(definitions: dict, node: dict) -> dict:
     resolved.update(overrides)
 
     # Recursively resolve any nested $ref entries
-    return _resolve_node(definitions, resolved)
+    return _resolve_node(definitions, resolved, referenced)
 
 
 def _lookup_definition(definitions: dict, ref: str) -> dict:

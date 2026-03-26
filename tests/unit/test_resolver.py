@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from uc_abac_governor.resolver import resolve_refs
-from uc_abac_governor.types import ResolutionError
+from uc_abac_governor.types import ResolutionError, UnreferencedDefinitionError
 
 
 # ---------------------------------------------------------------------------
@@ -293,3 +293,67 @@ def test_resolver_handles_mixed_refs_and_inline():
 
     # The inline entry is unchanged.
     assert schemas[1] == {"name": "raw", "comment": "Inline"}
+
+
+# ---------------------------------------------------------------------------
+# Unreferenced definitions
+# ---------------------------------------------------------------------------
+
+
+def test_resolver_raises_on_unreferenced_definition():
+    definitions = {
+        "schemas": {
+            "ops|sales": {"name": "sales"},
+            "ops|hr": {"name": "hr"},
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "schemas": [{"$ref": "$defs/schemas/ops|sales"}],
+            }
+        }
+    }
+    with pytest.raises(UnreferencedDefinitionError, match="ops\\|hr"):
+        resolve_refs(definitions, resources)
+
+
+def test_resolver_passes_when_all_definitions_referenced():
+    definitions = {
+        "schemas": {
+            "ops|sales": {"name": "sales"},
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "schemas": [{"$ref": "$defs/schemas/ops|sales"}],
+            }
+        }
+    }
+    result = resolve_refs(definitions, resources)
+    assert "catalogs" in result
+
+
+def test_resolver_raises_with_multiple_unreferenced_definitions():
+    definitions = {
+        "schemas": {
+            "ops|sales": {"name": "sales"},
+            "ops|hr": {"name": "hr"},
+        },
+        "tables": {
+            "ops|sales|orders": {"name": "orders"},
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "schemas": [{"$ref": "$defs/schemas/ops|sales"}],
+            }
+        }
+    }
+    with pytest.raises(UnreferencedDefinitionError) as exc_info:
+        resolve_refs(definitions, resources)
+    msg = str(exc_info.value)
+    assert "ops|hr" in msg
+    assert "ops|sales|orders" in msg
