@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from uc_governor.tags.differ import compute_tag_diff
-from uc_governor.tags.state import SecurableTag, TagDiff
-from uc_governor.types import SecurableType
+from uc_abac_governor.tags.differ import compute_tag_diff
+from uc_abac_governor.tags.state import SecurableTag, TagDiff
+from uc_abac_governor.types import SecurableType
 
 
 # ---------------------------------------------------------------------------

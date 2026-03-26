@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from uc_governor.models import ConfigFile
+from uc_abac_governor.models import ConfigFile
 
 
 def _minimal_catalog(**overrides):

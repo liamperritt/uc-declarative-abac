@@ -12,9 +12,9 @@ from databricks.sdk.service.sql import (
     StatementState,
 )
 
-from uc_governor.privileges.state import SecurablePrivilege
-from uc_governor.tags.state import SecurableTag
-from uc_governor.types import GovernorError, SecurableType
+from uc_abac_governor.privileges.state import SecurablePrivilege
+from uc_abac_governor.tags.state import SecurableTag
+from uc_abac_governor.types import GovernorError, SecurableType
 
 _POLL_INTERVAL_SECONDS = 10
 

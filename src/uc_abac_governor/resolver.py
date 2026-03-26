@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from uc_governor.types import ResolutionError
+from uc_abac_governor.types import ResolutionError
 
 
 def resolve_refs(definitions: dict, resources: dict) -> dict:

@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, field_validator, model_validator
 
-from uc_governor.types import PrivilegeType
+from uc_abac_governor.types import PrivilegeType
 
 
 def _coerce_null_tag_values(tags: dict | None) -> dict | None:

@@ -4,14 +4,14 @@ import logging
 
 from databricks.sdk import WorkspaceClient
 
-from uc_governor.types import (
+from uc_abac_governor.types import (
     DuplicateServicePrincipalError,
     Principal,
     PrincipalType,
     PrincipalValidationError,
 )
 
-_logger = logging.getLogger("uc_governor")
+_logger = logging.getLogger("uc_abac_governor")
 
 
 class WorkspaceHelper:

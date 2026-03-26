@@ -4,10 +4,10 @@ from unittest.mock import MagicMock
 
 import sqlglot
 
-from uc_governor.logger import ChangeLogger
-from uc_governor.tags.executor import execute_tag_diff
-from uc_governor.tags.state import SecurableTag, TagDiff
-from uc_governor.types import SecurableType
+from uc_abac_governor.logger import ChangeLogger
+from uc_abac_governor.tags.executor import execute_tag_diff
+from uc_abac_governor.tags.state import SecurableTag, TagDiff
+from uc_abac_governor.types import SecurableType
 
 
 def _parse_sql(sql: str):

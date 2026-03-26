@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from uc_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
+from uc_abac_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
 
 
 def compute_privilege_diff(

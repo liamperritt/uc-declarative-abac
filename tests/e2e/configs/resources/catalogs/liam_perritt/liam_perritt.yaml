@@ -3,7 +3,7 @@ resources:
     liam_perritt:
       tags:
         uc_gov_env: test
-        uc_gov_managed_by: uc_governor
+        uc_gov_managed_by: uc_abac_governor
       policies:
         - $ref: $defs/policies/abac|grant_use_catalog
         - $ref: $defs/policies/abac|grant_catalog_read

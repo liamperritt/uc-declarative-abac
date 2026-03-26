@@ -5,10 +5,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from uc_governor.governor import run
-from uc_governor.privileges.state import PrivilegeDiff
-from uc_governor.tags.state import TagDiff
-from uc_governor.types import ExecutionBatchError, PrincipalValidationError
+from uc_abac_governor.governor import run
+from uc_abac_governor.privileges.state import PrivilegeDiff
+from uc_abac_governor.tags.state import TagDiff
+from uc_abac_governor.types import ExecutionBatchError, PrincipalValidationError
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +211,7 @@ def test_governor_runs_both_domains_independently(
 # ---------------------------------------------------------------------------
 
 
-@patch("uc_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
 def test_governor_produces_empty_diffs_when_in_sync(
     mock_fetch, tmp_yaml_dir, mock_workspace_client):
     """When actual state matches desired, both diffs are empty and no SQL is executed."""
@@ -393,7 +393,7 @@ def test_governor_fetches_tags_privileges_and_principals_in_parallel(
 def test_governor_raises_execution_batch_error_when_sql_fails(
     tmp_yaml_dir, mock_workspace_client):
     """When mutation SQL fails, governor.run() raises ExecutionBatchError with collected errors."""
-    from uc_governor.types import ExecutionBatchError
+    from uc_abac_governor.types import ExecutionBatchError
 
     root = tmp_yaml_dir(
         {"resources/catalog.yaml": _catalog_with_tags_and_grants_config()}
@@ -471,7 +471,7 @@ def _catalog_with_two_grant_policies_config() -> dict:
 def test_governor_collects_unknown_principal_errors(
     tmp_yaml_dir, mock_workspace_client):
     """Unknown principals are collected as errors in ExecutionBatchError, not raised as PrincipalValidationError."""
-    from uc_governor.types import ExecutionBatchError, ExecutionError
+    from uc_abac_governor.types import ExecutionBatchError, ExecutionError
 
     root = tmp_yaml_dir(
         {"resources/catalog.yaml": _catalog_with_grant_policy_config()}
@@ -504,7 +504,7 @@ def test_governor_collects_unknown_principal_errors(
 def test_governor_continues_with_valid_principals_when_some_are_unknown(
     tmp_yaml_dir, mock_workspace_client):
     """Valid principals get GRANT SQL executed; unknown ones become errors in ExecutionBatchError."""
-    from uc_governor.types import ExecutionBatchError
+    from uc_abac_governor.types import ExecutionBatchError
 
     root = tmp_yaml_dir(
         {"resources/catalog.yaml": _catalog_with_two_grant_policies_config()}

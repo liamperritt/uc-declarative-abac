@@ -6,12 +6,12 @@ from pathlib import Path
 
 from databricks.sdk import WorkspaceClient
 
-from uc_governor.governor import run
+from uc_abac_governor.governor import run
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="UC Governor — declarative ABAC governance for Unity Catalog",
+        description="UC ABAC Governor — declarative ABAC governance for Unity Catalog",
     )
     parser.add_argument(
         "--config-dir",

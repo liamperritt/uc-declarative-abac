@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from uc_governor.types import Principal, PrivilegeType, SecurableType
+from uc_abac_governor.types import Principal, PrivilegeType, SecurableType
 
 
 @dataclass(frozen=True)

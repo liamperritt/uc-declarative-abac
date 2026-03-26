@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import logging
 
-from uc_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
-from uc_governor.tags.state import SecurableTag, TagDiff
-from uc_governor.types import ExecutionError, Principal, SecurableType
+from uc_abac_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
+from uc_abac_governor.tags.state import SecurableTag, TagDiff
+from uc_abac_governor.types import ExecutionError, Principal, SecurableType
 
-_default_logger = logging.getLogger("uc_governor")
+_default_logger = logging.getLogger("uc_abac_governor")
 
 
 def _format_tag(tag_name: str, tag_value: str | None) -> str:

@@ -3,10 +3,10 @@ from __future__ import annotations
 import logging
 from unittest.mock import MagicMock
 
-from uc_governor.privileges.state import SecurablePrivilege
-from uc_governor.logger import ChangeLogger
-from uc_governor.tags.state import SecurableTag
-from uc_governor.types import Principal, PrincipalType, PrivilegeType, SecurableType
+from uc_abac_governor.privileges.state import SecurablePrivilege
+from uc_abac_governor.logger import ChangeLogger
+from uc_abac_governor.tags.state import SecurableTag
+from uc_abac_governor.types import Principal, PrincipalType, PrivilegeType, SecurableType
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +256,7 @@ def test_change_logger_logs_dry_run_summary() -> None:
 
 def test_change_logger_logs_tag_changes() -> None:
     """log_tag_changes logs all adds, updates, and removes from a TagDiff."""
-    from uc_governor.tags.state import TagDiff
+    from uc_abac_governor.tags.state import TagDiff
 
     cl, mock_logger = _make_change_logger()
 
@@ -291,7 +291,7 @@ def test_change_logger_logs_tag_changes() -> None:
 
 def test_change_logger_logs_privilege_changes() -> None:
     """log_privilege_changes logs all grants and revokes from a PrivilegeDiff."""
-    from uc_governor.privileges.state import PrivilegeDiff
+    from uc_abac_governor.privileges.state import PrivilegeDiff
 
     cl, mock_logger = _make_change_logger()
 
@@ -326,7 +326,7 @@ def _make_execution_error(
     statement: str = "GRANT SELECT ON TABLE `cat`.`s`.`t` TO `user`",
     exception: Exception | None = None,
 ) -> "ExecutionError":
-    from uc_governor.types import ExecutionError
+    from uc_abac_governor.types import ExecutionError
 
     return ExecutionError(
         context=statement,
@@ -336,7 +336,7 @@ def _make_execution_error(
 
 def test_change_logger_collects_errors() -> None:
     """log_error() collects ExecutionError instances accessible via .errors."""
-    from uc_governor.types import ExecutionError
+    from uc_abac_governor.types import ExecutionError
 
     cl, _ = _make_change_logger()
     err1 = _make_execution_error(statement="ALTER CATALOG `c` SET TAGS ('a')")
@@ -411,7 +411,7 @@ def test_change_logger_summary_excludes_errors_when_none() -> None:
 
 def test_change_logger_uses_principal_display_name_in_grant_log() -> None:
     """log_grant uses the Principal's display_name (not identifier) in the log message."""
-    from uc_governor.types import Principal, PrincipalType
+    from uc_abac_governor.types import Principal, PrincipalType
 
     cl, mock_logger = _make_change_logger()
     priv = SecurablePrivilege(

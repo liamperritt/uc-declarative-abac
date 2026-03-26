@@ -8,4 +8,4 @@ definitions:
         - j.wang@databricks.com
       tags:
         uc_gov_env: test
-        uc_gov_managed_by: uc_governor
+        uc_gov_managed_by: uc_abac_governor

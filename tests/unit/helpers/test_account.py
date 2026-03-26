@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from uc_governor.helpers.workspace import WorkspaceHelper
-from uc_governor.types import DuplicateServicePrincipalError, PrincipalValidationError
+from uc_abac_governor.helpers.workspace import WorkspaceHelper
+from uc_abac_governor.types import DuplicateServicePrincipalError, PrincipalValidationError
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +241,7 @@ def test_account_helper_find_unknown_principals_returns_empty_when_all_valid() -
 
 def test_workspace_helper_resolves_user_by_name() -> None:
     """resolve_by_name returns a Principal with USER type for a known user."""
-    from uc_governor.types import Principal, PrincipalType
+    from uc_abac_governor.types import Principal, PrincipalType
 
     client = _make_account_client(users=[_make_user("jane@co.com")])
     helper = WorkspaceHelper(client)
@@ -254,7 +254,7 @@ def test_workspace_helper_resolves_user_by_name() -> None:
 
 def test_workspace_helper_resolves_group_by_name() -> None:
     """resolve_by_name returns a Principal with GROUP type for a known group."""
-    from uc_governor.types import Principal, PrincipalType
+    from uc_abac_governor.types import Principal, PrincipalType
 
     client = _make_account_client(groups=[_make_group("data_engineers")])
     helper = WorkspaceHelper(client)
@@ -267,7 +267,7 @@ def test_workspace_helper_resolves_group_by_name() -> None:
 
 def test_workspace_helper_resolves_sp_by_name() -> None:
     """resolve_by_name returns a Principal with SP type, using application_id as identifier."""
-    from uc_governor.types import Principal, PrincipalType
+    from uc_abac_governor.types import Principal, PrincipalType
 
     client = _make_account_client(
         service_principals=[_make_sp("my-sp", "app-123")],
@@ -282,7 +282,7 @@ def test_workspace_helper_resolves_sp_by_name() -> None:
 
 def test_workspace_helper_resolves_sp_by_identifier() -> None:
     """resolve_by_identifier returns a Principal for a known SP application_id."""
-    from uc_governor.types import Principal, PrincipalType
+    from uc_abac_governor.types import Principal, PrincipalType
 
     client = _make_account_client(
         service_principals=[_make_sp("my-sp", "app-123")],
@@ -297,7 +297,7 @@ def test_workspace_helper_resolves_sp_by_identifier() -> None:
 
 def test_workspace_helper_resolves_user_by_identifier() -> None:
     """resolve_by_identifier returns a Principal for a known user email."""
-    from uc_governor.types import Principal, PrincipalType
+    from uc_abac_governor.types import Principal, PrincipalType
 
     client = _make_account_client(users=[_make_user("jane@co.com")])
     helper = WorkspaceHelper(client)
@@ -315,7 +315,7 @@ def test_workspace_helper_resolves_user_by_identifier() -> None:
 
 def test_workspace_helper_returns_principals_dict() -> None:
     """get_principals returns a dict mapping display name to Principal."""
-    from uc_governor.types import Principal, PrincipalType
+    from uc_abac_governor.types import Principal, PrincipalType
 
     client = _make_account_client(
         users=[_make_user("jane@co.com")],

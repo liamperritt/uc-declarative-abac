@@ -3,9 +3,9 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 
-from uc_governor.models import ConfigFile, GrantPolicyConfig
-from uc_governor.tags.state import SecurableTag
-from uc_governor.types import PrivilegeType, SecurableType
+from uc_abac_governor.models import ConfigFile, GrantPolicyConfig
+from uc_abac_governor.tags.state import SecurableTag
+from uc_abac_governor.types import PrivilegeType, SecurableType
 
 # Privileges valid for each securable type. Higher-level securables inherit
 # all privileges from lower levels. Unknown privileges are allowed on all types.

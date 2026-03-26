@@ -6,6 +6,6 @@ definitions:
         - select
         - read_volume
       to:
-        - uc_governor_test_team
+        - uc_abac_governor_test_team
       tags:
         uc_gov_zone: landing

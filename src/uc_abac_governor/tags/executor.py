@@ -4,11 +4,11 @@ from collections import defaultdict
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from uc_governor.helpers.unity_catalog import UnityCatalogHelper
-    from uc_governor.logger import ChangeLogger
+    from uc_abac_governor.helpers.unity_catalog import UnityCatalogHelper
+    from uc_abac_governor.logger import ChangeLogger
 
-from uc_governor.tags.state import SecurableTag, TagDiff
-from uc_governor.types import ExecutionError, SecurableType
+from uc_abac_governor.tags.state import SecurableTag, TagDiff
+from uc_abac_governor.types import ExecutionError, SecurableType
 
 
 def _format_tag_entry(tag: SecurableTag) -> str:

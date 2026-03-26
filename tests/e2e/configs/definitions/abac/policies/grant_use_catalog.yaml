@@ -5,6 +5,6 @@ definitions:
       privileges:
         - use_catalog
       to:
-        - uc_governor_test_team
+        - uc_abac_governor_test_team
       tags:
-        uc_gov_managed_by: uc_governor
+        uc_gov_managed_by: uc_abac_governor

@@ -6,10 +6,10 @@ import pytest
 import sqlglot
 from databricks.sdk.service.sql import Disposition, StatementState
 
-from uc_governor.helpers.unity_catalog import UnityCatalogHelper
-from uc_governor.privileges.state import SecurablePrivilege
-from uc_governor.tags.state import SecurableTag
-from uc_governor.types import GovernorError, SecurableType
+from uc_abac_governor.helpers.unity_catalog import UnityCatalogHelper
+from uc_abac_governor.privileges.state import SecurablePrivilege
+from uc_abac_governor.tags.state import SecurableTag
+from uc_abac_governor.types import GovernorError, SecurableType
 
 WAREHOUSE_ID = "test-warehouse-id"
 
@@ -61,7 +61,7 @@ def _make_mock_workspace_client(data_array: list[list[str]] | None = None) -> Ma
 # ---------------------------------------------------------------------------
 
 
-@patch("uc_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_fetches_actual_tags_from_query_results(mock_fetch):
     """Mock returns tag rows -> correct set of SecurableTag."""
     rows = [
@@ -181,7 +181,7 @@ def test_uc_helper_tags_query_is_valid_sql():
 # ---------------------------------------------------------------------------
 
 
-@patch("uc_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_fetches_actual_privileges_from_query_results(mock_fetch):
     """Mock returns privilege rows -> correct set of SecurablePrivilege."""
     rows = [
@@ -311,7 +311,7 @@ def _make_statement_response(
     return response
 
 
-@patch("uc_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_returns_results_when_query_completes_within_timeout(mock_fetch):
     """When execute_statement returns SUCCEEDED, results are returned without polling."""
     tag_rows = [
@@ -342,7 +342,7 @@ def test_uc_helper_returns_results_when_query_completes_within_timeout(mock_fetc
 
 
 @patch("time.sleep")
-@patch("uc_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_polls_for_results_when_query_exceeds_timeout(mock_fetch, mock_sleep):
     """When execute_statement returns PENDING, polls get_statement until SUCCEEDED."""
     tag_rows = [
@@ -376,7 +376,7 @@ def test_uc_helper_polls_for_results_when_query_exceeds_timeout(mock_fetch, mock
     assert len(result) == 1
 
 
-@patch("uc_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_raises_on_failed_query(mock_fetch):
     """When execute_statement returns FAILED, a GovernorError is raised."""
     mock_fetch.return_value = []
@@ -394,7 +394,7 @@ def test_uc_helper_raises_on_failed_query(mock_fetch):
         helper.fetch_actual_tags(["my_catalog"])
 
 
-@patch("uc_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_uses_continue_on_wait_timeout(mock_fetch):
     """execute_statement is called with on_wait_timeout=CONTINUE for hybrid polling."""
     mock_fetch.return_value = []
