@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "uc-governor"
+name = "uc-abac-governor"
 version = "0.1.0"
 description = "Declarative ABAC governance engine for Databricks Unity Catalog"
 requires-python = ">=3.11"
@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-uc-governor = "uc_abac_governor.__main__:main"
+uc-abac-governor = "uc_abac_governor.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/uc_abac_governor"]
