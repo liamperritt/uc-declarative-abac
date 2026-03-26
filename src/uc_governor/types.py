@@ -19,16 +19,16 @@ class PrincipalType(str, Enum):
 
 @dataclass(frozen=True)
 class Principal:
-    """Represents a workspace principal with both its system identifier and display name.
+    """Represents a workspace principal with both its identifier and name.
 
-    - User: identifier=username, display_name=display_name
-    - Group: identifier=display_name, display_name=display_name
-    - Service Principal: identifier=application_id, display_name=display_name
+    - User: identifier=username, name=username
+    - Group: identifier=display_name, name=display_name
+    - Service Principal: identifier=application_id, name=display_name
     """
 
     principal_type: PrincipalType
     identifier: str
-    display_name: str
+    name: str
 
 
 class GovernorError(Exception):

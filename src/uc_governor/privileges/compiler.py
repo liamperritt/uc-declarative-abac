@@ -5,7 +5,9 @@ from collections import defaultdict
 from uc_governor.models import ConfigFile, GrantPolicyConfig
 from uc_governor.privileges.state import SecurablePrivilege
 from uc_governor.tags.state import SecurableTag
-from uc_governor.types import SecurableType
+from uc_governor.types import Principal, PrincipalType, SecurableType
+
+UNRESOLVED_IDENTIFIER = "__UNRESOLVED__"
 
 
 def compile_desired_privileges(
@@ -14,16 +16,17 @@ def compile_desired_privileges(
 ) -> set[SecurablePrivilege]:
     """Compute desired privileges by matching grant policies against desired tags.
 
-    For each catalog's grant policies, finds objects whose tags are a superset
-    of the policy's tags (AND semantics, exact value match). Emits a
-    SecurablePrivilege for each (matching_object, principal, privilege_type).
+    For each grant policy, finds objects whose tags are a superset of the
+    policy's tags (AND semantics, exact value match). Emits a SecurablePrivilege
+    for each (matching_object, principal, privilege_type).
 
-    Takes desired_tags as input so it can match policies against the tag state
-    without reaching into the tags domain's internals.
+    Principals are emitted as unresolved Principal objects (identifier set to
+    __UNRESOLVED__). The governor resolves these to real identifiers using
+    WorkspaceHelper before diffing.
     """
     tag_index = _build_tag_index(desired_tags)
     policies = _collect_policies(config)
-    return _match_policies(policies, tag_index, desired_tags)
+    return _match_policies(policies, tag_index)
 
 
 def _build_tag_index(
@@ -61,7 +64,6 @@ def _collect_policies(config: ConfigFile) -> list[GrantPolicyConfig]:
 def _match_policies(
     policies: list[GrantPolicyConfig],
     tag_index: dict[str, tuple[SecurableType, set[tuple[str, str | None]]]],
-    desired_tags: set[SecurableTag],
 ) -> set[SecurablePrivilege]:
     """Match policies against the tag index and emit privileges."""
     result: set[SecurablePrivilege] = set()
@@ -70,13 +72,17 @@ def _match_policies(
         for full_name, (sec_type, actual_tags) in tag_index.items():
             if not required.issubset(actual_tags):
                 continue
-            for principal in policy.to:
+            for principal_name in policy.to:
                 for privilege in policy.privileges:
                     result.add(
                         SecurablePrivilege(
                             securable_type=sec_type,
                             securable_full_name=full_name,
-                            principal=principal,
+                            principal=Principal(
+                                PrincipalType.GROUP,
+                                UNRESOLVED_IDENTIFIER,
+                                principal_name,
+                            ),
                             privilege_type=privilege.upper(),
                         )
                     )

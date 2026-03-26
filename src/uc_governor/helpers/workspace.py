@@ -45,10 +45,6 @@ class WorkspaceHelper:
         sp_map: dict[str, str] = {}
         for sp in self._client.service_principals.list(attributes="displayName,applicationId"):
             if sp.display_name in sp_map:
-                _logger.warning(
-                    f"Duplicate service principal display name: {sp.display_name} "
-                    f"(keeping first, skipping application_id={sp.application_id})"
-                )
                 self._duplicate_sps.add(sp.display_name)
                 continue
             sp_map[sp.display_name] = sp.application_id

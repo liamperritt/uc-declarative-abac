@@ -23,8 +23,8 @@ from uc_governor.types import ExecutionBatchError, ExecutionError, PrincipalVali
 
 
 def extract_principals(privileges: set[SecurablePrivilege]) -> list[str]:
-    """Extract unique principal names from a set of desired privileges."""
-    return list({p.principal for p in privileges})
+    """Extract unique principal display names from a set of desired privileges."""
+    return list({p.principal.name for p in privileges})
 
 
 def _try_resolve_identifier(ws_helper: WorkspaceHelper, identifier: str) -> bool:
@@ -59,11 +59,11 @@ def _resolve_privileges(
         SecurablePrivilege(
             securable_type=p.securable_type,
             securable_full_name=p.securable_full_name,
-            principal=ws_helper.resolve_by_name(p.principal),
+            principal=ws_helper.resolve_by_name(p.principal.name),
             privilege_type=p.privilege_type,
         )
         for p in desired_privileges
-        if p.principal not in unknown
+        if p.principal.name not in unknown
     }
 
     resolved_actual = {

@@ -104,7 +104,7 @@ class ChangeLogger:
     def _principal_name(self, principal: object) -> str:
         """Return the display name for a principal (str or Principal object)."""
         if isinstance(principal, Principal):
-            return principal.display_name
+            return principal.name
         return str(principal)
 
     def log_grant(self, privilege: SecurablePrivilege) -> None:
