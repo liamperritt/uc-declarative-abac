@@ -33,6 +33,7 @@ def _build_tags_query(catalog_names: list[str]) -> str:
         "schema_tags": ("SCHEMA", "concat(catalog_name, '.', schema_name)"),
         "table_tags": ("TABLE", "concat(catalog_name, '.', schema_name, '.', table_name)"),
         "volume_tags": ("VOLUME", "concat(catalog_name, '.', schema_name, '.', volume_name)"),
+        "column_tags": ("COLUMN", "concat(catalog_name, '.', schema_name, '.', table_name, '.', column_name)"),
     }
     parts = []
     for table, (sec_type, full_name_expr) in full_name_exprs.items():

@@ -30,6 +30,11 @@ def _build_set_tags_sql(
 ) -> str:
     """Build an ALTER SET TAGS statement for a batch of tags on one securable."""
     entries = ", ".join(sorted(_format_tag_entry(t) for t in tags))
+    if securable_type == SecurableType.COLUMN:
+        parts = securable_full_name.split(".")
+        table_name = ".".join(parts[:3])
+        column_name = parts[3]
+        return f"ALTER TABLE {_quote_securable(table_name)} ALTER COLUMN `{column_name}` SET TAGS ({entries})"
     quoted = _quote_securable(securable_full_name)
     return f"ALTER {securable_type.value} {quoted} SET TAGS ({entries})"
 
@@ -41,6 +46,11 @@ def _build_unset_tags_sql(
 ) -> str:
     """Build an ALTER UNSET TAGS statement for a batch of tags on one securable."""
     entries = ", ".join(sorted(f"'{t.tag_name}'" for t in tags))
+    if securable_type == SecurableType.COLUMN:
+        parts = securable_full_name.split(".")
+        table_name = ".".join(parts[:3])
+        column_name = parts[3]
+        return f"ALTER TABLE {_quote_securable(table_name)} ALTER COLUMN `{column_name}` UNSET TAGS ({entries})"
     quoted = _quote_securable(securable_full_name)
     return f"ALTER {securable_type.value} {quoted} UNSET TAGS ({entries})"
 

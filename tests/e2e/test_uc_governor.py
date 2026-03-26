@@ -46,6 +46,8 @@ EXPECTED_TAGS = {
     # Table: lff_sqlserver_bronze.dummy_cdc_sink
     SecurableTag(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_cdc_sink", "uc_gov_classification", "internal"),
     SecurableTag(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_cdc_sink", "uc_gov_pipeline", "lff"),
+    # Column: lff_sqlserver_bronze.dummy_cdc_sink.data
+    SecurableTag(SecurableType.COLUMN, "liam_perritt.lff_sqlserver_bronze.dummy_cdc_sink.data", "uc_gov_classification", "internal"),
     # Table: lff_sqlserver_bronze.dummy_table_cdc_st
     SecurableTag(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_table_cdc_st", "uc_gov_classification", "internal"),
     SecurableTag(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_table_cdc_st", "uc_gov_pipeline", "lff"),

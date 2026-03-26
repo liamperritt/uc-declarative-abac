@@ -347,3 +347,56 @@ def test_tag_executor_collects_all_errors():
     assert len(change_logger.errors) == 2
     # No successful statements
     assert stmts == []
+
+
+# ---------------------------------------------------------------------------
+# Column tag SQL
+# ---------------------------------------------------------------------------
+
+
+def test_tag_executor_generates_alter_column_set_tags_sql():
+    """A COLUMN tag in to_add produces ALTER TABLE ... ALTER COLUMN ... SET TAGS."""
+    uc_helper = MagicMock()
+    diff = TagDiff(
+        to_add={
+            SecurableTag(
+                securable_type=SecurableType.COLUMN,
+                securable_full_name="cat.schema.orders.email",
+                tag_name="pii",
+                tag_value="true",
+            )
+        },
+    )
+
+    stmts = execute_tag_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    sql = stmts[0]
+
+    _assert_sql_contains(sql, "ALTER TABLE", "ALTER COLUMN", "SET TAGS", "email", "pii")
+
+    uc_helper.execute_sql.assert_called_once_with(sql)
+
+
+def test_tag_executor_generates_alter_column_unset_tags_sql():
+    """A COLUMN tag in to_remove produces ALTER TABLE ... ALTER COLUMN ... UNSET TAGS."""
+    uc_helper = MagicMock()
+    diff = TagDiff(
+        to_remove={
+            SecurableTag(
+                securable_type=SecurableType.COLUMN,
+                securable_full_name="cat.schema.orders.email",
+                tag_name="pii",
+                tag_value="true",
+            )
+        },
+    )
+
+    stmts = execute_tag_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    sql = stmts[0]
+
+    _assert_sql_contains(sql, "ALTER TABLE", "ALTER COLUMN", "UNSET TAGS", "email", "pii")
+
+    uc_helper.execute_sql.assert_called_once_with(sql)

@@ -41,7 +41,10 @@ def compile_desired_tags(config: ConfigFile) -> set[SecurableTag]:
             tags |= _emit_tags(SecurableType.SCHEMA, schema_full, schema)
 
             for table in schema.tables or []:
-                tags |= _emit_tags(SecurableType.TABLE, f"{schema_full}.{table.name}", table)
+                table_full = f"{schema_full}.{table.name}"
+                tags |= _emit_tags(SecurableType.TABLE, table_full, table)
+                for col in table.columns or []:
+                    tags |= _emit_tags(SecurableType.COLUMN, f"{table_full}.{col.name}", col)
 
             for volume in schema.volumes or []:
                 tags |= _emit_tags(SecurableType.VOLUME, f"{schema_full}.{volume.name}", volume)

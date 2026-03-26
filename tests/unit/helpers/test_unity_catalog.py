@@ -414,3 +414,23 @@ def test_uc_helper_uses_continue_on_wait_timeout(mock_fetch):
     assert "CONTINUE" in on_wait_str, (
         f"Expected on_wait_timeout to contain CONTINUE, got {on_wait_timeout}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Column tags query
+# ---------------------------------------------------------------------------
+
+
+def test_uc_helper_tags_query_includes_column_tags():
+    """The tags fetch query references the column_tags system table."""
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.fetch_actual_tags(["my_catalog"])
+
+    sql = _get_executed_sql(client)
+
+    # Should reference column_tags alongside the other tag tables
+    assert "column_tags" in sql, (
+        f"Expected 'column_tags' in SQL: {sql}"
+    )

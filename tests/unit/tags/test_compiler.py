@@ -300,3 +300,77 @@ def test_tag_compiler_defaults_to_dict_key_when_catalog_name_omitted():
         ),
     }
     assert result == expected
+
+
+# ---------------------------------------------------------------------------
+# Column tags
+# ---------------------------------------------------------------------------
+
+
+def test_tag_compiler_emits_column_tags():
+    """A column with tags produces a SecurableTag with a four-part full name."""
+    config = ConfigFile.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "columns": [
+                                        {
+                                            "name": "email",
+                                            "tags": {"pii": "true"},
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    result = compile_desired_tags(config)
+
+    assert SecurableTag(
+        securable_type=SecurableType.COLUMN,
+        securable_full_name="my_catalog.sales.orders.email",
+        tag_name="pii",
+        tag_value="true",
+    ) in result
+
+
+def test_tag_compiler_emits_no_column_tags_when_columns_have_no_tags():
+    """A table with columns that have no tags produces no COLUMN-type tags."""
+    config = ConfigFile.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "columns": [
+                                        {
+                                            "name": "email",
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    result = compile_desired_tags(config)
+
+    column_tags = {t for t in result if t.securable_type == SecurableType.COLUMN}
+    assert column_tags == set()
