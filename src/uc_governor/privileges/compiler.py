@@ -13,7 +13,7 @@ class CompiledPrivilege:
     """Intermediate privilege representation emitted by the compiler.
 
     Contains the raw principal name from the YAML config (a plain string).
-    The governor resolves this to a Principal object with a real identifier
+    This needs to be resolved to a Principal object with a real identifier
     before diffing.
     """
 
