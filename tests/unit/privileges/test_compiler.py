@@ -669,3 +669,115 @@ def test_privilege_compiler_allows_all_privileges_on_any_securable():
         principal="team",
         privilege_type=PrivilegeType.ALL_PRIVILEGES,
     ) in result
+
+
+# ---------------------------------------------------------------------------
+# Expiry date
+# ---------------------------------------------------------------------------
+
+
+def test_privilege_compiler_excludes_expired_policy():
+    """A grant policy whose expiry_date <= run_date produces no privileges."""
+    from datetime import date
+
+    config = ConfigFile.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["team"],
+                            "tags": {"env": "prod"},
+                            "expiry_date": date(2025, 1, 1),
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            tag_name="env",
+            tag_value="prod",
+        ),
+    }
+
+    result = compile_desired_privileges(config, desired_tags, run_date=date(2025, 1, 1))
+
+    assert result == set()
+
+
+def test_privilege_compiler_includes_active_policy():
+    """A grant policy whose expiry_date > run_date produces privileges normally."""
+    from datetime import date
+
+    config = ConfigFile.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["team"],
+                            "tags": {"env": "prod"},
+                            "expiry_date": date(2026, 12, 31),
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            tag_name="env",
+            tag_value="prod",
+        ),
+    }
+
+    result = compile_desired_privileges(config, desired_tags, run_date=date(2025, 6, 1))
+
+    assert len(result) > 0
+
+
+def test_privilege_compiler_includes_policy_with_no_expiry():
+    """A grant policy with no expiry_date is always active regardless of run_date."""
+    from datetime import date
+
+    config = ConfigFile.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["team"],
+                            "tags": {"env": "prod"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            tag_name="env",
+            tag_value="prod",
+        ),
+    }
+
+    result = compile_desired_privileges(config, desired_tags, run_date=date(2099, 12, 31))
+
+    assert len(result) > 0

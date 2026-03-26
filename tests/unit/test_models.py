@@ -295,3 +295,55 @@ def test_grant_policy_config_converts_null_tag_values_to_empty_string():
     policy = config.catalogs["my_catalog"].policies[0]
     assert policy.tags["env"] == "prod"
     assert policy.tags["operations"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Expiry date
+# ---------------------------------------------------------------------------
+
+
+def test_grant_policy_config_accepts_expiry_date():
+    """A grant policy with an expiry_date parses successfully."""
+    from datetime import date
+
+    config = ConfigFile.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["team"],
+                            "tags": {"env": "prod"},
+                            "expiry_date": date(2026, 5, 1),
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    policy = config.catalogs["cat"].policies[0]
+    assert policy.expiry_date == date(2026, 5, 1)
+
+
+def test_grant_policy_config_defaults_expiry_date_to_none():
+    """A grant policy without expiry_date defaults to None."""
+    config = ConfigFile.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["team"],
+                            "tags": {"env": "prod"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    policy = config.catalogs["cat"].policies[0]
+    assert policy.expiry_date is None

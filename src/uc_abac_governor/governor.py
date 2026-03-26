@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 from pathlib import Path
 
 from databricks.sdk import WorkspaceClient
@@ -130,7 +131,7 @@ def run(
 
     # 4. Privileges workflow
     change_logger = ChangeLogger(dry_run=dry_run, logger=_logger)
-    compiled_privileges = compile_desired_privileges(config, desired_tags)
+    compiled_privileges = compile_desired_privileges(config, desired_tags, run_date=date.today())
     resolved_desired = _resolve_compiled_privileges(compiled_privileges, ws_helper, change_logger)
     resolved_actual = _resolve_actual_privileges(actual_privileges, ws_helper)
     privilege_diff = compute_privilege_diff(resolved_desired, resolved_actual)

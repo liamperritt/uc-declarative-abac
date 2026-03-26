@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, field_validator, model_validator
@@ -20,6 +21,7 @@ class GrantPolicyConfig(BaseModel):
     privileges: list[PrivilegeType]
     to: list[str]
     tags: dict[str, str]
+    expiry_date: date | None = None
 
     @field_validator("tags", mode="before")
     @classmethod

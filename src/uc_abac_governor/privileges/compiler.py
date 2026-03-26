@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import date
 
 from uc_abac_governor.models import ConfigFile, GrantPolicyConfig
 from uc_abac_governor.tags.state import SecurableTag
@@ -56,6 +57,7 @@ class CompiledPrivilege:
 def compile_desired_privileges(
     config: ConfigFile,
     desired_tags: set[SecurableTag],
+    run_date: date | None = None,
 ) -> set[CompiledPrivilege]:
     """Compute desired privileges by matching grant policies against desired tags.
 
@@ -63,9 +65,15 @@ def compile_desired_privileges(
     policy's tags (AND semantics, exact value match). Emits a CompiledPrivilege
     for each (matching_object, principal, privilege_type).
     """
+    if run_date is None:
+        run_date = date.today()
     tag_index = _build_tag_index(desired_tags)
     policies = _collect_policies(config)
-    return _match_policies(policies, tag_index)
+    active_policies = [
+        p for p in policies
+        if p.expiry_date is None or p.expiry_date > run_date
+    ]
+    return _match_policies(active_policies, tag_index)
 
 
 def _build_tag_index(
