@@ -49,7 +49,7 @@ def execute_privilege_diff(
     """
     statements: list[str] = []
 
-    for priv in diff.to_grant:
+    for priv in sorted(diff.to_grant, key=lambda p: (p.securable_type.value, p.securable_full_name)):
         stmt = _build_grant_sql(priv)
         try:
             uc_helper.execute_sql(stmt)
@@ -59,7 +59,7 @@ def execute_privilege_diff(
         statements.append(stmt)
         change_logger.log_grant(priv)
 
-    for priv in diff.to_revoke:
+    for priv in sorted(diff.to_revoke, key=lambda p: (p.securable_type.value, p.securable_full_name)):
         stmt = _build_revoke_sql(priv)
         try:
             uc_helper.execute_sql(stmt)

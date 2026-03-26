@@ -129,21 +129,23 @@ class ChangeLogger:
 
     def log_tag_changes(self, diff: TagDiff) -> None:
         """Log all tag changes from a TagDiff."""
-        for tag in diff.to_add:
+        sort_key = lambda t: (t.securable_type.value, t.securable_full_name)
+        for tag in sorted(diff.to_add, key=sort_key):
             self.log_tag_add(tag)
-        for tag in diff.to_update:
+        for tag in sorted(diff.to_update, key=sort_key):
             old_value = diff.old_values.get(
                 (tag.securable_type, tag.securable_full_name, tag.tag_name)
             )
             self.log_tag_update(tag, old_value)
-        for tag in diff.to_remove:
+        for tag in sorted(diff.to_remove, key=sort_key):
             self.log_tag_remove(tag)
 
     def log_privilege_changes(self, diff: PrivilegeDiff) -> None:
         """Log all privilege changes from a PrivilegeDiff."""
-        for priv in diff.to_grant:
+        sort_key = lambda p: (p.securable_type.value, p.securable_full_name)
+        for priv in sorted(diff.to_grant, key=sort_key):
             self.log_grant(priv)
-        for priv in diff.to_revoke:
+        for priv in sorted(diff.to_revoke, key=sort_key):
             self.log_revoke(priv)
 
     # ------------------------------------------------------------------

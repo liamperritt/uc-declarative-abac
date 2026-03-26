@@ -431,3 +431,85 @@ def test_change_logger_uses_principal_display_name_in_grant_log() -> None:
     # The system identifier must NOT appear in the log
     assert "app-id-123" not in msg
 
+
+# ---------------------------------------------------------------------------
+# Log ordering
+# ---------------------------------------------------------------------------
+
+
+def test_change_logger_logs_tags_ordered_by_type_then_name() -> None:
+    """log_tag_changes emits messages ordered by securable type then full name."""
+    from uc_abac_governor.tags.state import TagDiff
+
+    cl, mock_logger = _make_change_logger()
+
+    # Five tags on different securables in deliberate disorder.
+    tags = [
+        _make_tag(securable_type=SecurableType.VOLUME, securable_full_name="cat.s.vol_b", tag_name="z", tag_value="1"),
+        _make_tag(securable_type=SecurableType.TABLE, securable_full_name="cat.s.table_a", tag_name="y", tag_value="2"),
+        _make_tag(securable_type=SecurableType.CATALOG, securable_full_name="cat", tag_name="x", tag_value="3"),
+        _make_tag(securable_type=SecurableType.SCHEMA, securable_full_name="cat.s_z", tag_name="w", tag_value="4"),
+        _make_tag(securable_type=SecurableType.SCHEMA, securable_full_name="cat.s_a", tag_name="v", tag_value="5"),
+    ]
+
+    diff = TagDiff(to_add=set(tags))
+
+    cl.log_tag_changes(diff)
+
+    messages = _info_messages(mock_logger)
+    assert len(messages) == 5
+
+    # Expected order: CATALOG, SCHEMA (cat.s_a), SCHEMA (cat.s_z), TABLE, VOLUME
+    assert "Catalog" in messages[0] and "cat" in messages[0]
+    assert "Schema" in messages[1] and "cat.s_a" in messages[1]
+    assert "Schema" in messages[2] and "cat.s_z" in messages[2]
+    assert "Table" in messages[3] and "cat.s.table_a" in messages[3]
+    assert "Volume" in messages[4] and "cat.s.vol_b" in messages[4]
+
+
+def test_change_logger_logs_privileges_ordered_by_type_then_name() -> None:
+    """log_privilege_changes emits messages ordered by securable type then full name."""
+    from uc_abac_governor.privileges.state import PrivilegeDiff
+
+    cl, mock_logger = _make_change_logger()
+
+    diff = PrivilegeDiff(
+        to_grant={
+            SecurablePrivilege(
+                securable_type=SecurableType.VOLUME,
+                securable_full_name="cat.s.vol_a",
+                principal=Principal(PrincipalType.GROUP, "team_a", "team_a"),
+                privilege_type=PrivilegeType.READ_VOLUME,
+            ),
+            SecurablePrivilege(
+                securable_type=SecurableType.CATALOG,
+                securable_full_name="cat",
+                principal=Principal(PrincipalType.GROUP, "team_b", "team_b"),
+                privilege_type=PrivilegeType.USE_CATALOG,
+            ),
+            SecurablePrivilege(
+                securable_type=SecurableType.TABLE,
+                securable_full_name="cat.s.table_b",
+                principal=Principal(PrincipalType.GROUP, "team_c", "team_c"),
+                privilege_type=PrivilegeType.SELECT,
+            ),
+            SecurablePrivilege(
+                securable_type=SecurableType.SCHEMA,
+                securable_full_name="cat.s_a",
+                principal=Principal(PrincipalType.GROUP, "team_d", "team_d"),
+                privilege_type=PrivilegeType.USE_SCHEMA,
+            ),
+        },
+    )
+
+    cl.log_privilege_changes(diff)
+
+    messages = _info_messages(mock_logger)
+    assert len(messages) == 4
+
+    # Expected order: CATALOG, SCHEMA, TABLE, VOLUME
+    assert "Catalog" in messages[0] and "cat" in messages[0]
+    assert "Schema" in messages[1] and "cat.s_a" in messages[1]
+    assert "Table" in messages[2] and "cat.s.table_b" in messages[2]
+    assert "Volume" in messages[3] and "cat.s.vol_a" in messages[3]
+

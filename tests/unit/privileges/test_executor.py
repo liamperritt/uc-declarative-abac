@@ -290,3 +290,52 @@ def test_privilege_executor_uses_principal_identifier_in_grant_sql():
     assert "app-id-123" in sql
     # The display name must NOT appear in the SQL
     assert "my-etl-sp" not in sql
+
+
+# ---------------------------------------------------------------------------
+# Execution order
+# ---------------------------------------------------------------------------
+
+
+def test_privilege_executor_executes_sql_in_securable_order():
+    """Privileges are executed ordered by securable type then full name."""
+    uc_helper = MagicMock()
+
+    diff = PrivilegeDiff(
+        to_grant={
+            SecurablePrivilege(
+                securable_type=SecurableType.TABLE,
+                securable_full_name="cat.s.table_b",
+                principal=Principal(PrincipalType.GROUP, "team_a", "team_a"),
+                privilege_type=PrivilegeType.SELECT,
+            ),
+            SecurablePrivilege(
+                securable_type=SecurableType.CATALOG,
+                securable_full_name="cat_a",
+                principal=Principal(PrincipalType.GROUP, "team_b", "team_b"),
+                privilege_type=PrivilegeType.USE_CATALOG,
+            ),
+            SecurablePrivilege(
+                securable_type=SecurableType.TABLE,
+                securable_full_name="cat.s.table_a",
+                principal=Principal(PrincipalType.GROUP, "team_c", "team_c"),
+                privilege_type=PrivilegeType.SELECT,
+            ),
+            SecurablePrivilege(
+                securable_type=SecurableType.CATALOG,
+                securable_full_name="cat_b",
+                principal=Principal(PrincipalType.GROUP, "team_d", "team_d"),
+                privilege_type=PrivilegeType.USE_CATALOG,
+            ),
+        },
+    )
+
+    stmts = execute_privilege_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 4
+
+    # Expected order: CATALOG cat_a, CATALOG cat_b, TABLE cat.s.table_a, TABLE cat.s.table_b
+    assert "cat_a" in stmts[0]
+    assert "cat_b" in stmts[1]
+    assert "cat.s.table_a".replace(".", "`.`") in stmts[2] or "cat.s.table_a" in stmts[2].replace("`", "")
+    assert "cat.s.table_b".replace(".", "`.`") in stmts[3] or "cat.s.table_b" in stmts[3].replace("`", "")

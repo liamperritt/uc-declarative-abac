@@ -80,7 +80,7 @@ def execute_tag_diff(
 
     # SET TAGS for adds and updates combined
     set_tags = diff.to_add | diff.to_update
-    for (sec_type, sec_name), tags in _group_by_securable(set_tags).items():
+    for (sec_type, sec_name), tags in sorted(_group_by_securable(set_tags).items()):
         stmt = _build_set_tags_sql(sec_type, sec_name, tags)
         try:
             uc_helper.execute_sql(stmt)
@@ -97,7 +97,7 @@ def execute_tag_diff(
                 ))
 
     # UNSET TAGS for removes
-    for (sec_type, sec_name), tags in _group_by_securable(diff.to_remove).items():
+    for (sec_type, sec_name), tags in sorted(_group_by_securable(diff.to_remove).items()):
         stmt = _build_unset_tags_sql(sec_type, sec_name, tags)
         try:
             uc_helper.execute_sql(stmt)
