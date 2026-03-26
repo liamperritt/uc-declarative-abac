@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -25,6 +26,8 @@ from uc_governor.types import (
     PrivilegeType,
     PrincipalValidationError,
 )
+
+_logger = logging.getLogger("uc_governor")
 
 
 def _resolve_compiled_privileges(
@@ -109,9 +112,9 @@ def run(
     catalog_names = list(config.catalogs.keys())
 
     # 2. Parallel initial fetch (tags, privileges, and principals concurrently)
-    change_logger = ChangeLogger(dry_run=dry_run)
     uc_helper = UnityCatalogHelper(workspace_client, warehouse_id)
     ws_helper = WorkspaceHelper(workspace_client)
+    _logger.info("Fetching current state from system tables (this can take several minutes)...")
     with ThreadPoolExecutor() as pool:
         actual_tags_f = pool.submit(uc_helper.fetch_actual_tags, catalog_names)
         actual_privs_f = pool.submit(uc_helper.fetch_actual_privileges, catalog_names)
@@ -119,12 +122,14 @@ def run(
         actual_tags = actual_tags_f.result()
         actual_privileges = actual_privs_f.result()
         principals_f.result()
+    _logger.info("Successfully fetched current state")
 
     # 3. Tags workflow
     desired_tags = compile_desired_tags(config)
     tag_diff = compute_tag_diff(desired_tags, actual_tags)
 
     # 4. Privileges workflow
+    change_logger = ChangeLogger(dry_run=dry_run, logger=_logger)
     compiled_privileges = compile_desired_privileges(config, desired_tags)
     resolved_desired = _resolve_compiled_privileges(compiled_privileges, ws_helper, change_logger)
     resolved_actual = _resolve_actual_privileges(actual_privileges, ws_helper)

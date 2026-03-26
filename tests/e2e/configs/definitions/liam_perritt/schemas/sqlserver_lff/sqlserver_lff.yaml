@@ -4,5 +4,6 @@ definitions:
       name: sqlserver_lff
       tags:
         uc_gov_team: data_engineering
+        uc_gov_zone: landing
       tables:
         - $ref: $defs/tables/liam_perritt|sqlserver_lff|feature_python_extension_source

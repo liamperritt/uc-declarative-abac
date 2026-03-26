@@ -4,16 +4,14 @@ import logging
 
 from uc_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
 from uc_governor.tags.state import SecurableTag, TagDiff
-from uc_governor.types import ExecutionError, Principal
+from uc_governor.types import ExecutionError, Principal, SecurableType
 
 _default_logger = logging.getLogger("uc_governor")
 
 
 def _format_tag(tag_name: str, tag_value: str | None) -> str:
     """Format a tag as 'name=value' or just 'name' when valueless."""
-    if tag_value is None:
-        return tag_name
-    return f"{tag_name}={tag_value}"
+    return f"{tag_name}='{tag_value or ''}'"
 
 
 class ChangeLogger:
@@ -71,31 +69,33 @@ class ChangeLogger:
     # Tag logging
     # ------------------------------------------------------------------
 
+    def _securable_label(self, securable_type: SecurableType, full_name: str) -> str:
+        """Format a securable as '(Type 'full_name')'."""
+        return f"[{securable_type.value.capitalize()} {full_name}]"
+
     def log_tag_add(self, tag: SecurableTag) -> None:
         """Log a tag being added to a securable."""
         self._tags_added += 1
-        prefix = "[ADD]" if self._dry_run else "[ADDED]"
+        action = "ADD" if self._dry_run else "ADDED"
+        label = self._securable_label(tag.securable_type, tag.securable_full_name)
         display = _format_tag(tag.tag_name, tag.tag_value)
-        self._log_info(
-            f"{prefix} {tag.securable_type.value} {tag.securable_full_name} {display}"
-        )
+        self._log_info(f"{label} {action} tag {display}")
 
     def log_tag_update(self, tag: SecurableTag, old_value: str | None) -> None:
         """Log a tag value being updated on a securable."""
         self._tags_updated += 1
-        prefix = "[UPDATE]" if self._dry_run else "[UPDATED]"
-        self._log_info(
-            f"{prefix} {tag.securable_type.value} {tag.securable_full_name} "
-            f"{tag.tag_name} {old_value} -> {tag.tag_value}"
-        )
+        action = "UPDATE" if self._dry_run else "UPDATED"
+        label = self._securable_label(tag.securable_type, tag.securable_full_name)
+        old_display = _format_tag(tag.tag_name, old_value)
+        new_display = _format_tag(tag.tag_name, tag.tag_value)
+        self._log_info(f"{label} {action} tag {old_display} -> {new_display}")
 
     def log_tag_remove(self, tag: SecurableTag) -> None:
         """Log a tag being removed from a securable."""
         self._tags_removed += 1
-        prefix = "[REMOVE]" if self._dry_run else "[REMOVED]"
-        self._log_info(
-            f"{prefix} {tag.securable_type.value} {tag.securable_full_name} {tag.tag_name}"
-        )
+        action = "REMOVE" if self._dry_run else "REMOVED"
+        label = self._securable_label(tag.securable_type, tag.securable_full_name)
+        self._log_info(f"{label} {action} tag {tag.tag_name}")
 
     # ------------------------------------------------------------------
     # Privilege logging
@@ -110,24 +110,18 @@ class ChangeLogger:
     def log_grant(self, privilege: SecurablePrivilege) -> None:
         """Log a privilege being granted."""
         self._privileges_granted += 1
-        prefix = "[GRANT]" if self._dry_run else "[GRANTED]"
+        action = "GRANT" if self._dry_run else "GRANTED"
+        label = self._securable_label(privilege.securable_type, privilege.securable_full_name)
         name = self._principal_name(privilege.principal)
-        self._log_info(
-            f"{prefix} {privilege.privilege_type} on "
-            f"{privilege.securable_type.value} {privilege.securable_full_name} "
-            f"to {name}"
-        )
+        self._log_info(f"{label} {action} {privilege.privilege_type.value} to '{name}'")
 
     def log_revoke(self, privilege: SecurablePrivilege) -> None:
         """Log a privilege being revoked."""
         self._privileges_revoked += 1
-        prefix = "[REVOKE]" if self._dry_run else "[REVOKED]"
+        action = "REVOKE" if self._dry_run else "REVOKED"
+        label = self._securable_label(privilege.securable_type, privilege.securable_full_name)
         name = self._principal_name(privilege.principal)
-        self._log_info(
-            f"{prefix} {privilege.privilege_type} on "
-            f"{privilege.securable_type.value} {privilege.securable_full_name} "
-            f"from {name}"
-        )
+        self._log_info(f"{label} {action} {privilege.privilege_type.value} from '{name}'")
 
     # ------------------------------------------------------------------
     # Diff-level convenience methods
@@ -185,7 +179,7 @@ class ChangeLogger:
         if self._errors:
             sections.append(f"Errors: {len(self._errors)} failed")
 
-        return " | ".join(sections)
+        return " | ".join(sections) if sections else "No changes needed — all in sync"
 
     def _build_dry_run_summary(self) -> str:
         tag_parts: list[str] = []
@@ -208,6 +202,6 @@ class ChangeLogger:
         if priv_parts:
             sections.append("Privileges: " + ", ".join(priv_parts))
 
-        result = " | ".join(sections)
-        result += " (dry run — no changes applied)"
-        return result
+        if sections:
+            return " | ".join(sections) + " (dry run — no changes applied)"
+        return "No changes needed (dry run — no changes applied)"

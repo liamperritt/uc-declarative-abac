@@ -79,15 +79,13 @@ def test_change_logger_logs_tag_add() -> None:
     messages = _info_messages(mock_logger)
     assert len(messages) == 1
     msg = messages[0]
-    assert "[ADDED]" in msg
-    assert "CATALOG" in msg
-    assert "my_catalog" in msg
-    assert "env" in msg
-    assert "prod" in msg
+    assert "ADDED" in msg
+    assert "[Catalog my_catalog]" in msg
+    assert "env='prod'" in msg
 
 
 def test_change_logger_logs_tag_add_with_valueless_tag() -> None:
-    """tag_value=None logs just the tag name without =value."""
+    """tag_value=None logs the tag with an empty value."""
     cl, mock_logger = _make_change_logger()
     tag = _make_tag(tag_name="deprecated", tag_value=None)
     cl.log_tag_add(tag)
@@ -95,13 +93,12 @@ def test_change_logger_logs_tag_add_with_valueless_tag() -> None:
     messages = _info_messages(mock_logger)
     assert len(messages) == 1
     msg = messages[0]
-    assert "[ADDED]" in msg
-    assert "deprecated" in msg
-    assert "=" not in msg
+    assert "ADDED" in msg
+    assert "deprecated=''" in msg
 
 
 def test_change_logger_logs_tag_update_with_old_value() -> None:
-    """log_tag_update in live mode produces INFO with [UPDATED] (past tense)."""
+    """log_tag_update in live mode shows old and new tag values."""
     cl, mock_logger = _make_change_logger()
     tag = _make_tag(
         securable_type=SecurableType.TABLE,
@@ -114,15 +111,15 @@ def test_change_logger_logs_tag_update_with_old_value() -> None:
     messages = _info_messages(mock_logger)
     assert len(messages) == 1
     msg = messages[0]
-    assert "[UPDATED]" in msg
-    assert "TABLE" in msg
-    assert "my_catalog.sales.orders" in msg
-    assert "internal" in msg
-    assert "confidential" in msg
+    assert "UPDATED" in msg
+    assert "[Table my_catalog.sales.orders]" in msg
+    assert "classification='internal'" in msg
+    assert "classification='confidential'" in msg
+    assert "->" in msg
 
 
 def test_change_logger_logs_tag_remove() -> None:
-    """log_tag_remove in live mode produces INFO with [REMOVED] (past tense)."""
+    """log_tag_remove in live mode logs the removed tag."""
     cl, mock_logger = _make_change_logger()
     tag = _make_tag(
         securable_type=SecurableType.SCHEMA,
@@ -135,9 +132,8 @@ def test_change_logger_logs_tag_remove() -> None:
     messages = _info_messages(mock_logger)
     assert len(messages) == 1
     msg = messages[0]
-    assert "[REMOVED]" in msg
-    assert "SCHEMA" in msg
-    assert "my_catalog.sales" in msg
+    assert "REMOVED" in msg
+    assert "[Schema my_catalog.sales]" in msg
     assert "deprecated" in msg
 
 
@@ -160,15 +156,14 @@ def test_change_logger_logs_grant() -> None:
     messages = _info_messages(mock_logger)
     assert len(messages) == 1
     msg = messages[0]
-    assert "[GRANTED]" in msg
-    assert "SELECT" in msg
-    assert "SCHEMA" in msg
-    assert "my_catalog.sales" in msg
-    assert "data_engineers" in msg
+    assert "GRANTED" in msg
+    assert "[Schema my_catalog.sales]" in msg
+    assert "select" in msg
+    assert "'data_engineers'" in msg
 
 
 def test_change_logger_logs_revoke() -> None:
-    """log_revoke in live mode produces INFO with [REVOKED] (past tense)."""
+    """log_revoke in live mode logs the revoked privilege."""
     cl, mock_logger = _make_change_logger()
     priv = _make_privilege(
         securable_type=SecurableType.TABLE,
@@ -181,11 +176,10 @@ def test_change_logger_logs_revoke() -> None:
     messages = _info_messages(mock_logger)
     assert len(messages) == 1
     msg = messages[0]
-    assert "[REVOKED]" in msg
-    assert "MODIFY" in msg
-    assert "TABLE" in msg
-    assert "my_catalog.sales.orders" in msg
-    assert "temp_users" in msg
+    assert "REVOKED" in msg
+    assert "[Table my_catalog.sales.orders]" in msg
+    assert "modify" in msg
+    assert "'temp_users'" in msg
 
 
 # ---------------------------------------------------------------------------
@@ -205,8 +199,8 @@ def test_change_logger_prepends_dry_run_prefix() -> None:
     for msg in messages:
         assert "[DRY RUN]" in msg
     # Present tense in dry-run mode
-    assert "[ADD]" in messages[0]
-    assert "[GRANT]" in messages[1]
+    assert "ADD tag" in messages[0]
+    assert "GRANT" in messages[1]
 
 
 # ---------------------------------------------------------------------------
@@ -285,9 +279,9 @@ def test_change_logger_logs_tag_changes() -> None:
     assert len(messages) == 3
 
     combined = "\n".join(messages)
-    assert "[ADDED]" in combined
-    assert "[UPDATED]" in combined
-    assert "[REMOVED]" in combined
+    assert "ADDED" in combined
+    assert "UPDATED" in combined
+    assert "REMOVED" in combined
     assert "new_tag" in combined
     assert "changed" in combined
     assert "old_tag" in combined
@@ -315,12 +309,12 @@ def test_change_logger_logs_privilege_changes() -> None:
     assert len(messages) == 2
 
     combined = "\n".join(messages)
-    assert "[GRANTED]" in combined
-    assert "[REVOKED]" in combined
+    assert "GRANTED" in combined
+    assert "REVOKED" in combined
     assert "team_a" in combined
     assert "team_b" in combined
-    assert "SELECT" in combined
-    assert "MODIFY" in combined
+    assert "select" in combined
+    assert "modify" in combined
 
 
 # ---------------------------------------------------------------------------

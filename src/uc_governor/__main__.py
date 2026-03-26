@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import argparse
-import sys
+import logging
 from pathlib import Path
 
-from databricks.sdk import AccountClient, WorkspaceClient
+from databricks.sdk import WorkspaceClient
 
 from uc_governor.governor import run
 
@@ -26,6 +26,12 @@ def main() -> None:
         help="SQL warehouse ID for executing queries",
     )
     parser.add_argument(
+        "--profile",
+        type=str,
+        default=None,
+        help="Databricks CLI profile name (from ~/.databrickscfg)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print planned changes without executing",
@@ -33,13 +39,13 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    workspace_client = WorkspaceClient()
-    account_client = AccountClient()
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-    tag_diff, privilege_diff = run(
+    workspace_client = WorkspaceClient(profile=args.profile)
+
+    run(
         config_dir=args.config_dir,
         workspace_client=workspace_client,
-        account_client=account_client,
         warehouse_id=args.warehouse_id,
         dry_run=args.dry_run,
     )
