@@ -2,9 +2,16 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from uc_governor.types import PrivilegeType
+
+
+def _coerce_null_tag_values(tags: dict | None) -> dict | None:
+    """Replace None tag values with empty strings."""
+    if tags is None:
+        return None
+    return {k: (v if v is not None else "") for k, v in tags.items()}
 
 
 class GrantPolicyConfig(BaseModel):
@@ -12,14 +19,23 @@ class GrantPolicyConfig(BaseModel):
     type: Literal["grant"]
     privileges: list[PrivilegeType]
     to: list[str]
-    tags: dict[str, str | None]
+    tags: dict[str, str]
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _coerce_null_tags(cls, v: dict) -> dict:
+        return _coerce_null_tag_values(v) or {}
 
 
 class SecurableConfig(BaseModel):
     """Base model for all UC securable configs. Not intended to be instantiated directly."""
-
     name: str
-    tags: dict[str, str | None] | None = None
+    tags: dict[str, str] | None = None
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _coerce_null_tags(cls, v: dict | None) -> dict | None:
+        return _coerce_null_tag_values(v)
 
 
 class ColumnConfig(SecurableConfig):

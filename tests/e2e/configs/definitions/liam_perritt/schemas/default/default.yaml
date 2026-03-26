@@ -4,5 +4,6 @@ definitions:
       name: default
       tags:
         uc_gov_team: platform
+        uc_gov_certified: ~
       tables:
         - $ref: $defs/tables/liam_perritt|default|batch_table

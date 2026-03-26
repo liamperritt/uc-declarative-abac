@@ -153,7 +153,7 @@ def test_tag_compiler_emits_volume_tags():
 
 
 def test_tag_compiler_emits_valueless_tags():
-    """A tag with None as its value produces a SecurableTag with tag_value=None."""
+    """A tag with None as its value produces a SecurableTag with tag_value="" (empty string)."""
     config = ConfigFile.model_validate(
         {
             "catalogs": {
@@ -171,7 +171,7 @@ def test_tag_compiler_emits_valueless_tags():
             securable_type=SecurableType.CATALOG,
             securable_full_name="my_catalog",
             tag_name="operations",
-            tag_value=None,
+            tag_value="",
         )
     }
 

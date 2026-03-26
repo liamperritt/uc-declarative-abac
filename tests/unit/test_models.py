@@ -251,3 +251,47 @@ def test_table_config_accepts_policies():
 
     table = config.catalogs["cat"].schemas[0].tables[0]
     assert len(table.policies) == 1
+
+
+# ---------------------------------------------------------------------------
+# Null tag value coercion
+# ---------------------------------------------------------------------------
+
+
+def test_securable_config_converts_null_tag_values_to_empty_string():
+    """Tags with None values (from YAML ~) are coerced to empty strings."""
+    config = ConfigFile.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "tags": {"env": "prod", "operations": None},
+                }
+            }
+        }
+    )
+    tags = config.catalogs["my_catalog"].tags
+    assert tags["env"] == "prod"
+    assert tags["operations"] == ""
+
+
+def test_grant_policy_config_converts_null_tag_values_to_empty_string():
+    """Grant policy tags with None values are coerced to empty strings."""
+    config = ConfigFile.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["team"],
+                            "tags": {"env": "prod", "operations": None},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    policy = config.catalogs["my_catalog"].policies[0]
+    assert policy.tags["env"] == "prod"
+    assert policy.tags["operations"] == ""

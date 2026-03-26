@@ -10,7 +10,7 @@ class SecurableTag:
     securable_type: SecurableType
     securable_full_name: str
     tag_name: str
-    tag_value: str | None = None
+    tag_value: str = ""
 
 
 @dataclass

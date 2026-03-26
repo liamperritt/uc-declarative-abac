@@ -13,7 +13,7 @@ from uc_governor.types import PrivilegeType, SecurableType
 
 
 def test_privilege_compiler_computes_privileges_from_policy():
-    """A grant policy with tags: {sales: None} and a table tagged {sales: None}
+    """A grant policy with tags: {sales: None} and a table tagged {sales: ""}
     produces CompiledPrivilege entries for each principal x privilege."""
     config = ConfigFile.model_validate(
         {
@@ -43,7 +43,7 @@ def test_privilege_compiler_computes_privileges_from_policy():
             securable_type=SecurableType.TABLE,
             securable_full_name="my_catalog.default.orders",
             tag_name="sales",
-            tag_value=None,
+            tag_value="",
         ),
     }
 
@@ -209,13 +209,13 @@ def test_privilege_compiler_handles_multiple_policies_per_catalog():
             securable_type=SecurableType.TABLE,
             securable_full_name="cat.s.t1",
             tag_name="public",
-            tag_value=None,
+            tag_value="",
         ),
         SecurableTag(
             securable_type=SecurableType.TABLE,
             securable_full_name="cat.s.t2",
             tag_name="writable",
-            tag_value=None,
+            tag_value="",
         ),
     }
 
@@ -399,7 +399,7 @@ def test_privilege_compiler_matches_table_level_policy():
             securable_type=SecurableType.TABLE,
             securable_full_name="my_catalog.sales.orders",
             tag_name="sales",
-            tag_value=None,
+            tag_value="",
         ),
     }
 
@@ -475,7 +475,7 @@ def test_privilege_compiler_collects_policies_from_all_levels():
             securable_type=SecurableType.TABLE,
             securable_full_name="my_catalog.sales.orders",
             tag_name="sales",
-            tag_value=None,
+            tag_value="",
         ),
     }
 

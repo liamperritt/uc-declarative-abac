@@ -85,9 +85,9 @@ def test_change_logger_logs_tag_add() -> None:
 
 
 def test_change_logger_logs_tag_add_with_valueless_tag() -> None:
-    """tag_value=None logs the tag with an empty value."""
+    """tag_value="" logs the tag with an empty value."""
     cl, mock_logger = _make_change_logger()
-    tag = _make_tag(tag_name="deprecated", tag_value=None)
+    tag = _make_tag(tag_name="deprecated", tag_value="")
     cl.log_tag_add(tag)
 
     messages = _info_messages(mock_logger)
@@ -125,7 +125,7 @@ def test_change_logger_logs_tag_remove() -> None:
         securable_type=SecurableType.SCHEMA,
         securable_full_name="my_catalog.sales",
         tag_name="deprecated",
-        tag_value=None,
+        tag_value="",
     )
     cl.log_tag_remove(tag)
 

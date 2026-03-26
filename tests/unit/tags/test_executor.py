@@ -143,7 +143,7 @@ def test_tag_executor_generates_unset_tags_sql_for_removes():
 
 
 def test_tag_executor_handles_valueless_tags():
-    """A tag with tag_value=None produces SET TAGS('key') without '= value'."""
+    """A tag with tag_value="" produces SET TAGS('key' = '') with an empty string value."""
     uc_helper = MagicMock()
     diff = TagDiff(
         to_add={
@@ -151,7 +151,7 @@ def test_tag_executor_handles_valueless_tags():
                 securable_type=SecurableType.CATALOG,
                 securable_full_name="my_catalog",
                 tag_name="operations",
-                tag_value=None,
+                tag_value="",
             )
         },
     )
@@ -162,9 +162,9 @@ def test_tag_executor_handles_valueless_tags():
     sql = stmts[0]
 
     _assert_sql_contains(sql, "SET TAGS", "my_catalog", "operations")
-    # Must NOT contain an assignment for the valueless tag.
-    assert "= '" not in sql.split("operations")[-1].split(",")[0].split(")")[0], (
-        f"Valueless tag should not have '= value' assignment: {sql}"
+    # Empty-string tag should produce an assignment with an empty value.
+    assert "= ''" in sql.split("operations")[-1].split(",")[0].split(")")[0], (
+        f"Empty-string tag should have '= \"\"' assignment: {sql}"
     )
 
     uc_helper.execute_sql.assert_called_once_with(sql)
