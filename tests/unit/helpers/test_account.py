@@ -306,3 +306,33 @@ def test_workspace_helper_resolves_user_by_identifier() -> None:
     result = helper.resolve_by_identifier("jane@co.com")
 
     assert result == Principal(PrincipalType.USER, "jane@co.com", "jane@co.com")
+
+
+# ---------------------------------------------------------------------------
+# Principal dict
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_helper_returns_principals_dict() -> None:
+    """get_principals returns a dict mapping display name to Principal."""
+    from uc_governor.types import Principal, PrincipalType
+
+    client = _make_account_client(
+        users=[_make_user("jane@co.com")],
+        groups=[_make_group("data_engineers")],
+        service_principals=[_make_sp("my-sp", "app-123")],
+    )
+    helper = WorkspaceHelper(client)
+    helper.fetch_principals()
+
+    result = helper.get_principals()
+
+    assert result["jane@co.com"] == Principal(
+        PrincipalType.USER, "jane@co.com", "jane@co.com"
+    )
+    assert result["data_engineers"] == Principal(
+        PrincipalType.GROUP, "data_engineers", "data_engineers"
+    )
+    assert result["my-sp"] == Principal(
+        PrincipalType.SERVICE_PRINCIPAL, "app-123", "my-sp"
+    )

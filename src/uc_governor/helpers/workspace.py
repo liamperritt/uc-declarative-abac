@@ -51,6 +51,21 @@ class WorkspaceHelper:
         self._service_principals = sp_map
         self._sp_app_id_to_name: dict[str, str] = {v: k for k, v in sp_map.items()}
 
+    def get_principals(self) -> dict[str, Principal]:
+        """Return a mapping of principal names to Principal objects.
+
+        Includes all cached users, groups, and service principals.
+        Must be called after fetch_principals().
+        """
+        result: dict[str, Principal] = {}
+        for username in self._users or set():
+            result[username] = Principal(PrincipalType.USER, username, username)
+        for group_name in self._groups or set():
+            result[group_name] = Principal(PrincipalType.GROUP, group_name, group_name)
+        for sp_name, app_id in (self._service_principals or {}).items():
+            result[sp_name] = Principal(PrincipalType.SERVICE_PRINCIPAL, app_id, sp_name)
+        return result
+
     def validate_principal(self, name: str) -> bool:
         """Check if a principal name exists in any of the cached principal sets."""
         return (

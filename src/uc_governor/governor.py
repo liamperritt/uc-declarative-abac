@@ -9,7 +9,7 @@ from uc_governor.discovery import discover_yaml_files, load_raw_configs
 from uc_governor.helpers.workspace import WorkspaceHelper
 from uc_governor.helpers.unity_catalog import UnityCatalogHelper
 from uc_governor.models import ConfigFile
-from uc_governor.privileges.compiler import compile_desired_privileges
+from uc_governor.privileges.compiler import CompiledPrivilege, compile_desired_privileges
 from uc_governor.privileges.differ import compute_privilege_diff
 from uc_governor.privileges.executor import execute_privilege_diff
 from uc_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
@@ -19,65 +19,70 @@ from uc_governor.tags.compiler import compile_desired_tags
 from uc_governor.tags.differ import compute_tag_diff
 from uc_governor.tags.executor import execute_tag_diff
 from uc_governor.tags.state import TagDiff
-from uc_governor.types import ExecutionBatchError, ExecutionError, PrincipalValidationError
+from uc_governor.types import (
+    ExecutionBatchError,
+    ExecutionError,
+    PrincipalValidationError,
+)
 
 
-def _extract_principals(privileges: set[SecurablePrivilege]) -> list[str]:
-    """Extract unique principal display names from a set of desired privileges."""
-    return list({p.principal.name for p in privileges})
-
-
-def _try_resolve_identifier(ws_helper: WorkspaceHelper, identifier: str) -> bool:
-    """Return True if the identifier can be resolved to a known principal."""
-    try:
-        ws_helper.resolve_by_identifier(identifier)
-        return True
-    except PrincipalValidationError:
-        return False
-
-
-def _resolve_privileges(
+def _resolve_compiled_privileges(
+    compiled: set[CompiledPrivilege],
     ws_helper: WorkspaceHelper,
-    desired_privileges: set[SecurablePrivilege],
-    actual_privileges: set[SecurablePrivilege],
     change_logger: ChangeLogger,
-) -> tuple[set[SecurablePrivilege], set[SecurablePrivilege]]:
-    """Resolve string principals to Principal objects for both desired and actual privileges.
+) -> set[SecurablePrivilege]:
+    """Resolve compiled privileges to SecurablePrivileges with Principal objects.
 
-    Unknown desired principals are logged as errors and excluded.
-    Actual principals that cannot be resolved (e.g. deleted users) are silently excluded.
-    Returns (resolved_desired, resolved_actual).
+    Unknown principals (not in the workspace) are logged as errors and excluded.
     """
-    unknown = set(ws_helper.find_unknown_principals(_extract_principals(desired_privileges)))
-    for name in unknown:
-        change_logger.log_error(ExecutionError(
-            context=f"Validate principal '{name}'",
-            exception=PrincipalValidationError(f"Principal '{name}' not found in workspace"),
+    principals = ws_helper.get_principals()
+    resolved: set[SecurablePrivilege] = set()
+    unknown: set[str] = set()
+
+    for cp in compiled:
+        principal = principals.get(cp.principal)
+        if principal is None:
+            if cp.principal not in unknown:
+                unknown.add(cp.principal)
+                change_logger.log_error(ExecutionError(
+                    context=f"Validate principal '{cp.principal}'",
+                    exception=PrincipalValidationError(
+                        f"Principal '{cp.principal}' not found in workspace"
+                    ),
+                ))
+            continue
+        resolved.add(SecurablePrivilege(
+            securable_type=cp.securable_type,
+            securable_full_name=cp.securable_full_name,
+            principal=principal,
+            privilege_type=cp.privilege_type,
         ))
 
-    resolved_desired = {
-        SecurablePrivilege(
+    return resolved
+
+
+def _resolve_actual_privileges(
+    actual_privileges: set[SecurablePrivilege],
+    ws_helper: WorkspaceHelper,
+) -> set[SecurablePrivilege]:
+    """Resolve raw actual privileges (string principals) to Principal objects.
+
+    Actual privileges with unrecognised identifiers (e.g. deleted users) are
+    silently excluded.
+    """
+    resolved: set[SecurablePrivilege] = set()
+    for p in actual_privileges:
+        try:
+            principal = ws_helper.resolve_by_identifier(p.principal)
+        except PrincipalValidationError:
+            continue
+        resolved.add(SecurablePrivilege(
             securable_type=p.securable_type,
             securable_full_name=p.securable_full_name,
-            principal=ws_helper.resolve_by_name(p.principal.name),
+            principal=principal,
             privilege_type=p.privilege_type,
-        )
-        for p in desired_privileges
-        if p.principal.name not in unknown
-    }
-
-    resolved_actual = {
-        SecurablePrivilege(
-            securable_type=p.securable_type,
-            securable_full_name=p.securable_full_name,
-            principal=ws_helper.resolve_by_identifier(p.principal),
-            privilege_type=p.privilege_type,
-        )
-        for p in actual_privileges
-        if _try_resolve_identifier(ws_helper, p.principal)
-    }
-
-    return resolved_desired, resolved_actual
+        ))
+    return resolved
 
 
 def run(
@@ -114,11 +119,10 @@ def run(
     desired_tags = compile_desired_tags(config)
     tag_diff = compute_tag_diff(desired_tags, actual_tags)
 
-    # 4. Privileges workflow — resolve string principals to Principal objects
-    desired_privileges = compile_desired_privileges(config, desired_tags)
-    resolved_desired, resolved_actual = _resolve_privileges(
-        ws_helper, desired_privileges, actual_privileges, change_logger,
-    )
+    # 4. Privileges workflow
+    compiled_privileges = compile_desired_privileges(config, desired_tags)
+    resolved_desired = _resolve_compiled_privileges(compiled_privileges, ws_helper, change_logger)
+    resolved_actual = _resolve_actual_privileges(actual_privileges, ws_helper)
     privilege_diff = compute_privilege_diff(resolved_desired, resolved_actual)
 
     # 5. Log and execute (sequential)

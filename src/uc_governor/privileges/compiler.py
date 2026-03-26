@@ -1,28 +1,37 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 
 from uc_governor.models import ConfigFile, GrantPolicyConfig
-from uc_governor.privileges.state import SecurablePrivilege
 from uc_governor.tags.state import SecurableTag
-from uc_governor.types import Principal, PrincipalType, SecurableType
+from uc_governor.types import SecurableType
 
-UNRESOLVED_IDENTIFIER = "__UNRESOLVED__"
+
+@dataclass(frozen=True)
+class CompiledPrivilege:
+    """Intermediate privilege representation emitted by the compiler.
+
+    Contains the raw principal name from the YAML config (a plain string).
+    The governor resolves this to a Principal object with a real identifier
+    before diffing.
+    """
+
+    securable_type: SecurableType
+    securable_full_name: str
+    principal: str
+    privilege_type: str
 
 
 def compile_desired_privileges(
     config: ConfigFile,
     desired_tags: set[SecurableTag],
-) -> set[SecurablePrivilege]:
+) -> set[CompiledPrivilege]:
     """Compute desired privileges by matching grant policies against desired tags.
 
     For each grant policy, finds objects whose tags are a superset of the
-    policy's tags (AND semantics, exact value match). Emits a SecurablePrivilege
+    policy's tags (AND semantics, exact value match). Emits a CompiledPrivilege
     for each (matching_object, principal, privilege_type).
-
-    Principals are emitted as unresolved Principal objects (identifier set to
-    __UNRESOLVED__). The governor resolves these to real identifiers using
-    WorkspaceHelper before diffing.
     """
     tag_index = _build_tag_index(desired_tags)
     policies = _collect_policies(config)
@@ -64,9 +73,9 @@ def _collect_policies(config: ConfigFile) -> list[GrantPolicyConfig]:
 def _match_policies(
     policies: list[GrantPolicyConfig],
     tag_index: dict[str, tuple[SecurableType, set[tuple[str, str | None]]]],
-) -> set[SecurablePrivilege]:
-    """Match policies against the tag index and emit privileges."""
-    result: set[SecurablePrivilege] = set()
+) -> set[CompiledPrivilege]:
+    """Match policies against the tag index and emit compiled privileges."""
+    result: set[CompiledPrivilege] = set()
     for policy in policies:
         required = {(k, v) for k, v in policy.tags.items()}
         for full_name, (sec_type, actual_tags) in tag_index.items():
@@ -75,14 +84,10 @@ def _match_policies(
             for principal_name in policy.to:
                 for privilege in policy.privileges:
                     result.add(
-                        SecurablePrivilege(
+                        CompiledPrivilege(
                             securable_type=sec_type,
                             securable_full_name=full_name,
-                            principal=Principal(
-                                PrincipalType.GROUP,
-                                UNRESOLVED_IDENTIFIER,
-                                principal_name,
-                            ),
+                            principal=principal_name,
                             privilege_type=privilege.upper(),
                         )
                     )
