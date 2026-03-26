@@ -15,7 +15,7 @@ def resolve_refs(definitions: dict, resources: dict) -> dict:
     3. Apply overrides (top-level replacement, no deep merge)
     4. Recursively resolve nested $ref entries
 
-    Returns a flat dict ready for ConfigFile.model_validate(),
+    Returns a flat dict ready for ResourcesConfig.model_validate(),
     i.e. {"catalogs": {...}} with all refs resolved and definitions stripped.
     """
     return _resolve_node(definitions, resources)

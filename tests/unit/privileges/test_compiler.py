@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from uc_abac_governor.models import ConfigFile
+from uc_abac_governor.models import ResourcesConfig
 from uc_abac_governor.privileges.compiler import CompiledPrivilege, compile_desired_privileges
 from uc_abac_governor.privileges.state import SecurablePrivilege
 from uc_abac_governor.tags.state import SecurableTag
@@ -15,7 +15,7 @@ from uc_abac_governor.types import PrivilegeType, SecurableType
 def test_privilege_compiler_computes_privileges_from_policy():
     """A grant policy with tags: {sales: None} and a table tagged {sales: ""}
     produces CompiledPrivilege entries for each principal x privilege."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "my_catalog": {
@@ -84,7 +84,7 @@ def test_privilege_compiler_computes_privileges_from_policy():
 
 def test_privilege_compiler_policy_uses_and_semantics_for_multiple_tags():
     """A policy with tags: {a: x, b: y} only matches objects that have BOTH tags."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "cat": {
@@ -143,7 +143,7 @@ def test_privilege_compiler_policy_uses_and_semantics_for_multiple_tags():
 
 def test_privilege_compiler_policy_skips_objects_without_matching_tags():
     """Objects without matching tags produce no privileges."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "cat": {
@@ -181,7 +181,7 @@ def test_privilege_compiler_policy_skips_objects_without_matching_tags():
 
 def test_privilege_compiler_handles_multiple_policies_per_catalog():
     """Two policies on the same catalog each independently match and generate privileges."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "cat": {
@@ -244,7 +244,7 @@ def test_privilege_compiler_handles_multiple_policies_per_catalog():
 
 def test_privilege_compiler_handles_catalog_with_no_policies():
     """A catalog with no policies produces an empty set."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "cat": {
@@ -281,7 +281,7 @@ def test_privilege_compiler_handles_catalog_with_no_policies():
 def test_privilege_compiler_matches_against_desired_tags():
     """The compiler uses the desired_tags parameter (not raw config) to match;
     if desired_tags is empty, no privileges are generated even if config has tags."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "cat": {
@@ -322,7 +322,7 @@ def test_privilege_compiler_matches_against_desired_tags():
 
 def test_privilege_compiler_matches_schema_level_policy():
     """A grant policy on a schema matches against desired tags for that schema."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "my_catalog": {
@@ -366,7 +366,7 @@ def test_privilege_compiler_matches_schema_level_policy():
 
 def test_privilege_compiler_matches_table_level_policy():
     """A grant policy on a table matches against desired tags for that table."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "my_catalog": {
@@ -415,7 +415,7 @@ def test_privilege_compiler_matches_table_level_policy():
 
 def test_privilege_compiler_collects_policies_from_all_levels():
     """Policies at catalog, schema, and table levels all produce privileges."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "my_catalog": {
@@ -509,7 +509,7 @@ def test_privilege_compiler_collects_policies_from_all_levels():
 
 def test_privilege_compiler_emits_compiled_privilege_type():
     """The compiler emits CompiledPrivilege instances (not SecurablePrivilege)."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "cat": {
@@ -551,7 +551,7 @@ def test_privilege_compiler_emits_compiled_privilege_type():
 def test_privilege_compiler_filters_incompatible_privilege_for_volume():
     """SELECT is incompatible with VOLUME and should be filtered out;
     READ_VOLUME is compatible and should remain."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "cat": {
@@ -593,7 +593,7 @@ def test_privilege_compiler_filters_incompatible_privilege_for_volume():
 
 def test_privilege_compiler_allows_select_on_table():
     """SELECT is compatible with TABLE; READ_VOLUME is not and should be filtered out."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "cat": {
@@ -635,7 +635,7 @@ def test_privilege_compiler_allows_select_on_table():
 
 def test_privilege_compiler_allows_all_privileges_on_any_securable():
     """ALL_PRIVILEGES is compatible with any securable type, including VOLUME."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "cat": {
@@ -680,7 +680,7 @@ def test_privilege_compiler_excludes_expired_policy():
     """A grant policy whose expiry_date <= run_date produces no privileges."""
     from datetime import date
 
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "cat": {
@@ -716,7 +716,7 @@ def test_privilege_compiler_includes_active_policy():
     """A grant policy whose expiry_date > run_date produces privileges normally."""
     from datetime import date
 
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "cat": {
@@ -752,7 +752,7 @@ def test_privilege_compiler_includes_policy_with_no_expiry():
     """A grant policy with no expiry_date is always active regardless of run_date."""
     from datetime import date
 
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "cat": {
@@ -781,3 +781,204 @@ def test_privilege_compiler_includes_policy_with_no_expiry():
     result = compile_desired_privileges(config, desired_tags, run_date=date(2099, 12, 31))
 
     assert len(result) > 0
+
+
+# ---------------------------------------------------------------------------
+# Tagless direct policies
+# ---------------------------------------------------------------------------
+
+
+def test_privilege_compiler_grants_directly_when_policy_has_no_tags():
+    """A grant policy with empty tags grants directly to its attached securable (catalog)."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["use_catalog"],
+                            "to": ["team"],
+                            "tags": {},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    result = compile_desired_privileges(config, set())
+
+    assert CompiledPrivilege(
+        securable_type=SecurableType.CATALOG,
+        securable_full_name="my_cat",
+        principal="team",
+        privilege_type=PrivilegeType.USE_CATALOG,
+    ) in result
+
+
+def test_privilege_compiler_grants_directly_to_schema_when_policy_has_no_tags():
+    """A grant policy with empty tags on a schema grants directly to that schema."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "policies": [
+                                {
+                                    "type": "grant",
+                                    "privileges": ["use_schema"],
+                                    "to": ["team"],
+                                    "tags": {},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    result = compile_desired_privileges(config, set())
+
+    assert CompiledPrivilege(
+        securable_type=SecurableType.SCHEMA,
+        securable_full_name="my_cat.sales",
+        principal="team",
+        privilege_type=PrivilegeType.USE_SCHEMA,
+    ) in result
+
+
+# ---------------------------------------------------------------------------
+# Scoped policy matching
+# ---------------------------------------------------------------------------
+
+
+def test_privilege_compiler_scopes_policy_to_attached_securable():
+    """A tag-matching policy on schema 'sales' only matches objects within
+    that schema, not objects in sibling schema 'hr' even if they share the
+    same tags."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "policies": [
+                                {
+                                    "type": "grant",
+                                    "privileges": ["select"],
+                                    "to": ["team"],
+                                    "tags": {"dept": "eng"},
+                                }
+                            ],
+                            "tables": [{"name": "orders", "tags": {"dept": "eng"}}],
+                        },
+                        {
+                            "name": "hr",
+                            "tables": [{"name": "employees", "tags": {"dept": "eng"}}],
+                        },
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="my_cat.sales.orders",
+            tag_name="dept",
+            tag_value="eng",
+        ),
+        SecurableTag(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="my_cat.hr.employees",
+            tag_name="dept",
+            tag_value="eng",
+        ),
+    }
+
+    result = compile_desired_privileges(config, desired_tags)
+
+    # Policy is on schema 'sales' — should match its child table only
+    assert CompiledPrivilege(
+        securable_type=SecurableType.TABLE,
+        securable_full_name="my_cat.sales.orders",
+        principal="team",
+        privilege_type=PrivilegeType.SELECT,
+    ) in result
+
+    # Should NOT match table in sibling schema 'hr'
+    assert CompiledPrivilege(
+        securable_type=SecurableType.TABLE,
+        securable_full_name="my_cat.hr.employees",
+        principal="team",
+        privilege_type=PrivilegeType.SELECT,
+    ) not in result
+
+
+def test_privilege_compiler_scopes_catalog_policy_to_all_children():
+    """A tag-matching policy at catalog level matches objects in ALL schemas
+    under that catalog."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["team"],
+                            "tags": {"env": "prod"},
+                        }
+                    ],
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [{"name": "orders", "tags": {"env": "prod"}}],
+                        },
+                        {
+                            "name": "hr",
+                            "tables": [{"name": "employees", "tags": {"env": "prod"}}],
+                        },
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="my_cat.sales.orders",
+            tag_name="env",
+            tag_value="prod",
+        ),
+        SecurableTag(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="my_cat.hr.employees",
+            tag_name="env",
+            tag_value="prod",
+        ),
+    }
+
+    result = compile_desired_privileges(config, desired_tags)
+
+    # Catalog-level policy should match tables in BOTH schemas
+    assert CompiledPrivilege(
+        securable_type=SecurableType.TABLE,
+        securable_full_name="my_cat.sales.orders",
+        principal="team",
+        privilege_type=PrivilegeType.SELECT,
+    ) in result
+
+    assert CompiledPrivilege(
+        securable_type=SecurableType.TABLE,
+        securable_full_name="my_cat.hr.employees",
+        principal="team",
+        privilege_type=PrivilegeType.SELECT,
+    ) in result

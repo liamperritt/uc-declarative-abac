@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from uc_abac_governor.models import ConfigFile
+from uc_abac_governor.models import ResourcesConfig
 
 
 def _minimal_catalog(**overrides):
@@ -54,13 +54,13 @@ def _full_config():
 
 
 # ---------------------------------------------------------------------------
-# ConfigFile
+# ResourcesConfig
 # ---------------------------------------------------------------------------
 
 
 def test_config_file_validates_valid_config():
-    """A well-formed resolved dict passes ConfigFile.model_validate() without errors."""
-    config = ConfigFile.model_validate(_full_config())
+    """A well-formed resolved dict passes ResourcesConfig.model_validate() without errors."""
+    config = ResourcesConfig.model_validate(_full_config())
 
     catalog = config.catalogs["analytics"]
     assert catalog.name == "analytics"
@@ -78,7 +78,7 @@ def test_config_file_validates_valid_config():
 def test_config_file_rejects_missing_catalogs():
     """A dict with no 'catalogs' key raises a validation error."""
     with pytest.raises(ValidationError) as exc_info:
-        ConfigFile.model_validate({})
+        ResourcesConfig.model_validate({})
 
     errors = exc_info.value.errors()
     assert any(e["loc"] == ("catalogs",) for e in errors)
@@ -106,7 +106,7 @@ def test_grant_policy_config_rejects_missing_privileges():
         }
     }
     with pytest.raises(ValidationError) as exc_info:
-        ConfigFile.model_validate(data)
+        ResourcesConfig.model_validate(data)
 
     errors = exc_info.value.errors()
     assert any("privileges" in str(e["loc"]) for e in errors)
@@ -129,7 +129,7 @@ def test_grant_policy_config_rejects_missing_to():
         }
     }
     with pytest.raises(ValidationError) as exc_info:
-        ConfigFile.model_validate(data)
+        ResourcesConfig.model_validate(data)
 
     errors = exc_info.value.errors()
     assert any("to" in str(e["loc"]) for e in errors)
@@ -147,7 +147,7 @@ def test_catalog_config_allows_optional_fields():
             "bare": {"name": "bare"}
         }
     }
-    config = ConfigFile.model_validate(data)
+    config = ResourcesConfig.model_validate(data)
 
     catalog = config.catalogs["bare"]
     assert catalog.name == "bare"
@@ -168,7 +168,7 @@ def test_config_file_injects_name_from_catalog_dict_key():
             },
         },
     }
-    config = ConfigFile.model_validate(data)
+    config = ResourcesConfig.model_validate(data)
 
     assert config.catalogs["operations_prod"].name == "operations_prod"
     assert config.catalogs["operations_test"].name == "operations_test"
@@ -184,7 +184,7 @@ def test_config_file_preserves_explicit_catalog_name():
             },
         },
     }
-    config = ConfigFile.model_validate(data)
+    config = ResourcesConfig.model_validate(data)
 
     assert config.catalogs["ops_prod"].name == "operations_production"
 
@@ -215,7 +215,7 @@ def test_schema_config_accepts_policies():
             }
         }
     }
-    config = ConfigFile.model_validate(data)
+    config = ResourcesConfig.model_validate(data)
 
     schema = config.catalogs["cat"].schemas[0]
     assert len(schema.policies) == 1
@@ -247,7 +247,7 @@ def test_table_config_accepts_policies():
             }
         }
     }
-    config = ConfigFile.model_validate(data)
+    config = ResourcesConfig.model_validate(data)
 
     table = config.catalogs["cat"].schemas[0].tables[0]
     assert len(table.policies) == 1
@@ -260,7 +260,7 @@ def test_table_config_accepts_policies():
 
 def test_securable_config_converts_null_tag_values_to_empty_string():
     """Tags with None values (from YAML ~) are coerced to empty strings."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "my_catalog": {
@@ -276,7 +276,7 @@ def test_securable_config_converts_null_tag_values_to_empty_string():
 
 def test_grant_policy_config_converts_null_tag_values_to_empty_string():
     """Grant policy tags with None values are coerced to empty strings."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "my_catalog": {
@@ -306,7 +306,7 @@ def test_grant_policy_config_accepts_expiry_date():
     """A grant policy with an expiry_date parses successfully."""
     from datetime import date
 
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "cat": {
@@ -329,7 +329,7 @@ def test_grant_policy_config_accepts_expiry_date():
 
 def test_grant_policy_config_defaults_expiry_date_to_none():
     """A grant policy without expiry_date defaults to None."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "cat": {
@@ -347,3 +347,178 @@ def test_grant_policy_config_defaults_expiry_date_to_none():
     )
     policy = config.catalogs["cat"].policies[0]
     assert policy.expiry_date is None
+
+
+# ---------------------------------------------------------------------------
+# Parent context and full_name
+# ---------------------------------------------------------------------------
+
+
+def test_catalog_config_injects_catalog_name_into_schemas():
+    """Schemas inherit catalog_name from their parent catalog."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_catalog": {
+                "schemas": [{"name": "sales"}]
+            }
+        }
+    })
+    assert config.catalogs["my_catalog"].schemas[0].catalog_name == "my_catalog"
+
+
+def test_schema_config_injects_names_into_tables():
+    """Tables inherit catalog_name and schema_name from their parent schema."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_catalog": {
+                "schemas": [
+                    {
+                        "name": "sales",
+                        "tables": [{"name": "orders"}],
+                    }
+                ]
+            }
+        }
+    })
+    table = config.catalogs["my_catalog"].schemas[0].tables[0]
+    assert table.catalog_name == "my_catalog"
+    assert table.schema_name == "sales"
+
+
+def test_table_config_injects_names_into_columns():
+    """Columns inherit catalog_name, schema_name, and table_name from their parent table."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_catalog": {
+                "schemas": [
+                    {
+                        "name": "sales",
+                        "tables": [
+                            {
+                                "name": "orders",
+                                "columns": [{"name": "email"}],
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+    })
+    column = config.catalogs["my_catalog"].schemas[0].tables[0].columns[0]
+    assert column.catalog_name == "my_catalog"
+    assert column.schema_name == "sales"
+    assert column.table_name == "orders"
+
+
+def test_catalog_config_injects_catalog_name_into_policies():
+    """Catalog-level grant policies inherit catalog_name from their parent catalog."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_catalog": {
+                "policies": [
+                    {"type": "grant", "privileges": ["select"], "to": ["team"], "tags": {"env": "prod"}}
+                ]
+            }
+        }
+    })
+    policy = config.catalogs["my_catalog"].policies[0]
+    assert policy.catalog_name == "my_catalog"
+
+
+def test_schema_config_injects_names_into_policies():
+    """Schema-level grant policies inherit catalog_name and schema_name from their parents."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_catalog": {
+                "schemas": [
+                    {
+                        "name": "sales",
+                        "policies": [
+                            {"type": "grant", "privileges": ["select"], "to": ["team"], "tags": {"env": "prod"}}
+                        ],
+                    }
+                ]
+            }
+        }
+    })
+    policy = config.catalogs["my_catalog"].schemas[0].policies[0]
+    assert policy.catalog_name == "my_catalog"
+    assert policy.schema_name == "sales"
+
+
+def test_catalog_config_has_full_name():
+    """CatalogConfig.full_name returns the catalog name."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_catalog": {}
+        }
+    })
+    assert config.catalogs["my_catalog"].full_name == "my_catalog"
+
+
+def test_schema_config_has_full_name():
+    """SchemaConfig.full_name returns catalog.schema."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_catalog": {
+                "schemas": [{"name": "sales"}]
+            }
+        }
+    })
+    assert config.catalogs["my_catalog"].schemas[0].full_name == "my_catalog.sales"
+
+
+def test_table_config_has_full_name():
+    """TableConfig.full_name returns catalog.schema.table."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_catalog": {
+                "schemas": [
+                    {
+                        "name": "sales",
+                        "tables": [{"name": "orders"}],
+                    }
+                ]
+            }
+        }
+    })
+    assert config.catalogs["my_catalog"].schemas[0].tables[0].full_name == "my_catalog.sales.orders"
+
+
+def test_volume_config_has_full_name():
+    """VolumeConfig.full_name returns catalog.schema.volume."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_catalog": {
+                "schemas": [
+                    {
+                        "name": "landing",
+                        "volumes": [{"name": "files"}],
+                    }
+                ]
+            }
+        }
+    })
+    assert config.catalogs["my_catalog"].schemas[0].volumes[0].full_name == "my_catalog.landing.files"
+
+
+def test_column_config_has_full_name():
+    """ColumnConfig.full_name returns catalog.schema.table.column."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_catalog": {
+                "schemas": [
+                    {
+                        "name": "sales",
+                        "tables": [
+                            {
+                                "name": "orders",
+                                "columns": [{"name": "email"}],
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+    })
+    assert config.catalogs["my_catalog"].schemas[0].tables[0].columns[0].full_name == "my_catalog.sales.orders.email"

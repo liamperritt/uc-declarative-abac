@@ -4,7 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
 
-from uc_abac_governor.models import ConfigFile, GrantPolicyConfig
+from uc_abac_governor.models import ResourcesConfig, GrantPolicyConfig
 from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.types import PrivilegeType, SecurableType
 
@@ -55,7 +55,7 @@ class CompiledPrivilege:
 
 
 def compile_desired_privileges(
-    config: ConfigFile,
+    config: ResourcesConfig,
     desired_tags: set[SecurableTag],
     run_date: date | None = None,
 ) -> set[CompiledPrivilege]:
@@ -93,7 +93,7 @@ def _build_tag_index(
     }
 
 
-def _collect_policies(config: ConfigFile) -> list[GrantPolicyConfig]:
+def _collect_policies(config: ResourcesConfig) -> list[GrantPolicyConfig]:
     """Gather all grant policies across all catalogs, schemas, and tables."""
     policies: list[GrantPolicyConfig] = []
     for catalog in config.catalogs.values():
@@ -108,28 +108,68 @@ def _collect_policies(config: ConfigFile) -> list[GrantPolicyConfig]:
     return policies
 
 
+def _policy_securable_type(policy: GrantPolicyConfig) -> SecurableType:
+    """Derive the securable type of the object a policy is attached to."""
+    if policy.table_name:
+        return SecurableType.TABLE
+    if policy.schema_name:
+        return SecurableType.SCHEMA
+    return SecurableType.CATALOG
+
+
+def _is_within_scope(full_name: str, policy: GrantPolicyConfig) -> bool:
+    """Return True if the securable full_name is within the policy's scope."""
+    scope = policy.full_name
+    return full_name == scope or full_name.startswith(f"{scope}.")
+
+
+def _emit_privileges(
+    sec_type: SecurableType,
+    full_name: str,
+    policy: GrantPolicyConfig,
+) -> set[CompiledPrivilege]:
+    """Emit CompiledPrivilege entries for each principal × privilege combination."""
+    allowed = SECURABLE_TYPE_PRIVILEGE_MAP.get(sec_type)
+    result: set[CompiledPrivilege] = set()
+    for principal_name in policy.to:
+        for privilege in policy.privileges:
+            if allowed is not None and privilege not in allowed:
+                continue
+            result.add(
+                CompiledPrivilege(
+                    securable_type=sec_type,
+                    securable_full_name=full_name,
+                    principal=principal_name,
+                    privilege_type=privilege,
+                )
+            )
+    return result
+
+
 def _match_policies(
     policies: list[GrantPolicyConfig],
     tag_index: dict[str, tuple[SecurableType, set[tuple[str, str | None]]]],
 ) -> set[CompiledPrivilege]:
-    """Match policies against the tag index and emit compiled privileges."""
+    """Match policies against the tag index and emit compiled privileges.
+
+    Tagless policies (empty tags) grant directly to their attached securable.
+    Policies with tags only match securables within their scope (attached
+    securable and its children).
+    """
     result: set[CompiledPrivilege] = set()
     for policy in policies:
+        if not policy.tags:
+            # Tagless policy — grant directly to the attached securable
+            sec_type = _policy_securable_type(policy)
+            result |= _emit_privileges(sec_type, policy.full_name, policy)
+            continue
+
+        # Tag-matching policy — scoped to the attached securable and its children
         required = {(k, v) for k, v in policy.tags.items()}
         for full_name, (sec_type, actual_tags) in tag_index.items():
+            if not _is_within_scope(full_name, policy):
+                continue
             if not required.issubset(actual_tags):
                 continue
-            allowed = SECURABLE_TYPE_PRIVILEGE_MAP.get(sec_type)
-            for principal_name in policy.to:
-                for privilege in policy.privileges:
-                    if allowed is not None and privilege not in allowed:
-                        continue
-                    result.add(
-                        CompiledPrivilege(
-                            securable_type=sec_type,
-                            securable_full_name=full_name,
-                            principal=principal_name,
-                            privilege_type=privilege,
-                        )
-                    )
+            result |= _emit_privileges(sec_type, full_name, policy)
     return result

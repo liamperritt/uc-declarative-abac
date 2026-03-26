@@ -10,7 +10,7 @@ from databricks.sdk import WorkspaceClient
 from uc_abac_governor.discovery import discover_yaml_files, load_raw_configs
 from uc_abac_governor.helpers.workspace import WorkspaceHelper
 from uc_abac_governor.helpers.unity_catalog import UnityCatalogHelper
-from uc_abac_governor.models import ConfigFile
+from uc_abac_governor.models import ResourcesConfig
 from uc_abac_governor.privileges.compiler import CompiledPrivilege, compile_desired_privileges
 from uc_abac_governor.privileges.differ import compute_privilege_diff
 from uc_abac_governor.privileges.executor import execute_privilege_diff
@@ -109,7 +109,7 @@ def run(
     paths = discover_yaml_files(config_dir)
     raw_defs, raw_resources = load_raw_configs(paths)
     resolved = resolve_refs(raw_defs, raw_resources)
-    config = ConfigFile.model_validate(resolved)
+    config = ResourcesConfig.model_validate(resolved)
     catalog_names = list(config.catalogs.keys())
 
     # 2. Parallel initial fetch (tags, privileges, and principals concurrently)

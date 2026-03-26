@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from uc_abac_governor.models import ConfigFile
+from uc_abac_governor.models import ResourcesConfig
 from uc_abac_governor.tags.compiler import compile_desired_tags
 from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.types import SecurableType
@@ -13,7 +13,7 @@ from uc_abac_governor.types import SecurableType
 
 def test_tag_compiler_emits_catalog_tags():
     """A catalog with tags produces a SecurableTag for each tag."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "my_catalog": {
@@ -42,7 +42,7 @@ def test_tag_compiler_emits_catalog_tags():
 
 def test_tag_compiler_emits_schema_tags():
     """A schema with tags produces a SecurableTag with a two-part full name."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "my_catalog": {
@@ -76,7 +76,7 @@ def test_tag_compiler_emits_schema_tags():
 
 def test_tag_compiler_emits_table_tags():
     """A table with tags produces a SecurableTag with a three-part full name."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "my_catalog": {
@@ -115,7 +115,7 @@ def test_tag_compiler_emits_table_tags():
 
 def test_tag_compiler_emits_volume_tags():
     """A volume with tags produces a SecurableTag with a three-part full name."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "my_catalog": {
@@ -154,7 +154,7 @@ def test_tag_compiler_emits_volume_tags():
 
 def test_tag_compiler_emits_valueless_tags():
     """A tag with None as its value produces a SecurableTag with tag_value="" (empty string)."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "my_catalog": {
@@ -183,7 +183,7 @@ def test_tag_compiler_emits_valueless_tags():
 
 def test_tag_compiler_emits_no_tags_when_none_defined():
     """Objects with no tags field produce an empty set."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "my_catalog": {
@@ -212,7 +212,7 @@ def test_tag_compiler_emits_no_tags_when_none_defined():
 def test_tag_compiler_uses_catalog_name_for_full_names_when_name_differs_from_key():
     """When a catalog's name differs from its dict key, the explicit name is
     used as the catalog segment in full names for the catalog and nested schemas."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "ops_prod": {
@@ -243,7 +243,7 @@ def test_tag_compiler_uses_catalog_name_for_full_names_when_name_differs_from_ke
 def test_tag_compiler_defaults_to_dict_key_when_catalog_name_omitted():
     """When no explicit name is set, the catalog dict key is used as the
     catalog segment in securable_full_name for all nested objects."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "cat_key": {
@@ -309,7 +309,7 @@ def test_tag_compiler_defaults_to_dict_key_when_catalog_name_omitted():
 
 def test_tag_compiler_emits_column_tags():
     """A column with tags produces a SecurableTag with a four-part full name."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "my_catalog": {
@@ -346,7 +346,7 @@ def test_tag_compiler_emits_column_tags():
 
 def test_tag_compiler_emits_no_column_tags_when_columns_have_no_tags():
     """A table with columns that have no tags produces no COLUMN-type tags."""
-    config = ConfigFile.model_validate(
+    config = ResourcesConfig.model_validate(
         {
             "catalogs": {
                 "my_catalog": {

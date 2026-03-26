@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from uc_abac_governor.models import ConfigFile, SecurableConfig
+from uc_abac_governor.models import ResourcesConfig, SecurableConfig
 from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.types import SecurableType
 
@@ -24,29 +24,25 @@ def _emit_tags(
     }
 
 
-def compile_desired_tags(config: ConfigFile) -> set[SecurableTag]:
+def compile_desired_tags(config: ResourcesConfig) -> set[SecurableTag]:
     """Walk the resolved config and emit SecurableTag entries for all tagged objects.
 
-    Produces tags for catalogs, schemas, tables, and volumes.
-    Uses the dict key as the object name when name is omitted.
+    Produces tags for catalogs, schemas, tables, volumes, and columns.
     """
     tags: set[SecurableTag] = set()
 
     for catalog in config.catalogs.values():
-        cat_name = catalog.name
-        tags |= _emit_tags(SecurableType.CATALOG, cat_name, catalog)
+        tags |= _emit_tags(SecurableType.CATALOG, catalog.full_name, catalog)
 
         for schema in catalog.schemas or []:
-            schema_full = f"{cat_name}.{schema.name}"
-            tags |= _emit_tags(SecurableType.SCHEMA, schema_full, schema)
+            tags |= _emit_tags(SecurableType.SCHEMA, schema.full_name, schema)
 
             for table in schema.tables or []:
-                table_full = f"{schema_full}.{table.name}"
-                tags |= _emit_tags(SecurableType.TABLE, table_full, table)
+                tags |= _emit_tags(SecurableType.TABLE, table.full_name, table)
                 for col in table.columns or []:
-                    tags |= _emit_tags(SecurableType.COLUMN, f"{table_full}.{col.name}", col)
+                    tags |= _emit_tags(SecurableType.COLUMN, col.full_name, col)
 
             for volume in schema.volumes or []:
-                tags |= _emit_tags(SecurableType.VOLUME, f"{schema_full}.{volume.name}", volume)
+                tags |= _emit_tags(SecurableType.VOLUME, volume.full_name, volume)
 
     return tags

@@ -159,14 +159,14 @@ resources:
   schemas:
     platform|shared_prod:
       $ref: $defs/schemas/platform|shared
-      catalog: platform_prod
+      catalog_name: platform_prod
 
 # resources/catalogs/platform_test/schemas/shared/shared.yaml
 resources:
   schemas:
     platform|shared_test:
       $ref: $defs/schemas/platform|shared
-      catalog: platform_test
+      catalog_name: platform_test
 ```
 
 #### Table definitions
@@ -250,7 +250,8 @@ resources:
   volumes:
     platform_prod|landing|raw_events:
       $ref: $defs/volumes/platform|landing|raw_events
-      catalog: platform_prod
+      catalog_name: platform_prod
+      schema_name: landing
 ```
 
 #### function definitions
