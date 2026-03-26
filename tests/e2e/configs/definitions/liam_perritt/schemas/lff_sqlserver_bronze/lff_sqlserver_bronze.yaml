@@ -3,10 +3,8 @@ definitions:
     liam_perritt|lff_sqlserver_bronze:
       name: lff_sqlserver_bronze
       tags:
-        team: data_engineering
-        zone: bronze
-      policies:
-        - $ref: $defs/policies/shared|grant_bronze_access
+        uc_gov_team: data_engineering
+        uc_gov_zone: bronze
       tables:
         - $ref: $defs/tables/liam_perritt|lff_sqlserver_bronze|dummy_cdc_sink
         - $ref: $defs/tables/liam_perritt|lff_sqlserver_bronze|dummy_table_cdc_st

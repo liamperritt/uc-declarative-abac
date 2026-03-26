@@ -3,4 +3,4 @@ definitions:
     liam_perritt|default|batch_table:
       name: batch_table
       tags:
-        classification: internal
+        uc_gov_classification: internal

@@ -3,4 +3,4 @@ definitions:
     liam_perritt|lff_sqlserver_bronze|test:
       name: test
       tags:
-        zone: landing
+        uc_gov_zone: landing

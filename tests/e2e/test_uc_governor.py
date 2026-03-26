@@ -32,44 +32,45 @@ from uc_governor.types import Principal, PrincipalType, SecurableType
 
 EXPECTED_TAGS = {
     # Catalog
-    SecurableTag(SecurableType.CATALOG, "liam_perritt", "env", "test"),
-    SecurableTag(SecurableType.CATALOG, "liam_perritt", "managed_by", "uc_governor"),
+    SecurableTag(SecurableType.CATALOG, "liam_perritt", "uc_gov_env", "test"),
+    SecurableTag(SecurableType.CATALOG, "liam_perritt", "uc_gov_managed_by", "uc_governor"),
     # Schema: default
-    SecurableTag(SecurableType.SCHEMA, "liam_perritt.default", "team", "platform"),
+    SecurableTag(SecurableType.SCHEMA, "liam_perritt.default", "uc_gov_team", "platform"),
     # Schema: lff_sqlserver_bronze
-    SecurableTag(SecurableType.SCHEMA, "liam_perritt.lff_sqlserver_bronze", "team", "data_engineering"),
-    SecurableTag(SecurableType.SCHEMA, "liam_perritt.lff_sqlserver_bronze", "zone", "bronze"),
+    SecurableTag(SecurableType.SCHEMA, "liam_perritt.lff_sqlserver_bronze", "uc_gov_team", "data_engineering"),
+    SecurableTag(SecurableType.SCHEMA, "liam_perritt.lff_sqlserver_bronze", "uc_gov_zone", "bronze"),
     # Schema: sqlserver_lff
-    SecurableTag(SecurableType.SCHEMA, "liam_perritt.sqlserver_lff", "team", "data_engineering"),
+    SecurableTag(SecurableType.SCHEMA, "liam_perritt.sqlserver_lff", "uc_gov_team", "data_engineering"),
     # Table: default.batch_table
-    SecurableTag(SecurableType.TABLE, "liam_perritt.default.batch_table", "classification", "internal"),
+    SecurableTag(SecurableType.TABLE, "liam_perritt.default.batch_table", "uc_gov_classification", "internal"),
     # Table: lff_sqlserver_bronze.dummy_cdc_sink
-    SecurableTag(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_cdc_sink", "classification", "internal"),
-    SecurableTag(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_cdc_sink", "pipeline", "lff"),
+    SecurableTag(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_cdc_sink", "uc_gov_classification", "internal"),
+    SecurableTag(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_cdc_sink", "uc_gov_pipeline", "lff"),
     # Table: lff_sqlserver_bronze.dummy_table_cdc_st
-    SecurableTag(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_table_cdc_st", "classification", "internal"),
-    SecurableTag(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_table_cdc_st", "pipeline", "lff"),
+    SecurableTag(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_table_cdc_st", "uc_gov_classification", "internal"),
+    SecurableTag(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_table_cdc_st", "uc_gov_pipeline", "lff"),
     # Table: sqlserver_lff.feature_python_extension_source
-    SecurableTag(SecurableType.TABLE, "liam_perritt.sqlserver_lff.feature_python_extension_source", "classification", "internal"),
+    SecurableTag(SecurableType.TABLE, "liam_perritt.sqlserver_lff.feature_python_extension_source", "uc_gov_classification", "internal"),
     # Volume: lff_sqlserver_bronze.test
-    SecurableTag(SecurableType.VOLUME, "liam_perritt.lff_sqlserver_bronze.test", "zone", "landing"),
+    SecurableTag(SecurableType.VOLUME, "liam_perritt.lff_sqlserver_bronze.test", "uc_gov_zone", "landing"),
 }
 
 EXPECTED_PRIVILEGES = {
-    # Catalog-level policy: USE_CATALOG to test group (matches managed_by=uc_governor)
+    # Catalog-level policy: USE_CATALOG to test group (matches uc_gov_managed_by=uc_governor)
     SecurablePrivilege(SecurableType.CATALOG, "liam_perritt", Principal(PrincipalType.GROUP, "uc_governor_test_team", "uc_governor_test_team"), "USE_CATALOG"),
-    # Schema-level policy on default: USE_SCHEMA + SELECT to test user (matches team=platform)
+    # Catalog-level policy: SELECT to test user (AND semantics — matches both uc_gov_env=test AND uc_gov_managed_by=uc_governor)
+    SecurablePrivilege(SecurableType.CATALOG, "liam_perritt", Principal(PrincipalType.USER, "j.wang@databricks.com", "j.wang@databricks.com"), "SELECT"),
+    # Schema-level policy on default: USE_SCHEMA + SELECT to test user (matches uc_gov_team=platform)
     SecurablePrivilege(SecurableType.SCHEMA, "liam_perritt.default", Principal(PrincipalType.USER, "j.wang@databricks.com", "j.wang@databricks.com"), "USE_SCHEMA"),
     SecurablePrivilege(SecurableType.SCHEMA, "liam_perritt.default", Principal(PrincipalType.USER, "j.wang@databricks.com", "j.wang@databricks.com"), "SELECT"),
-    # Schema-level policy on lff_sqlserver_bronze: USE_SCHEMA to test SP (matches zone=bronze)
+    # Schema-level policy on lff_sqlserver_bronze: USE_SCHEMA to test SP (matches uc_gov_zone=bronze)
     SecurablePrivilege(SecurableType.SCHEMA, "liam_perritt.lff_sqlserver_bronze", Principal(PrincipalType.SERVICE_PRINCIPAL, "sp_uc_governor_test", "sp_uc_governor_test"), "USE_SCHEMA"),
-    # Table-level policy on dummy_cdc_sink: SELECT to test group (matches pipeline=lff)
+    # Table-level policy on dummy_cdc_sink: SELECT to test group (matches uc_gov_pipeline=lff)
     SecurablePrivilege(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_cdc_sink", Principal(PrincipalType.GROUP, "uc_governor_test_team", "uc_governor_test_team"), "SELECT"),
-    # The pipeline=lff tag also appears on dummy_table_cdc_st, which is in the same
-    # schema — but the table-level policy is scoped to dummy_cdc_sink's own tags.
-    # However, _match_policies is global (matches any object with matching tags), so
-    # dummy_table_cdc_st also matches the table-level grant_pipeline_select policy.
+    # dummy_table_cdc_st also has uc_gov_pipeline=lff, so the grant_pipeline_select policy matches it too
     SecurablePrivilege(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_table_cdc_st", Principal(PrincipalType.GROUP, "uc_governor_test_team", "uc_governor_test_team"), "SELECT"),
+    # Volume-level policy: READ_VOLUME to test group (matches uc_gov_zone=landing)
+    SecurablePrivilege(SecurableType.VOLUME, "liam_perritt.lff_sqlserver_bronze.test", Principal(PrincipalType.GROUP, "uc_governor_test_team", "uc_governor_test_team"), "READ_VOLUME"),
 }
 
 

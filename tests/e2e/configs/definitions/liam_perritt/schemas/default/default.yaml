@@ -3,8 +3,6 @@ definitions:
     liam_perritt|default:
       name: default
       tags:
-        team: platform
-      policies:
-        - $ref: $defs/policies/shared|grant_schema_access
+        uc_gov_team: platform
       tables:
         - $ref: $defs/tables/liam_perritt|default|batch_table

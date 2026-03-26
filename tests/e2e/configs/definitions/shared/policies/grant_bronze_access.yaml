@@ -7,4 +7,4 @@ definitions:
       to:
         - sp_uc_governor_test
       tags:
-        zone: bronze
+        uc_gov_zone: bronze

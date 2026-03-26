@@ -1,10 +1,11 @@
 definitions:
   policies:
-    shared|grant_use_catalog:
+    shared|grant_catalog_read:
       type: grant
       privileges:
-        - USE_CATALOG
+        - SELECT
       to:
-        - uc_governor_test_team
+        - j.wang@databricks.com
       tags:
+        uc_gov_env: test
         uc_gov_managed_by: uc_governor

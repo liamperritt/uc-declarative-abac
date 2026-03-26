@@ -3,4 +3,4 @@ definitions:
     liam_perritt|sqlserver_lff|feature_python_extension_source:
       name: feature_python_extension_source
       tags:
-        classification: internal
+        uc_gov_classification: internal

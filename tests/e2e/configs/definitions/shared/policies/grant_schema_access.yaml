@@ -8,4 +8,4 @@ definitions:
       to:
         - j.wang@databricks.com
       tags:
-        team: platform
+        uc_gov_team: platform

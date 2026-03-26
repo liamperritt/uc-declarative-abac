@@ -5,7 +5,12 @@ import time
 
 import requests
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.service.sql import Disposition, StatementResponse, StatementState
+from databricks.sdk.service.sql import (
+    Disposition,
+    ExecuteStatementRequestOnWaitTimeout,
+    StatementResponse,
+    StatementState,
+)
 
 from uc_governor.privileges.state import SecurablePrivilege
 from uc_governor.tags.state import SecurableTag
@@ -129,7 +134,7 @@ class UnityCatalogHelper:
             warehouse_id=self._warehouse_id,
             disposition=Disposition.EXTERNAL_LINKS,
             wait_timeout="50s",
-            on_wait_timeout="CONTINUE",
+            on_wait_timeout=ExecuteStatementRequestOnWaitTimeout.CONTINUE,
         )
         while response.status.state in (StatementState.PENDING, StatementState.RUNNING):
             time.sleep(_POLL_INTERVAL_SECONDS)
