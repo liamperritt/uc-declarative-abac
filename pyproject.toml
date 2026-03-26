@@ -28,7 +28,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests/unit"]
 pythonpath = ["src"]
 addopts = "--cov=uc_governor --cov-report=term-missing"
 
