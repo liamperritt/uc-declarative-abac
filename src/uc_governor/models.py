@@ -7,10 +7,18 @@ from pydantic import BaseModel, model_validator
 from uc_governor.types import PrivilegeType
 
 
+class GrantPolicyConfig(BaseModel):
+    name: str | None = None
+    type: Literal["grant"]
+    privileges: list[PrivilegeType]
+    to: list[str]
+    tags: dict[str, str | None]
+
+
 class SecurableConfig(BaseModel):
     """Base model for all UC securable configs. Not intended to be instantiated directly."""
 
-    name: str | None = None
+    name: str
     tags: dict[str, str | None] | None = None
 
 
@@ -33,22 +41,9 @@ class SchemaConfig(SecurableConfig):
     volumes: list[VolumeConfig] | None = None
 
 
-class GrantPolicyConfig(BaseModel):
-    name: str | None = None
-    type: Literal["grant"]
-    privileges: list[PrivilegeType]
-    to: list[str]
-    tags: dict[str, str | None]
-
-
 class CatalogConfig(SecurableConfig):
     policies: list[GrantPolicyConfig] | None = None
     schemas: list[SchemaConfig] | None = None
-
-
-# Rebuild models that use forward references to GrantPolicyConfig
-TableConfig.model_rebuild()
-SchemaConfig.model_rebuild()
 
 
 class ConfigFile(BaseModel):
