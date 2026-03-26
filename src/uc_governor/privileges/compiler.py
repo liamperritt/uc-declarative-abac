@@ -5,7 +5,37 @@ from dataclasses import dataclass
 
 from uc_governor.models import ConfigFile, GrantPolicyConfig
 from uc_governor.tags.state import SecurableTag
-from uc_governor.types import SecurableType
+from uc_governor.types import PrivilegeType, SecurableType
+
+# Privileges valid for each securable type. Higher-level securables inherit
+# all privileges from lower levels. Unknown privileges are allowed on all types.
+_TABLE_PRIVILEGES = {PrivilegeType.SELECT, PrivilegeType.MODIFY}
+_VOLUME_PRIVILEGES = {PrivilegeType.READ_VOLUME, PrivilegeType.WRITE_VOLUME}
+_SCHEMA_PRIVILEGES = (
+    _TABLE_PRIVILEGES
+    | _VOLUME_PRIVILEGES
+    | {
+        PrivilegeType.USE_SCHEMA,
+        PrivilegeType.CREATE_TABLE,
+        PrivilegeType.CREATE_FUNCTION,
+        PrivilegeType.CREATE_VOLUME,
+        PrivilegeType.EXECUTE,
+        PrivilegeType.EXTERNAL_USE_SCHEMA,
+        PrivilegeType.CREATE_MATERIALIZED_VIEW,
+        PrivilegeType.REFRESH,
+        PrivilegeType.CREATE_MODEL,
+        PrivilegeType.CREATE_MODEL_VERSION,
+    }
+)
+_CATALOG_PRIVILEGES = _SCHEMA_PRIVILEGES | {PrivilegeType.USE_CATALOG, PrivilegeType.CREATE_SCHEMA}
+_UNIVERSAL_PRIVILEGES = {PrivilegeType.ALL_PRIVILEGES, PrivilegeType.MANAGE}
+
+SECURABLE_TYPE_PRIVILEGE_MAP: dict[SecurableType, set[PrivilegeType]] = {
+    SecurableType.CATALOG: _CATALOG_PRIVILEGES | _UNIVERSAL_PRIVILEGES,
+    SecurableType.SCHEMA: _SCHEMA_PRIVILEGES | _UNIVERSAL_PRIVILEGES,
+    SecurableType.TABLE: _TABLE_PRIVILEGES | _UNIVERSAL_PRIVILEGES,
+    SecurableType.VOLUME: _VOLUME_PRIVILEGES | _UNIVERSAL_PRIVILEGES,
+}
 
 
 @dataclass(frozen=True)
@@ -81,14 +111,20 @@ def _match_policies(
         for full_name, (sec_type, actual_tags) in tag_index.items():
             if not required.issubset(actual_tags):
                 continue
+            allowed = SECURABLE_TYPE_PRIVILEGE_MAP.get(sec_type)
+            all_known = {p.value for p in PrivilegeType}
             for principal_name in policy.to:
                 for privilege in policy.privileges:
+                    priv_upper = privilege.upper()
+                    # Skip only if the privilege is known AND not valid for this securable type
+                    if priv_upper in all_known and allowed is not None and priv_upper not in {p.value for p in allowed}:
+                        continue
                     result.add(
                         CompiledPrivilege(
                             securable_type=sec_type,
                             securable_full_name=full_name,
                             principal=principal_name,
-                            privilege_type=privilege.upper(),
+                            privilege_type=priv_upper,
                         )
                     )
     return result

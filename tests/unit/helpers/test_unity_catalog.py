@@ -246,9 +246,12 @@ def test_uc_helper_privileges_query_is_valid_sql():
     # Should be a SELECT statement
     assert isinstance(stmt, sqlglot.exp.Select)
 
-    # Should reference the privileges system table
+    # Should reference all privilege system tables
     tables = _get_table_names(stmt)
+    assert "catalog_privileges" in tables
+    assert "schema_privileges" in tables
     assert "table_privileges" in tables
+    assert "volume_privileges" in tables
 
     # Output columns should include the expected aliases
     sql_upper = sql.upper()

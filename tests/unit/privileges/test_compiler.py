@@ -541,3 +541,131 @@ def test_privilege_compiler_emits_compiled_privilege_type():
     for elem in result:
         assert isinstance(elem, CompiledPrivilege)
         assert not isinstance(elem, SecurablePrivilege)
+
+
+# ---------------------------------------------------------------------------
+# Privilege-securable compatibility
+# ---------------------------------------------------------------------------
+
+
+def test_privilege_compiler_filters_incompatible_privilege_for_volume():
+    """SELECT is incompatible with VOLUME and should be filtered out;
+    READ_VOLUME is compatible and should remain."""
+    config = ConfigFile.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["SELECT", "READ_VOLUME"],
+                            "to": ["team"],
+                            "tags": {"zone": "landing"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.VOLUME,
+            securable_full_name="cat.raw.events",
+            tag_name="zone",
+            tag_value="landing",
+        ),
+    }
+
+    result = compile_desired_privileges(config, desired_tags)
+
+    assert CompiledPrivilege(
+        securable_type=SecurableType.VOLUME,
+        securable_full_name="cat.raw.events",
+        principal="team",
+        privilege_type="READ_VOLUME",
+    ) in result
+
+    # SELECT is not valid on a VOLUME — must be excluded
+    select_privileges = {p for p in result if p.privilege_type == "SELECT"}
+    assert select_privileges == set()
+
+
+def test_privilege_compiler_allows_select_on_table():
+    """SELECT is compatible with TABLE; READ_VOLUME is not and should be filtered out."""
+    config = ConfigFile.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["SELECT", "READ_VOLUME"],
+                            "to": ["team"],
+                            "tags": {"zone": "landing"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="cat.raw.events",
+            tag_name="zone",
+            tag_value="landing",
+        ),
+    }
+
+    result = compile_desired_privileges(config, desired_tags)
+
+    assert CompiledPrivilege(
+        securable_type=SecurableType.TABLE,
+        securable_full_name="cat.raw.events",
+        principal="team",
+        privilege_type="SELECT",
+    ) in result
+
+    # READ_VOLUME is not valid on a TABLE — must be excluded
+    read_volume_privileges = {p for p in result if p.privilege_type == "READ_VOLUME"}
+    assert read_volume_privileges == set()
+
+
+def test_privilege_compiler_allows_all_privileges_on_any_securable():
+    """ALL_PRIVILEGES is compatible with any securable type, including VOLUME."""
+    config = ConfigFile.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["ALL_PRIVILEGES"],
+                            "to": ["team"],
+                            "tags": {"zone": "landing"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.VOLUME,
+            securable_full_name="cat.raw.files",
+            tag_name="zone",
+            tag_value="landing",
+        ),
+    }
+
+    result = compile_desired_privileges(config, desired_tags)
+
+    assert CompiledPrivilege(
+        securable_type=SecurableType.VOLUME,
+        securable_full_name="cat.raw.files",
+        principal="team",
+        privilege_type="ALL_PRIVILEGES",
+    ) in result

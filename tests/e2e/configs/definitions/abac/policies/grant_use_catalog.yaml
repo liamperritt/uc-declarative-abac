@@ -1,6 +1,6 @@
 definitions:
   policies:
-    shared|grant_use_catalog:
+    abac|grant_use_catalog:
       type: grant
       privileges:
         - USE_CATALOG

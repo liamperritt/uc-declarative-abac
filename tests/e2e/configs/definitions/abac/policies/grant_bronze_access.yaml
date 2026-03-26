@@ -1,6 +1,6 @@
 definitions:
   policies:
-    shared|grant_bronze_access:
+    abac|grant_bronze_access:
       type: grant
       privileges:
         - USE_SCHEMA

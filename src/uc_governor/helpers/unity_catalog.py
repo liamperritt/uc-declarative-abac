@@ -66,6 +66,12 @@ def _build_privileges_query(catalog_names: list[str]) -> str:
         f"grantee, privilege_type "
         f"FROM system.information_schema.table_privileges "
         f"WHERE table_catalog IN {in_clause} AND inherited_from = 'NONE'",
+
+        f"SELECT 'VOLUME' AS securable_type, "
+        f"concat(volume_catalog, '.', volume_schema, '.', volume_name) AS securable_full_name, "
+        f"grantee, privilege_type "
+        f"FROM system.information_schema.volume_privileges "
+        f"WHERE volume_catalog IN {in_clause} AND inherited_from = 'NONE'",
     ]
     inner = " UNION ALL ".join(parts)
     return f"SELECT securable_type, securable_full_name, grantee, privilege_type FROM ({inner})"

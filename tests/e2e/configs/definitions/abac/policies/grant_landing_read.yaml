@@ -1,10 +1,11 @@
 definitions:
   policies:
-    shared|grant_pipeline_select:
+    abac|grant_landing_read:
       type: grant
       privileges:
         - SELECT
+        - READ_VOLUME
       to:
         - uc_governor_test_team
       tags:
-        uc_gov_pipeline: lff
+        uc_gov_zone: landing
