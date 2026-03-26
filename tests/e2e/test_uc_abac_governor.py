@@ -59,20 +59,20 @@ EXPECTED_TAGS = {
 
 EXPECTED_PRIVILEGES = {
     # Catalog-level policy: USE_CATALOG to test group (matches uc_gov_managed_by=uc_abac_governor)
-    SecurablePrivilege(SecurableType.CATALOG, "liam_perritt", Principal(PrincipalType.GROUP, "uc_abac_governor_test_team", "uc_abac_governor_test_team"), PrivilegeType.USE_CATALOG),
+    SecurablePrivilege(SecurableType.CATALOG, "liam_perritt", Principal(PrincipalType.GROUP, "uc_governor_test_team", "uc_governor_test_team"), PrivilegeType.USE_CATALOG),
     # Catalog-level policy: SELECT to test user (AND semantics — matches both uc_gov_env=test AND uc_gov_managed_by=uc_abac_governor)
     SecurablePrivilege(SecurableType.CATALOG, "liam_perritt", Principal(PrincipalType.USER, "j.wang@databricks.com", "j.wang@databricks.com"), PrivilegeType.SELECT),
     # Schema-level policy on default: USE_SCHEMA + SELECT to test user (matches uc_gov_team=platform)
     SecurablePrivilege(SecurableType.SCHEMA, "liam_perritt.default", Principal(PrincipalType.USER, "j.wang@databricks.com", "j.wang@databricks.com"), PrivilegeType.USE_SCHEMA),
     SecurablePrivilege(SecurableType.SCHEMA, "liam_perritt.default", Principal(PrincipalType.USER, "j.wang@databricks.com", "j.wang@databricks.com"), PrivilegeType.SELECT),
     # Schema-level policy on lff_sqlserver_bronze: USE_SCHEMA to test SP (matches uc_gov_zone=bronze)
-    SecurablePrivilege(SecurableType.SCHEMA, "liam_perritt.lff_sqlserver_bronze", Principal(PrincipalType.SERVICE_PRINCIPAL, "sp_uc_abac_governor_test", "sp_uc_abac_governor_test"), PrivilegeType.USE_SCHEMA),
+    SecurablePrivilege(SecurableType.SCHEMA, "liam_perritt.lff_sqlserver_bronze", Principal(PrincipalType.SERVICE_PRINCIPAL, "72a5956b-8469-4c26-b414-bfc1a7e279c4", "sp_uc_governor_test"), PrivilegeType.USE_SCHEMA),
     # Table-level policy on dummy_cdc_sink: SELECT to test group (matches uc_gov_pipeline=lff)
-    SecurablePrivilege(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_cdc_sink", Principal(PrincipalType.GROUP, "uc_abac_governor_test_team", "uc_abac_governor_test_team"), PrivilegeType.SELECT),
+    SecurablePrivilege(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_cdc_sink", Principal(PrincipalType.GROUP, "uc_governor_test_team", "uc_governor_test_team"), PrivilegeType.SELECT),
     # dummy_table_cdc_st also has uc_gov_pipeline=lff, so the grant_pipeline_select policy matches it too
-    SecurablePrivilege(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_table_cdc_st", Principal(PrincipalType.GROUP, "uc_abac_governor_test_team", "uc_abac_governor_test_team"), PrivilegeType.SELECT),
+    SecurablePrivilege(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_table_cdc_st", Principal(PrincipalType.GROUP, "uc_governor_test_team", "uc_governor_test_team"), PrivilegeType.SELECT),
     # Volume-level policy: READ_VOLUME to test group (matches uc_gov_zone=landing)
-    SecurablePrivilege(SecurableType.VOLUME, "liam_perritt.lff_sqlserver_bronze.test", Principal(PrincipalType.GROUP, "uc_abac_governor_test_team", "uc_abac_governor_test_team"), PrivilegeType.READ_VOLUME),
+    SecurablePrivilege(SecurableType.VOLUME, "liam_perritt.lff_sqlserver_bronze.test", Principal(PrincipalType.GROUP, "uc_governor_test_team", "uc_governor_test_team"), PrivilegeType.READ_VOLUME),
 }
 
 

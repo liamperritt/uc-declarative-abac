@@ -5,6 +5,6 @@ definitions:
       privileges:
         - use_schema
       to:
-        - sp_uc_abac_governor_test
+        - sp_uc_governor_test
       tags:
         uc_gov_zone: bronze
