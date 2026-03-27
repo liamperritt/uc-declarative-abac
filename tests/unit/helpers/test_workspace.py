@@ -414,7 +414,7 @@ def test_workspace_helper_uses_account_scim_by_default() -> None:
 
 
 def test_workspace_helper_uses_sdk_list_when_scope_is_workspace() -> None:
-    """principal_scope='workspace' uses SDK .list() instead of account SCIM proxy."""
+    """use_workspace_scim=True uses SDK .list() instead of account SCIM proxy."""
     client = MagicMock()
 
     user = MagicMock()
@@ -427,7 +427,7 @@ def test_workspace_helper_uses_sdk_list_when_scope_is_workspace() -> None:
 
     client.service_principals.list.return_value = []
 
-    helper = WorkspaceHelper(client, principal_scope="workspace")
+    helper = WorkspaceHelper(client, use_workspace_scim=True)
     helper.fetch_principals()
 
     # SDK list methods should be called

@@ -28,9 +28,9 @@ class WorkspaceHelper:
     Caches results after initial fetch.
     """
 
-    def __init__(self, workspace_client: WorkspaceClient, principal_scope: str = "account") -> None:
+    def __init__(self, workspace_client: WorkspaceClient, use_workspace_scim: bool = False) -> None:
         self._client = workspace_client
-        self._principal_scope = principal_scope
+        self._use_workspace_scim = use_workspace_scim
         self._users: set[str] | None = None
         self._groups: set[str] | None = None
         self._service_principals: dict[str, str] | None = None  # display_name -> application_id
@@ -58,7 +58,7 @@ class WorkspaceHelper:
         """Fetch and cache all principals. Dispatches based on principal_scope."""
         if self._users is not None:
             return
-        if self._principal_scope == "workspace":
+        if self._use_workspace_scim:
             self._fetch_workspace_principals()
         else:
             self._fetch_account_principals()
