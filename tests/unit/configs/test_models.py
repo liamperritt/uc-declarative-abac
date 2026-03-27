@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from uc_abac_governor.models import ResourcesConfig
+from uc_abac_governor.configs.models import ResourcesConfig
 from uc_abac_governor.types import DuplicateResourceError
 
 

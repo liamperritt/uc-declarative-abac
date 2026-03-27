@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from uc_abac_governor.models import ResourcesConfig
+from uc_abac_governor.configs.models import ResourcesConfig
 from uc_abac_governor.tags.compiler import compile_desired_tags
 from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.types import SecurableType

@@ -1,6 +1,0 @@
-definitions:
-  tables:
-    liam_perritt|default|batch_table:
-      name: batch_table
-      tags:
-        uc_gov_classification: internal

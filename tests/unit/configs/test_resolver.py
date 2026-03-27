@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from uc_abac_governor.resolver import resolve_refs
+from uc_abac_governor.configs.resolver import resolve_refs
 from uc_abac_governor.types import ResolutionError, UnreferencedDefinitionError
 
 

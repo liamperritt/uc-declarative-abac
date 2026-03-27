@@ -4,7 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
 
-from uc_abac_governor.models import ResourcesConfig, GrantPolicyConfig
+from uc_abac_governor.configs.models import ResourcesConfig, GrantPolicyConfig
 from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.types import PrivilegeType, SecurableType
 

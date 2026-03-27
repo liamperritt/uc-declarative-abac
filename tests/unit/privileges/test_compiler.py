@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from uc_abac_governor.models import ResourcesConfig
+from uc_abac_governor.configs.models import ResourcesConfig
 from uc_abac_governor.privileges.compiler import CompiledPrivilege, compile_desired_privileges
 from uc_abac_governor.privileges.state import SecurablePrivilege
 from uc_abac_governor.tags.state import SecurableTag
