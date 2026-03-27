@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, computed_field, field_validator, model_validator
 
-from uc_abac_governor.types import DuplicateResourceError, PrivilegeType
+from uc_abac_governor.types import DuplicateResourceError, PolicyType, PrivilegeType
 
 
 def _coerce_null_tag_values(tags: dict | None) -> dict | None:
@@ -29,16 +29,16 @@ def _check_duplicate_names(items: list, child_label: str, parent_label: str) -> 
             seen.add(name)
 
 
-class GrantPolicyConfig(BaseModel):
+class PolicyConfig(BaseModel):
+    """Base model for all policy configs. Not intended to be instantiated directly."""
+
     catalog_name: str
     schema_name: str | None = None
     table_name: str | None = None
     name: str | None = None
-    type: Literal["grant"]
-    privileges: list[PrivilegeType]
+    type: PolicyType
     to: list[str]
     tags: dict[str, str] | None = None
-    expiry_date: date | None = None
 
     @field_validator("tags", mode="before")
     @classmethod
@@ -53,6 +53,12 @@ class GrantPolicyConfig(BaseModel):
         if self.schema_name:
             return f"{self.catalog_name}.{self.schema_name}"
         return self.catalog_name
+
+
+class GrantPolicyConfig(PolicyConfig):
+    type: Literal[PolicyType.GRANT] = PolicyType.GRANT
+    privileges: list[PrivilegeType]
+    expiry_date: date | None = None
 
 
 class SecurableConfig(BaseModel):

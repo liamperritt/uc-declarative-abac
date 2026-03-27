@@ -33,6 +33,10 @@ class PrivilegeType(str, Enum):
     CREATE_MODEL_VERSION = "create_model_version"
 
 
+class PolicyType(str, Enum):
+    GRANT = "grant"
+
+
 class PrincipalType(str, Enum):
     USER = "USER"
     GROUP = "GROUP"
