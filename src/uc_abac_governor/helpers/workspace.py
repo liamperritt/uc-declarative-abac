@@ -58,10 +58,10 @@ class WorkspaceHelper:
         """Fetch and cache all principals. Dispatches based on principal_scope."""
         if self._users is not None:
             return
-        if self._principal_scope == "account":
-            self._fetch_account_principals()
-        else:
+        if self._principal_scope == "workspace":
             self._fetch_workspace_principals()
+        else:
+            self._fetch_account_principals()
 
     def _fetch_account_principals(self) -> None:
         """Fetch principals via the workspace account SCIM proxy (all account principals)."""
