@@ -13,34 +13,42 @@ from uc_abac_governor.types import DuplicateServicePrincipalError, PrincipalVali
 # ---------------------------------------------------------------------------
 
 
-def _make_user(user_name: str) -> MagicMock:
-    user = MagicMock()
-    user.user_name = user_name
-    return user
+def _make_user(user_name: str) -> dict:
+    return {"userName": user_name}
 
 
-def _make_group(display_name: str) -> MagicMock:
-    group = MagicMock()
-    group.display_name = display_name
-    return group
+def _make_group(display_name: str) -> dict:
+    return {"displayName": display_name}
 
 
-def _make_sp(display_name: str, application_id: str) -> MagicMock:
-    sp = MagicMock()
-    sp.display_name = display_name
-    sp.application_id = application_id
-    return sp
+def _make_sp(display_name: str, application_id: str) -> dict:
+    return {"displayName": display_name, "applicationId": application_id}
 
 
 def _make_workspace_client(
-    users: list[MagicMock] | None = None,
-    groups: list[MagicMock] | None = None,
-    service_principals: list[MagicMock] | None = None,
+    users: list[dict] | None = None,
+    groups: list[dict] | None = None,
+    service_principals: list[dict] | None = None,
 ) -> MagicMock:
     client = MagicMock()
-    client.users.list.return_value = users or []
-    client.groups.list.return_value = groups or []
-    client.service_principals.list.return_value = service_principals or []
+
+    def _do(method, path, **kwargs):
+        if "/Users" in path:
+            resources = users or []
+        elif "/Groups" in path:
+            resources = groups or []
+        elif "/ServicePrincipals" in path:
+            resources = service_principals or []
+        else:
+            resources = []
+        return {
+            "totalResults": len(resources),
+            "startIndex": 1,
+            "itemsPerPage": 100,
+            "Resources": resources,
+        }
+
+    client.api_client.do.side_effect = _do
     return client
 
 
@@ -60,7 +68,9 @@ def test_workspace_helper_fetches_and_caches_users() -> None:
 
     assert helper.validate_principal("alice@example.com") is True
     assert helper.validate_principal("bob@example.com") is True
-    assert client.users.list.call_count == 1
+    # SCIM endpoint should only be called once per principal type (3 types, 1 call each)
+    # but the second fetch_principals should be cached so total = 3
+    assert client.api_client.do.call_count == 3
 
 
 def test_workspace_helper_fetches_and_caches_groups() -> None:
@@ -74,7 +84,7 @@ def test_workspace_helper_fetches_and_caches_groups() -> None:
 
     assert helper.validate_principal("data_engineers") is True
     assert helper.validate_principal("analysts") is True
-    assert client.groups.list.call_count == 1
+    assert client.api_client.do.call_count == 3
 
 
 def test_workspace_helper_fetches_and_caches_service_principals() -> None:
@@ -87,7 +97,7 @@ def test_workspace_helper_fetches_and_caches_service_principals() -> None:
     helper.fetch_principals()  # second call should use cache
 
     assert helper.validate_principal("my-sp") is True
-    assert client.service_principals.list.call_count == 1
+    assert client.api_client.do.call_count == 3
 
 
 def test_workspace_helper_warns_on_duplicate_sp_display_names() -> None:
@@ -336,3 +346,96 @@ def test_workspace_helper_returns_principals_dict() -> None:
     assert result["my-sp"] == Principal(
         PrincipalType.SERVICE_PRINCIPAL, "app-123", "my-sp"
     )
+
+
+# ---------------------------------------------------------------------------
+# Account SCIM proxy
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_helper_paginates_scim_results() -> None:
+    """fetch_principals paginates through SCIM results when totalResults > itemsPerPage."""
+    client = MagicMock()
+
+    call_count = {"n": 0}
+
+    def _paginated_do(method, path, **kwargs):
+        call_count["n"] += 1
+        query = kwargs.get("query", {})
+        start = query.get("startIndex", 1)
+        if "/Users" in path:
+            if start == 1:
+                return {
+                    "totalResults": 3,
+                    "startIndex": 1,
+                    "itemsPerPage": 2,
+                    "Resources": [
+                        {"userName": "a@co.com"},
+                        {"userName": "b@co.com"},
+                    ],
+                }
+            else:
+                return {
+                    "totalResults": 3,
+                    "startIndex": 3,
+                    "itemsPerPage": 2,
+                    "Resources": [{"userName": "c@co.com"}],
+                }
+        return {
+            "totalResults": 0,
+            "startIndex": 1,
+            "itemsPerPage": 100,
+            "Resources": [],
+        }
+
+    client.api_client.do.side_effect = _paginated_do
+
+    helper = WorkspaceHelper(client)
+    helper.fetch_principals()
+
+    assert helper.validate_principal("a@co.com") is True
+    assert helper.validate_principal("b@co.com") is True
+    assert helper.validate_principal("c@co.com") is True
+
+
+# ---------------------------------------------------------------------------
+# Principal scope
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_helper_uses_account_scim_by_default() -> None:
+    """Default scope uses account SCIM proxy (api_client.do)."""
+    client = _make_workspace_client(users=[{"userName": "jane@co.com"}])
+    helper = WorkspaceHelper(client)
+    helper.fetch_principals()
+
+    assert client.api_client.do.called
+    assert helper.validate_principal("jane@co.com")
+
+
+def test_workspace_helper_uses_sdk_list_when_scope_is_workspace() -> None:
+    """principal_scope='workspace' uses SDK .list() instead of account SCIM proxy."""
+    client = MagicMock()
+
+    user = MagicMock()
+    user.user_name = "jane@co.com"
+    client.users.list.return_value = [user]
+
+    group = MagicMock()
+    group.display_name = "data_engineers"
+    client.groups.list.return_value = [group]
+
+    client.service_principals.list.return_value = []
+
+    helper = WorkspaceHelper(client, principal_scope="workspace")
+    helper.fetch_principals()
+
+    # SDK list methods should be called
+    assert client.users.list.called
+    assert client.groups.list.called
+    assert client.service_principals.list.called
+    # Account SCIM proxy should NOT be called
+    assert not client.api_client.do.called
+    # Principals should be found
+    assert helper.validate_principal("jane@co.com")
+    assert helper.validate_principal("data_engineers")

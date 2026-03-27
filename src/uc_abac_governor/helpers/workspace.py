@@ -14,40 +14,89 @@ from uc_abac_governor.types import (
 _logger = logging.getLogger("uc_abac_governor")
 
 
-class WorkspaceHelper:
-    """Wraps WorkspaceClient for fetching and validating workspace principals.
+_SCIM_PAGE_SIZE = 100
 
-    Uses the workspace-level SCIM API to list users, groups, and service principals.
+
+class WorkspaceHelper:
+    """Wraps WorkspaceClient for fetching and validating principals.
+
+    Supports two modes controlled by principal_scope:
+    - "account" (default): uses the workspace account SCIM proxy endpoints to
+      list all users, groups, and service principals in the account.
+    - "workspace": uses the SDK's SCIM API to list only workspace-level principals.
+
     Caches results after initial fetch.
     """
 
-    def __init__(self, workspace_client: WorkspaceClient) -> None:
+    def __init__(self, workspace_client: WorkspaceClient, principal_scope: str = "account") -> None:
         self._client = workspace_client
+        self._principal_scope = principal_scope
         self._users: set[str] | None = None
         self._groups: set[str] | None = None
         self._service_principals: dict[str, str] | None = None  # display_name -> application_id
         self._duplicate_sps: set[str] = set()
 
-    def fetch_principals(self) -> None:
-        """Fetch and cache all users, groups, and service principals from the workspace.
+    def _scim_list_all(self, endpoint: str, attributes: str) -> list[dict]:
+        """Paginate through an account SCIM proxy endpoint, returning all resources."""
+        results: list[dict] = []
+        start_index = 1
+        while True:
+            resp = self._client.api_client.do(
+                "GET", endpoint,
+                query={"startIndex": start_index, "count": _SCIM_PAGE_SIZE, "attributes": attributes},
+            )
+            resources = resp.get("Resources", [])
+            results.extend(resources)
+            total = resp.get("totalResults", 0)
+            items_per_page = len(resources)
+            if not resources or start_index + items_per_page > total:
+                break
+            start_index += items_per_page
+        return results
 
-        Duplicate service principal display names are logged as warnings and
-        tracked. The first application_id is kept; subsequent duplicates are
-        skipped. Callers using a duplicate SP in a policy will get an error
-        at resolve time via get_sp_application_id.
-        Results are cached after the first call.
-        """
+    def fetch_principals(self) -> None:
+        """Fetch and cache all principals. Dispatches based on principal_scope."""
         if self._users is not None:
             return
+        if self._principal_scope == "account":
+            self._fetch_account_principals()
+        else:
+            self._fetch_workspace_principals()
+
+    def _fetch_account_principals(self) -> None:
+        """Fetch principals via the workspace account SCIM proxy (all account principals)."""
+        users_data = self._scim_list_all("/api/2.0/account/scim/v2/Users", "userName")
+        self._users = {u["userName"] for u in users_data if "userName" in u}
+
+        groups_data = self._scim_list_all("/api/2.0/account/scim/v2/Groups", "displayName")
+        self._groups = {g["displayName"] for g in groups_data if "displayName" in g}
+
+        sps_data = self._scim_list_all("/api/2.0/account/scim/v2/ServicePrincipals", "displayName,applicationId")
+        self._build_sp_map(sps_data)
+
+    def _fetch_workspace_principals(self) -> None:
+        """Fetch principals via the SDK's workspace SCIM API (workspace principals only)."""
         self._users = {user.user_name for user in self._client.users.list(attributes="userName")}
         self._groups = {group.display_name for group in self._client.groups.list(attributes="displayName")}
 
+        sps_data = [
+            {"displayName": sp.display_name, "applicationId": sp.application_id}
+            for sp in self._client.service_principals.list(attributes="displayName,applicationId")
+        ]
+        self._build_sp_map(sps_data)
+
+    def _build_sp_map(self, sps_data: list[dict]) -> None:
+        """Build the service principal maps from SCIM-format dicts."""
         sp_map: dict[str, str] = {}
-        for sp in self._client.service_principals.list(attributes="displayName,applicationId"):
-            if sp.display_name in sp_map:
-                self._duplicate_sps.add(sp.display_name)
+        for sp in sps_data:
+            display_name = sp.get("displayName")
+            app_id = sp.get("applicationId")
+            if not display_name or not app_id:
                 continue
-            sp_map[sp.display_name] = sp.application_id
+            if display_name in sp_map:
+                self._duplicate_sps.add(display_name)
+                continue
+            sp_map[display_name] = app_id
         self._service_principals = sp_map
         self._sp_app_id_to_name: dict[str, str] = {v: k for k, v in sp_map.items()}
 

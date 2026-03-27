@@ -110,10 +110,38 @@ def _setup_mock_workspace_empty_state(mock_workspace_client: MagicMock) -> None:
 def _setup_mock_principals(
     mock_workspace_client: MagicMock, group_name: str
 ) -> None:
-    """Configure the mock workspace client's SCIM API to return a single group."""
-    mock_workspace_client.groups.list.return_value = [_make_mock_group(group_name)]
-    mock_workspace_client.users.list.return_value = []
-    mock_workspace_client.service_principals.list.return_value = []
+    """Configure the mock workspace client's account SCIM proxy to return a single group."""
+    original_do = mock_workspace_client.api_client.do.side_effect
+
+    def _scim_do(method, path, **kwargs):
+        if "/account/scim/v2/Groups" in path:
+            return {"totalResults": 1, "startIndex": 1, "itemsPerPage": 100, "Resources": [{"displayName": group_name}]}
+        if "/account/scim/v2/Users" in path:
+            return {"totalResults": 0, "startIndex": 1, "itemsPerPage": 100, "Resources": []}
+        if "/account/scim/v2/ServicePrincipals" in path:
+            return {"totalResults": 0, "startIndex": 1, "itemsPerPage": 100, "Resources": []}
+        return {}
+
+    mock_workspace_client.api_client.do.side_effect = _scim_do
+
+
+def _setup_mock_empty_principals(mock_workspace_client: MagicMock) -> None:
+    """Configure the mock workspace client's account SCIM proxy to return no principals."""
+    def _scim_do(method, path, **kwargs):
+        return {"totalResults": 0, "startIndex": 1, "itemsPerPage": 100, "Resources": []}
+    mock_workspace_client.api_client.do.side_effect = _scim_do
+
+
+def _setup_mock_principals_with_groups(
+    mock_workspace_client: MagicMock, group_names: list[str]
+) -> None:
+    """Configure the mock account SCIM proxy to return specific groups and no users/SPs."""
+    def _scim_do(method, path, **kwargs):
+        if "/account/scim/v2/Groups" in path:
+            resources = [{"displayName": name} for name in group_names]
+            return {"totalResults": len(resources), "startIndex": 1, "itemsPerPage": 100, "Resources": resources}
+        return {"totalResults": 0, "startIndex": 1, "itemsPerPage": 100, "Resources": []}
+    mock_workspace_client.api_client.do.side_effect = _scim_do
 
 
 # ---------------------------------------------------------------------------
@@ -276,10 +304,7 @@ def test_governor_validates_principals_before_applying(
         {"resources/catalog.yaml": _catalog_with_grant_policy_config()}
     )
     _setup_mock_workspace_empty_state(mock_workspace_client)
-
-    mock_workspace_client.users.list.return_value = []
-    mock_workspace_client.groups.list.return_value = []
-    mock_workspace_client.service_principals.list.return_value = []
+    _setup_mock_empty_principals(mock_workspace_client)
 
     with pytest.raises(ExecutionBatchError):
         run(
@@ -362,13 +387,13 @@ def test_governor_fetches_tags_privileges_and_principals_in_parallel(
         _slow_execute
     )
 
-    def _slow_list_groups(**kwargs):
-        time.sleep(delay_seconds)
-        return [_make_mock_group("data_engineers")]
+    def _slow_scim_do(method, path, **kwargs):
+        if "/account/scim/v2/Groups" in path:
+            time.sleep(delay_seconds)
+            return {"totalResults": 1, "startIndex": 1, "itemsPerPage": 100, "Resources": [{"displayName": "data_engineers"}]}
+        return {"totalResults": 0, "startIndex": 1, "itemsPerPage": 100, "Resources": []}
 
-    mock_workspace_client.groups.list.side_effect = _slow_list_groups
-    mock_workspace_client.users.list.return_value = []
-    mock_workspace_client.service_principals.list.return_value = []
+    mock_workspace_client.api_client.do.side_effect = _slow_scim_do
 
     start = time.monotonic()
     run(
@@ -477,11 +502,7 @@ def test_governor_collects_unknown_principal_errors(
         {"resources/catalog.yaml": _catalog_with_grant_policy_config()}
     )
     _setup_mock_workspace_empty_state(mock_workspace_client)
-
-    # No groups/users/SPs -> "data_engineers" is unknown
-    mock_workspace_client.users.list.return_value = []
-    mock_workspace_client.groups.list.return_value = []
-    mock_workspace_client.service_principals.list.return_value = []
+    _setup_mock_empty_principals(mock_workspace_client)
 
     with pytest.raises(ExecutionBatchError) as exc_info:
         run(
@@ -510,11 +531,7 @@ def test_governor_continues_with_valid_principals_when_some_are_unknown(
         {"resources/catalog.yaml": _catalog_with_two_grant_policies_config()}
     )
     _setup_mock_workspace_empty_state(mock_workspace_client)
-
-    # Only "data_engineers" exists; "ghost_team" does not
-    mock_workspace_client.groups.list.return_value = [_make_mock_group("data_engineers")]
-    mock_workspace_client.users.list.return_value = []
-    mock_workspace_client.service_principals.list.return_value = []
+    _setup_mock_principals_with_groups(mock_workspace_client, ["data_engineers"])
 
     with pytest.raises(ExecutionBatchError) as exc_info:
         run(

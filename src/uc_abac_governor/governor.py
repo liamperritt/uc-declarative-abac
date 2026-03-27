@@ -97,6 +97,7 @@ def run(
     workspace_client: WorkspaceClient,
     warehouse_id: str,
     dry_run: bool = False,
+    principal_scope: str = "account",
 ) -> tuple[TagDiff, PrivilegeDiff]:
     """Run the full governance pipeline: discover, resolve, compile, diff, apply.
 
@@ -113,7 +114,7 @@ def run(
 
     # 2. Parallel initial fetch (tags, privileges, and principals concurrently)
     uc_helper = UnityCatalogHelper(workspace_client, warehouse_id)
-    ws_helper = WorkspaceHelper(workspace_client)
+    ws_helper = WorkspaceHelper(workspace_client, principal_scope=principal_scope)
     _logger.info("Fetching current state from system tables (this can take several minutes)...")
     with ThreadPoolExecutor() as pool:
         actual_tags_f = pool.submit(uc_helper.fetch_actual_tags, catalog_names)

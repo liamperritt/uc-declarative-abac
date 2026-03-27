@@ -93,6 +93,7 @@ def test_uc_abac_governor_dry_run(
 
         warehouse_id=warehouse_id,
         dry_run=True,
+        principal_scope="workspace",
     )
 
     # All expected tags should be pending add/update or already in sync
@@ -138,6 +139,7 @@ def test_uc_abac_governor_deploy(
 
         warehouse_id=warehouse_id,
         dry_run=False,
+        principal_scope="workspace",
     )
 
     # All expected tags should have been added or updated (or already in sync)

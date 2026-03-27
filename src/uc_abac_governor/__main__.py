@@ -36,6 +36,12 @@ def main() -> None:
         action="store_true",
         help="Print planned changes without executing",
     )
+    parser.add_argument(
+        "--principal-scope",
+        choices=["account", "workspace"],
+        default="account",
+        help="Scope for fetching principals: 'account' (default) fetches all account principals via SCIM proxy, 'workspace' fetches only workspace principals via SDK",
+    )
 
     args = parser.parse_args()
 
@@ -48,6 +54,7 @@ def main() -> None:
         workspace_client=workspace_client,
         warehouse_id=args.warehouse_id,
         dry_run=args.dry_run,
+        principal_scope=args.principal_scope,
     )
 
 
