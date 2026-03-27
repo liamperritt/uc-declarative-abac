@@ -31,7 +31,6 @@ def _check_duplicate_names(items: list, child_label: str, parent_label: str) -> 
 
 class PolicyConfig(BaseModel):
     """Base model for all policy configs. Not intended to be instantiated directly."""
-
     catalog_name: str
     schema_name: str | None = None
     table_name: str | None = None
