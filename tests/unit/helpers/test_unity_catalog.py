@@ -210,6 +210,36 @@ def test_uc_helper_fetches_actual_privileges_from_query_results(mock_fetch):
     assert result == expected
 
 
+@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetches_volume_privileges_from_query_results(mock_fetch):
+    """Mock returns volume privilege rows -> correct set of UnresolvedPrivilege."""
+    rows = [
+        ["VOLUME", "my_catalog.landing.raw_events", "data_engineers", "READ_VOLUME"],
+        ["VOLUME", "my_catalog.landing.raw_events", "data_engineers", "WRITE_VOLUME"],
+    ]
+    mock_fetch.return_value = rows
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    result = helper.fetch_actual_privileges(["my_catalog"])
+
+    expected = {
+        UnresolvedPrivilege(
+            securable_type=SecurableType.VOLUME,
+            securable_full_name="my_catalog.landing.raw_events",
+            principal="data_engineers",
+            privilege_type=PrivilegeType.READ_VOLUME,
+        ),
+        UnresolvedPrivilege(
+            securable_type=SecurableType.VOLUME,
+            securable_full_name="my_catalog.landing.raw_events",
+            principal="data_engineers",
+            privilege_type=PrivilegeType.WRITE_VOLUME,
+        ),
+    }
+    assert result == expected
+
+
 def test_uc_helper_fetches_no_privileges_given_no_rows():
     """Mock returns no rows -> empty set, but a query was still executed."""
     client = _make_mock_workspace_client(data_array=[])

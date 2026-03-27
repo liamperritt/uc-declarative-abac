@@ -452,4 +452,58 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 
 ---
 
+## Implementation Status
+
+### Implemented
+
+#### Core pipeline
+- **YAML discovery** — recursively finds all `.yaml`/`.yml` files in a config directory
+- **`$ref` resolution** — resolves `$defs/<type>/<key>` references with override support, circular reference detection, and unreferenced definition detection
+- **Resource consolidation** — standalone `resources.schemas`, `resources.tables`, `resources.volumes` are restructured into the nested catalog hierarchy with parent auto-creation
+- **Pydantic model validation** — full config validation with parent context injection (`catalog_name`, `schema_name`, `table_name`), `full_name` computed fields, null tag coercion, and duplicate resource detection
+
+#### Tags domain
+- **Tag compilation** — walks catalog → schema → table → column → volume hierarchy, emitting desired tags
+- **Tag diffing** — computes adds, updates, and removes by comparing desired vs actual state from `information_schema.*_tags` system tables
+- **Tag execution** — generates and executes `ALTER SET/UNSET TAGS` SQL, including `ALTER TABLE ... ALTER COLUMN ... SET/UNSET TAGS` for column-level tags
+- **Tag types** — CATALOG, SCHEMA, TABLE, VOLUME, COLUMN
+
+#### Privileges domain
+- **Privilege compilation** — matches grant policies against desired tags with AND semantics, scoped to the policy's attached securable and its children
+- **Privilege-securable compatibility** — filters incompatible privilege/securable combinations (e.g. `READ_VOLUME` only on volumes)
+- **Tagless policies** — policies with no tags grant directly to their attached securable
+- **Policy expiry** — `expiry_date` field; expired policies are excluded from compilation
+- **Principal resolution** — resolves YAML principal names to `Principal` objects with system identifiers (application IDs for service principals)
+- **Privilege diffing** — computes grants and revokes by comparing desired vs actual state from `information_schema.*_privileges` system tables
+- **Privilege execution** — generates and executes `GRANT`/`REVOKE` SQL
+
+#### Principal management
+- **Account SCIM proxy** (default) — fetches all account-level principals via `/api/2.0/account/scim/v2/` endpoints with pagination
+- **Workspace SCIM** (optional `--use-workspace-scim`) — fetches workspace-level principals via SDK
+- **Duplicate SP handling** — warns on duplicate service principal display names, errors if a duplicate SP is referenced in a policy
+
+#### Error handling
+- **Error collection** — SQL execution errors and principal validation errors are collected (not raised immediately), allowing the pipeline to process as many operations as possible before reporting all failures
+- **`ExecutionBatchError`** — raised at the end with all collected errors
+- **Structured logging** — `[TAGS]`/`[PRIVILEGES]` prefixed logs, ordered by securable type then name, with dry-run prefix support and summary counts
+
+#### Infrastructure
+- **CLI** (`python -m uc_abac_governor`) — `--config-dir`, `--warehouse-id`, `--profile`, `--dry-run`, `--use-workspace-scim`, `--principal-scope`
+- **Hybrid SQL polling** — `wait_timeout=50s` with `on_wait_timeout=CONTINUE` and 10s polling for long-running queries
+- **External links** — fetches SQL results via external link URLs for large result sets
+- **Parallel state fetch** — tags, privileges, and principals are fetched concurrently
+
+### Not yet implemented
+
+- **Governed tags** — `resources.governed_tags` with `allowed_values`, `owner`, `comment` (documented in README but not built)
+- **UC object creation** — creating/updating catalogs, schemas, tables, volumes, functions (currently only tags and privileges are managed)
+- **Object attributes** — `owner`, `comment`, `rfa_destination` on securables
+- **Mask & filter policies** — `type: mask` and `type: filter` policy support
+- **Direct mask/filter** — `filter` on tables and `mask` on columns (non-ABAC, directly applied functions)
+- **Function definitions** — UDF definitions with parameters and return expressions
+- **Abstracted privilege names** — `read`, `edit`, `create` expanding to multiple UC privileges
+- **GitHub Action** — CI/CD deployment action
+
+---
+
 *Define governance in YAML. Version it. Deploy it.*
