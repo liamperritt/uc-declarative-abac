@@ -7,9 +7,8 @@ import sqlglot
 from databricks.sdk.service.sql import Disposition, StatementState
 
 from uc_abac_governor.helpers.unity_catalog import UnityCatalogHelper
-from uc_abac_governor.privileges.state import SecurablePrivilege
 from uc_abac_governor.tags.state import SecurableTag
-from uc_abac_governor.types import GovernorError, SecurableType
+from uc_abac_governor.types import GovernorError, PrivilegeType, SecurableType, UnresolvedPrivilege
 
 WAREHOUSE_ID = "test-warehouse-id"
 
@@ -195,17 +194,17 @@ def test_uc_helper_fetches_actual_privileges_from_query_results(mock_fetch):
     result = helper.fetch_actual_privileges(["my_catalog"])
 
     expected = {
-        SecurablePrivilege(
+        UnresolvedPrivilege(
             securable_type=SecurableType.CATALOG,
             securable_full_name="my_catalog",
             principal="data_engineers",
-            privilege_type="USE_CATALOG",
+            privilege_type=PrivilegeType.USE_CATALOG,
         ),
-        SecurablePrivilege(
+        UnresolvedPrivilege(
             securable_type=SecurableType.SCHEMA,
             securable_full_name="my_catalog.sales",
             principal="analysts",
-            privilege_type="SELECT",
+            privilege_type=PrivilegeType.SELECT,
         ),
     }
     assert result == expected
@@ -434,3 +433,30 @@ def test_uc_helper_tags_query_includes_column_tags():
     assert "column_tags" in sql, (
         f"Expected 'column_tags' in SQL: {sql}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Empty catalog list
+# ---------------------------------------------------------------------------
+
+
+def test_uc_helper_returns_empty_tags_for_empty_catalog_list():
+    """Passing an empty catalog list returns an empty set without executing any SQL."""
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    result = helper.fetch_actual_tags([])
+
+    assert result == set()
+    client.statement_execution.execute_statement.assert_not_called()
+
+
+def test_uc_helper_returns_empty_privileges_for_empty_catalog_list():
+    """Passing an empty catalog list returns an empty set without executing any SQL."""
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    result = helper.fetch_actual_privileges([])
+
+    assert result == set()
+    client.statement_execution.execute_statement.assert_not_called()

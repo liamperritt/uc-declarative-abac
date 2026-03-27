@@ -357,3 +357,33 @@ def test_resolver_raises_with_multiple_unreferenced_definitions():
     msg = str(exc_info.value)
     assert "ops|hr" in msg
     assert "ops|sales|orders" in msg
+
+
+# ---------------------------------------------------------------------------
+# Malformed and circular refs
+# ---------------------------------------------------------------------------
+
+
+def test_resolver_raises_on_malformed_ref_without_slash():
+    """A $ref value missing the second slash (type/key separator) raises ResolutionError."""
+    definitions = {"schemas": {"ops|sales": {"name": "sales"}}}
+    resources = {"catalogs": {"main": {"schemas": [{"$ref": "$defs/schemas_no_key"}]}}}
+
+    with pytest.raises(ResolutionError):
+        resolve_refs(definitions, resources)
+
+
+def test_resolver_raises_on_circular_reference():
+    """Definition A references B and B references A — raises ResolutionError with 'circular'."""
+    definitions = {
+        "schemas": {
+            "a": {"name": "a", "tables": [{"$ref": "$defs/tables/b"}]},
+        },
+        "tables": {
+            "b": {"name": "b", "columns": [{"$ref": "$defs/schemas/a"}]},
+        },
+    }
+    resources = {"catalogs": {"main": {"schemas": [{"$ref": "$defs/schemas/a"}]}}}
+
+    with pytest.raises(ResolutionError, match="[Cc]ircular"):
+        resolve_refs(definitions, resources)

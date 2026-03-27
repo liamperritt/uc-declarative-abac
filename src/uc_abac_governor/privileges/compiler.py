@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
 from datetime import date
 
 from uc_abac_governor.configs.models import ResourcesConfig, GrantPolicyConfig
 from uc_abac_governor.tags.state import SecurableTag
-from uc_abac_governor.types import PrivilegeType, SecurableType
+from uc_abac_governor.types import PrivilegeType, SecurableType, UnresolvedPrivilege
 
 # Privileges valid for each securable type. Higher-level securables inherit
 # all privileges from lower levels. Unknown privileges are allowed on all types.
@@ -39,30 +38,16 @@ SECURABLE_TYPE_PRIVILEGE_MAP: dict[SecurableType, set[PrivilegeType]] = {
 }
 
 
-@dataclass(frozen=True)
-class CompiledPrivilege:
-    """Intermediate privilege representation emitted by the compiler.
-
-    Contains the raw principal name from the YAML config (a plain string).
-    This needs to be resolved to a Principal object with a real identifier
-    before diffing.
-    """
-
-    securable_type: SecurableType
-    securable_full_name: str
-    principal: str
-    privilege_type: PrivilegeType
-
 
 def compile_desired_privileges(
     config: ResourcesConfig,
     desired_tags: set[SecurableTag],
     run_date: date | None = None,
-) -> set[CompiledPrivilege]:
+) -> set[UnresolvedPrivilege]:
     """Compute desired privileges by matching grant policies against desired tags.
 
     For each grant policy, finds objects whose tags are a superset of the
-    policy's tags (AND semantics, exact value match). Emits a CompiledPrivilege
+    policy's tags (AND semantics, exact value match). Emits a UnresolvedPrivilege
     for each (matching_object, principal, privilege_type).
     """
     if run_date is None:
@@ -119,7 +104,7 @@ def _policy_securable_type(policy: GrantPolicyConfig) -> SecurableType:
 
 def _is_within_scope(full_name: str, policy: GrantPolicyConfig) -> bool:
     """Return True if the securable full_name is within the policy's scope."""
-    scope = policy.full_name
+    scope = policy.parent_full_name
     return full_name == scope or full_name.startswith(f"{scope}.")
 
 
@@ -127,16 +112,16 @@ def _emit_privileges(
     sec_type: SecurableType,
     full_name: str,
     policy: GrantPolicyConfig,
-) -> set[CompiledPrivilege]:
-    """Emit CompiledPrivilege entries for each principal × privilege combination."""
+) -> set[UnresolvedPrivilege]:
+    """Emit UnresolvedPrivilege entries for each principal × privilege combination."""
     allowed = SECURABLE_TYPE_PRIVILEGE_MAP.get(sec_type)
-    result: set[CompiledPrivilege] = set()
+    result: set[UnresolvedPrivilege] = set()
     for principal_name in policy.to:
         for privilege in policy.privileges:
             if allowed is not None and privilege not in allowed:
                 continue
             result.add(
-                CompiledPrivilege(
+                UnresolvedPrivilege(
                     securable_type=sec_type,
                     securable_full_name=full_name,
                     principal=principal_name,
@@ -149,19 +134,19 @@ def _emit_privileges(
 def _match_policies(
     policies: list[GrantPolicyConfig],
     tag_index: dict[str, tuple[SecurableType, set[tuple[str, str | None]]]],
-) -> set[CompiledPrivilege]:
+) -> set[UnresolvedPrivilege]:
     """Match policies against the tag index and emit compiled privileges.
 
     Tagless policies (empty tags) grant directly to their attached securable.
     Policies with tags only match securables within their scope (attached
     securable and its children).
     """
-    result: set[CompiledPrivilege] = set()
+    result: set[UnresolvedPrivilege] = set()
     for policy in policies:
         if not policy.tags:
             # Tagless policy — grant directly to the attached securable
             sec_type = _policy_securable_type(policy)
-            result |= _emit_privileges(sec_type, policy.full_name, policy)
+            result |= _emit_privileges(sec_type, policy.parent_full_name, policy)
             continue
 
         # Tag-matching policy — scoped to the attached securable and its children

@@ -37,17 +37,17 @@ class GrantPolicyConfig(BaseModel):
     type: Literal["grant"]
     privileges: list[PrivilegeType]
     to: list[str]
-    tags: dict[str, str]
+    tags: dict[str, str] | None = None
     expiry_date: date | None = None
 
     @field_validator("tags", mode="before")
     @classmethod
     def _coerce_null_tags(cls, v: dict) -> dict:
-        return _coerce_null_tag_values(v) or {}
+        return _coerce_null_tag_values(v)
 
     @computed_field
     @property
-    def full_name(self) -> str:
+    def parent_full_name(self) -> str:
         if self.table_name:
             return f"{self.catalog_name}.{self.schema_name}.{self.table_name}"
         if self.schema_name:

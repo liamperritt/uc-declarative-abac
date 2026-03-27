@@ -21,7 +21,8 @@ def resolve_refs(definitions: dict, resources: dict) -> dict:
     Raises UnreferencedDefinitionError if any definitions are not referenced.
     """
     referenced: set[str] = set()
-    result = _resolve_node(definitions, resources, referenced)
+    visited: set[str] = set()
+    result = _resolve_node(definitions, resources, referenced, visited)
 
     all_refs = {
         f"$defs/{def_type}/{def_key}"
@@ -39,25 +40,28 @@ def resolve_refs(definitions: dict, resources: dict) -> dict:
     return result
 
 
-def _resolve_node(definitions: dict, node: Any, referenced: set[str]) -> Any:
+def _resolve_node(definitions: dict, node: Any, referenced: set[str], visited: set[str]) -> Any:
     """Recursively resolve $ref entries within an arbitrary node."""
     if isinstance(node, dict):
-        return _resolve_dict(definitions, node, referenced)
+        return _resolve_dict(definitions, node, referenced, visited)
     if isinstance(node, list):
-        return [_resolve_node(definitions, item, referenced) for item in node]
+        return [_resolve_node(definitions, item, referenced, visited) for item in node]
     return node
 
 
-def _resolve_dict(definitions: dict, node: dict, referenced: set[str]) -> dict:
+def _resolve_dict(definitions: dict, node: dict, referenced: set[str], visited: set[str]) -> dict:
     """Resolve a single dict node, handling $ref if present."""
     if "$ref" in node:
-        return _resolve_ref(definitions, node, referenced)
-    return {key: _resolve_node(definitions, value, referenced) for key, value in node.items()}
+        return _resolve_ref(definitions, node, referenced, visited)
+    return {key: _resolve_node(definitions, value, referenced, visited) for key, value in node.items()}
 
 
-def _resolve_ref(definitions: dict, node: dict, referenced: set[str]) -> dict:
+def _resolve_ref(definitions: dict, node: dict, referenced: set[str], visited: set[str]) -> dict:
     """Look up a $ref, apply overrides, and recursively resolve the result."""
     ref_path = node["$ref"]
+    if ref_path in visited:
+        raise ResolutionError(f"Circular $ref detected: {ref_path}")
+    visited.add(ref_path)
     referenced.add(ref_path)
     definition = _lookup_definition(definitions, ref_path)
     resolved = copy.deepcopy(definition)
@@ -67,7 +71,9 @@ def _resolve_ref(definitions: dict, node: dict, referenced: set[str]) -> dict:
     resolved.update(overrides)
 
     # Recursively resolve any nested $ref entries
-    return _resolve_node(definitions, resolved, referenced)
+    result = _resolve_node(definitions, resolved, referenced, visited)
+    visited.discard(ref_path)
+    return result
 
 
 def _lookup_definition(definitions: dict, ref: str) -> dict:
@@ -80,7 +86,10 @@ def _lookup_definition(definitions: dict, ref: str) -> dict:
         raise ResolutionError(f"Invalid $ref format: {ref}")
 
     remainder = ref[len(prefix):]
-    slash_idx = remainder.index("/")
+    try:
+        slash_idx = remainder.index("/")
+    except ValueError:
+        raise ResolutionError(f"Invalid $ref format (missing type/key separator): {ref}")
     def_type = remainder[:slash_idx]
     def_key = remainder[slash_idx + 1:]
 

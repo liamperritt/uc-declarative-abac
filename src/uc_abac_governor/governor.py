@@ -13,7 +13,7 @@ from uc_abac_governor.configs.models import ResourcesConfig
 from uc_abac_governor.configs.resolver import resolve_refs
 from uc_abac_governor.helpers.workspace import WorkspaceHelper
 from uc_abac_governor.helpers.unity_catalog import UnityCatalogHelper
-from uc_abac_governor.privileges.compiler import CompiledPrivilege, compile_desired_privileges
+from uc_abac_governor.privileges.compiler import compile_desired_privileges
 from uc_abac_governor.privileges.differ import compute_privilege_diff
 from uc_abac_governor.privileges.executor import execute_privilege_diff
 from uc_abac_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
@@ -25,15 +25,15 @@ from uc_abac_governor.tags.state import TagDiff
 from uc_abac_governor.types import (
     ExecutionBatchError,
     ExecutionError,
-    PrivilegeType,
     PrincipalValidationError,
+    UnresolvedPrivilege,
 )
 
 _logger = logging.getLogger("uc_abac_governor")
 
 
 def _resolve_compiled_privileges(
-    compiled: set[CompiledPrivilege],
+    compiled: set[UnresolvedPrivilege],
     ws_helper: WorkspaceHelper,
     change_logger: ChangeLogger,
 ) -> set[SecurablePrivilege]:
@@ -68,29 +68,26 @@ def _resolve_compiled_privileges(
 
 
 def _resolve_actual_privileges(
-    actual_privileges: set[SecurablePrivilege],
+    actual_privileges: set[UnresolvedPrivilege],
     ws_helper: WorkspaceHelper,
 ) -> set[SecurablePrivilege]:
-    """Resolve raw actual privileges (string principals) to Principal objects.
+    """Resolve unresolved actual privileges (string principals) to Principal objects.
 
-    Actual privileges with unrecognised identifiers (e.g. deleted users) are
-    silently excluded.
+    Actual privileges with unrecognised principals (e.g. deleted users) are
+    logged as errors and excluded.
     """
     resolved: set[SecurablePrivilege] = set()
     for p in actual_privileges:
         try:
             principal = ws_helper.resolve_by_identifier(p.principal)
         except PrincipalValidationError:
+            _logger.error(f"Skipping actual privilege: unknown principal '{p.principal}'")
             continue
-        try:
-            privilege_type = PrivilegeType(p.privilege_type.lower())
-        except ValueError:
-            continue  # Skip privileges not in our supported set
         resolved.add(SecurablePrivilege(
             securable_type=p.securable_type,
             securable_full_name=p.securable_full_name,
             principal=principal,
-            privilege_type=privilege_type,
+            privilege_type=p.privilege_type,
         ))
     return resolved
 

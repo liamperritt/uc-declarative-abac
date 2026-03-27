@@ -12,9 +12,12 @@ from databricks.sdk.service.sql import (
     StatementState,
 )
 
-from uc_abac_governor.privileges.state import SecurablePrivilege
+import logging
+
 from uc_abac_governor.tags.state import SecurableTag
-from uc_abac_governor.types import GovernorError, SecurableType
+from uc_abac_governor.types import GovernorError, PrivilegeType, SecurableType, UnresolvedPrivilege
+
+_logger = logging.getLogger("uc_abac_governor")
 
 _POLL_INTERVAL_SECONDS = 10
 
@@ -91,17 +94,28 @@ def _parse_tag_rows(rows: list[list[str]]) -> set[SecurableTag]:
     }
 
 
-def _parse_privilege_rows(rows: list[list[str]]) -> set[SecurablePrivilege]:
-    """Parse raw SQL result rows into a set of SecurablePrivilege."""
-    return {
-        SecurablePrivilege(
-            securable_type=SecurableType(row[0]),
-            securable_full_name=row[1],
-            principal=row[2],
-            privilege_type=row[3],
+def _parse_privilege_rows(rows: list[list[str]]) -> set[UnresolvedPrivilege]:
+    """Parse raw SQL result rows into a set of UnresolvedPrivilege.
+
+    Converts privilege_type strings to PrivilegeType enums. Rows with
+    unsupported privilege types are skipped with a logged error.
+    """
+    result: set[UnresolvedPrivilege] = set()
+    for row in rows:
+        try:
+            privilege_type = PrivilegeType(row[3].lower())
+        except ValueError:
+            _logger.error(f"Skipping privilege from system table: unsupported type '{row[3]}'")
+            continue
+        result.add(
+            UnresolvedPrivilege(
+                securable_type=SecurableType(row[0]),
+                securable_full_name=row[1],
+                principal=row[2],
+                privilege_type=privilege_type,
+            )
         )
-        for row in rows
-    }
+    return result
 
 
 def _fetch_external_links_rows(response: StatementResponse) -> list[list[str]]:
@@ -112,7 +126,10 @@ def _fetch_external_links_rows(response: StatementResponse) -> list[list[str]]:
     for link in response.result.external_links:
         resp = requests.get(link.external_link, headers=link.http_headers)
         resp.raise_for_status()
-        rows.extend(json.loads(resp.text))
+        try:
+            rows.extend(json.loads(resp.text))
+        except json.JSONDecodeError as e:
+            raise GovernorError(f"Failed to parse external link response: {e}") from e
     return rows
 
 
@@ -127,7 +144,7 @@ class UnityCatalogHelper:
         self._client = workspace_client
         self._warehouse_id = warehouse_id
         self._tags_cache: set[SecurableTag] | None = None
-        self._privileges_cache: set[SecurablePrivilege] | None = None
+        self._privileges_cache: set[UnresolvedPrivilege] | None = None
 
     def _execute_and_poll(self, statement: str) -> StatementResponse:
         """Execute a SQL statement with hybrid polling for long-running queries.
@@ -149,7 +166,7 @@ class UnityCatalogHelper:
 
         if response.status.state != StatementState.SUCCEEDED:
             error_msg = getattr(response.status.error, "message", "Unknown error")
-            raise GovernorError(f"SQL query failed ({response.status.state}): {error_msg}")
+            raise GovernorError(f"SQL query failed ({response.status.state}): {error_msg}\nStatement: {statement}")
 
         return response
 
@@ -161,18 +178,26 @@ class UnityCatalogHelper:
         if self._tags_cache is not None:
             return self._tags_cache
 
+        if not catalog_names:
+            self._tags_cache = set()
+            return self._tags_cache
+
         response = self._execute_and_poll(_build_tags_query(catalog_names))
         rows = _fetch_external_links_rows(response)
         self._tags_cache = _parse_tag_rows(rows)
         return self._tags_cache
 
-    def fetch_actual_privileges(self, catalog_names: list[str]) -> set[SecurablePrivilege]:
+    def fetch_actual_privileges(self, catalog_names: list[str]) -> set[UnresolvedPrivilege]:
         """Query system tables for all explicit privileges on securables in the given catalogs.
 
         Filters to inherited_from='NONE' to only return directly granted privileges.
         Results are cached after the first call.
         """
         if self._privileges_cache is not None:
+            return self._privileges_cache
+
+        if not catalog_names:
+            self._privileges_cache = set()
             return self._privileges_cache
 
         response = self._execute_and_poll(_build_privileges_query(catalog_names))
