@@ -447,6 +447,8 @@ This folder structure is not enforced by the engine — you can organise files h
 
 The engine is designed to run in CI/CD. You can use it as a **GitHub Action** on a repository that holds your YAML files: on push or on a schedule, the action runs the engine against your configs and **declaratively deploys ABAC governance** to your Databricks workspace and Unity Catalog.
 
+It is recommended to run the deployment whenever a new version of your YAML files is released, as well as running a scheduled deployment at least once per day (to reduce drift and to ensure features like the grant policy `expiry_date` work as intended).
+
 ### Deployment semantics
 
 Not all object types are managed the same way:
