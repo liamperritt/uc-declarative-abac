@@ -320,7 +320,7 @@ Resource configs are concrete, deployable instances (e.g., catalogs and their co
 
 #### Tag Policies
 
-Tag policies specify usage rules for Unity Catalog governed tags. They specify a tag name with a controlled set of allowed values. They are defined under `resources: tag_policies:` (not definitions) because they are account-level singletons—there is no catalog-scoped variant. The dictionary key is used as the tag name if `name` is not provided. All tag policies should exclusively be created through this framework.
+Tag policies enforce usage rules for Unity Catalog governed tags. They specify a tag name with a controlled set of allowed values. They are defined under `resources: tag_policies:` (not definitions) because they are account-level singletons—there is no catalog-scoped variant. The dictionary key is used as the tag name if `name` is not provided. All tag policies should exclusively be created through this framework.
 
 - **`name`** — the governed tag key.
 - **`comment`** — a human-readable description of the governed tag's purpose.
