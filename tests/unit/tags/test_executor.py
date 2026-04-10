@@ -28,7 +28,7 @@ def _assert_sql_contains(sql: str, *fragments: str):
 
 
 # ---------------------------------------------------------------------------
-# 1. Adds produce ALTER SET TAGS
+# Tag diffs to ALTER statement resolution
 # ---------------------------------------------------------------------------
 
 
@@ -66,11 +66,6 @@ def test_tag_executor_generates_set_tags_sql_for_adds():
     uc_helper.execute_sql.assert_called_once_with(sql)
 
 
-# ---------------------------------------------------------------------------
-# 2. Updates produce ALTER SET TAGS (same syntax as adds)
-# ---------------------------------------------------------------------------
-
-
 def test_tag_executor_generates_set_tags_sql_for_updates():
     """to_update tags produce ALTER SET TAGS — same SQL shape as adds."""
     uc_helper = MagicMock()
@@ -98,11 +93,6 @@ def test_tag_executor_generates_set_tags_sql_for_updates():
         _assert_sql_contains(sql, "ALTER", "TABLE", "SET TAGS", "cat.schema.orders", "pii", "true")
 
     uc_helper.execute_sql.assert_called_once_with(sql)
-
-
-# ---------------------------------------------------------------------------
-# 3. Removes produce ALTER UNSET TAGS
-# ---------------------------------------------------------------------------
 
 
 def test_tag_executor_generates_unset_tags_sql_for_removes():
@@ -137,11 +127,6 @@ def test_tag_executor_generates_unset_tags_sql_for_removes():
     uc_helper.execute_sql.assert_called_once_with(sql)
 
 
-# ---------------------------------------------------------------------------
-# 4. Valueless tags — no `= 'value'` part
-# ---------------------------------------------------------------------------
-
-
 def test_tag_executor_handles_valueless_tags():
     """A tag with tag_value="" produces SET TAGS('key' = '') with an empty string value."""
     uc_helper = MagicMock()
@@ -171,7 +156,7 @@ def test_tag_executor_handles_valueless_tags():
 
 
 # ---------------------------------------------------------------------------
-# 5. Batching — multiple tags on the same securable → single statement
+# Batching — multiple tags on the same securable → single statement
 # ---------------------------------------------------------------------------
 
 
@@ -209,7 +194,7 @@ def test_tag_executor_batches_tags_per_securable():
 
 
 # ---------------------------------------------------------------------------
-# 6. Return value contains every executed SQL statement
+# SQL statement execution
 # ---------------------------------------------------------------------------
 
 
@@ -251,11 +236,6 @@ def test_tag_executor_returns_all_executed_statements():
     assert set(stmts) == set(executed_sqls)
 
 
-# ---------------------------------------------------------------------------
-# 7. Empty diff — no execute_sql calls
-# ---------------------------------------------------------------------------
-
-
 def test_tag_executor_executes_nothing_given_empty_diff():
     """An empty TagDiff should produce no SQL and no execute_sql calls."""
     uc_helper = MagicMock()
@@ -265,6 +245,52 @@ def test_tag_executor_executes_nothing_given_empty_diff():
 
     assert stmts == []
     uc_helper.execute_sql.assert_not_called()
+
+
+def test_tag_executor_executes_sql_in_securable_order():
+    """SQL statements are executed ordered by securable type then full name."""
+    uc_helper = MagicMock()
+    diff = TagDiff(
+        to_add={
+            SecurableTag(
+                securable_type=SecurableType.TABLE,
+                securable_full_name="cat.s.table_b",
+                tag_name="a",
+                tag_value="1",
+            ),
+            SecurableTag(
+                securable_type=SecurableType.CATALOG,
+                securable_full_name="cat_a",
+                tag_name="b",
+                tag_value="2",
+            ),
+            SecurableTag(
+                securable_type=SecurableType.TABLE,
+                securable_full_name="cat.s.table_a",
+                tag_name="c",
+                tag_value="3",
+            ),
+            SecurableTag(
+                securable_type=SecurableType.CATALOG,
+                securable_full_name="cat_b",
+                tag_name="d",
+                tag_value="4",
+            ),
+        },
+    )
+
+    stmts = execute_tag_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 4
+
+    # Normalise by removing backticks for easier assertions.
+    normalised = [s.replace("`", "") for s in stmts]
+
+    # Expected order: CATALOG cat_a, CATALOG cat_b, TABLE cat.s.table_a, TABLE cat.s.table_b
+    assert "cat_a" in normalised[0], f"Expected cat_a in first stmt: {stmts[0]}"
+    assert "cat_b" in normalised[1], f"Expected cat_b in second stmt: {stmts[1]}"
+    assert "cat.s.table_a" in normalised[2], f"Expected cat.s.table_a in third stmt: {stmts[2]}"
+    assert "cat.s.table_b" in normalised[3], f"Expected cat.s.table_b in fourth stmt: {stmts[3]}"
 
 
 # ---------------------------------------------------------------------------
@@ -400,54 +426,3 @@ def test_tag_executor_generates_alter_column_unset_tags_sql():
     _assert_sql_contains(sql, "ALTER TABLE", "ALTER COLUMN", "UNSET TAGS", "email", "pii")
 
     uc_helper.execute_sql.assert_called_once_with(sql)
-
-
-# ---------------------------------------------------------------------------
-# Execution order
-# ---------------------------------------------------------------------------
-
-
-def test_tag_executor_executes_sql_in_securable_order():
-    """SQL statements are executed ordered by securable type then full name."""
-    uc_helper = MagicMock()
-    diff = TagDiff(
-        to_add={
-            SecurableTag(
-                securable_type=SecurableType.TABLE,
-                securable_full_name="cat.s.table_b",
-                tag_name="a",
-                tag_value="1",
-            ),
-            SecurableTag(
-                securable_type=SecurableType.CATALOG,
-                securable_full_name="cat_a",
-                tag_name="b",
-                tag_value="2",
-            ),
-            SecurableTag(
-                securable_type=SecurableType.TABLE,
-                securable_full_name="cat.s.table_a",
-                tag_name="c",
-                tag_value="3",
-            ),
-            SecurableTag(
-                securable_type=SecurableType.CATALOG,
-                securable_full_name="cat_b",
-                tag_name="d",
-                tag_value="4",
-            ),
-        },
-    )
-
-    stmts = execute_tag_diff(uc_helper, diff, ChangeLogger())
-
-    assert len(stmts) == 4
-
-    # Normalise by removing backticks for easier assertions.
-    normalised = [s.replace("`", "") for s in stmts]
-
-    # Expected order: CATALOG cat_a, CATALOG cat_b, TABLE cat.s.table_a, TABLE cat.s.table_b
-    assert "cat_a" in normalised[0], f"Expected cat_a in first stmt: {stmts[0]}"
-    assert "cat_b" in normalised[1], f"Expected cat_b in second stmt: {stmts[1]}"
-    assert "cat.s.table_a" in normalised[2], f"Expected cat.s.table_a in third stmt: {stmts[2]}"
-    assert "cat.s.table_b" in normalised[3], f"Expected cat.s.table_b in fourth stmt: {stmts[3]}"

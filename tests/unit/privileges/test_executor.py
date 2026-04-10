@@ -18,7 +18,7 @@ def _assert_sql_contains(sql: str, *fragments: str):
 
 
 # ---------------------------------------------------------------------------
-# 1. GRANT SQL generation
+# SQL generation
 # ---------------------------------------------------------------------------
 
 
@@ -50,11 +50,6 @@ def test_privilege_executor_generates_grant_sql():
     uc_helper.execute_sql.assert_called_once_with(sql)
 
 
-# ---------------------------------------------------------------------------
-# 2. REVOKE SQL generation
-# ---------------------------------------------------------------------------
-
-
 def test_privilege_executor_generates_revoke_sql():
     """to_revoke privileges produce REVOKE statements with correct components."""
     uc_helper = MagicMock()
@@ -83,7 +78,7 @@ def test_privilege_executor_generates_revoke_sql():
 
 
 # ---------------------------------------------------------------------------
-# 3. Service principal resolution — display name → application ID
+# Principal resolution
 # ---------------------------------------------------------------------------
 
 
@@ -114,8 +109,35 @@ def test_privilege_executor_resolves_sp_display_name_to_application_id():
     uc_helper.execute_sql.assert_called_once_with(sql)
 
 
+def test_privilege_executor_uses_principal_identifier_in_grant_sql():
+    """When principal is a Principal object, the SQL uses its identifier (not display_name)."""
+    from uc_abac_governor.types import Principal, PrincipalType
+
+    uc_helper = MagicMock()
+
+
+    priv = SecurablePrivilege(
+        securable_type=SecurableType.TABLE,
+        securable_full_name="catalog.schema.orders",
+        principal=Principal(PrincipalType.SERVICE_PRINCIPAL, "app-id-123", "my-etl-sp"),
+        privilege_type=PrivilegeType.SELECT,
+    )
+
+    diff = PrivilegeDiff(to_grant={priv})
+
+    stmts = execute_privilege_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    sql = stmts[0]
+
+    # The system identifier must appear in the SQL
+    assert "app-id-123" in sql
+    # The display name must NOT appear in the SQL
+    assert "my-etl-sp" not in sql
+
+
 # ---------------------------------------------------------------------------
-# 4. Return value contains every executed SQL statement
+# SQL statement executions
 # ---------------------------------------------------------------------------
 
 
@@ -159,11 +181,6 @@ def test_privilege_executor_returns_all_executed_statements():
     assert set(stmts) == set(executed_sqls)
 
 
-# ---------------------------------------------------------------------------
-# 5. Empty diff — no execute_sql calls
-# ---------------------------------------------------------------------------
-
-
 def test_privilege_executor_executes_nothing_given_empty_diff():
     """An empty PrivilegeDiff should produce no SQL and no execute_sql calls."""
     uc_helper = MagicMock()
@@ -175,6 +192,50 @@ def test_privilege_executor_executes_nothing_given_empty_diff():
 
     assert stmts == []
     uc_helper.execute_sql.assert_not_called()
+
+
+def test_privilege_executor_executes_sql_in_securable_order():
+    """Privileges are executed ordered by securable type then full name."""
+    uc_helper = MagicMock()
+
+    diff = PrivilegeDiff(
+        to_grant={
+            SecurablePrivilege(
+                securable_type=SecurableType.TABLE,
+                securable_full_name="cat.s.table_b",
+                principal=Principal(PrincipalType.GROUP, "team_a", "team_a"),
+                privilege_type=PrivilegeType.SELECT,
+            ),
+            SecurablePrivilege(
+                securable_type=SecurableType.CATALOG,
+                securable_full_name="cat_a",
+                principal=Principal(PrincipalType.GROUP, "team_b", "team_b"),
+                privilege_type=PrivilegeType.USE_CATALOG,
+            ),
+            SecurablePrivilege(
+                securable_type=SecurableType.TABLE,
+                securable_full_name="cat.s.table_a",
+                principal=Principal(PrincipalType.GROUP, "team_c", "team_c"),
+                privilege_type=PrivilegeType.SELECT,
+            ),
+            SecurablePrivilege(
+                securable_type=SecurableType.CATALOG,
+                securable_full_name="cat_b",
+                principal=Principal(PrincipalType.GROUP, "team_d", "team_d"),
+                privilege_type=PrivilegeType.USE_CATALOG,
+            ),
+        },
+    )
+
+    stmts = execute_privilege_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 4
+
+    # Expected order: CATALOG cat_a, CATALOG cat_b, TABLE cat.s.table_a, TABLE cat.s.table_b
+    assert "cat_a" in stmts[0]
+    assert "cat_b" in stmts[1]
+    assert "cat.s.table_a".replace(".", "`.`") in stmts[2] or "cat.s.table_a" in stmts[2].replace("`", "")
+    assert "cat.s.table_b".replace(".", "`.`") in stmts[3] or "cat.s.table_b" in stmts[3].replace("`", "")
 
 
 # ---------------------------------------------------------------------------
@@ -258,84 +319,3 @@ def test_privilege_executor_collects_all_errors():
     assert len(change_logger.errors) == 2
     # No successful statements
     assert stmts == []
-
-
-# ---------------------------------------------------------------------------
-# Principal identifier in SQL
-# ---------------------------------------------------------------------------
-
-
-def test_privilege_executor_uses_principal_identifier_in_grant_sql():
-    """When principal is a Principal object, the SQL uses its identifier (not display_name)."""
-    from uc_abac_governor.types import Principal, PrincipalType
-
-    uc_helper = MagicMock()
-
-
-    priv = SecurablePrivilege(
-        securable_type=SecurableType.TABLE,
-        securable_full_name="catalog.schema.orders",
-        principal=Principal(PrincipalType.SERVICE_PRINCIPAL, "app-id-123", "my-etl-sp"),
-        privilege_type=PrivilegeType.SELECT,
-    )
-
-    diff = PrivilegeDiff(to_grant={priv})
-
-    stmts = execute_privilege_diff(uc_helper, diff, ChangeLogger())
-
-    assert len(stmts) == 1
-    sql = stmts[0]
-
-    # The system identifier must appear in the SQL
-    assert "app-id-123" in sql
-    # The display name must NOT appear in the SQL
-    assert "my-etl-sp" not in sql
-
-
-# ---------------------------------------------------------------------------
-# Execution order
-# ---------------------------------------------------------------------------
-
-
-def test_privilege_executor_executes_sql_in_securable_order():
-    """Privileges are executed ordered by securable type then full name."""
-    uc_helper = MagicMock()
-
-    diff = PrivilegeDiff(
-        to_grant={
-            SecurablePrivilege(
-                securable_type=SecurableType.TABLE,
-                securable_full_name="cat.s.table_b",
-                principal=Principal(PrincipalType.GROUP, "team_a", "team_a"),
-                privilege_type=PrivilegeType.SELECT,
-            ),
-            SecurablePrivilege(
-                securable_type=SecurableType.CATALOG,
-                securable_full_name="cat_a",
-                principal=Principal(PrincipalType.GROUP, "team_b", "team_b"),
-                privilege_type=PrivilegeType.USE_CATALOG,
-            ),
-            SecurablePrivilege(
-                securable_type=SecurableType.TABLE,
-                securable_full_name="cat.s.table_a",
-                principal=Principal(PrincipalType.GROUP, "team_c", "team_c"),
-                privilege_type=PrivilegeType.SELECT,
-            ),
-            SecurablePrivilege(
-                securable_type=SecurableType.CATALOG,
-                securable_full_name="cat_b",
-                principal=Principal(PrincipalType.GROUP, "team_d", "team_d"),
-                privilege_type=PrivilegeType.USE_CATALOG,
-            ),
-        },
-    )
-
-    stmts = execute_privilege_diff(uc_helper, diff, ChangeLogger())
-
-    assert len(stmts) == 4
-
-    # Expected order: CATALOG cat_a, CATALOG cat_b, TABLE cat.s.table_a, TABLE cat.s.table_b
-    assert "cat_a" in stmts[0]
-    assert "cat_b" in stmts[1]
-    assert "cat.s.table_a".replace(".", "`.`") in stmts[2] or "cat.s.table_a" in stmts[2].replace("`", "")
-    assert "cat.s.table_b".replace(".", "`.`") in stmts[3] or "cat.s.table_b" in stmts[3].replace("`", "")

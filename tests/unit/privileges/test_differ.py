@@ -6,7 +6,7 @@ from uc_abac_governor.types import Principal, PrincipalType, PrivilegeType, Secu
 
 
 # ---------------------------------------------------------------------------
-# Privileges to grant
+# Privileges to grant and revoke
 # ---------------------------------------------------------------------------
 
 
@@ -48,11 +48,6 @@ def test_privilege_differ_computes_privileges_to_grant():
     assert diff.to_revoke == set()
 
 
-# ---------------------------------------------------------------------------
-# Privileges to revoke
-# ---------------------------------------------------------------------------
-
-
 def test_privilege_differ_computes_privileges_to_revoke():
     """An actual privilege not present in desired appears in to_revoke."""
     desired = {
@@ -92,7 +87,7 @@ def test_privilege_differ_computes_privileges_to_revoke():
 
 
 # ---------------------------------------------------------------------------
-# In-sync — empty diff
+# Empty sets
 # ---------------------------------------------------------------------------
 
 
@@ -118,11 +113,6 @@ def test_privilege_differ_returns_empty_diff_when_in_sync():
     assert diff == PrivilegeDiff()
 
 
-# ---------------------------------------------------------------------------
-# Empty desired
-# ---------------------------------------------------------------------------
-
-
 def test_privilege_differ_handles_empty_desired():
     """Empty desired with non-empty actual produces only to_revoke entries."""
     actual = {
@@ -144,11 +134,6 @@ def test_privilege_differ_handles_empty_desired():
 
     assert diff.to_revoke == actual
     assert diff.to_grant == set()
-
-
-# ---------------------------------------------------------------------------
-# Empty actual
-# ---------------------------------------------------------------------------
 
 
 def test_privilege_differ_handles_empty_actual():

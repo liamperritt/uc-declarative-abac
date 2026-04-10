@@ -105,18 +105,3 @@ class ExecutionBatchError(GovernorError):
         for err in self.errors:
             lines.append(f"  - {err.context}: {err.exception}")
         return "\n".join(lines)
-
-
-@dataclass(frozen=True)
-class UnresolvedPrivilege:
-    """Intermediate privilege representation with unresolved principal.
-
-    Used by the privilege compiler (principal is a raw YAML string) and by
-    UnityCatalogHelper (principal is a raw grantee string from system tables).
-    Must be resolved to SecurablePrivilege (with Principal object) before diffing.
-    """
-
-    securable_type: SecurableType
-    securable_full_name: str
-    principal: str
-    privilege_type: PrivilegeType

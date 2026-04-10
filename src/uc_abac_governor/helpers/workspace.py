@@ -20,10 +20,10 @@ _SCIM_PAGE_SIZE = 100
 class WorkspaceHelper:
     """Wraps WorkspaceClient for fetching and validating principals.
 
-    Supports two modes controlled by principal_scope:
-    - "account" (default): uses the workspace account SCIM proxy endpoints to
+    Supports two modes controlled by use_workspace_scim:
+    - use_workspace_scim=False (default): uses the workspace account SCIM proxy endpoints to
       list all users, groups, and service principals in the account.
-    - "workspace": uses the SDK's SCIM API to list only workspace-level principals.
+    - use_workspace_scim=True: uses the SDK's SCIM API to list only workspace-level principals.
 
     Caches results after initial fetch.
     """
@@ -55,7 +55,7 @@ class WorkspaceHelper:
         return results
 
     def fetch_principals(self) -> None:
-        """Fetch and cache all principals. Dispatches based on principal_scope."""
+        """Fetch and cache all principals. Dispatches based on use_workspace_scim."""
         if self._users is not None:
             return
         if self._use_workspace_scim:

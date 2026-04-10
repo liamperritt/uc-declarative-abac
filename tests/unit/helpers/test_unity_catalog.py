@@ -8,7 +8,8 @@ from databricks.sdk.service.sql import Disposition, StatementState
 
 from uc_abac_governor.helpers.unity_catalog import UnityCatalogHelper
 from uc_abac_governor.tags.state import SecurableTag
-from uc_abac_governor.types import GovernorError, PrivilegeType, SecurableType, UnresolvedPrivilege
+from uc_abac_governor.privileges.state import UnresolvedPrivilege
+from uc_abac_governor.types import GovernorError, PrivilegeType, SecurableType
 
 WAREHOUSE_ID = "test-warehouse-id"
 

@@ -4,11 +4,12 @@ from uc_abac_governor.configs.models import ResourcesConfig
 from uc_abac_governor.privileges.compiler import compile_desired_privileges
 from uc_abac_governor.privileges.state import SecurablePrivilege
 from uc_abac_governor.tags.state import SecurableTag
-from uc_abac_governor.types import PrivilegeType, SecurableType, UnresolvedPrivilege
+from uc_abac_governor.privileges.state import UnresolvedPrivilege
+from uc_abac_governor.types import PrivilegeType, SecurableType
 
 
 # ---------------------------------------------------------------------------
-# Single policy with matching tags
+# Resolution of policies into privileges
 # ---------------------------------------------------------------------------
 
 
@@ -77,11 +78,6 @@ def test_privilege_compiler_computes_privileges_from_policy():
     }
 
 
-# ---------------------------------------------------------------------------
-# AND semantics for multiple tags
-# ---------------------------------------------------------------------------
-
-
 def test_privilege_compiler_policy_uses_and_semantics_for_multiple_tags():
     """A policy with tags: {a: x, b: y} only matches objects that have BOTH tags."""
     config = ResourcesConfig.model_validate(
@@ -136,11 +132,6 @@ def test_privilege_compiler_policy_uses_and_semantics_for_multiple_tags():
     }
 
 
-# ---------------------------------------------------------------------------
-# No matching tags — no privileges
-# ---------------------------------------------------------------------------
-
-
 def test_privilege_compiler_policy_skips_objects_without_matching_tags():
     """Objects without matching tags produce no privileges."""
     config = ResourcesConfig.model_validate(
@@ -172,11 +163,6 @@ def test_privilege_compiler_policy_skips_objects_without_matching_tags():
     result = compile_desired_privileges(config, desired_tags)
 
     assert result == set()
-
-
-# ---------------------------------------------------------------------------
-# Multiple policies per catalog
-# ---------------------------------------------------------------------------
 
 
 def test_privilege_compiler_handles_multiple_policies_per_catalog():
@@ -237,11 +223,6 @@ def test_privilege_compiler_handles_multiple_policies_per_catalog():
     }
 
 
-# ---------------------------------------------------------------------------
-# Catalog with no policies
-# ---------------------------------------------------------------------------
-
-
 def test_privilege_compiler_handles_catalog_with_no_policies():
     """A catalog with no policies produces an empty set."""
     config = ResourcesConfig.model_validate(
@@ -271,53 +252,6 @@ def test_privilege_compiler_handles_catalog_with_no_policies():
     result = compile_desired_privileges(config, desired_tags)
 
     assert result == set()
-
-
-# ---------------------------------------------------------------------------
-# Matches against desired_tags parameter, not raw config
-# ---------------------------------------------------------------------------
-
-
-def test_privilege_compiler_matches_against_desired_tags():
-    """The compiler uses the desired_tags parameter (not raw config) to match;
-    if desired_tags is empty, no privileges are generated even if config has tags."""
-    config = ResourcesConfig.model_validate(
-        {
-            "catalogs": {
-                "cat": {
-                    "tags": {"env": "prod"},
-                    "policies": [
-                        {
-                            "type": "grant",
-                            "privileges": ["select"],
-                            "to": ["team"],
-                            "tags": {"env": "prod"},
-                        }
-                    ],
-                    "schemas": [
-                        {
-                            "name": "s",
-                            "tags": {"env": "prod"},
-                            "tables": [
-                                {"name": "t", "tags": {"env": "prod"}},
-                            ],
-                        }
-                    ],
-                }
-            }
-        }
-    )
-
-    # Even though the config defines tags, passing an empty desired_tags set
-    # means no securables can match the policy.
-    result = compile_desired_privileges(config, desired_tags=set())
-
-    assert result == set()
-
-
-# ---------------------------------------------------------------------------
-# Schema and table level policies
-# ---------------------------------------------------------------------------
 
 
 def test_privilege_compiler_matches_schema_level_policy():
@@ -500,6 +434,49 @@ def test_privilege_compiler_collects_policies_from_all_levels():
         principal="sales_team",
         privilege_type=PrivilegeType.MODIFY,
     ) in result
+
+
+
+# ---------------------------------------------------------------------------
+# Matches against desired_tags parameter, not raw config
+# ---------------------------------------------------------------------------
+
+
+def test_privilege_compiler_matches_against_desired_tags():
+    """The compiler uses the desired_tags parameter (not raw config) to match;
+    if desired_tags is empty, no privileges are generated even if config has tags."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "tags": {"env": "prod"},
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["team"],
+                            "tags": {"env": "prod"},
+                        }
+                    ],
+                    "schemas": [
+                        {
+                            "name": "s",
+                            "tags": {"env": "prod"},
+                            "tables": [
+                                {"name": "t", "tags": {"env": "prod"}},
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    # Even though the config defines tags, passing an empty desired_tags set
+    # means no securables can match the policy.
+    result = compile_desired_privileges(config, desired_tags=set())
+
+    assert result == set()
 
 
 # ---------------------------------------------------------------------------
@@ -982,11 +959,6 @@ def test_privilege_compiler_scopes_catalog_policy_to_all_children():
         principal="team",
         privilege_type=PrivilegeType.SELECT,
     ) in result
-
-
-# ---------------------------------------------------------------------------
-# AND tag semantics with scoped policies
-# ---------------------------------------------------------------------------
 
 
 def test_privilege_compiler_and_semantics_with_scoped_policy():

@@ -5,7 +5,8 @@ from datetime import date
 
 from uc_abac_governor.configs.models import ResourcesConfig, GrantPolicyConfig
 from uc_abac_governor.tags.state import SecurableTag
-from uc_abac_governor.types import PrivilegeType, SecurableType, UnresolvedPrivilege
+from uc_abac_governor.privileges.state import UnresolvedPrivilege
+from uc_abac_governor.types import PrivilegeType, SecurableType
 
 # Privileges valid for each securable type. Higher-level securables inherit
 # all privileges from lower levels. Unknown privileges are allowed on all types.

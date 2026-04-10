@@ -7,7 +7,7 @@ from uc_abac_governor.types import SecurableType
 
 
 # ---------------------------------------------------------------------------
-# Catalog tags
+# Config to securable tag resolution
 # ---------------------------------------------------------------------------
 
 
@@ -33,11 +33,6 @@ def test_tag_compiler_emits_catalog_tags():
             tag_value="prod",
         )
     }
-
-
-# ---------------------------------------------------------------------------
-# Schema tags
-# ---------------------------------------------------------------------------
 
 
 def test_tag_compiler_emits_schema_tags():
@@ -67,11 +62,6 @@ def test_tag_compiler_emits_schema_tags():
             tag_value="revenue",
         )
     }
-
-
-# ---------------------------------------------------------------------------
-# Table tags
-# ---------------------------------------------------------------------------
 
 
 def test_tag_compiler_emits_table_tags():
@@ -108,11 +98,6 @@ def test_tag_compiler_emits_table_tags():
     }
 
 
-# ---------------------------------------------------------------------------
-# Volume tags
-# ---------------------------------------------------------------------------
-
-
 def test_tag_compiler_emits_volume_tags():
     """A volume with tags produces a SecurableTag with a three-part full name."""
     config = ResourcesConfig.model_validate(
@@ -147,11 +132,6 @@ def test_tag_compiler_emits_volume_tags():
     }
 
 
-# ---------------------------------------------------------------------------
-# Valueless tags
-# ---------------------------------------------------------------------------
-
-
 def test_tag_compiler_emits_valueless_tags():
     """A tag with None as its value produces a SecurableTag with tag_value="" (empty string)."""
     config = ResourcesConfig.model_validate(
@@ -176,11 +156,6 @@ def test_tag_compiler_emits_valueless_tags():
     }
 
 
-# ---------------------------------------------------------------------------
-# No tags defined
-# ---------------------------------------------------------------------------
-
-
 def test_tag_compiler_emits_no_tags_when_none_defined():
     """Objects with no tags field produce an empty set."""
     config = ResourcesConfig.model_validate(
@@ -202,6 +177,80 @@ def test_tag_compiler_emits_no_tags_when_none_defined():
     result = compile_desired_tags(config)
 
     assert result == set()
+
+
+# ---------------------------------------------------------------------------
+# Column tags
+# ---------------------------------------------------------------------------
+
+
+def test_tag_compiler_emits_column_tags():
+    """A column with tags produces a SecurableTag with a four-part full name."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "columns": [
+                                        {
+                                            "name": "email",
+                                            "tags": {"pii": "true"},
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    result = compile_desired_tags(config)
+
+    assert SecurableTag(
+        securable_type=SecurableType.COLUMN,
+        securable_full_name="my_catalog.sales.orders.email",
+        tag_name="pii",
+        tag_value="true",
+    ) in result
+
+
+def test_tag_compiler_emits_no_column_tags_when_columns_have_no_tags():
+    """A table with columns that have no tags produces no COLUMN-type tags."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "columns": [
+                                        {
+                                            "name": "email",
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    result = compile_desired_tags(config)
+
+    column_tags = {t for t in result if t.securable_type == SecurableType.COLUMN}
+    assert column_tags == set()
 
 
 # ---------------------------------------------------------------------------
@@ -300,77 +349,3 @@ def test_tag_compiler_defaults_to_dict_key_when_catalog_name_omitted():
         ),
     }
     assert result == expected
-
-
-# ---------------------------------------------------------------------------
-# Column tags
-# ---------------------------------------------------------------------------
-
-
-def test_tag_compiler_emits_column_tags():
-    """A column with tags produces a SecurableTag with a four-part full name."""
-    config = ResourcesConfig.model_validate(
-        {
-            "catalogs": {
-                "my_catalog": {
-                    "schemas": [
-                        {
-                            "name": "sales",
-                            "tables": [
-                                {
-                                    "name": "orders",
-                                    "columns": [
-                                        {
-                                            "name": "email",
-                                            "tags": {"pii": "true"},
-                                        }
-                                    ],
-                                }
-                            ],
-                        }
-                    ],
-                }
-            }
-        }
-    )
-
-    result = compile_desired_tags(config)
-
-    assert SecurableTag(
-        securable_type=SecurableType.COLUMN,
-        securable_full_name="my_catalog.sales.orders.email",
-        tag_name="pii",
-        tag_value="true",
-    ) in result
-
-
-def test_tag_compiler_emits_no_column_tags_when_columns_have_no_tags():
-    """A table with columns that have no tags produces no COLUMN-type tags."""
-    config = ResourcesConfig.model_validate(
-        {
-            "catalogs": {
-                "my_catalog": {
-                    "schemas": [
-                        {
-                            "name": "sales",
-                            "tables": [
-                                {
-                                    "name": "orders",
-                                    "columns": [
-                                        {
-                                            "name": "email",
-                                        }
-                                    ],
-                                }
-                            ],
-                        }
-                    ],
-                }
-            }
-        }
-    )
-
-    result = compile_desired_tags(config)
-
-    column_tags = {t for t in result if t.securable_type == SecurableType.COLUMN}
-    assert column_tags == set()

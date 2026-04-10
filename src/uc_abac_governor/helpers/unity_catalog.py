@@ -15,7 +15,8 @@ from databricks.sdk.service.sql import (
 import logging
 
 from uc_abac_governor.tags.state import SecurableTag
-from uc_abac_governor.types import GovernorError, PrivilegeType, SecurableType, UnresolvedPrivilege
+from uc_abac_governor.privileges.state import UnresolvedPrivilege
+from uc_abac_governor.types import GovernorError, PrivilegeType, SecurableType
 
 _logger = logging.getLogger("uc_abac_governor")
 

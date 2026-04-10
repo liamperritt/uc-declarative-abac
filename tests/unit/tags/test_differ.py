@@ -6,7 +6,7 @@ from uc_abac_governor.types import SecurableType
 
 
 # ---------------------------------------------------------------------------
-# Tags to add
+# Tags to add, update and remove
 # ---------------------------------------------------------------------------
 
 
@@ -27,11 +27,6 @@ def test_tag_differ_computes_tags_to_add():
     assert diff.to_add == desired
     assert diff.to_update == set()
     assert diff.to_remove == set()
-
-
-# ---------------------------------------------------------------------------
-# Tags to update
-# ---------------------------------------------------------------------------
 
 
 def test_tag_differ_computes_tags_to_update():
@@ -57,11 +52,6 @@ def test_tag_differ_computes_tags_to_update():
     assert diff.to_remove == set()
 
 
-# ---------------------------------------------------------------------------
-# Tags to remove
-# ---------------------------------------------------------------------------
-
-
 def test_tag_differ_computes_tags_to_remove():
     """A tag key present in actual but absent from desired appears in to_remove."""
     actual_tag = SecurableTag(
@@ -79,7 +69,7 @@ def test_tag_differ_computes_tags_to_remove():
 
 
 # ---------------------------------------------------------------------------
-# In-sync — empty diff
+# Empty sets
 # ---------------------------------------------------------------------------
 
 
@@ -105,11 +95,6 @@ def test_tag_differ_returns_empty_diff_when_in_sync():
     assert diff == TagDiff()
 
 
-# ---------------------------------------------------------------------------
-# Empty desired
-# ---------------------------------------------------------------------------
-
-
 def test_tag_differ_handles_empty_desired():
     """Empty desired with non-empty actual produces only to_remove entries."""
     actual = {
@@ -132,11 +117,6 @@ def test_tag_differ_handles_empty_desired():
     assert diff.to_remove == actual
     assert diff.to_add == set()
     assert diff.to_update == set()
-
-
-# ---------------------------------------------------------------------------
-# Empty actual
-# ---------------------------------------------------------------------------
 
 
 def test_tag_differ_handles_empty_actual():

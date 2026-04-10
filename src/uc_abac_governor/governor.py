@@ -16,7 +16,7 @@ from uc_abac_governor.helpers.unity_catalog import UnityCatalogHelper
 from uc_abac_governor.privileges.compiler import compile_desired_privileges
 from uc_abac_governor.privileges.differ import compute_privilege_diff
 from uc_abac_governor.privileges.executor import execute_privilege_diff
-from uc_abac_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
+from uc_abac_governor.privileges.state import PrivilegeDiff, SecurablePrivilege, UnresolvedPrivilege
 from uc_abac_governor.logger import ChangeLogger
 from uc_abac_governor.tags.compiler import compile_desired_tags
 from uc_abac_governor.tags.differ import compute_tag_diff
@@ -26,7 +26,6 @@ from uc_abac_governor.types import (
     ExecutionBatchError,
     ExecutionError,
     PrincipalValidationError,
-    UnresolvedPrivilege,
 )
 
 _logger = logging.getLogger("uc_abac_governor")
