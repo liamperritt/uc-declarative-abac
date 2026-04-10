@@ -8,7 +8,7 @@ Instead of managing grants, tags, and policies manually in the Databricks worksp
 
 Configs are split into two namespaces:
 
-- **`definitions:`** — catalog-agnostic, reusable templates (schemas, tables, volumes, functions, policies).
+- **`definitions:`** — catalog-agnostic, reusable templates (schemas, tables, volumes, functions, ABAC policies).
 - **`resources:`** — concrete, deployable instances (e.g., catalogs and their contents) that can compose definitions into real UC objects.
 
 Definitions define *what* exists; resources define *where* it gets deployed.
@@ -28,8 +28,8 @@ Definitions define *what* exists; resources define *where* it gets deployed.
 ### Resources (deployed UC objects)
 
 - **Tag policies** — enforced usage rules for UC governed tags with allowed values, allowed principals, and comments.
-- **Catalogs** — compose schema and policy definitions into deployable units, with per-catalog overrides.
-- **Schemas, tables, volumes, functions, mask/filter policies** — concrete instances that can reference relevant definitions.
+- **Catalogs** — compose schema and ABAC policy definitions into deployable units, with per-catalog overrides.
+- **Schemas, tables, volumes, functions, mask/filter ABAC policies** — concrete instances that can reference relevant definitions.
 
 ### Metadata on all objects
 
