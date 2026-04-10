@@ -334,7 +334,6 @@ resources:
     pii:
       name: pii
       comment: Personally identifiable information
-      owner: sp_data_governor
       allowed_values:
         - name
         - address
@@ -348,7 +347,6 @@ resources:
     classification:
       name: classification
       comment: Data classification level
-      owner: sp_data_governor
       allowed_values:
         - public
         - internal
