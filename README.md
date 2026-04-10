@@ -27,7 +27,7 @@ Definitions define *what* exists; resources define *where* it gets deployed.
 
 ### Resources (deployed UC objects)
 
-- **Governed tags** — UC governed tags with allowed values, owners, and comments.
+- **Tag policies** — enforced usage rules for UC governed tags with allowed values, allowed principals, and comments.
 - **Catalogs** — compose schema and policy definitions into deployable units, with per-catalog overrides.
 - **Schemas, tables, volumes, functions, mask/filter policies** — concrete instances that can reference relevant definitions.
 
@@ -252,7 +252,7 @@ definitions:
 
 #### Policy definitions
 
-Policies are defined under `definitions: policies:`. Key convention: `<logical_catalog/domain>|<policy_name>` (e.g. `shared|mask_pii_email`). Three types:
+ABAC policies are defined under `definitions: policies:`. Key convention: `<logical_catalog/domain>|<policy_name>` (e.g. `shared|mask_pii_email`). Three types:
 
 - **`mask`** — applies a function to columns matching a tag; uses `to` / `except` to control who sees masked vs. unmasked data.
 - **`filter`** — applies a row-filter function to tables matching a tag; uses `to` / `except` to control who is filtered.
@@ -310,26 +310,27 @@ definitions:
       expiry_date: 2026-05-01
 ```
 
-If a policy specifies multiple tags, the policy is only applied to objects that match **all** of the listed tags (AND semantics). For example, a policy with `tags: { pii: email, classification: confidential }` would only apply to objects tagged with both `pii: email` and `classification: confidential`.
+If an ABAC policy specifies multiple tags, the policy is only applied to objects that match **all** of the listed tags (AND semantics). For example, a policy with `tags: { pii: email, classification: confidential }` would only apply to objects tagged with both `pii: email` and `classification: confidential`.
 
-Policy definitions are catalog-agnostic. Catalogs, schemas, and tables reference which policies to apply via `$ref` entries in their `policies:` list, and can override fields (e.g. `function`) per instance. When a policy is attached at a given level, it is scoped to match only the tagged objects within that level — a policy on a schema only matches objects within that schema, a policy on a table only matches that table and its columns.
+ABAC policy definitions are catalog-agnostic. Catalogs, schemas, and tables reference which policies to apply via `$ref` entries in their `policies:` list, and can override fields (e.g. `function`) per instance. When a policy is attached at a given level, it is scoped to match only the tagged objects within that level — a policy on a schema only matches objects within that schema, a policy on a table only matches that table and its columns.
 
 ### Resources
 
 Resource configs are concrete, deployable instances (e.g., catalogs and their contents) that can compose definitions into real UC objects.
 
-#### Governed tags
+#### Tag Policies
 
-Governed tags are Unity Catalog tag keys with a controlled set of allowed values. They are defined under `resources: governed_tags:` (not definitions) because they are account-level singletons—there is no catalog-scoped variant. The dictionary key is the tag key name as it will appear in Unity Catalog.
+Tag policies specify usage rules for Unity Catalog governed tags. They specify a tag name with a controlled set of allowed values. They are defined under `resources: tag_policies:` (not definitions) because they are account-level singletons—there is no catalog-scoped variant. The dictionary key is used as the tag name if `name` is not provided. All tag policies should exclusively be created through this framework.
 
+- **`name`** — the governed tag key.
+- **`comment`** — a human-readable description of the governed tag's purpose.
 - **`allowed_values`** — the fixed list of values that can be assigned to this tag. Policies reference these tag key-value pairs to determine which columns to mask, which rows to filter, or which objects to grant access on.
-- **`owner`** — the principal (user or service principal) who can manage the governed tag.
-- **`comment`** — a human-readable description of the tag's purpose.
+- **`allowed_principals`** — the list of principals who allowed to `ASSIGN` the tag to Unity Catalog objects. This can be useful for users to test tag assignments within `dev` catalogs that are not governed by this `uc_abac_governor` framework. It is not recommended to manually assign tags to UC objects that are governed by this framework, as this will result in those tags being blown away the next time that this framework runs.
 
 ```yaml
-# resources/governed_tags/pii.yaml
+# resources/tag_policies/pii.yaml
 resources:
-  governed_tags:
+  tag_policies:
     pii:
       name: pii
       comment: Personally identifiable information
@@ -338,10 +339,12 @@ resources:
         - name
         - address
         - drivers_license
+      allowed_principals:
+        - account_users
 
-# resources/governed_tags/classification.yaml
+# resources/tag_policies/classification.yaml
 resources:
-  governed_tags:
+  tag_policies:
     classification:
       name: classification
       comment: Data classification level
@@ -351,9 +354,13 @@ resources:
         - internal
         - confidential
         - restricted
+      allowed_principals:
+        - data_governance_team
+        - john.smith@company.com
+        - sp_data_governor
 ```
 
-Once a governed tag is created, you can apply it to tables, columns, schemas, and other UC objects via the `tags:` field on any definition or resource. Policies then match against these tag key-value pairs (e.g. `pii: email`, `classification: confidential`) to enforce masking, filtering, or grants.
+Once a tag policy is created, you can apply it to tables, columns, schemas, and other UC objects via the `tags:` field on any definition or resource. ABAC policies then match against these tag key-value pairs (e.g. `pii: email`, `classification: confidential`) to enforce masking, filtering, or grants.
 
 #### Catalogs
 
@@ -500,7 +507,7 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 
 ### Not yet implemented
 
-- **Governed tags** — `resources.governed_tags` with `allowed_values`, `owner`, `comment` (documented in README but not built)
+- **Tag policies** — `resources.tag_policies` with `allowed_values`, `allowed_principals`, `comment` (documented in README but not built)
 - **UC object creation** — creating/updating catalogs, schemas, tables, volumes, functions (currently only tags and privileges are managed)
 - **Object attributes** — `owner`, `comment`, `rfa_destination` on securables
 - **Mask & filter policies** — `type: mask` and `type: filter` policy support
