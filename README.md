@@ -305,6 +305,7 @@ definitions:
       to:
         - data_engineers
         - sales_team
+        - sp_sales_job_runner
       tags:
         sales: ~
       expiry_date: 2026-05-01
