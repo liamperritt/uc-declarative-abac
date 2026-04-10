@@ -157,7 +157,6 @@ definitions:
   tables:
     operations|sales|orders:
       name: orders
-      comment: Customer order fact table
       owner: sales_engineering
       tags:
         classification: internal
@@ -171,22 +170,17 @@ definitions:
   tables:
     people|hr|employees:
       name: employees
-      comment: Employee master data
       owner: hr_analytics_team
       filter: platform.shared.reports_to_current_user
       tags:
         people: ~
       columns:
         - name: employee_id
-          comment: Unique employee identifier
         - name: full_name
-          comment: Employee full name
           mask: platform.shared.mask_pii_name
         - name: email
-          comment: Corporate email address
           mask: platform.shared.mask_pii_email
         - name: salary
-          comment: Annual base salary
           tags:
             classification: confidential
 ```
@@ -199,7 +193,6 @@ Table definitions support two approaches to row-level and column-level security:
 Column-level fields:
 - **`name`** — the column name (required).
 - **`type`** — the column data type (optional). If provided and the table does not yet exist, the framework will attempt to create it as a managed table with the specified column types.
-- **`comment`** — description of the column.
 - **`tags`** — key-value or valueless tags applied to the column. These can be matched by ABAC policy definitions.
 - **`mask`** — a fully- or partially-qualified UC function name to apply as a column mask directly.
 
@@ -207,6 +200,8 @@ Table-level fields (in addition to the common fields `name`, `comment`, `owner`,
 - **`filter`** — a fully- or partially-qualified UC function name to apply as a row filter directly on the table.
 - **`columns`** — list of column-level configurations (see above).
 - **`policies`** — list of policy `$ref` entries or inline policies scoped to this table.
+
+Note that the `comment` field is not supported for tables and columns due to current Unity Catalog view limitations.
 
 #### Volume definitions
 
