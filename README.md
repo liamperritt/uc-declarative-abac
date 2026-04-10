@@ -34,7 +34,7 @@ Definitions define *what* exists; resources define *where* it gets deployed.
 ### Metadata on all objects
 
 - **Owners** — set or update owners on catalogs, schemas, tables, volumes, and functions.
-- **Comments** — manage descriptions on UC objects.
+- **Comments** — manage descriptions on UC objects (except for tables and columns due to UC view limitations).
 - **Tags** — key-value or valueless tags (using `~`) applied to any object.
 - **RFA destinations** — configure where access requests are sent for governed objects.
 
