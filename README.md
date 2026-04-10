@@ -70,28 +70,6 @@ The `name` field determines the unqualified object name created in Databricks/Un
 
 Any definition type (schemas, tables, volumes, functions, mask/filter policy) can be promoted to a concrete resource by placing it under `resources:` with a `$ref` to the definition and a fixed `catalog`/`schema`. This is useful when you need a specific deployed instance outside of a catalog composition.
 
-### Overrides
-
-Any `$ref` entry can include additional fields alongside the reference. These fields override the corresponding values from the definition, letting you customise a single instance without modifying the shared definition. For example, you can override `owner`, `rfa_destination`, `comment`, `tags`, or `function` on a per-catalog or per-resource basis. Unspecified fields fall back to the definition.
-
-Overrides also support recursive references — you can nest `$ref` entries within an override to further customise child objects. For example, overriding a schema's `tables` list with specific table references that themselves carry overrides:
-
-```yaml
-resources:
-  catalogs:
-    operations_test:
-      comment: TEST Operations catalog
-      schemas:
-        - $ref: $defs/schemas/operations|sales
-          name: sales_staging
-          tables:
-            - $ref: $defs/tables/operations|sales|orders
-            - $ref: $defs/tables/operations|sales|quotes
-              comment: This table only exists in TEST
-```
-
-> **Note:** Overrides replace top-level keys in their entirety — they do not merge into nested structures. For example, you cannot override a single tag; you must specify all tags. The same applies to `tables`, `volumes`, `functions`, and any other list or map field.
-
 ### Definitions
 
 Definition configs are catalog-agnostic, reusable templates (schemas, tables, volumes, functions, policies).
@@ -420,6 +398,28 @@ resources:
         - $ref: $defs/schemas/platform|shared
           owner: sp_test_job_runner
 ```
+
+### Overrides
+
+Any `$ref` entry can include additional fields alongside the reference. These fields override the corresponding values from the definition, letting you customise a single instance without modifying the shared definition. For example, you can override `owner`, `rfa_destination`, `comment`, `tags`, or `function` on a per-catalog or per-resource basis. Unspecified fields fall back to the definition.
+
+Overrides also support recursive references — you can nest `$ref` entries within an override to further customise child objects. For example, overriding a schema's `tables` list with specific table references that themselves carry overrides:
+
+```yaml
+resources:
+  catalogs:
+    operations_test:
+      comment: TEST Operations catalog
+      schemas:
+        - $ref: $defs/schemas/operations|sales
+          name: sales_staging
+          tables:
+            - $ref: $defs/tables/operations|sales|orders
+            - $ref: $defs/tables/operations|sales|quotes
+              comment: This table only exists in TEST
+```
+
+> **Note:** Overrides replace top-level keys in their entirety — they do not merge into nested structures. For example, you cannot override a single tag; you must specify all tags. The same applies to `tables`, `volumes`, `functions`, and any other list or map field.
 
 ---
 
