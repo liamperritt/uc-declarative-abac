@@ -64,11 +64,11 @@ You maintain YAML as the source of truth; the engine turns it into UC objects an
 
 ## YAML Config Structures
 
-Configs use **dictionaries keyed by definition IDs**. The recommended convention is to use `|`-delimited keys (e.g. `operations|sales`, `operations|sales|orders`, `platform|shared|mask_pii_email`), following the same pattern as the Databricks Terraform provider which uses `|` for composite resource IDs (e.g. `<metastore_id>|<name>` for UC connections). However, the `|` delimiter is a convention only and is not enforced by the engine — keys can be any valid YAML string. These keys are the stable identity for each entity and let you reference entities across files via `$ref: $defs/<type>/<key>` syntax (inspired by JSON Schema's `$defs` and `$ref` keywords).
+Configs use **dictionaries keyed by definition IDs**. The recommended convention is to use `|`-delimited keys (e.g. `operations|sales`, `operations|sales|orders`, `platform|shared|mask_pii_email`), following the same pattern as the Databricks Terraform provider which uses `|` for composite resource IDs (e.g. `<metastore_id>|<name>` for UC connections). However, the `|` delimiter is a convention only and is not enforced by the engine — keys can be any valid YAML string.
 
-The `name` field determines the unqualified object name created in Databricks/Unity Catalog. For resources, `name` is optional — if omitted, the dictionary key is used as the name (e.g. a governed tag keyed `pii` with no name specified will be created with the name `pii`).
+These keys are the stable identity for each entity and let you reference entities across files via `$ref: $defs/<type>/<key>` syntax (inspired by JSON Schema's `$defs` and `$ref` keywords).
 
-Any definition type (schemas, tables, volumes, functions, mask/filter policy) can be promoted to a concrete resource by placing it under `resources:` with a `$ref` to the definition and a fixed `catalog`/`schema`. This is useful when you need a specific deployed instance outside of a catalog composition.
+Any definition type (schemas, tables, volumes, functions, mask/filter policy) can be promoted to a concrete resource by placing it under `resources:` with a `$ref` to the definition and a fixed `catalog_name`/`schema_name`. This is useful when you need a specific deployed instance outside of a catalog composition.
 
 ### Definitions
 
@@ -331,6 +331,7 @@ Governed tags are Unity Catalog tag keys with a controlled set of allowed values
 resources:
   governed_tags:
     pii:
+      name: pii
       comment: Personally identifiable information
       owner: sp_data_governor
       allowed_values:
@@ -342,6 +343,7 @@ resources:
 resources:
   governed_tags:
     classification:
+      name: classification
       comment: Data classification level
       owner: sp_data_governor
       allowed_values:
@@ -362,6 +364,7 @@ Catalogs are defined under `resources: catalogs:` and compose schema definitions
 resources:
   catalogs:
     operations_prod:
+      name: operations_prod
       comment: Production operations catalog
       owner: data_platform_team
       rfa_destination: data-governance@company.com
@@ -379,6 +382,7 @@ resources:
 resources:
   catalogs:
     operations_test:
+      name: operations_test
       comment: Test operations catalog
       owner: data_platform_team
       rfa_destination: data-governance@company.com
@@ -409,6 +413,7 @@ Overrides also support recursive references — you can nest `$ref` entries with
 resources:
   catalogs:
     operations_test:
+      name: operations_test
       comment: TEST Operations catalog
       schemas:
         - $ref: $defs/schemas/operations|sales
