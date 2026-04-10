@@ -324,7 +324,7 @@ Tag policies enforce usage rules for Unity Catalog governed tags. They specify a
 
 - **`name`** — the governed tag key.
 - **`comment`** — a human-readable description of the governed tag's purpose.
-- **`allowed_values`** — the fixed list of values that can be assigned to this tag. Policies reference these tag key-value pairs to determine which columns to mask, which rows to filter, or which objects to grant access on.
+- **`allowed_values`** — the fixed list of values that can be assigned to this tag. ABAC policies reference these tag key-value pairs to determine which columns to mask, which rows to filter, or which objects to grant access on.
 - **`allowed_principals`** — the list of principals who allowed to `ASSIGN` the tag to Unity Catalog objects. This can be useful for users to test tag assignments within `dev` catalogs that are not governed by this `uc_abac_governor` framework. It is not recommended to manually assign tags to UC objects that are governed by this framework, as this will result in those tags being blown away the next time that this framework runs.
 
 ```yaml
