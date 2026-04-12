@@ -198,7 +198,7 @@ Column-level fields:
 Table-level fields (in addition to the common fields `name`, `comment`, `owner`, `tags`, `rfa_destination`):
 - **`filter`** — a fully- or partially-qualified UC function name to apply as a row filter directly on the table.
 - **`columns`** — list of column-level configurations (see above).
-- **`policies`** — list of policy `$ref` entries or inline policies scoped to this table.
+- **`policies`** — list of policy `$ref`/`$defs` entries or inline policies scoped to this table.
 
 Note that the `comment` field is not supported for tables and columns due to current Unity Catalog view limitations.
 
@@ -361,7 +361,7 @@ definitions:
 
 If an ABAC policy specifies multiple tags, the policy is only applied to objects that match **all** of the listed tags (AND semantics). For example, a policy with `tags: { pii: email, classification: confidential }` would only apply to objects tagged with both `pii: email` and `classification: confidential`.
 
-ABAC policy definitions are catalog-agnostic. Catalogs, schemas, and tables reference which policies to apply via `$ref` entries in their `policies:` list, and can override fields (e.g. `function`) per instance. When a policy is attached at a given level, it is scoped to match only the tagged objects within that level — a policy on a schema only matches objects within that schema, a policy on a table only matches that table and its columns.
+ABAC policy definitions are catalog-agnostic. Catalogs, schemas, and tables reference which policies to apply via `$ref`/`$defs` entries in their `policies:` list, and can override fields (e.g. `function`) per instance. When a policy is attached at a given level, it is scoped to match only the tagged objects within that level — a policy on a schema only matches objects within that schema, a policy on a table only matches that table and its columns.
 
 For column mask and row filter policies, the `function` property can either be the fully qualified name of an existing UC function (string), or an inline function definition (object or reference to a "definition", i.e., `$defs/<type>/<key>`). When defining an inline function, the function resource will be deployed into the same catalog and schema as the policy. If the policy is attached at the catalog level, then the inline function will be deployed to the `default` schema of that catalog.
 
@@ -491,7 +491,7 @@ The recommended convention is to place your YAML configs under two top-level dir
 - **`definitions/`** — catalog-agnostic templates organised by domain (e.g. `definitions/operations/schemas/sales/`).
 - **`resources/`** — concrete deployable instances organised by catalog (e.g. `resources/catalogs/operations/`).
 
-This folder structure is not enforced by the engine — you can organise files however you like. The engine discovers all YAML files regardless of directory layout and resolves `$ref` entries by definition key, not by file path.
+This folder structure is not enforced by the engine — you can organise files however you like. The engine discovers all YAML files regardless of directory layout and resolves `$ref`/`$defs` entries by definition key, not by file path.
 
 ## Deployment
 
@@ -523,7 +523,7 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 
 #### Core pipeline
 - **YAML discovery** — recursively finds all `.yaml`/`.yml` files in a config directory
-- **`$ref` resolution** — resolves `$defs/<type>/<key>` references with override support, circular reference detection, and unreferenced definition detection
+- **`$ref`/`$defs` resolution** — resolves `$defs/<type>/<key>` references with override support, circular reference detection, and unreferenced definition detection
 - **Resource consolidation** — standalone `resources.schemas`, `resources.tables`, `resources.volumes` are restructured into the nested catalog hierarchy with parent auto-creation
 - **Pydantic model validation** — full config validation with parent context injection (`catalog_name`, `schema_name`, `table_name`), `full_name` computed fields, null tag coercion, and duplicate resource detection
 
