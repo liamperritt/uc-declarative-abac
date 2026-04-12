@@ -66,9 +66,9 @@ You maintain YAML as the source of truth; the engine turns it into UC objects an
 
 Configs use **dictionaries keyed by definition IDs**. The recommended convention is to use `|`-delimited keys (e.g. `operations|sales`, `operations|sales|orders`, `platform|shared|mask_pii_email`), following the same pattern as the Databricks Terraform provider which uses `|` for composite resource IDs (e.g. `<metastore_id>|<name>` for UC connections). However, the `|` delimiter is a convention only and is not enforced by the engine — keys can be any valid YAML string.
 
-These keys are the stable identity for each entity and let you reference entities across files via `$ref: $defs/<type>/<key>` syntax (inspired by JSON Schema's `$defs` and `$ref` keywords).
+These keys are the stable identity for each entity and let you reference entities across files via `$defs/<type>/<key>` or `$ref: $defs/<type>/<key>` syntax (inspired by JSON Schema's `$defs` and `$ref` keywords) which also supports selective config overrides (see the **Overrides** section below).
 
-Any definition type (schemas, tables, volumes, functions, mask/filter policy) can be promoted to a concrete resource by placing it under `resources:` with a `$ref` to the definition and a fixed `catalog_name`/`schema_name`. This is useful when you need a specific deployed instance outside of a catalog composition.
+Any definition type (schemas, tables, volumes, functions, mask/filter policy) can be promoted to a concrete resource by placing it under `resources:` with a `$ref`/`$defs` reference to the definition and a fixed `catalog_name`/`schema_name`. This is useful when you need a specific deployed instance outside of a catalog composition.
 
 ### Definitions
 
@@ -76,7 +76,7 @@ Definition configs are catalog-agnostic, reusable templates (schemas, tables, vo
 
 #### Schema definitions
 
-Schema definitions are catalog-agnostic templates: name, comment, owner, tags, policies, and RFA. Key convention: `<domain>|<schema_name>` (e.g. `operations|sales`, `people|hr`). Each schema definition lists the **tables**, **volumes**, **functions**, and/or **policies** it contains as `$ref` entries. Catalogs reference which schema definitions to instantiate; the engine creates each schema and its listed children in every catalog that includes it.
+Schema definitions are catalog-agnostic templates: name, comment, owner, tags, policies, and RFA. Key convention: `<domain>|<schema_name>` (e.g. `operations|sales`, `people|hr`). Each schema definition lists the **tables**, **volumes**, **functions**, and/or **policies** it contains as `$ref`/`$defs` entries. Catalogs reference which schema definitions to instantiate; the engine creates each schema and its listed children in every catalog that includes it.
 
 ```yaml
 # definitions/operations/schemas/sales/sales.yaml
@@ -89,10 +89,9 @@ definitions:
       tags:
         operations: ~
       policies:
-        - $ref: $defs/policies/shared|grant_read_on_sales
+        - $defs/policies/shared|grant_read_on_sales
       tables:
-        - $ref: $defs/tables/operations|sales|orders
-          rfa_destination: sales-data2@company.com
+        - $defs/tables/operations|sales|orders
 
 # definitions/people/schemas/hr/hr.yaml
 definitions:
@@ -117,7 +116,7 @@ definitions:
         zone: landing
       volumes:
         - $ref: $defs/volumes/platform|landing|files
-          owner: hr_engineers
+          owner: hr_analysts
 
 # definitions/platform/schemas/shared/shared.yaml
 definitions:
@@ -229,7 +228,7 @@ resources:
 
 #### function definitions
 
-Functions are defined under `definitions: functions:`. Key convention: `<logical_catalog/domain>|<schema_name>|<function_name>` (e.g. `platform|shared|mask_pii_email`). Policy definitions point to these functions by their fully qualified UC name.
+Functions are defined under `definitions: functions:`. Key convention: `<logical_catalog/domain>|<schema_name>|<function_name>` (e.g. `platform|shared|mask_pii_email`). ABAC policies can leverage these functions by referencing the function definition inline, or via the fully qualified UC function resource name.
 
 ```yaml
 # definitions/platform/schemas/shared/functions/mask_pii_email.yaml
@@ -243,6 +242,32 @@ definitions:
         - name: address
           type: string
       return: "CONCAT('***', SUBSTRING(address, -4))"
+
+# definitions/platform/schemas/shared/functions/filter_by_region.yaml
+definitions:
+  functions:
+    platform|shared|fn_filter_trips_by_region:
+      name: fn_filter_trips_by_region
+      comment: Users can only see trips to or from their region
+      parameters:
+        - name: from_region
+          type: string
+        - name: to_region
+          type: string
+      return: |-
+        (
+          (from_region = 'AFRICA' AND is_account_group_member('africa_users'))
+          OR (from_region = 'AMERICA' AND is_account_group_member('america_users'))
+          OR (from_region = 'EUROPE' AND is_account_group_member('europe_users'))
+          OR (from_region = 'ASIA' AND is_account_group_member('asia_users'))
+          OR (from_region = 'MIDDLE EAST' AND is_account_group_member('middle_east_users')
+        ) OR (
+          (to_region = 'AFRICA' AND is_account_group_member('africa_users'))
+          OR (to_region = 'AMERICA' AND is_account_group_member('america_users'))
+          OR (to_region = 'EUROPE' AND is_account_group_member('europe_users'))
+          OR (to_region = 'ASIA' AND is_account_group_member('asia_users'))
+          OR (to_region = 'MIDDLE EAST' AND is_account_group_member('middle_east_users')
+        )
 ```
 
 #### Policy definitions
@@ -271,20 +296,48 @@ definitions:
       to:
         - account_users
       except:
-        - account_admins
+        - pii_viewers
       tags:
         pii: email
 
-# definitions/shared/policies/filter_out_eu_customers.yaml
+# definitions/shared/policies/filter_trips_by_region.yaml
 definitions:
   policies:
-    shared|filter_out_eu_customers:
-      name: filter_out_eu_customers
-      comment: Hide EU customer data from all users
+    shared|filter_trips_by_region:
+      name: filter_trips_by_region
+      comment: Filter trips by region
       type: filter
-      function: platform.abac.is_not_eu_region
+      function: $defs/functions/platform|shared|fn_filter_trips_by_region
       to:
         - account_users
+      except:
+        - account_admins
+      tags:
+        from_region: ~
+        to_region: ~
+
+# definitions/shared/policies/filter_by_region.yaml
+definitions:
+  policies:
+    shared|filter_by_region:
+      name: filter_by_region
+      comment: Users can only see records from their region
+      type: filter
+      function:
+        name: fn_region_filter
+        parameters:
+          - name: region
+            type: string
+        return: |-
+          (region = 'AFRICA' AND is_account_group_member('africa_users'))
+          OR (region = 'AMERICA' AND is_account_group_member('america_users'))
+          OR (region = 'EUROPE' AND is_account_group_member('europe_users'))
+          OR (region = 'ASIA' AND is_account_group_member('asia_users'))
+          OR (region = 'MIDDLE EAST' AND is_account_group_member('middle_east_users'))
+      to:
+        - account_users
+      except:
+        - account_admins
       tags:
         region: ~
 
@@ -302,13 +355,15 @@ definitions:
         - sales_team
         - sp_sales_job_runner
       tags:
-        sales: ~
+        domain: sales
       expiry_date: 2026-05-01
 ```
 
 If an ABAC policy specifies multiple tags, the policy is only applied to objects that match **all** of the listed tags (AND semantics). For example, a policy with `tags: { pii: email, classification: confidential }` would only apply to objects tagged with both `pii: email` and `classification: confidential`.
 
 ABAC policy definitions are catalog-agnostic. Catalogs, schemas, and tables reference which policies to apply via `$ref` entries in their `policies:` list, and can override fields (e.g. `function`) per instance. When a policy is attached at a given level, it is scoped to match only the tagged objects within that level — a policy on a schema only matches objects within that schema, a policy on a table only matches that table and its columns.
+
+For column mask and row filter policies, the `function` property can either be the fully qualified name of an existing UC function (string), or an inline function definition (object or reference to a "definition", i.e., `$defs/<type>/<key>`). When defining an inline function, the function resource will be deployed into the same catalog and schema as the policy. If the policy is attached at the catalog level, then the inline function will be deployed to the `default` schema of that catalog.
 
 ### Resources
 
@@ -358,7 +413,7 @@ Once a tag policy is created, you can apply it to tables, columns, schemas, and 
 
 #### Catalogs
 
-Catalogs are defined under `resources: catalogs:` and compose schema definitions and policy definitions into a deployable unit. Each catalog lists the schemas to instantiate and the policies to apply, with optional per-catalog overrides on any `$ref` entry. Policies can also be attached at the schema and table level for finer-grained scoping.
+Catalogs are defined under `resources: catalogs:` and compose schema definitions and policy definitions into a deployable unit. Each catalog lists the schemas to instantiate and the policies to apply, with optional per-catalog overrides on any `$ref`/`$defs` entry. Policies can also be attached at the schema and table level for finer-grained scoping.
 
 ```yaml
 # resources/catalogs/operations/operations_prod.yaml
@@ -373,11 +428,11 @@ resources:
         operations: ~
         env: prod
       policies:
-        - $ref: $defs/policies/shared|mask_pii_email
+        - $defs/policies/shared|mask_pii_email
       schemas:
-        - $ref: $defs/schemas/operations|sales
-        - $ref: $defs/schemas/people|hr
-        - $ref: $defs/schemas/platform|landing
+        - $defs/schemas/operations|sales
+        - $defs/schemas/people|hr
+        - $defs/schemas/platform|landing
 
 # resources/catalogs/operations/operations_test.yaml
 resources:
@@ -443,6 +498,8 @@ This folder structure is not enforced by the engine — you can organise files h
 The engine is designed to run in CI/CD. You can use it as a **GitHub Action** on a repository that holds your YAML files: on push or on a schedule, the action runs the engine against your configs and **declaratively deploys ABAC governance** to your Databricks workspace and Unity Catalog.
 
 It is recommended to run the deployment whenever a new version of your YAML files is released, as well as running a scheduled deployment at least once per day (to reduce drift and to ensure features like the grant policy `expiry_date` work as intended).
+
+> **Note:** By default, the engine assumes that securables (catalogs, schemas, tables, volumes) already exist in Unity Catalog and will only manage tags, grants, and policies on them. If you want the engine to create securables that don't exist yet, pass the `--create-if-not-exists` flag.
 
 ### Deployment semantics
 

@@ -7,13 +7,16 @@ from uc_abac_governor.types import ResolutionError, UnreferencedDefinitionError
 
 
 def resolve_refs(definitions: dict, resources: dict) -> dict:
-    """Resolve all $ref entries in the resources dict using the definitions registry.
+    """Resolve all $ref entries and inline $defs/... string values using the definitions registry.
 
-    Walks the resources dict recursively. For each dict with a $ref key:
-    1. Parse the ref: $defs/<type>/<key> -> look up in definitions
-    2. Deep-copy the definition
-    3. Apply overrides (top-level replacement, no deep merge)
-    4. Recursively resolve nested $ref entries
+    Walks the resources dict recursively and resolves two forms of reference:
+
+    1. **$ref dicts** — ``{"$ref": "$defs/<type>/<key>", ...}`` — the definition is
+       looked up, deep-copied, sibling keys are applied as overrides, and nested
+       refs are resolved recursively.
+    2. **Inline $defs strings** — any string value matching ``$defs/<type>/<key>``
+       is replaced with the deep-copied definition content and resolved recursively
+       (no overrides, since there are no sibling keys on a plain string value).
 
     Returns a flat dict ready for ResourcesConfig.model_validate(),
     i.e. {"catalogs": {...}} with all refs resolved and definitions stripped.
@@ -46,6 +49,8 @@ def _resolve_node(definitions: dict, node: Any, referenced: set[str], visited: s
         return _resolve_dict(definitions, node, referenced, visited)
     if isinstance(node, list):
         return [_resolve_node(definitions, item, referenced, visited) for item in node]
+    if isinstance(node, str) and node.startswith("$defs/"):
+        return _resolve_inline_defs_string(definitions, node, referenced, visited)
     return node
 
 
@@ -71,6 +76,19 @@ def _resolve_ref(definitions: dict, node: dict, referenced: set[str], visited: s
     resolved.update(overrides)
 
     # Recursively resolve any nested $ref entries
+    result = _resolve_node(definitions, resolved, referenced, visited)
+    visited.discard(ref_path)
+    return result
+
+
+def _resolve_inline_defs_string(definitions: dict, ref_path: str, referenced: set[str], visited: set[str]) -> Any:
+    """Resolve a bare $defs/... string value the same way a $ref dict is resolved."""
+    if ref_path in visited:
+        raise ResolutionError(f"Circular $ref detected: {ref_path}")
+    visited.add(ref_path)
+    referenced.add(ref_path)
+    definition = _lookup_definition(definitions, ref_path)
+    resolved = copy.deepcopy(definition)
     result = _resolve_node(definitions, resolved, referenced, visited)
     visited.discard(ref_path)
     return result

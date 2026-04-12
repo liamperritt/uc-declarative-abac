@@ -387,3 +387,245 @@ def test_resolver_raises_on_circular_reference():
 
     with pytest.raises(ResolutionError, match="[Cc]ircular"):
         resolve_refs(definitions, resources)
+
+
+# ---------------------------------------------------------------------------
+# Inline $defs string resolution
+# ---------------------------------------------------------------------------
+
+
+def test_resolver_resolves_inline_defs_string_value():
+    """A field value like `function: $defs/functions/shared|fn_filter` resolves to the function definition dict."""
+    definitions = {
+        "functions": {
+            "shared|fn_filter": {
+                "name": "fn_filter",
+                "parameters": [{"name": "office", "type": "STRING"}],
+                "return": "BOOLEAN",
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "policies": [
+                    {
+                        "name": "filter_by_office_location",
+                        "function": "$defs/functions/shared|fn_filter",
+                        "tags": {"office_location": "true"},
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    policy = result["catalogs"]["main"]["policies"][0]
+    # The string is replaced with the full definition content (a dict).
+    assert isinstance(policy["function"], dict)
+    assert policy["function"]["name"] == "fn_filter"
+    assert policy["function"]["parameters"] == [{"name": "office", "type": "STRING"}]
+    assert policy["function"]["return"] == "BOOLEAN"
+    # The rest of the policy is unchanged.
+    assert policy["name"] == "filter_by_office_location"
+    assert policy["tags"] == {"office_location": "true"}
+
+
+def test_resolver_inline_defs_string_counts_as_referenced():
+    """An inline $defs/... string value counts as a reference for unreferenced-definition detection."""
+    definitions = {
+        "functions": {
+            "shared|fn_filter": {
+                "name": "fn_filter",
+                "parameters": [],
+                "return": "BOOLEAN",
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "policies": [
+                    {
+                        "name": "filter_policy",
+                        "function": "$defs/functions/shared|fn_filter",
+                    },
+                ],
+            },
+        },
+    }
+
+    # Should NOT raise UnreferencedDefinitionError — the inline string counts as a reference.
+    result = resolve_refs(definitions, resources)
+    assert "catalogs" in result
+
+
+def test_resolver_inline_defs_string_resolves_nested_refs():
+    """When an inline $defs/... string resolves to a definition containing further refs, those are resolved too."""
+    definitions = {
+        "functions": {
+            "shared|fn_filter": {
+                "name": "fn_filter",
+                "helper": {"$ref": "$defs/functions/shared|fn_helper"},
+            },
+            "shared|fn_helper": {
+                "name": "fn_helper",
+                "return": "STRING",
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "policies": [
+                    {
+                        "name": "filter_policy",
+                        "function": "$defs/functions/shared|fn_filter",
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    policy = result["catalogs"]["main"]["policies"][0]
+    resolved_fn = policy["function"]
+    assert isinstance(resolved_fn, dict)
+    assert resolved_fn["name"] == "fn_filter"
+    # The nested $ref inside the function definition was also resolved.
+    assert isinstance(resolved_fn["helper"], dict)
+    assert resolved_fn["helper"]["name"] == "fn_helper"
+    assert resolved_fn["helper"]["return"] == "STRING"
+    assert "$ref" not in resolved_fn["helper"]
+
+
+def test_resolver_inline_defs_string_raises_on_missing_key():
+    """An inline $defs/... string pointing to a non-existent key raises ResolutionError."""
+    definitions = {
+        "functions": {},
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "policies": [
+                    {
+                        "name": "filter_policy",
+                        "function": "$defs/functions/shared|does_not_exist",
+                    },
+                ],
+            },
+        },
+    }
+
+    with pytest.raises(ResolutionError, match="does_not_exist"):
+        resolve_refs(definitions, resources)
+
+
+def test_resolver_inline_defs_string_raises_on_circular_reference():
+    """Circular references involving inline $defs/... strings are detected and raise ResolutionError."""
+    definitions = {
+        "functions": {
+            "shared|fn_a": {
+                "name": "fn_a",
+                "delegate": "$defs/functions/shared|fn_b",
+            },
+            "shared|fn_b": {
+                "name": "fn_b",
+                "delegate": "$defs/functions/shared|fn_a",
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "policies": [
+                    {
+                        "name": "circular_policy",
+                        "function": "$defs/functions/shared|fn_a",
+                    },
+                ],
+            },
+        },
+    }
+
+    with pytest.raises(ResolutionError, match="[Cc]ircular"):
+        resolve_refs(definitions, resources)
+
+
+def test_resolver_resolves_inline_defs_strings_in_list():
+    """Bare $defs/... strings as list items are resolved to definition dicts (catalog-style shorthand)."""
+    definitions = {
+        "schemas": {
+            "ops|sales": {"name": "sales", "comment": "Sales schema"},
+            "people|hr": {"name": "hr", "comment": "HR schema"},
+        },
+        "policies": {
+            "shared|mask_pii_email": {
+                "name": "mask_pii_email",
+                "type": "mask",
+                "function": "platform.abac.mask_pii_email",
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "operations_prod": {
+                "name": "operations_prod",
+                "comment": "Production operations catalog",
+                "policies": [
+                    "$defs/policies/shared|mask_pii_email",
+                ],
+                "schemas": [
+                    "$defs/schemas/ops|sales",
+                    "$defs/schemas/people|hr",
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    catalog = result["catalogs"]["operations_prod"]
+    # Policies list: bare string resolved to full definition dict
+    assert len(catalog["policies"]) == 1
+    assert isinstance(catalog["policies"][0], dict)
+    assert catalog["policies"][0]["name"] == "mask_pii_email"
+    assert catalog["policies"][0]["type"] == "mask"
+    assert catalog["policies"][0]["function"] == "platform.abac.mask_pii_email"
+
+    # Schemas list: both bare strings resolved to definition dicts
+    assert len(catalog["schemas"]) == 2
+    assert isinstance(catalog["schemas"][0], dict)
+    assert catalog["schemas"][0]["name"] == "sales"
+    assert catalog["schemas"][0]["comment"] == "Sales schema"
+    assert isinstance(catalog["schemas"][1], dict)
+    assert catalog["schemas"][1]["name"] == "hr"
+    assert catalog["schemas"][1]["comment"] == "HR schema"
+
+
+def test_resolver_leaves_non_defs_strings_unchanged():
+    """Regular strings and strings that don't match the $defs/ prefix are left unchanged."""
+    definitions: dict = {}
+    resources = {
+        "catalogs": {
+            "main": {
+                "policies": [
+                    {
+                        "name": "inline_policy",
+                        "function": "platform.shared.mask_pii_email",
+                        "comment": "A plain string",
+                        "filter": "some_function_name",
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    policy = result["catalogs"]["main"]["policies"][0]
+    assert policy["function"] == "platform.shared.mask_pii_email"
+    assert policy["comment"] == "A plain string"
+    assert policy["filter"] == "some_function_name"
