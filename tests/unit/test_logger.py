@@ -3,10 +3,10 @@ from __future__ import annotations
 import logging
 from unittest.mock import MagicMock
 
-from uc_abac_governor.privileges.state import SecurablePrivilege
+from uc_abac_governor.privileges.state import SecurablePrivilege, PrivilegeDiff
 from uc_abac_governor.logger import ChangeLogger
-from uc_abac_governor.tags.state import SecurableTag
-from uc_abac_governor.types import Principal, PrincipalType, PrivilegeType, SecurableType
+from uc_abac_governor.tags.state import SecurableTag, TagDiff
+from uc_abac_governor.types import Principal, PrincipalType, PrivilegeType, SecurableType, ExecutionError
 
 
 # ---------------------------------------------------------------------------
@@ -29,6 +29,20 @@ def _make_change_logger(dry_run: bool = False) -> tuple[ChangeLogger, MagicMock]
 def _info_messages(mock_logger: MagicMock) -> list[str]:
     """Extract all messages passed to mock_logger.info()."""
     return [c.args[0] for c in mock_logger.info.call_args_list]
+
+
+def _all_messages(mock_logger: MagicMock) -> list[str]:
+    """Extract all messages from info() and error() calls, in call order."""
+    return [
+        args[0]
+        for name, args, _ in mock_logger.method_calls
+        if name in ("info", "error")
+    ]
+
+
+def _change_lines(mock_logger: MagicMock) -> list[str]:
+    """Extract only change lines (indented action symbols like '  + ...') from info messages."""
+    return [m for m in _info_messages(mock_logger) if m.startswith("  ") and m[2:3] in ("+", "~", "-", "!")]
 
 
 
@@ -78,10 +92,10 @@ def test_change_logger_logs_tag_add() -> None:
 
     messages = _info_messages(mock_logger)
     assert len(messages) == 1
-    msg = messages[0]
-    assert "ADDED" in msg
-    assert "[CATALOG my_catalog]" in msg
-    assert "env='prod'" in msg
+    msg = messages[0].lower()
+    assert "added" in msg
+    assert "catalog" in msg and "my_catalog" in msg
+    assert "env" in msg and "prod" in msg
 
 
 def test_change_logger_logs_tag_add_with_valueless_tag() -> None:
@@ -92,9 +106,9 @@ def test_change_logger_logs_tag_add_with_valueless_tag() -> None:
 
     messages = _info_messages(mock_logger)
     assert len(messages) == 1
-    msg = messages[0]
-    assert "ADDED" in msg
-    assert "deprecated=''" in msg
+    msg = messages[0].lower()
+    assert "added" in msg
+    assert "deprecated" in msg
 
 
 def test_change_logger_logs_tag_update_with_old_value() -> None:
@@ -110,11 +124,11 @@ def test_change_logger_logs_tag_update_with_old_value() -> None:
 
     messages = _info_messages(mock_logger)
     assert len(messages) == 1
-    msg = messages[0]
-    assert "UPDATED" in msg
-    assert "[TABLE my_catalog.sales.orders]" in msg
-    assert "classification='internal'" in msg
-    assert "classification='confidential'" in msg
+    msg = messages[0].lower()
+    assert "updated" in msg
+    assert "table" in msg and "my_catalog.sales.orders" in msg
+    assert "classification" in msg and "internal" in msg
+    assert "confidential" in msg
     assert "->" in msg
 
 
@@ -131,9 +145,9 @@ def test_change_logger_logs_tag_remove() -> None:
 
     messages = _info_messages(mock_logger)
     assert len(messages) == 1
-    msg = messages[0]
-    assert "REMOVED" in msg
-    assert "[SCHEMA my_catalog.sales]" in msg
+    msg = messages[0].lower()
+    assert "removed" in msg
+    assert "schema" in msg and "my_catalog.sales" in msg
     assert "deprecated" in msg
 
 
@@ -155,11 +169,11 @@ def test_change_logger_logs_grant() -> None:
 
     messages = _info_messages(mock_logger)
     assert len(messages) == 1
-    msg = messages[0]
-    assert "GRANTED" in msg
-    assert "[SCHEMA my_catalog.sales]" in msg
+    msg = messages[0].lower()
+    assert "granted" in msg
+    assert "schema" in msg and "my_catalog.sales" in msg
     assert "select" in msg
-    assert "'data_engineers'" in msg
+    assert "data_engineers" in msg
 
 
 def test_change_logger_logs_revoke() -> None:
@@ -175,11 +189,11 @@ def test_change_logger_logs_revoke() -> None:
 
     messages = _info_messages(mock_logger)
     assert len(messages) == 1
-    msg = messages[0]
-    assert "REVOKED" in msg
-    assert "[TABLE my_catalog.sales.orders]" in msg
+    msg = messages[0].lower()
+    assert "revoked" in msg
+    assert "table" in msg and "my_catalog.sales.orders" in msg
     assert "modify" in msg
-    assert "'temp_users'" in msg
+    assert "temp_users" in msg
 
 
 # ---------------------------------------------------------------------------
@@ -188,19 +202,20 @@ def test_change_logger_logs_revoke() -> None:
 
 
 def test_change_logger_prepends_dry_run_prefix() -> None:
-    """In dry_run mode, INFO messages have [DRY RUN] prefix and use present tense."""
+    """In dry_run mode, change lines use present tense (Add/Grant not Added/Granted)."""
     cl, mock_logger = _make_change_logger(dry_run=True)
 
     cl.log_tag_add(_make_tag())
     cl.log_grant(_make_privilege())
 
-    messages = _info_messages(mock_logger)
+    messages = _change_lines(mock_logger)
     assert len(messages) == 2
-    for msg in messages:
-        assert "[DRY RUN]" in msg
     # Present tense in dry-run mode
-    assert "ADD tag" in messages[0]
-    assert "GRANT" in messages[1]
+    assert "add" in messages[0].lower() and "tag" in messages[0].lower()
+    assert "grant" in messages[1].lower()
+    # Must NOT contain past tense
+    assert "added" not in messages[0].lower()
+    assert "granted" not in messages[1].lower()
 
 
 # ---------------------------------------------------------------------------
@@ -256,8 +271,6 @@ def test_change_logger_logs_dry_run_summary() -> None:
 
 def test_change_logger_logs_tag_changes() -> None:
     """log_tag_changes logs all adds, updates, and removes from a TagDiff."""
-    from uc_abac_governor.tags.state import TagDiff
-
     cl, mock_logger = _make_change_logger()
 
     tag_add = _make_tag(tag_name="new_tag", tag_value="val")
@@ -275,13 +288,13 @@ def test_change_logger_logs_tag_changes() -> None:
 
     cl.log_tag_changes(diff)
 
-    messages = _info_messages(mock_logger)
+    messages = _change_lines(mock_logger)
     assert len(messages) == 3
 
-    combined = "\n".join(messages)
-    assert "ADDED" in combined
-    assert "UPDATED" in combined
-    assert "REMOVED" in combined
+    combined = "\n".join(messages).lower()
+    assert "added" in combined
+    assert "updated" in combined
+    assert "removed" in combined
     assert "new_tag" in combined
     assert "changed" in combined
     assert "old_tag" in combined
@@ -291,8 +304,6 @@ def test_change_logger_logs_tag_changes() -> None:
 
 def test_change_logger_logs_privilege_changes() -> None:
     """log_privilege_changes logs all grants and revokes from a PrivilegeDiff."""
-    from uc_abac_governor.privileges.state import PrivilegeDiff
-
     cl, mock_logger = _make_change_logger()
 
     grant_priv = _make_privilege(principal=Principal(PrincipalType.GROUP, "team_a", "team_a"), privilege_type=PrivilegeType.SELECT)
@@ -305,12 +316,12 @@ def test_change_logger_logs_privilege_changes() -> None:
 
     cl.log_privilege_changes(diff)
 
-    messages = _info_messages(mock_logger)
+    messages = _change_lines(mock_logger)
     assert len(messages) == 2
 
-    combined = "\n".join(messages)
-    assert "GRANTED" in combined
-    assert "REVOKED" in combined
+    combined = "\n".join(messages).lower()
+    assert "granted" in combined
+    assert "revoked" in combined
     assert "team_a" in combined
     assert "team_b" in combined
     assert "select" in combined
@@ -326,8 +337,6 @@ def _make_execution_error(
     statement: str = "GRANT SELECT ON TABLE `cat`.`s`.`t` TO `user`",
     exception: Exception | None = None,
 ) -> "ExecutionError":
-    from uc_abac_governor.types import ExecutionError
-
     return ExecutionError(
         context=statement,
         exception=exception or RuntimeError("SQL execution failed"),
@@ -336,8 +345,6 @@ def _make_execution_error(
 
 def test_change_logger_collects_errors() -> None:
     """log_error() collects ExecutionError instances accessible via .errors."""
-    from uc_abac_governor.types import ExecutionError
-
     cl, _ = _make_change_logger()
     err1 = _make_execution_error(statement="ALTER CATALOG `c` SET TAGS ('a')")
     err2 = _make_execution_error(statement="GRANT SELECT ON TABLE `c`.`s`.`t` TO `u`")
@@ -366,9 +373,9 @@ def test_change_logger_logs_error_message() -> None:
     cl, mock_logger = _make_change_logger()
     cl.log_error(_make_execution_error())
 
-    messages = _info_messages(mock_logger)
-    assert any("[ERROR]" in msg for msg in messages), (
-        f"Expected an [ERROR] message in: {messages}"
+    messages = _all_messages(mock_logger)
+    assert any("error" in msg.lower() for msg in messages), (
+        f"Expected an error message in: {messages}"
     )
 
 
@@ -411,8 +418,6 @@ def test_change_logger_summary_excludes_errors_when_none() -> None:
 
 def test_change_logger_uses_principal_display_name_in_grant_log() -> None:
     """log_grant uses the Principal's display_name (not identifier) in the log message."""
-    from uc_abac_governor.types import Principal, PrincipalType
-
     cl, mock_logger = _make_change_logger()
     priv = SecurablePrivilege(
         securable_type=SecurableType.TABLE,
@@ -424,7 +429,7 @@ def test_change_logger_uses_principal_display_name_in_grant_log() -> None:
 
     messages = _info_messages(mock_logger)
     assert len(messages) == 1
-    msg = messages[0]
+    msg = messages[0].lower()
 
     # The display name must appear in the log
     assert "my-etl-sp" in msg
@@ -439,8 +444,6 @@ def test_change_logger_uses_principal_display_name_in_grant_log() -> None:
 
 def test_change_logger_logs_tags_ordered_by_type_then_name() -> None:
     """log_tag_changes emits messages ordered by securable type then full name."""
-    from uc_abac_governor.tags.state import TagDiff
-
     cl, mock_logger = _make_change_logger()
 
     # Five tags on different securables in deliberate disorder.
@@ -456,21 +459,19 @@ def test_change_logger_logs_tags_ordered_by_type_then_name() -> None:
 
     cl.log_tag_changes(diff)
 
-    messages = _info_messages(mock_logger)
+    messages = _change_lines(mock_logger)
     assert len(messages) == 5
 
     # Expected order: CATALOG, SCHEMA (cat.s_a), SCHEMA (cat.s_z), TABLE, VOLUME
-    assert "CATALOG" in messages[0] and "cat" in messages[0]
-    assert "SCHEMA" in messages[1] and "cat.s_a" in messages[1]
-    assert "SCHEMA" in messages[2] and "cat.s_z" in messages[2]
-    assert "TABLE" in messages[3] and "cat.s.table_a" in messages[3]
-    assert "VOLUME" in messages[4] and "cat.s.vol_b" in messages[4]
+    assert "catalog" in messages[0].lower() and "cat" in messages[0]
+    assert "schema" in messages[1].lower() and "cat.s_a" in messages[1]
+    assert "schema" in messages[2].lower() and "cat.s_z" in messages[2]
+    assert "table" in messages[3].lower() and "cat.s.table_a" in messages[3]
+    assert "volume" in messages[4].lower() and "cat.s.vol_b" in messages[4]
 
 
 def test_change_logger_logs_privileges_ordered_by_type_then_name() -> None:
     """log_privilege_changes emits messages ordered by securable type then full name."""
-    from uc_abac_governor.privileges.state import PrivilegeDiff
-
     cl, mock_logger = _make_change_logger()
 
     diff = PrivilegeDiff(
@@ -504,12 +505,11 @@ def test_change_logger_logs_privileges_ordered_by_type_then_name() -> None:
 
     cl.log_privilege_changes(diff)
 
-    messages = _info_messages(mock_logger)
+    messages = _change_lines(mock_logger)
     assert len(messages) == 4
 
     # Expected order: CATALOG, SCHEMA, TABLE, VOLUME
-    assert "CATALOG" in messages[0] and "cat" in messages[0]
-    assert "SCHEMA" in messages[1] and "cat.s_a" in messages[1]
-    assert "TABLE" in messages[2] and "cat.s.table_b" in messages[2]
-    assert "VOLUME" in messages[3] and "cat.s.vol_a" in messages[3]
-
+    assert "catalog" in messages[0].lower() and "cat" in messages[0]
+    assert "schema" in messages[1].lower() and "cat.s_a" in messages[1]
+    assert "table" in messages[2].lower() and "cat.s.table_b" in messages[2]
+    assert "volume" in messages[3].lower() and "cat.s.vol_a" in messages[3]

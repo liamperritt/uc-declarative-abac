@@ -114,7 +114,9 @@ def run(
     # 2. Parallel initial fetch (tags, privileges, and principals concurrently)
     uc_helper = UnityCatalogHelper(workspace_client, warehouse_id)
     ws_helper = WorkspaceHelper(workspace_client, use_workspace_scim=use_workspace_scim)
-    _logger.info("Fetching current state from system tables (this can take several minutes)...")
+    change_logger = ChangeLogger(dry_run=dry_run, logger=_logger)
+    change_logger.log_banner()
+    _logger.info("  Fetching current state from workspace (this can take several minutes)...")
     with ThreadPoolExecutor() as pool:
         actual_tags_f = pool.submit(uc_helper.fetch_actual_tags, catalog_names)
         actual_privs_f = pool.submit(uc_helper.fetch_actual_privileges, catalog_names)
@@ -122,14 +124,14 @@ def run(
         actual_tags = actual_tags_f.result()
         actual_privileges = actual_privs_f.result()
         principals_f.result()
-    _logger.info("Successfully fetched current state")
+    _logger.info("  Successfully fetched current state")
+    _logger.info("")
 
     # 3. Tags workflow
     desired_tags = compile_desired_tags(config)
     tag_diff = compute_tag_diff(desired_tags, actual_tags)
 
     # 4. Privileges workflow
-    change_logger = ChangeLogger(dry_run=dry_run, logger=_logger)
     compiled_privileges = compile_desired_privileges(config, desired_tags, run_date=date.today())
     resolved_desired = _resolve_compiled_privileges(compiled_privileges, ws_helper, change_logger)
     resolved_actual = _resolve_actual_privileges(actual_privileges, ws_helper)
@@ -137,11 +139,16 @@ def run(
 
     # 5. Log and execute (sequential)
     if not dry_run:
+        if tag_diff.to_add or tag_diff.to_update or tag_diff.to_remove:
+            change_logger.log_section_header("Tags")
         execute_tag_diff(uc_helper, tag_diff, change_logger)
+        if privilege_diff.to_grant or privilege_diff.to_revoke:
+            change_logger.log_section_header("Privileges")
         execute_privilege_diff(uc_helper, privilege_diff, change_logger)
     else:
         change_logger.log_tag_changes(tag_diff)
         change_logger.log_privilege_changes(privilege_diff)
+    change_logger.log_errors_section()
     change_logger.log_summary()
 
     if change_logger.has_errors:
