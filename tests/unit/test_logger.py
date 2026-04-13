@@ -3,9 +3,9 @@ from __future__ import annotations
 import logging
 from unittest.mock import MagicMock
 
-from uc_abac_governor.privileges.state import SecurablePrivilege, PrivilegeDiff
+from uc_abac_governor.privileges.state import SecurablePrivilege
 from uc_abac_governor.logger import ChangeLogger
-from uc_abac_governor.tags.state import SecurableTag, TagDiff
+from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.types import Principal, PrincipalType, PrivilegeType, SecurableType, ExecutionError
 
 
@@ -265,70 +265,6 @@ def test_change_logger_logs_dry_run_summary() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Diff-level convenience methods
-# ---------------------------------------------------------------------------
-
-
-def test_change_logger_logs_tag_changes() -> None:
-    """log_tag_changes logs all adds, updates, and removes from a TagDiff."""
-    cl, mock_logger = _make_change_logger()
-
-    tag_add = _make_tag(tag_name="new_tag", tag_value="val")
-    tag_update = _make_tag(tag_name="changed", tag_value="new_val")
-    tag_remove = _make_tag(tag_name="old_tag", tag_value="stale")
-
-    diff = TagDiff(
-        to_add={tag_add},
-        to_update={tag_update},
-        to_remove={tag_remove},
-        old_values={
-            (tag_update.securable_type, tag_update.securable_full_name, tag_update.tag_name): "old_val",
-        },
-    )
-
-    cl.log_tag_changes(diff)
-
-    messages = _change_lines(mock_logger)
-    assert len(messages) == 3
-
-    combined = "\n".join(messages).lower()
-    assert "added" in combined
-    assert "updated" in combined
-    assert "removed" in combined
-    assert "new_tag" in combined
-    assert "changed" in combined
-    assert "old_tag" in combined
-    assert "old_val" in combined
-    assert "new_val" in combined
-
-
-def test_change_logger_logs_privilege_changes() -> None:
-    """log_privilege_changes logs all grants and revokes from a PrivilegeDiff."""
-    cl, mock_logger = _make_change_logger()
-
-    grant_priv = _make_privilege(principal=Principal(PrincipalType.GROUP, "team_a", "team_a"), privilege_type=PrivilegeType.SELECT)
-    revoke_priv = _make_privilege(principal=Principal(PrincipalType.GROUP, "team_b", "team_b"), privilege_type=PrivilegeType.MODIFY)
-
-    diff = PrivilegeDiff(
-        to_grant={grant_priv},
-        to_revoke={revoke_priv},
-    )
-
-    cl.log_privilege_changes(diff)
-
-    messages = _change_lines(mock_logger)
-    assert len(messages) == 2
-
-    combined = "\n".join(messages).lower()
-    assert "granted" in combined
-    assert "revoked" in combined
-    assert "team_a" in combined
-    assert "team_b" in combined
-    assert "select" in combined
-    assert "modify" in combined
-
-
-# ---------------------------------------------------------------------------
 # Error tracking
 # ---------------------------------------------------------------------------
 
@@ -435,81 +371,3 @@ def test_change_logger_uses_principal_display_name_in_grant_log() -> None:
     assert "my-etl-sp" in msg
     # The system identifier must NOT appear in the log
     assert "app-id-123" not in msg
-
-
-# ---------------------------------------------------------------------------
-# Log ordering
-# ---------------------------------------------------------------------------
-
-
-def test_change_logger_logs_tags_ordered_by_type_then_name() -> None:
-    """log_tag_changes emits messages ordered by securable type then full name."""
-    cl, mock_logger = _make_change_logger()
-
-    # Five tags on different securables in deliberate disorder.
-    tags = [
-        _make_tag(securable_type=SecurableType.VOLUME, securable_full_name="cat.s.vol_b", tag_name="z", tag_value="1"),
-        _make_tag(securable_type=SecurableType.TABLE, securable_full_name="cat.s.table_a", tag_name="y", tag_value="2"),
-        _make_tag(securable_type=SecurableType.CATALOG, securable_full_name="cat", tag_name="x", tag_value="3"),
-        _make_tag(securable_type=SecurableType.SCHEMA, securable_full_name="cat.s_z", tag_name="w", tag_value="4"),
-        _make_tag(securable_type=SecurableType.SCHEMA, securable_full_name="cat.s_a", tag_name="v", tag_value="5"),
-    ]
-
-    diff = TagDiff(to_add=set(tags))
-
-    cl.log_tag_changes(diff)
-
-    messages = _change_lines(mock_logger)
-    assert len(messages) == 5
-
-    # Expected order: CATALOG, SCHEMA (cat.s_a), SCHEMA (cat.s_z), TABLE, VOLUME
-    assert "catalog" in messages[0].lower() and "cat" in messages[0]
-    assert "schema" in messages[1].lower() and "cat.s_a" in messages[1]
-    assert "schema" in messages[2].lower() and "cat.s_z" in messages[2]
-    assert "table" in messages[3].lower() and "cat.s.table_a" in messages[3]
-    assert "volume" in messages[4].lower() and "cat.s.vol_b" in messages[4]
-
-
-def test_change_logger_logs_privileges_ordered_by_type_then_name() -> None:
-    """log_privilege_changes emits messages ordered by securable type then full name."""
-    cl, mock_logger = _make_change_logger()
-
-    diff = PrivilegeDiff(
-        to_grant={
-            SecurablePrivilege(
-                securable_type=SecurableType.VOLUME,
-                securable_full_name="cat.s.vol_a",
-                principal=Principal(PrincipalType.GROUP, "team_a", "team_a"),
-                privilege_type=PrivilegeType.READ_VOLUME,
-            ),
-            SecurablePrivilege(
-                securable_type=SecurableType.CATALOG,
-                securable_full_name="cat",
-                principal=Principal(PrincipalType.GROUP, "team_b", "team_b"),
-                privilege_type=PrivilegeType.USE_CATALOG,
-            ),
-            SecurablePrivilege(
-                securable_type=SecurableType.TABLE,
-                securable_full_name="cat.s.table_b",
-                principal=Principal(PrincipalType.GROUP, "team_c", "team_c"),
-                privilege_type=PrivilegeType.SELECT,
-            ),
-            SecurablePrivilege(
-                securable_type=SecurableType.SCHEMA,
-                securable_full_name="cat.s_a",
-                principal=Principal(PrincipalType.GROUP, "team_d", "team_d"),
-                privilege_type=PrivilegeType.USE_SCHEMA,
-            ),
-        },
-    )
-
-    cl.log_privilege_changes(diff)
-
-    messages = _change_lines(mock_logger)
-    assert len(messages) == 4
-
-    # Expected order: CATALOG, SCHEMA, TABLE, VOLUME
-    assert "catalog" in messages[0].lower() and "cat" in messages[0]
-    assert "schema" in messages[1].lower() and "cat.s_a" in messages[1]
-    assert "table" in messages[2].lower() and "cat.s.table_b" in messages[2]
-    assert "volume" in messages[3].lower() and "cat.s.vol_a" in messages[3]

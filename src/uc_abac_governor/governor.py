@@ -137,17 +137,15 @@ def run(
     resolved_actual = _resolve_actual_privileges(actual_privileges, ws_helper)
     privilege_diff = compute_privilege_diff(resolved_desired, resolved_actual)
 
-    # 5. Log and execute (sequential)
-    if not dry_run:
-        if tag_diff.to_add or tag_diff.to_update or tag_diff.to_remove:
-            change_logger.log_section_header("Tags")
-        execute_tag_diff(uc_helper, tag_diff, change_logger)
-        if privilege_diff.to_grant or privilege_diff.to_revoke:
-            change_logger.log_section_header("Privileges")
-        execute_privilege_diff(uc_helper, privilege_diff, change_logger)
-    else:
-        change_logger.log_tag_changes(tag_diff)
-        change_logger.log_privilege_changes(privilege_diff)
+    # 5. Log and execute (or dry-run)
+    if tag_diff.to_add or tag_diff.to_update or tag_diff.to_remove:
+        change_logger.log_section_header("Tags")
+    execute_tag_diff(uc_helper, tag_diff, change_logger, dry_run=dry_run)
+
+    if privilege_diff.to_grant or privilege_diff.to_revoke:
+        change_logger.log_section_header("Privileges")
+    execute_privilege_diff(uc_helper, privilege_diff, change_logger, dry_run=dry_run)
+
     change_logger.log_errors_section()
     change_logger.log_summary()
 

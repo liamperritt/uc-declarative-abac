@@ -69,25 +69,27 @@ def execute_tag_diff(
     uc_helper: UnityCatalogHelper,
     diff: TagDiff,
     change_logger: ChangeLogger,
+    dry_run: bool = False,
 ) -> list[str]:
     """Generate and execute ALTER SET/UNSET TAGS SQL from a TagDiff.
 
     Batches tags per securable where possible.
-    Logs each change after successful execution.
-    Returns the list of SQL statements executed.
+    Logs each change after successful execution (or unconditionally in dry-run mode).
+    Returns the list of SQL statements executed (empty in dry-run mode).
     """
     statements: list[str] = []
 
     # SET TAGS for adds and updates combined
     set_tags = diff.to_add | diff.to_update
     for (sec_type, sec_name), tags in sorted(_group_by_securable(set_tags).items()):
-        stmt = _build_set_tags_sql(sec_type, sec_name, tags)
-        try:
-            uc_helper.execute_sql(stmt)
-        except Exception as exc:
-            change_logger.log_error(ExecutionError(context=stmt, exception=exc))
-            continue
-        statements.append(stmt)
+        if not dry_run:
+            stmt = _build_set_tags_sql(sec_type, sec_name, tags)
+            try:
+                uc_helper.execute_sql(stmt)
+            except Exception as exc:
+                change_logger.log_error(ExecutionError(context=stmt, exception=exc))
+                continue
+            statements.append(stmt)
         for tag in tags:
             if tag in diff.to_add:
                 change_logger.log_tag_add(tag)
@@ -98,13 +100,14 @@ def execute_tag_diff(
 
     # UNSET TAGS for removes
     for (sec_type, sec_name), tags in sorted(_group_by_securable(diff.to_remove).items()):
-        stmt = _build_unset_tags_sql(sec_type, sec_name, tags)
-        try:
-            uc_helper.execute_sql(stmt)
-        except Exception as exc:
-            change_logger.log_error(ExecutionError(context=stmt, exception=exc))
-            continue
-        statements.append(stmt)
+        if not dry_run:
+            stmt = _build_unset_tags_sql(sec_type, sec_name, tags)
+            try:
+                uc_helper.execute_sql(stmt)
+            except Exception as exc:
+                change_logger.log_error(ExecutionError(context=stmt, exception=exc))
+                continue
+            statements.append(stmt)
         for tag in tags:
             change_logger.log_tag_remove(tag)
 

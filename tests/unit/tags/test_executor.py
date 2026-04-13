@@ -404,6 +404,56 @@ def test_tag_executor_generates_alter_column_set_tags_sql():
     uc_helper.execute_sql.assert_called_once_with(sql)
 
 
+# ---------------------------------------------------------------------------
+# Dry-run mode
+# ---------------------------------------------------------------------------
+
+
+def test_tag_executor_logs_changes_in_dry_run():
+    """dry_run=True logs all tag changes without executing any SQL."""
+    uc_helper = MagicMock()
+    change_logger = ChangeLogger()
+
+    tag_add = SecurableTag(
+        securable_type=SecurableType.CATALOG,
+        securable_full_name="my_catalog",
+        tag_name="env",
+        tag_value="prod",
+    )
+    tag_update = SecurableTag(
+        securable_type=SecurableType.TABLE,
+        securable_full_name="cat.schema.orders",
+        tag_name="pii",
+        tag_value="true",
+    )
+    tag_remove = SecurableTag(
+        securable_type=SecurableType.SCHEMA,
+        securable_full_name="cat.schema",
+        tag_name="deprecated",
+        tag_value="",
+    )
+
+    diff = TagDiff(
+        to_add={tag_add},
+        to_update={tag_update},
+        to_remove={tag_remove},
+        old_values={
+            (tag_update.securable_type, tag_update.securable_full_name, tag_update.tag_name): "false",
+        },
+    )
+
+    stmts = execute_tag_diff(uc_helper, diff, change_logger, dry_run=True)
+
+    # No SQL executed
+    assert stmts == []
+    uc_helper.execute_sql.assert_not_called()
+
+    # All three changes were logged (counts tracked on the ChangeLogger)
+    assert change_logger._tags_added == 1
+    assert change_logger._tags_updated == 1
+    assert change_logger._tags_removed == 1
+
+
 def test_tag_executor_generates_alter_column_unset_tags_sql():
     """A COLUMN tag in to_remove produces ALTER TABLE ... ALTER COLUMN ... UNSET TAGS."""
     uc_helper = MagicMock()

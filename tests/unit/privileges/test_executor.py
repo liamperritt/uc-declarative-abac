@@ -319,3 +319,43 @@ def test_privilege_executor_collects_all_errors():
     assert len(change_logger.errors) == 2
     # No successful statements
     assert stmts == []
+
+
+# ---------------------------------------------------------------------------
+# Dry-run mode
+# ---------------------------------------------------------------------------
+
+
+def test_privilege_executor_logs_changes_in_dry_run():
+    """dry_run=True logs all privilege changes without executing any SQL."""
+    uc_helper = MagicMock()
+    change_logger = ChangeLogger()
+
+    diff = PrivilegeDiff(
+        to_grant={
+            SecurablePrivilege(
+                securable_type=SecurableType.SCHEMA,
+                securable_full_name="catalog.sales",
+                principal=Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
+                privilege_type=PrivilegeType.USE_SCHEMA,
+            ),
+        },
+        to_revoke={
+            SecurablePrivilege(
+                securable_type=SecurableType.TABLE,
+                securable_full_name="catalog.schema.orders",
+                principal=Principal(PrincipalType.GROUP, "temp_users", "temp_users"),
+                privilege_type=PrivilegeType.SELECT,
+            ),
+        },
+    )
+
+    stmts = execute_privilege_diff(uc_helper, diff, change_logger, dry_run=True)
+
+    # No SQL executed
+    assert stmts == []
+    uc_helper.execute_sql.assert_not_called()
+
+    # Both changes were logged
+    assert change_logger._privileges_granted == 1
+    assert change_logger._privileges_revoked == 1

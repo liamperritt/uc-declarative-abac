@@ -39,34 +39,37 @@ def execute_privilege_diff(
     uc_helper: UnityCatalogHelper,
     diff: PrivilegeDiff,
     change_logger: ChangeLogger,
+    dry_run: bool = False,
 ) -> list[str]:
     """Generate and execute GRANT/REVOKE SQL from a PrivilegeDiff.
 
     Principal identifiers are read directly from the Principal object
     on each SecurablePrivilege.
-    Logs each change after successful execution.
-    Returns the list of SQL statements executed.
+    Logs each change after successful execution (or unconditionally in dry-run mode).
+    Returns the list of SQL statements executed (empty in dry-run mode).
     """
     statements: list[str] = []
 
     for priv in sorted(diff.to_grant, key=lambda p: (p.securable_type.value, p.securable_full_name)):
-        stmt = _build_grant_sql(priv)
-        try:
-            uc_helper.execute_sql(stmt)
-        except Exception as exc:
-            change_logger.log_error(ExecutionError(context=stmt, exception=exc))
-            continue
-        statements.append(stmt)
+        if not dry_run:
+            stmt = _build_grant_sql(priv)
+            try:
+                uc_helper.execute_sql(stmt)
+            except Exception as exc:
+                change_logger.log_error(ExecutionError(context=stmt, exception=exc))
+                continue
+            statements.append(stmt)
         change_logger.log_grant(priv)
 
     for priv in sorted(diff.to_revoke, key=lambda p: (p.securable_type.value, p.securable_full_name)):
-        stmt = _build_revoke_sql(priv)
-        try:
-            uc_helper.execute_sql(stmt)
-        except Exception as exc:
-            change_logger.log_error(ExecutionError(context=stmt, exception=exc))
-            continue
-        statements.append(stmt)
+        if not dry_run:
+            stmt = _build_revoke_sql(priv)
+            try:
+                uc_helper.execute_sql(stmt)
+            except Exception as exc:
+                change_logger.log_error(ExecutionError(context=stmt, exception=exc))
+                continue
+            statements.append(stmt)
         change_logger.log_revoke(priv)
 
     return statements

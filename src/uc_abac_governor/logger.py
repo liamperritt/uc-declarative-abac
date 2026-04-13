@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import logging
 
-from uc_abac_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
-from uc_abac_governor.tags.state import SecurableTag, TagDiff
-from uc_abac_governor.types import ExecutionError, Principal, SecurableType
+from uc_abac_governor.privileges.state import SecurablePrivilege
+from uc_abac_governor.tags.state import SecurableTag
+from uc_abac_governor.types import ExecutionError, Principal
 
 _default_logger = logging.getLogger("uc_abac_governor")
 
@@ -160,43 +160,8 @@ class ChangeLogger:
         ))
 
     # ------------------------------------------------------------------
-    # Diff-level convenience methods
+    # Error section
     # ------------------------------------------------------------------
-
-    def log_tag_changes(self, diff: TagDiff) -> None:
-        """Log all tag changes from a TagDiff under a Tags section header."""
-        has_changes = diff.to_add or diff.to_update or diff.to_remove
-        if has_changes:
-            self.log_section_header("Tags")
-
-        sort_key = lambda t: (t.securable_type.value, t.securable_full_name)
-        for tag in sorted(diff.to_add, key=sort_key):
-            self.log_tag_add(tag)
-        for tag in sorted(diff.to_update, key=sort_key):
-            old_value = diff.old_values.get(
-                (tag.securable_type, tag.securable_full_name, tag.tag_name)
-            )
-            self.log_tag_update(tag, old_value)
-        for tag in sorted(diff.to_remove, key=sort_key):
-            self.log_tag_remove(tag)
-
-        if has_changes:
-            self._logger.info("")
-
-    def log_privilege_changes(self, diff: PrivilegeDiff) -> None:
-        """Log all privilege changes from a PrivilegeDiff under a Privileges section header."""
-        has_changes = diff.to_grant or diff.to_revoke
-        if has_changes:
-            self.log_section_header("Privileges")
-
-        sort_key = lambda p: (p.securable_type.value, p.securable_full_name)
-        for priv in sorted(diff.to_grant, key=sort_key):
-            self.log_grant(priv)
-        for priv in sorted(diff.to_revoke, key=sort_key):
-            self.log_revoke(priv)
-
-        if has_changes:
-            self._logger.info("")
 
     def log_errors_section(self) -> None:
         """Log collected errors as a dedicated section."""
