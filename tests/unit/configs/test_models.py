@@ -3,8 +3,6 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from databricks.sdk.service.catalog import ColumnTypeName
-
 from uc_abac_governor.configs.models import FunctionConfig, ParameterConfig, ResourcesConfig
 from uc_abac_governor.types import DuplicateResourceError
 
@@ -694,21 +692,9 @@ def test_column_config_allows_omitted_owner():
 
 
 def test_parameter_config_coerces_lowercase_type():
-    """A lowercase type string like 'string' is coerced to ColumnTypeName.STRING."""
+    """A lowercase type string like 'string' is coerced to STRING."""
     param = ParameterConfig.model_validate({"name": "col", "type": "string"})
-    assert param.type == ColumnTypeName.STRING
-
-
-def test_parameter_config_accepts_uppercase_type():
-    """An uppercase type string like 'STRING' is accepted as ColumnTypeName.STRING."""
-    param = ParameterConfig.model_validate({"name": "col", "type": "STRING"})
-    assert param.type == ColumnTypeName.STRING
-
-
-def test_parameter_config_rejects_invalid_type():
-    """An invalid type string raises a ValidationError."""
-    with pytest.raises(ValidationError):
-        ParameterConfig.model_validate({"name": "col", "type": "not_a_type"})
+    assert param.type == "STRING"
 
 
 # ---------------------------------------------------------------------------

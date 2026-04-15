@@ -6,8 +6,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
-from databricks.sdk.service.catalog import ColumnTypeName
-
 from uc_abac_governor.types import DuplicateResourceError, PolicyType, PrivilegeType
 
 
@@ -64,7 +62,7 @@ class GrantPolicyConfig(PolicyConfig):
 
 class ParameterConfig(BaseModel):
     name: str
-    type: ColumnTypeName
+    type: str
 
     @field_validator("type", mode="before")
     @classmethod
