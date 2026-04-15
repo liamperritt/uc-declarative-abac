@@ -16,141 +16,21 @@ from uc_abac_governor.helpers.unity_catalog import UnityCatalogHelper
 from uc_abac_governor.privileges.compiler import compile_desired_privileges
 from uc_abac_governor.privileges.differ import compute_privilege_diff
 from uc_abac_governor.privileges.executor import execute_privilege_diff
-from uc_abac_governor.privileges.state import PrivilegeDiff, SecurablePrivilege, UnresolvedPrivilege
+from uc_abac_governor.privileges.resolver import resolve_actual_privileges, resolve_compiled_privileges
+from uc_abac_governor.privileges.state import PrivilegeDiff
 from uc_abac_governor.securables.compiler import compile_desired_attributes, compile_desired_securables
 from uc_abac_governor.securables.differ import compute_securable_diff
 from uc_abac_governor.securables.executor import execute_securable_diff
-from uc_abac_governor.securables.state import SecurableAttributes, SecurableDiff
+from uc_abac_governor.securables.resolver import resolve_actual_owners, resolve_desired_owners
+from uc_abac_governor.securables.state import SecurableDiff
 from uc_abac_governor.logger import ChangeLogger
 from uc_abac_governor.tags.compiler import compile_desired_tags
 from uc_abac_governor.tags.differ import compute_tag_diff
 from uc_abac_governor.tags.executor import execute_tag_diff
 from uc_abac_governor.tags.state import TagDiff
-from uc_abac_governor.types import (
-    ExecutionBatchError,
-    ExecutionError,
-    PrincipalValidationError,
-    Principal,
-)
+from uc_abac_governor.types import ExecutionBatchError
 
 _logger = logging.getLogger("uc_abac_governor")
-
-
-def _resolve_compiled_privileges(
-    compiled: set[UnresolvedPrivilege],
-    ws_helper: WorkspaceHelper,
-    change_logger: ChangeLogger,
-) -> set[SecurablePrivilege]:
-    """Resolve compiled privileges to SecurablePrivileges with Principal objects.
-
-    Unknown principals (not in the workspace) are logged as errors and excluded.
-    """
-    principals = ws_helper.get_principals()
-    resolved: set[SecurablePrivilege] = set()
-    unknown: set[str] = set()
-
-    for cp in compiled:
-        principal = principals.get(cp.principal)
-        if principal is None:
-            if cp.principal not in unknown:
-                unknown.add(cp.principal)
-                change_logger.log_error(ExecutionError(
-                    context=f"Validate principal '{cp.principal}'",
-                    exception=PrincipalValidationError(
-                        f"Principal '{cp.principal}' not found in workspace"
-                    ),
-                ))
-            continue
-        resolved.add(SecurablePrivilege(
-            securable_type=cp.securable_type,
-            securable_full_name=cp.securable_full_name,
-            principal=principal,
-            privilege_type=cp.privilege_type,
-        ))
-
-    return resolved
-
-
-def _resolve_actual_privileges(
-    actual_privileges: set[UnresolvedPrivilege],
-    ws_helper: WorkspaceHelper,
-) -> set[SecurablePrivilege]:
-    """Resolve unresolved actual privileges (string principals) to Principal objects.
-
-    Actual privileges with unrecognised principals (e.g. deleted users) are
-    logged as errors and excluded.
-    """
-    resolved: set[SecurablePrivilege] = set()
-    for p in actual_privileges:
-        try:
-            principal = ws_helper.resolve_by_identifier(p.principal)
-        except PrincipalValidationError:
-            _logger.error(f"Skipping actual privilege: unknown principal '{p.principal}'")
-            continue
-        resolved.add(SecurablePrivilege(
-            securable_type=p.securable_type,
-            securable_full_name=p.securable_full_name,
-            principal=principal,
-            privilege_type=p.privilege_type,
-        ))
-    return resolved
-
-
-def _resolve_desired_owners(
-    desired_attrs: set[SecurableAttributes],
-    ws_helper: WorkspaceHelper,
-    change_logger: ChangeLogger,
-) -> dict[str, Principal]:
-    """Resolve desired owner display names to Principal objects.
-
-    Returns a mapping of full_name → Principal for each securable with an
-    owner. Unknown principals are logged as errors and excluded.
-    """
-    principals = ws_helper.get_principals()
-    result: dict[str, Principal] = {}
-    unknown: set[str] = set()
-
-    for attr in desired_attrs:
-        if attr.owner is None:
-            continue
-        principal = principals.get(attr.owner)
-        if principal is None:
-            if attr.owner not in unknown:
-                unknown.add(attr.owner)
-                change_logger.log_error(ExecutionError(
-                    context=f"Resolve owner '{attr.owner}' for {attr.full_name}",
-                    exception=PrincipalValidationError(
-                        f"Owner '{attr.owner}' not found in workspace"
-                    ),
-                ))
-            continue
-        result[attr.full_name] = principal
-
-    return result
-
-
-def _resolve_actual_owners(
-    actual_attrs: set[SecurableAttributes],
-    ws_helper: WorkspaceHelper,
-) -> dict[str, Principal]:
-    """Resolve actual owner identifiers to Principal objects.
-
-    Returns a mapping of full_name → Principal. Unrecognised identifiers
-    (e.g. deleted users) are logged and excluded.
-    """
-    result: dict[str, Principal] = {}
-
-    for attr in actual_attrs:
-        if attr.owner is None:
-            continue
-        try:
-            principal = ws_helper.resolve_by_identifier(attr.owner)
-        except PrincipalValidationError:
-            _logger.warning(f"WARNING: Skipping actual owner: unknown identifier '{attr.owner}' on {attr.full_name}")
-            continue
-        result[attr.full_name] = principal
-
-    return result
 
 
 def run(
@@ -194,8 +74,8 @@ def run(
     # 3. Securables workflow (before tags and privileges)
     desired_attributes = compile_desired_attributes(config)
     desired_securables = compile_desired_securables(config)
-    desired_owner_principals = _resolve_desired_owners(desired_attributes, ws_helper, change_logger)
-    actual_owner_principals = _resolve_actual_owners(actual_attributes, ws_helper)
+    desired_owner_principals = resolve_desired_owners(desired_attributes, ws_helper, change_logger)
+    actual_owner_principals = resolve_actual_owners(actual_attributes, ws_helper)
     securable_diff = compute_securable_diff(
         desired_attributes, actual_attributes, desired_securables, actual_securables,
         desired_owner_principals=desired_owner_principals,
@@ -212,8 +92,8 @@ def run(
 
     # 5. Privileges workflow
     compiled_privileges = compile_desired_privileges(config, desired_tags, run_date=date.today())
-    resolved_desired = _resolve_compiled_privileges(compiled_privileges, ws_helper, change_logger)
-    resolved_actual = _resolve_actual_privileges(actual_privileges, ws_helper)
+    resolved_desired = resolve_compiled_privileges(compiled_privileges, ws_helper, change_logger)
+    resolved_actual = resolve_actual_privileges(actual_privileges, ws_helper)
     privilege_diff = compute_privilege_diff(resolved_desired, resolved_actual)
 
     # 6. Log and execute (or dry-run)

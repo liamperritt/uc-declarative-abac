@@ -527,6 +527,15 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 - **Resource consolidation** — standalone `resources.schemas`, `resources.tables`, `resources.volumes` are restructured into the nested catalog hierarchy with parent auto-creation
 - **Pydantic model validation** — full config validation with parent context injection (`catalog_name`, `schema_name`, `table_name`), `full_name` computed fields, null tag coercion, and duplicate resource detection
 
+#### Securables domain
+- **Owner management** — detects owner drift between config and workspace; updates via WorkspaceClient API for all securable types (catalogs, schemas, tables, volumes, functions)
+- **Owner principal resolution** — resolves YAML owner display names to `Principal` objects with system identifiers (application IDs for service principals), and resolves actual owner identifiers from system tables back to `Principal` objects for comparison
+- **Function creation** — creates new functions via `CREATE FUNCTION` SQL with parameters and return expression (no `RETURNS` clause; UC infers the type)
+- **Function replacement** — replaces existing functions whose parameters or definition have changed via `CREATE OR REPLACE FUNCTION` SQL
+- **Polymorphic securable state** — `SecurableInfo` base class with `FunctionInfo` subclass; executor dispatches via structural pattern matching (`match`/`case`), extensible for future securable types
+- **Generic attribute updates** — `AttributeUpdate` type supports any attribute (currently `owner`); adding future attributes (comment, RFA destination) requires only adding a field to `SecurableAttributes` and a dispatch branch in the executor
+- **Single state query** — `fetch_actual_securables` combines attributes and function definitions in one UNION ALL query with `collect_list`/`sort_array`/`transform` aggregation for parameters
+
 #### Tags domain
 - **Tag compilation** — walks catalog → schema → table → column → volume hierarchy, emitting desired tags
 - **Tag diffing** — computes adds, updates, and removes by comparing desired vs actual state from `information_schema.*_tags` system tables
@@ -542,6 +551,12 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 - **Privilege diffing** — computes grants and revokes by comparing desired vs actual state from `information_schema.*_privileges` system tables
 - **Privilege execution** — generates and executes `GRANT`/`REVOKE` SQL
 
+#### Pydantic model validation
+- **`FunctionConfig`** — function definitions with `parameters` (list of `ParameterConfig`), `definition` (aliased as `return` in YAML), and tags rejection validator
+- **`ParameterConfig`** — function parameters with automatic lowercase-to-uppercase `ColumnTypeName` coercion
+- **Column owner rejection** — `ColumnConfig` rejects explicit `owner` field (always inherited from table)
+- **Schema function support** — `SchemaConfig.functions` with parent name injection and duplicate detection
+
 #### Principal management
 - **Account SCIM proxy** (default) — fetches all account-level principals via `/api/2.0/account/scim/v2/` endpoints with pagination
 - **Workspace SCIM** (optional `--use-workspace-scim`) — fetches workspace-level principals via SDK
@@ -550,22 +565,22 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 #### Error handling
 - **Error collection** — SQL execution errors and principal validation errors are collected (not raised immediately), allowing the pipeline to process as many operations as possible before reporting all failures
 - **`ExecutionBatchError`** — raised at the end with all collected errors
-- **Structured logging** — `[TAGS]`/`[PRIVILEGES]` prefixed logs, ordered by securable type then name, with dry-run prefix support and summary counts
+- **Structured logging** — `[SECURABLES]`/`[TAGS]`/`[PRIVILEGES]` section headers, ordered by securable type then name, with dry-run prefix support and summary counts
 
 #### Infrastructure
 - **CLI** (`python -m uc_abac_governor`) — `--config-dir`, `--warehouse-id`, `--profile`, `--dry-run`, `--use-workspace-scim`
 - **Hybrid SQL polling** — `wait_timeout=50s` with `on_wait_timeout=CONTINUE` and 10s polling for long-running queries
 - **External links** — fetches SQL results via external link URLs for large result sets
-- **Parallel state fetch** — tags, privileges, and principals are fetched concurrently
+- **Parallel state fetch** — securables, tags, privileges, and principals are fetched concurrently
+- **`information_schema` filtering** — all state queries exclude the `information_schema` schema and its child objects
 
 ### Not yet implemented
 
 - **Tag policies** — `resources.tag_policies` with `allowed_values`, `allowed_principals`, `comment` (documented in README but not built)
-- **UC object creation** — creating/updating catalogs, schemas, tables, volumes, functions (currently only tags and privileges are managed)
-- **Object attributes** — `owner`, `comment`, `rfa_destination` on securables
+- **UC object creation** — creating/updating catalogs, schemas, tables, volumes (functions are supported; other securable types require adding `SecurableInfo` subclasses)
+- **Object attributes** — `comment`, `rfa_destination` on securables (the `owner` attribute is implemented; adding new attributes requires only a field on `SecurableAttributes` and an executor dispatch branch)
 - **Mask & filter policies** — `type: mask` and `type: filter` policy support
 - **Direct mask/filter** — `filter` on tables and `mask` on columns (non-ABAC, directly applied functions)
-- **Function definitions** — UDF definitions with parameters and return expressions
 - **Abstracted privilege names** — `read`, `edit`, `create` expanding to multiple UC privileges
 - **GitHub Action** — CI/CD deployment action
 
