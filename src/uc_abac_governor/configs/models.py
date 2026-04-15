@@ -4,7 +4,9 @@ from abc import abstractmethod
 from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, computed_field, field_validator, model_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
+
+from databricks.sdk.service.catalog import ColumnTypeName
 
 from uc_abac_governor.types import DuplicateResourceError, PolicyType, PrivilegeType
 
@@ -36,7 +38,6 @@ class PolicyConfig(BaseModel):
     table_name: str | None = None
     name: str | None = None
     type: PolicyType
-    to: list[str]
     tags: dict[str, str] | None = None
 
     @field_validator("tags", mode="before")
@@ -57,12 +58,26 @@ class PolicyConfig(BaseModel):
 class GrantPolicyConfig(PolicyConfig):
     type: Literal[PolicyType.GRANT] = PolicyType.GRANT
     privileges: list[PrivilegeType]
+    to: list[str]
     expiry_date: date | None = None
+
+
+class ParameterConfig(BaseModel):
+    name: str
+    type: ColumnTypeName
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def _coerce_type_to_uppercase(cls, v):
+        if isinstance(v, str):
+            return v.upper()
+        return v
 
 
 class SecurableConfig(BaseModel):
     """Base model for all UC securable configs. Not intended to be instantiated directly."""
     name: str
+    owner: str | None = None
     tags: dict[str, str] | None = None
 
     @computed_field
@@ -79,10 +94,38 @@ class SecurableConfig(BaseModel):
         return _coerce_null_tag_values(v)
 
 
+class FunctionConfig(SecurableConfig):
+    catalog_name: str
+    schema_name: str
+    parameters: list[ParameterConfig] | None = None
+    definition: str = Field(alias="return")
+    tags: None = None
+
+    @computed_field
+    @property
+    def full_name(self) -> str:
+        return f"{self.catalog_name}.{self.schema_name}.{self.name}"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_tags(cls, data):
+        if isinstance(data, dict) and "tags" in data:
+            raise ValueError("Functions do not support tags")
+        return data
+
+
 class ColumnConfig(SecurableConfig):
     catalog_name: str
     schema_name: str
     table_name: str
+
+    @field_validator("owner", mode="before")
+    @classmethod
+    def _reject_explicit_owner(cls, v):
+        raise ValueError(
+            "Owner cannot be explicitly set on a column; "
+            "it is always inherited from the table"
+        )
 
     @computed_field
     @property
@@ -140,6 +183,7 @@ class SchemaConfig(SecurableConfig):
     policies: list[GrantPolicyConfig] | None = None
     tables: list[TableConfig] | None = None
     volumes: list[VolumeConfig] | None = None
+    functions: list[FunctionConfig] | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -156,6 +200,11 @@ class SchemaConfig(SecurableConfig):
             "volume",
             f"schema '{schema_name}'",
         )
+        _check_duplicate_names(
+            data.get("functions", []) or [],
+            "function",
+            f"schema '{schema_name}'",
+        )
         for policy_dict in data.get("policies", []) or []:
             if isinstance(policy_dict, dict):
                 policy_dict.setdefault("catalog_name", catalog_name)
@@ -168,6 +217,10 @@ class SchemaConfig(SecurableConfig):
             if isinstance(volume_dict, dict):
                 volume_dict.setdefault("catalog_name", catalog_name)
                 volume_dict.setdefault("schema_name", schema_name)
+        for function_dict in data.get("functions", []) or []:
+            if isinstance(function_dict, dict):
+                function_dict.setdefault("catalog_name", catalog_name)
+                function_dict.setdefault("schema_name", schema_name)
         return data
 
     @computed_field

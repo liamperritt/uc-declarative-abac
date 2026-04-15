@@ -9,6 +9,7 @@ class SecurableType(str, Enum):
     SCHEMA = "SCHEMA"
     TABLE = "TABLE"
     VOLUME = "VOLUME"
+    FUNCTION = "FUNCTION"
     COLUMN = "COLUMN"
 
 

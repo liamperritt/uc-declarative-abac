@@ -3,7 +3,9 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from uc_abac_governor.configs.models import ResourcesConfig
+from databricks.sdk.service.catalog import ColumnTypeName
+
+from uc_abac_governor.configs.models import FunctionConfig, ParameterConfig, ResourcesConfig
 from uc_abac_governor.types import DuplicateResourceError
 
 
@@ -629,3 +631,113 @@ def test_catalog_config_allows_same_name_in_different_parents():
         }
     })
     assert len(config.catalogs["my_cat"].schemas) == 2
+
+
+# ---------------------------------------------------------------------------
+# ColumnConfig.owner validation
+# ---------------------------------------------------------------------------
+
+
+def test_column_config_rejects_explicit_owner():
+    """A column with an explicit 'owner' field raises a ValidationError."""
+    data = {
+        "catalogs": {
+            "my_catalog": {
+                "schemas": [
+                    {
+                        "name": "sales",
+                        "tables": [
+                            {
+                                "name": "orders",
+                                "columns": [
+                                    {"name": "email", "owner": "someone"},
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+    }
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate(data)
+
+    assert "inherited" in str(exc_info.value).lower() or "table" in str(exc_info.value).lower()
+
+
+def test_column_config_allows_omitted_owner():
+    """A column without an 'owner' field validates successfully with owner as None."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_catalog": {
+                "schemas": [
+                    {
+                        "name": "sales",
+                        "tables": [
+                            {
+                                "name": "orders",
+                                "columns": [{"name": "email"}],
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+    })
+    column = config.catalogs["my_catalog"].schemas[0].tables[0].columns[0]
+    assert column.owner is None
+
+
+# ---------------------------------------------------------------------------
+# ParameterConfig.type coercion
+# ---------------------------------------------------------------------------
+
+
+def test_parameter_config_coerces_lowercase_type():
+    """A lowercase type string like 'string' is coerced to ColumnTypeName.STRING."""
+    param = ParameterConfig.model_validate({"name": "col", "type": "string"})
+    assert param.type == ColumnTypeName.STRING
+
+
+def test_parameter_config_accepts_uppercase_type():
+    """An uppercase type string like 'STRING' is accepted as ColumnTypeName.STRING."""
+    param = ParameterConfig.model_validate({"name": "col", "type": "STRING"})
+    assert param.type == ColumnTypeName.STRING
+
+
+def test_parameter_config_rejects_invalid_type():
+    """An invalid type string raises a ValidationError."""
+    with pytest.raises(ValidationError):
+        ParameterConfig.model_validate({"name": "col", "type": "not_a_type"})
+
+
+# ---------------------------------------------------------------------------
+# FunctionConfig.tags validation
+# ---------------------------------------------------------------------------
+
+
+def test_function_config_rejects_tags():
+    """A FunctionConfig with an explicit 'tags' field raises a ValidationError."""
+    with pytest.raises(ValidationError):
+        FunctionConfig.model_validate({
+            "name": "mask_pii_email",
+            "owner": None,
+            "catalog_name": "my_catalog",
+            "schema_name": "shared",
+            "parameters": [{"name": "col", "type": "STRING"}],
+            "return": "CASE WHEN is_member('admins') THEN col ELSE '***' END",
+            "tags": {"env": "prod"},
+        })
+
+
+def test_function_config_allows_omitted_tags():
+    """A FunctionConfig without 'tags' validates successfully with tags as None."""
+    function = FunctionConfig.model_validate({
+        "name": "mask_pii_email",
+        "owner": None,
+        "catalog_name": "my_catalog",
+        "schema_name": "shared",
+        "parameters": [{"name": "col", "type": "STRING"}],
+        "return": "CASE WHEN is_member('admins') THEN col ELSE '***' END",
+    })
+    assert function.tags is None
