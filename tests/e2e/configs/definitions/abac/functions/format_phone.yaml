@@ -1,0 +1,10 @@
+definitions:
+  functions:
+    abac|format_phone:
+      name: format_phone
+      parameters:
+        - name: code
+          type: string
+        - name: phone
+          type: string
+      return: "concat('+', code, phone)"

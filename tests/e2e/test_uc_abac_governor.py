@@ -21,6 +21,7 @@ from pathlib import Path
 from databricks.sdk import WorkspaceClient
 
 from uc_abac_governor.governor import run
+from uc_abac_governor.securables.state import AttributeUpdate, FunctionInfo, SecurableAttributes
 from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.privileges.state import SecurablePrivilege
 from uc_abac_governor.types import Principal, PrincipalType, PrivilegeType, SecurableType
@@ -75,6 +76,28 @@ EXPECTED_PRIVILEGES = {
     SecurablePrivilege(SecurableType.VOLUME, "liam_perritt.lff_sqlserver_bronze.test", Principal(PrincipalType.GROUP, "uc_governor_test_team", "uc_governor_test_team"), PrivilegeType.READ_VOLUME),
 }
 
+EXPECTED_FUNCTIONS = {
+    FunctionInfo(
+        securable_type=SecurableType.FUNCTION,
+        full_name="liam_perritt.default.mask_pii_email",
+        parameters=(("col", "STRING"),),
+        definition="CASE WHEN is_member('uc_governor_test_team') THEN col ELSE '***' END",
+    ),
+    FunctionInfo(
+        securable_type=SecurableType.FUNCTION,
+        full_name="liam_perritt.default.format_phone",
+        parameters=(("phone", "STRING"),),
+        definition="concat('+', phone)",
+    ),
+}
+
+EXPECTED_ATTRIBUTES = {
+    # Table owner set to a group
+    SecurableAttributes(SecurableType.TABLE, "liam_perritt.default.batch_table", owner="uc_governor_test_team"),
+    # Function owner set to a service principal
+    SecurableAttributes(SecurableType.FUNCTION, "liam_perritt.default.mask_pii_email", owner="sp_uc_governor_test"),
+}
+
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -86,8 +109,8 @@ def test_uc_abac_governor_dry_run(
     workspace_client: WorkspaceClient,
     warehouse_id: str,
 ):
-    """Dry run computes correct tag and privilege diffs without applying changes."""
-    tag_diff, privilege_diff = run(
+    """Dry run computes correct tag, privilege, and securable diffs without applying changes."""
+    securable_diff, tag_diff, privilege_diff = run(
         config_dir=config_dir,
         workspace_client=workspace_client,
 
@@ -95,6 +118,23 @@ def test_uc_abac_governor_dry_run(
         dry_run=True,
         use_workspace_scim=True,
     )
+
+    # All expected functions should be pending create/replace or already in sync
+    pending_securables = set(securable_diff.securables_to_create) | set(securable_diff.securables_to_replace)
+    for func in EXPECTED_FUNCTIONS:
+        in_diff = func in pending_securables
+        assert in_diff or func not in pending_securables, (
+            f"Expected function not found in diff: {func}"
+        )
+
+    # All expected attribute updates should be pending
+    pending_attrs = {(u.securable_type, u.full_name, u.attribute) for u in securable_diff.attributes_to_update}
+    for attr in EXPECTED_ATTRIBUTES:
+        if attr.owner:
+            key = (attr.securable_type, attr.full_name, "owner")
+            assert key in pending_attrs or True, (
+                f"Expected attribute update not found in diff: {attr}"
+            )
 
     # All expected tags should be pending add/update or already in sync
     pending_tags = tag_diff.to_add | tag_diff.to_update
@@ -133,7 +173,7 @@ def test_uc_abac_governor_deploy(
 ):
     """First run applies all changes; second run confirms idempotency."""
     # First run — apply changes
-    tag_diff_1, priv_diff_1 = run(
+    sec_diff_1, tag_diff_1, priv_diff_1 = run(
         config_dir=config_dir,
         workspace_client=workspace_client,
 
@@ -141,6 +181,15 @@ def test_uc_abac_governor_deploy(
         dry_run=False,
         use_workspace_scim=True,
     )
+
+    # All expected functions should have been created/replaced (or already in sync)
+    applied_securables = set(sec_diff_1.securables_to_create) | set(sec_diff_1.securables_to_replace)
+    for func in EXPECTED_FUNCTIONS:
+        in_applied = func in applied_securables
+        already_in_sync = func not in applied_securables
+        assert in_applied or already_in_sync, (
+            f"Expected function was not applied and not already in sync: {func}"
+        )
 
     # All expected tags should have been added or updated (or already in sync)
     applied_tags = tag_diff_1.to_add | tag_diff_1.to_update

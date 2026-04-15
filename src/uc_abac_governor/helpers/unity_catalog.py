@@ -16,6 +16,7 @@ import logging
 
 from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.privileges.state import UnresolvedPrivilege
+from uc_abac_governor.securables.state import FunctionInfo, SecurableAttributes, SecurableInfo
 from uc_abac_governor.types import GovernorError, PrivilegeType, SecurableType
 
 _logger = logging.getLogger("uc_abac_governor")
@@ -33,20 +34,23 @@ def _build_tags_query(catalog_names: list[str]) -> str:
     """Build a UNION ALL query across all tag system tables for the given catalogs."""
     in_clause = _build_catalog_in_clause(catalog_names)
     full_name_exprs = {
-        "catalog_tags": ("CATALOG", "catalog_name"),
-        "schema_tags": ("SCHEMA", "concat(catalog_name, '.', schema_name)"),
-        "table_tags": ("TABLE", "concat(catalog_name, '.', schema_name, '.', table_name)"),
-        "volume_tags": ("VOLUME", "concat(catalog_name, '.', schema_name, '.', volume_name)"),
-        "column_tags": ("COLUMN", "concat(catalog_name, '.', schema_name, '.', table_name, '.', column_name)"),
+        "catalog_tags": ("CATALOG", "catalog_name", False),
+        "schema_tags": ("SCHEMA", "concat(catalog_name, '.', schema_name)", True),
+        "table_tags": ("TABLE", "concat(catalog_name, '.', schema_name, '.', table_name)", True),
+        "volume_tags": ("VOLUME", "concat(catalog_name, '.', schema_name, '.', volume_name)", True),
+        "column_tags": ("COLUMN", "concat(catalog_name, '.', schema_name, '.', table_name, '.', column_name)", True),
     }
     parts = []
-    for table, (sec_type, full_name_expr) in full_name_exprs.items():
+    for table, (sec_type, full_name_expr, has_schema) in full_name_exprs.items():
+        where = f"catalog_name IN {in_clause}"
+        if has_schema:
+            where += " AND schema_name != 'information_schema'"
         parts.append(
             f"SELECT '{sec_type}' AS securable_type, "
             f"{full_name_expr} AS securable_full_name, "
             f"tag_name, tag_value "
             f"FROM system.information_schema.{table} "
-            f"WHERE catalog_name IN {in_clause}"
+            f"WHERE {where}"
         )
     return " UNION ALL ".join(parts)
 
@@ -64,19 +68,19 @@ def _build_privileges_query(catalog_names: list[str]) -> str:
         f"concat(catalog_name, '.', schema_name) AS securable_full_name, "
         f"grantee, privilege_type "
         f"FROM system.information_schema.schema_privileges "
-        f"WHERE catalog_name IN {in_clause} AND inherited_from = 'NONE'",
+        f"WHERE catalog_name IN {in_clause} AND inherited_from = 'NONE' AND schema_name != 'information_schema'",
 
         f"SELECT 'TABLE' AS securable_type, "
         f"concat(table_catalog, '.', table_schema, '.', table_name) AS securable_full_name, "
         f"grantee, privilege_type "
         f"FROM system.information_schema.table_privileges "
-        f"WHERE table_catalog IN {in_clause} AND inherited_from = 'NONE'",
+        f"WHERE table_catalog IN {in_clause} AND inherited_from = 'NONE' AND table_schema != 'information_schema'",
 
         f"SELECT 'VOLUME' AS securable_type, "
         f"concat(volume_catalog, '.', volume_schema, '.', volume_name) AS securable_full_name, "
         f"grantee, privilege_type "
         f"FROM system.information_schema.volume_privileges "
-        f"WHERE volume_catalog IN {in_clause} AND inherited_from = 'NONE'",
+        f"WHERE volume_catalog IN {in_clause} AND inherited_from = 'NONE' AND volume_schema != 'information_schema'",
     ]
     inner = " UNION ALL ".join(parts)
     return f"SELECT securable_type, securable_full_name, grantee, privilege_type FROM ({inner})"
@@ -134,6 +138,93 @@ def _fetch_external_links_rows(response: StatementResponse) -> list[list[str]]:
     return rows
 
 
+def _build_securables_query(catalog_names: list[str]) -> str:
+    """Build a UNION ALL query for securable attributes and function definitions."""
+    in_clause = _build_catalog_in_clause(catalog_names)
+    parts = [
+        f"SELECT 'CATALOG' AS securable_type, catalog_name AS full_name, "
+        f"catalog_owner AS owner, NULL AS parameters, NULL AS routine_definition "
+        f"FROM system.information_schema.catalogs "
+        f"WHERE catalog_name IN {in_clause}",
+
+        f"SELECT 'SCHEMA' AS securable_type, "
+        f"concat(catalog_name, '.', schema_name) AS full_name, "
+        f"schema_owner AS owner, NULL AS parameters, NULL AS routine_definition "
+        f"FROM system.information_schema.schemata "
+        f"WHERE catalog_name IN {in_clause} AND schema_name != 'information_schema'",
+
+        f"SELECT 'TABLE' AS securable_type, "
+        f"concat(table_catalog, '.', table_schema, '.', table_name) AS full_name, "
+        f"table_owner AS owner, NULL AS parameters, NULL AS routine_definition "
+        f"FROM system.information_schema.tables "
+        f"WHERE table_catalog IN {in_clause} AND table_schema != 'information_schema'",
+
+        f"SELECT 'VOLUME' AS securable_type, "
+        f"concat(volume_catalog, '.', volume_schema, '.', volume_name) AS full_name, "
+        f"volume_owner AS owner, NULL AS parameters, NULL AS routine_definition "
+        f"FROM system.information_schema.volumes "
+        f"WHERE volume_catalog IN {in_clause} AND volume_schema != 'information_schema'",
+
+        f"SELECT 'FUNCTION' AS securable_type, "
+        f"concat(r.specific_catalog, '.', r.specific_schema, '.', r.specific_name) AS full_name, "
+        f"r.routine_owner AS owner, "
+        f"to_json(transform(sort_array(collect_list(struct(p.ordinal_position, p.parameter_name, p.data_type))), x -> struct(x.parameter_name, x.data_type))) AS parameters, "
+        f"r.routine_definition AS routine_definition "
+        f"FROM system.information_schema.routines r "
+        f"LEFT JOIN system.information_schema.parameters p "
+        f"ON r.specific_catalog = p.specific_catalog "
+        f"AND r.specific_schema = p.specific_schema "
+        f"AND r.specific_name = p.specific_name "
+        f"WHERE r.specific_catalog IN {in_clause} AND r.routine_type = 'FUNCTION' AND r.specific_schema != 'information_schema' "
+        f"GROUP BY r.specific_catalog, r.specific_schema, r.specific_name, r.routine_owner, r.routine_definition",
+    ]
+    return " UNION ALL ".join(parts)
+
+
+def _parse_securable_rows(
+    rows: list[list[str]],
+) -> tuple[set[SecurableInfo], set[SecurableAttributes]]:
+    """Parse raw SQL rows into securables and attributes.
+
+    Row columns: [securable_type, full_name, owner, parameters_json, routine_definition]
+    """
+    securables: set[SecurableInfo] = set()
+    attributes: set[SecurableAttributes] = set()
+    for row in rows:
+        securable_type = SecurableType(row[0])
+        full_name = row[1]
+        owner = row[2]
+        parameters_json = row[3]
+        routine_definition = row[4]
+
+        attributes.add(
+            SecurableAttributes(
+                securable_type=securable_type,
+                full_name=full_name,
+                owner=owner,
+            )
+        )
+
+        if securable_type == SecurableType.FUNCTION:
+            if parameters_json:
+                parsed_params = json.loads(parameters_json)
+                params = tuple(
+                    (p["parameter_name"], p["data_type"]) for p in parsed_params
+                )
+            else:
+                params = ()
+            securables.add(
+                FunctionInfo(
+                    securable_type=SecurableType.FUNCTION,
+                    full_name=full_name,
+                    parameters=params,
+                    definition=routine_definition,
+                )
+            )
+
+    return securables, attributes
+
+
 class UnityCatalogHelper:
     """Wraps WorkspaceClient for querying UC state and executing SQL.
 
@@ -146,6 +237,8 @@ class UnityCatalogHelper:
         self._warehouse_id = warehouse_id
         self._tags_cache: set[SecurableTag] | None = None
         self._privileges_cache: set[UnresolvedPrivilege] | None = None
+        self._securables_cache: set[SecurableInfo] | None = None
+        self._attributes_cache: set[SecurableAttributes] | None = None
 
     def _execute_and_poll(self, statement: str) -> StatementResponse:
         """Execute a SQL statement with hybrid polling for long-running queries.
@@ -205,6 +298,43 @@ class UnityCatalogHelper:
         rows = _fetch_external_links_rows(response)
         self._privileges_cache = _parse_privilege_rows(rows)
         return self._privileges_cache
+
+    def fetch_actual_securables(
+        self, catalog_names: list[str]
+    ) -> tuple[set[SecurableInfo], set[SecurableAttributes]]:
+        """Query system tables for securable attributes and function definitions.
+
+        Returns a tuple of (securables, attributes) for the given catalogs.
+        Results are cached after the first call.
+        """
+        if self._securables_cache is not None and self._attributes_cache is not None:
+            return self._securables_cache, self._attributes_cache
+
+        if not catalog_names:
+            self._securables_cache = set()
+            self._attributes_cache = set()
+            return self._securables_cache, self._attributes_cache
+
+        response = self._execute_and_poll(_build_securables_query(catalog_names))
+        rows = _fetch_external_links_rows(response)
+        self._securables_cache, self._attributes_cache = _parse_securable_rows(rows)
+        return self._securables_cache, self._attributes_cache
+
+    def update_owner(
+        self, securable_type: SecurableType, full_name: str, new_owner: str
+    ) -> None:
+        """Update the owner of a securable via the WorkspaceClient API."""
+        match securable_type:
+            case SecurableType.CATALOG:
+                self._client.catalogs.update(full_name, owner=new_owner)
+            case SecurableType.SCHEMA:
+                self._client.schemas.update(full_name, owner=new_owner)
+            case SecurableType.TABLE:
+                self._client.tables.update(full_name, owner=new_owner)
+            case SecurableType.VOLUME:
+                self._client.volumes.update(full_name, owner=new_owner)
+            case SecurableType.FUNCTION:
+                self._client.functions.update(full_name, owner=new_owner)
 
     def execute_sql(self, statement: str) -> None:
         """Execute a SQL statement via the Statement Execution API."""

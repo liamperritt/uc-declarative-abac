@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from uc_abac_governor.privileges.state import SecurablePrivilege
+from uc_abac_governor.securables.state import AttributeUpdate, SecurableInfo
 from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.types import ExecutionError, Principal
 
@@ -46,6 +47,9 @@ class ChangeLogger:
         self._tags_removed = 0
         self._privileges_granted = 0
         self._privileges_revoked = 0
+        self._attributes_updated = 0
+        self._securables_created = 0
+        self._securables_replaced = 0
         self._errors: list[ExecutionError] = []
 
     @property
@@ -160,6 +164,45 @@ class ChangeLogger:
         ))
 
     # ------------------------------------------------------------------
+    # Securable logging
+    # ------------------------------------------------------------------
+
+    def _display_value(self, value: object) -> str:
+        """Return a display-friendly string for an attribute value."""
+        if isinstance(value, Principal):
+            return value.name
+        return str(value)
+
+    def log_attribute_update(self, update: AttributeUpdate) -> None:
+        """Log an attribute being updated on a securable."""
+        self._attributes_updated += 1
+        action_verb = "Update" if self._dry_run else "Updated"
+        old = self._display_value(update.old_value)
+        new = self._display_value(update.new_value)
+        self._log_info(_format_change_line(
+            "~", update.securable_type.value, update.full_name,
+            f"{action_verb} {update.attribute}: '{old}' -> '{new}'",
+        ))
+
+    def log_securable_create(self, info: SecurableInfo) -> None:
+        """Log a securable being created."""
+        self._securables_created += 1
+        action_verb = "Create" if self._dry_run else "Created"
+        self._log_info(_format_change_line(
+            "+", info.securable_type.value, info.full_name,
+            f"{action_verb} {info.securable_type.value.lower()}",
+        ))
+
+    def log_securable_replace(self, info: SecurableInfo) -> None:
+        """Log a securable being replaced."""
+        self._securables_replaced += 1
+        action_verb = "Replace" if self._dry_run else "Replaced"
+        self._log_info(_format_change_line(
+            "~", info.securable_type.value, info.full_name,
+            f"{action_verb} {info.securable_type.value.lower()}",
+        ))
+
+    # ------------------------------------------------------------------
     # Error section
     # ------------------------------------------------------------------
 
@@ -183,6 +226,14 @@ class ChangeLogger:
         return self._build_normal_summary()
 
     def _build_normal_summary(self) -> str:
+        sec_parts: list[str] = []
+        if self._attributes_updated:
+            sec_parts.append(f"{self._attributes_updated} updated")
+        if self._securables_created:
+            sec_parts.append(f"{self._securables_created} created")
+        if self._securables_replaced:
+            sec_parts.append(f"{self._securables_replaced} replaced")
+
         tag_parts: list[str] = []
         if self._tags_added:
             tag_parts.append(f"{self._tags_added} added")
@@ -198,6 +249,8 @@ class ChangeLogger:
             priv_parts.append(f"{self._privileges_revoked} revoked")
 
         sections: list[str] = []
+        if sec_parts:
+            sections.append("Securables: " + ", ".join(sec_parts))
         if tag_parts:
             sections.append("Tags: " + ", ".join(tag_parts))
         if priv_parts:
@@ -208,6 +261,14 @@ class ChangeLogger:
         return " | ".join(sections) if sections else "No changes needed — all in sync"
 
     def _build_dry_run_summary(self) -> str:
+        sec_parts: list[str] = []
+        if self._attributes_updated:
+            sec_parts.append(f"{self._attributes_updated} to update")
+        if self._securables_created:
+            sec_parts.append(f"{self._securables_created} to create")
+        if self._securables_replaced:
+            sec_parts.append(f"{self._securables_replaced} to replace")
+
         tag_parts: list[str] = []
         if self._tags_added:
             tag_parts.append(f"{self._tags_added} to add")
@@ -223,6 +284,8 @@ class ChangeLogger:
             priv_parts.append(f"{self._privileges_revoked} to revoke")
 
         sections: list[str] = []
+        if sec_parts:
+            sections.append("Securables: " + ", ".join(sec_parts))
         if tag_parts:
             sections.append("Tags: " + ", ".join(tag_parts))
         if priv_parts:

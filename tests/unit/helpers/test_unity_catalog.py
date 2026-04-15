@@ -9,6 +9,7 @@ from databricks.sdk.service.sql import Disposition, StatementState
 from uc_abac_governor.helpers.unity_catalog import UnityCatalogHelper
 from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.privileges.state import UnresolvedPrivilege
+from uc_abac_governor.securables.state import FunctionInfo, SecurableAttributes
 from uc_abac_governor.types import GovernorError, PrivilegeType, SecurableType
 
 WAREHOUSE_ID = "test-warehouse-id"
@@ -491,3 +492,170 @@ def test_uc_helper_returns_empty_privileges_for_empty_catalog_list():
 
     assert result == set()
     client.statement_execution.execute_statement.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# UnityCatalogHelper.fetch_actual_securables
+# ---------------------------------------------------------------------------
+
+
+@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_parses_securable_rows_for_attributes(mock_fetch):
+    """Non-function rows produce SecurableAttributes; securables set is empty."""
+    rows = [
+        ["CATALOG", "my_catalog", "admin_user", None, None],
+        ["SCHEMA", "my_catalog.sales", "schema_owner", None, None],
+        ["TABLE", "my_catalog.sales.orders", "table_owner", None, None],
+        ["VOLUME", "my_catalog.landing.files", "vol_owner", None, None],
+    ]
+    mock_fetch.return_value = rows
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    securables, attributes = helper.fetch_actual_securables(["my_catalog"])
+
+    expected_attributes = {
+        SecurableAttributes(
+            securable_type=SecurableType.CATALOG,
+            full_name="my_catalog",
+            owner="admin_user",
+        ),
+        SecurableAttributes(
+            securable_type=SecurableType.SCHEMA,
+            full_name="my_catalog.sales",
+            owner="schema_owner",
+        ),
+        SecurableAttributes(
+            securable_type=SecurableType.TABLE,
+            full_name="my_catalog.sales.orders",
+            owner="table_owner",
+        ),
+        SecurableAttributes(
+            securable_type=SecurableType.VOLUME,
+            full_name="my_catalog.landing.files",
+            owner="vol_owner",
+        ),
+    }
+    assert attributes == expected_attributes
+    assert securables == set()
+
+
+@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_parses_securable_rows_for_functions(mock_fetch):
+    """Function rows produce FunctionInfo in the securables set."""
+    rows = [
+        [
+            "FUNCTION",
+            "my_catalog.shared.mask_email",
+            "func_owner",
+            '[{"parameter_name":"col","data_type":"STRING"}]',
+            "CASE WHEN is_member('admins') THEN col ELSE '***' END",
+        ],
+    ]
+    mock_fetch.return_value = rows
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    securables, _attributes = helper.fetch_actual_securables(["my_catalog"])
+
+    expected = {
+        FunctionInfo(
+            securable_type=SecurableType.FUNCTION,
+            full_name="my_catalog.shared.mask_email",
+            parameters=(("col", "STRING"),),
+            definition="CASE WHEN is_member('admins') THEN col ELSE '***' END",
+        ),
+    }
+    assert securables == expected
+
+
+@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_parses_securable_rows_emits_function_attributes(mock_fetch):
+    """Function rows also emit SecurableAttributes with the owner."""
+    rows = [
+        [
+            "FUNCTION",
+            "my_catalog.shared.mask_email",
+            "func_owner",
+            '[{"parameter_name":"col","data_type":"STRING"}]',
+            "CASE WHEN is_member('admins') THEN col ELSE '***' END",
+        ],
+    ]
+    mock_fetch.return_value = rows
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    _securables, attributes = helper.fetch_actual_securables(["my_catalog"])
+
+    expected = {
+        SecurableAttributes(
+            securable_type=SecurableType.FUNCTION,
+            full_name="my_catalog.shared.mask_email",
+            owner="func_owner",
+        ),
+    }
+    assert attributes == expected
+
+
+def test_uc_helper_securables_query_is_valid_sql():
+    """The securables query parses as valid SQL and references the expected info-schema tables."""
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.fetch_actual_securables(["my_catalog"])
+
+    sql = _get_executed_sql(client)
+    stmt = _parse_sql(sql)
+
+    # Should be a valid SQL statement (UNION ALL of SELECTs)
+    assert isinstance(stmt, (sqlglot.exp.Select, sqlglot.exp.Union))
+
+    # Should reference the five info-schema tables
+    tables = _get_table_names(stmt)
+    assert "catalogs" in tables, f"Expected 'catalogs' in tables: {tables}"
+    assert "schemata" in tables, f"Expected 'schemata' in tables: {tables}"
+    assert "tables" in tables, f"Expected 'tables' in tables: {tables}"
+    assert "volumes" in tables, f"Expected 'volumes' in tables: {tables}"
+    assert "routines" in tables, f"Expected 'routines' in tables: {tables}"
+
+    # Catalog name should appear in the SQL
+    assert "'my_catalog'" in sql
+
+
+def test_uc_helper_returns_empty_securables_for_empty_catalog_list():
+    """Passing an empty catalog list returns empty sets without executing any SQL."""
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    securables, attributes = helper.fetch_actual_securables([])
+
+    assert securables == set()
+    assert attributes == set()
+    client.statement_execution.execute_statement.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# UnityCatalogHelper.update_owner
+# ---------------------------------------------------------------------------
+
+
+def test_uc_helper_update_owner_dispatches_to_catalog_api():
+    """update_owner for CATALOG calls client.catalogs.update."""
+    client = MagicMock()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.update_owner(SecurableType.CATALOG, "my_catalog", "new_owner")
+
+    client.catalogs.update.assert_called_once_with("my_catalog", owner="new_owner")
+
+
+def test_uc_helper_update_owner_dispatches_to_function_api():
+    """update_owner for FUNCTION calls client.functions.update."""
+    client = MagicMock()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.update_owner(SecurableType.FUNCTION, "my_catalog.shared.mask_email", "new_owner")
+
+    client.functions.update.assert_called_once_with(
+        "my_catalog.shared.mask_email", owner="new_owner"
+    )

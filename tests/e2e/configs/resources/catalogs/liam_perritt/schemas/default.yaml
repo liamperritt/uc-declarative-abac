@@ -10,3 +10,6 @@ resources:
         - name: batch_table
           tags:
             uc_gov_classification: internal
+      functions:
+        - $defs/functions/abac|mask_pii_email
+        - $defs/functions/abac|format_phone

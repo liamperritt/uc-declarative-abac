@@ -71,6 +71,10 @@ Two approaches to RLS/CLS, which can coexist:
 
 Multiple tags on a policy use AND semantics — all must match.
 
+## Running Python
+
+Always use the `.venv` virtual environment when running `python`, `pip`, `pytest`, or any other Python tool — e.g. `.venv/bin/python`, `.venv/bin/pytest`.
+
 ## Code style
 
 - Python project — use standard Python conventions

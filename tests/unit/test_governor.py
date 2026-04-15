@@ -156,7 +156,7 @@ def test_governor_runs_tags_workflow_end_to_end(
     _setup_mock_workspace_empty_state(mock_workspace_client)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    tag_diff, _ = run(
+    _, tag_diff, _ = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
@@ -182,7 +182,7 @@ def test_governor_runs_privileges_workflow_end_to_end(
     _setup_mock_workspace_empty_state(mock_workspace_client)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    _, privilege_diff = run(
+    _, _, privilege_diff = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
@@ -210,7 +210,7 @@ def test_governor_runs_both_domains_independently(
     _setup_mock_workspace_empty_state(mock_workspace_client)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    tag_diff, privilege_diff = run(
+    _, tag_diff, privilege_diff = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
@@ -255,21 +255,36 @@ def test_governor_produces_empty_diffs_when_in_sync(
         ["SCHEMA", "my_catalog.sales", "data_engineers", "select"],
     ]
 
-    call_count = 0
-
-    def _return_rows_by_call_order(response):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
+    def _route_rows_by_sql(response):
+        sql = getattr(response, "_sql", "") or ""
+        sql_lower = sql.lower()
+        if "tag" in sql_lower:
             return actual_tags
-        elif call_count == 2:
+        if "privilege" in sql_lower:
             return actual_privileges
         return []
 
-    mock_fetch.side_effect = _return_rows_by_call_order
+    mock_fetch.side_effect = _route_rows_by_sql
+
+    # Store the SQL on each response so _route_rows_by_sql can identify the query
+    from databricks.sdk.service.sql import StatementState
+
+    def _execute_with_sql_tag(*args, **kwargs):
+        statement = kwargs.get("statement", args[0] if args else None)
+        if statement:
+            mock_workspace_client.executed_sql.append(statement)
+        response = MagicMock()
+        response.status.state = StatementState.SUCCEEDED
+        response.result.external_links = []
+        response._sql = statement
+        return response
+
+    mock_workspace_client.statement_execution.execute_statement.side_effect = (
+        _execute_with_sql_tag
+    )
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    tag_diff, privilege_diff = run(
+    _, tag_diff, privilege_diff = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
@@ -333,7 +348,7 @@ def test_governor_dry_run_does_not_execute_sql(
     _setup_mock_workspace_empty_state(mock_workspace_client)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    tag_diff, privilege_diff = run(
+    _, tag_diff, privilege_diff = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
 

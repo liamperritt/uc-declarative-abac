@@ -17,6 +17,10 @@ from uc_abac_governor.privileges.compiler import compile_desired_privileges
 from uc_abac_governor.privileges.differ import compute_privilege_diff
 from uc_abac_governor.privileges.executor import execute_privilege_diff
 from uc_abac_governor.privileges.state import PrivilegeDiff, SecurablePrivilege, UnresolvedPrivilege
+from uc_abac_governor.securables.compiler import compile_desired_attributes, compile_desired_securables
+from uc_abac_governor.securables.differ import compute_securable_diff
+from uc_abac_governor.securables.executor import execute_securable_diff
+from uc_abac_governor.securables.state import SecurableAttributes, SecurableDiff
 from uc_abac_governor.logger import ChangeLogger
 from uc_abac_governor.tags.compiler import compile_desired_tags
 from uc_abac_governor.tags.differ import compute_tag_diff
@@ -26,6 +30,7 @@ from uc_abac_governor.types import (
     ExecutionBatchError,
     ExecutionError,
     PrincipalValidationError,
+    Principal,
 )
 
 _logger = logging.getLogger("uc_abac_governor")
@@ -91,13 +96,70 @@ def _resolve_actual_privileges(
     return resolved
 
 
+def _resolve_desired_owners(
+    desired_attrs: set[SecurableAttributes],
+    ws_helper: WorkspaceHelper,
+    change_logger: ChangeLogger,
+) -> dict[str, Principal]:
+    """Resolve desired owner display names to Principal objects.
+
+    Returns a mapping of full_name → Principal for each securable with an
+    owner. Unknown principals are logged as errors and excluded.
+    """
+    principals = ws_helper.get_principals()
+    result: dict[str, Principal] = {}
+    unknown: set[str] = set()
+
+    for attr in desired_attrs:
+        if attr.owner is None:
+            continue
+        principal = principals.get(attr.owner)
+        if principal is None:
+            if attr.owner not in unknown:
+                unknown.add(attr.owner)
+                change_logger.log_error(ExecutionError(
+                    context=f"Resolve owner '{attr.owner}' for {attr.full_name}",
+                    exception=PrincipalValidationError(
+                        f"Owner '{attr.owner}' not found in workspace"
+                    ),
+                ))
+            continue
+        result[attr.full_name] = principal
+
+    return result
+
+
+def _resolve_actual_owners(
+    actual_attrs: set[SecurableAttributes],
+    ws_helper: WorkspaceHelper,
+) -> dict[str, Principal]:
+    """Resolve actual owner identifiers to Principal objects.
+
+    Returns a mapping of full_name → Principal. Unrecognised identifiers
+    (e.g. deleted users) are logged and excluded.
+    """
+    result: dict[str, Principal] = {}
+
+    for attr in actual_attrs:
+        if attr.owner is None:
+            continue
+        try:
+            principal = ws_helper.resolve_by_identifier(attr.owner)
+        except PrincipalValidationError:
+            _logger.warning(f"WARNING: Skipping actual owner: unknown identifier '{attr.owner}' on {attr.full_name}")
+            continue
+        result[attr.full_name] = principal
+
+    return result
+
+
 def run(
     config_dir: Path,
     workspace_client: WorkspaceClient,
     warehouse_id: str,
     dry_run: bool = False,
     use_workspace_scim: bool = False,
-) -> tuple[TagDiff, PrivilegeDiff]:
+) -> tuple[SecurableDiff, TagDiff, PrivilegeDiff]:
     """Run the full governance pipeline: discover, resolve, compile, diff, apply.
 
     Returns the computed (TagDiff, PrivilegeDiff) for both domains.
@@ -111,33 +173,50 @@ def run(
     config = ResourcesConfig.model_validate(consolidated)
     catalog_names = list(config.catalogs.keys())
 
-    # 2. Parallel initial fetch (tags, privileges, and principals concurrently)
+    # 2. Parallel initial fetch (securables, tags, privileges, and principals concurrently)
     uc_helper = UnityCatalogHelper(workspace_client, warehouse_id)
     ws_helper = WorkspaceHelper(workspace_client, use_workspace_scim=use_workspace_scim)
     change_logger = ChangeLogger(dry_run=dry_run, logger=_logger)
     change_logger.log_banner()
     _logger.info("  Fetching current state from workspace (this can take several minutes)...")
     with ThreadPoolExecutor() as pool:
+        actual_securables_f = pool.submit(uc_helper.fetch_actual_securables, catalog_names)
         actual_tags_f = pool.submit(uc_helper.fetch_actual_tags, catalog_names)
         actual_privs_f = pool.submit(uc_helper.fetch_actual_privileges, catalog_names)
         principals_f = pool.submit(ws_helper.fetch_principals)
+        actual_securables, actual_attributes = actual_securables_f.result()
         actual_tags = actual_tags_f.result()
         actual_privileges = actual_privs_f.result()
         principals_f.result()
     _logger.info("  Successfully fetched current state")
     _logger.info("")
 
-    # 3. Tags workflow
+    # 3. Securables workflow (before tags and privileges)
+    desired_attributes = compile_desired_attributes(config)
+    desired_securables = compile_desired_securables(config)
+    desired_owner_principals = _resolve_desired_owners(desired_attributes, ws_helper, change_logger)
+    actual_owner_principals = _resolve_actual_owners(actual_attributes, ws_helper)
+    securable_diff = compute_securable_diff(
+        desired_attributes, actual_attributes, desired_securables, actual_securables,
+        desired_owner_principals=desired_owner_principals,
+        actual_owner_principals=actual_owner_principals,
+    )
+
+    if securable_diff.securables_to_create or securable_diff.securables_to_replace or securable_diff.attributes_to_update:
+        change_logger.log_section_header("Securables")
+    execute_securable_diff(uc_helper, securable_diff, change_logger, dry_run=dry_run)
+
+    # 4. Tags workflow
     desired_tags = compile_desired_tags(config)
     tag_diff = compute_tag_diff(desired_tags, actual_tags)
 
-    # 4. Privileges workflow
+    # 5. Privileges workflow
     compiled_privileges = compile_desired_privileges(config, desired_tags, run_date=date.today())
     resolved_desired = _resolve_compiled_privileges(compiled_privileges, ws_helper, change_logger)
     resolved_actual = _resolve_actual_privileges(actual_privileges, ws_helper)
     privilege_diff = compute_privilege_diff(resolved_desired, resolved_actual)
 
-    # 5. Log and execute (or dry-run)
+    # 6. Log and execute (or dry-run)
     if tag_diff.to_add or tag_diff.to_update or tag_diff.to_remove:
         change_logger.log_section_header("Tags")
     execute_tag_diff(uc_helper, tag_diff, change_logger, dry_run=dry_run)
@@ -152,4 +231,4 @@ def run(
     if change_logger.has_errors:
         raise ExecutionBatchError(change_logger.errors)
 
-    return tag_diff, privilege_diff
+    return securable_diff, tag_diff, privilege_diff

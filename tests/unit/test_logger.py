@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 from uc_abac_governor.privileges.state import SecurablePrivilege
 from uc_abac_governor.logger import ChangeLogger
+from uc_abac_governor.securables.state import AttributeUpdate, FunctionInfo, SecurableInfo
 from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.types import Principal, PrincipalType, PrivilegeType, SecurableType, ExecutionError
 
@@ -371,3 +372,83 @@ def test_change_logger_uses_principal_display_name_in_grant_log() -> None:
     assert "my-etl-sp" in msg
     # The system identifier must NOT appear in the log
     assert "app-id-123" not in msg
+
+
+# ---------------------------------------------------------------------------
+# Securable logging
+# ---------------------------------------------------------------------------
+
+
+def test_logger_logs_attribute_update() -> None:
+    """log_attribute_update increments _attributes_updated counter."""
+    cl, _ = _make_change_logger()
+    update = AttributeUpdate(
+        securable_type=SecurableType.CATALOG,
+        full_name="my_catalog",
+        attribute="owner",
+        old_value="old_owner",
+        new_value="new_owner",
+    )
+    cl.log_attribute_update(update)
+
+    assert cl._attributes_updated == 1
+
+
+def test_logger_logs_securable_create() -> None:
+    """log_securable_create increments _securables_created counter."""
+    cl, _ = _make_change_logger()
+    info = FunctionInfo(
+        securable_type=SecurableType.FUNCTION,
+        full_name="cat.schema.func",
+        parameters=(("col", "STRING"),),
+        definition="col",
+    )
+    cl.log_securable_create(info)
+
+    assert cl._securables_created == 1
+
+
+def test_logger_logs_securable_replace() -> None:
+    """log_securable_replace increments _securables_replaced counter."""
+    cl, _ = _make_change_logger()
+    info = FunctionInfo(
+        securable_type=SecurableType.FUNCTION,
+        full_name="cat.schema.func",
+        parameters=(("col", "STRING"),),
+        definition="col",
+    )
+    cl.log_securable_replace(info)
+
+    assert cl._securables_replaced == 1
+
+
+def test_logger_includes_securables_in_summary() -> None:
+    """_build_summary includes a Securables section with attribute, create, and replace counts."""
+    cl, _ = _make_change_logger()
+
+    cl.log_attribute_update(AttributeUpdate(
+        securable_type=SecurableType.CATALOG,
+        full_name="my_catalog",
+        attribute="owner",
+        old_value="old_owner",
+        new_value="new_owner",
+    ))
+    cl.log_securable_create(FunctionInfo(
+        securable_type=SecurableType.FUNCTION,
+        full_name="cat.schema.func",
+        parameters=(("col", "STRING"),),
+        definition="col",
+    ))
+    cl.log_securable_replace(FunctionInfo(
+        securable_type=SecurableType.FUNCTION,
+        full_name="cat.schema.func2",
+        parameters=(("col", "STRING"),),
+        definition="col",
+    ))
+
+    summary = cl._build_summary()
+
+    assert "1 updated" in summary
+    assert "1 created" in summary
+    assert "1 replaced" in summary
+    assert "Securables:" in summary
