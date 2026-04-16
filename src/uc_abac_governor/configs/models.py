@@ -36,9 +36,9 @@ class PolicyConfig(BaseModel):
     table_name: str | None = None
     name: str | None = None
     type: PolicyType
-    tags: dict[str, str] | None = None
+    has_tags: dict[str, str] | None = None
 
-    @field_validator("tags", mode="before")
+    @field_validator("has_tags", mode="before")
     @classmethod
     def _coerce_null_tags(cls, v: dict) -> dict:
         return _coerce_null_tag_values(v)

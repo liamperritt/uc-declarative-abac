@@ -7,5 +7,5 @@ definitions:
         - select
       to:
         - j.wang@databricks.com
-      tags:
+      has_tags:
         uc_gov_team: platform

@@ -155,7 +155,7 @@ def sample_resources() -> dict:
                         "type": "grant",
                         "privileges": ["select"],
                         "to": ["data_engineers"],
-                        "tags": {"sales": None},
+                        "has_tags": {"sales": None},
                     },
                 ],
                 "schemas": [

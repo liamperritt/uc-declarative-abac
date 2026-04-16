@@ -6,5 +6,5 @@ definitions:
         - use_catalog
       to:
         - uc_governor_test_team
-      tags:
+      has_tags:
         uc_gov_managed_by: uc_abac_governor

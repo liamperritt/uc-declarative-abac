@@ -6,5 +6,5 @@ definitions:
         - select
       to:
         - uc_governor_test_team
-      tags:
+      has_tags:
         uc_gov_pipeline: lff

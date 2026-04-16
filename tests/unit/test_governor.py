@@ -54,7 +54,7 @@ def _catalog_with_grant_policy_config() -> dict:
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["data_engineers"],
-                            "tags": {"team": "data"},
+                            "has_tags": {"team": "data"},
                         },
                     ],
                 }
@@ -78,7 +78,7 @@ def _catalog_with_tags_and_grants_config() -> dict:
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["data_engineers"],
-                            "tags": {"team": "data"},
+                            "has_tags": {"team": "data"},
                         },
                     ],
                 }
@@ -493,13 +493,13 @@ def _catalog_with_two_grant_policies_config() -> dict:
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["data_engineers"],
-                            "tags": {"team": "data"},
+                            "has_tags": {"team": "data"},
                         },
                         {
                             "type": "grant",
                             "privileges": ["modify"],
                             "to": ["ghost_team"],
-                            "tags": {"team": "data"},
+                            "has_tags": {"team": "data"},
                         },
                     ],
                 }

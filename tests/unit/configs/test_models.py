@@ -27,7 +27,7 @@ def _full_config():
                         "type": "grant",
                         "privileges": ["select", "use_schema"],
                         "to": ["analysts"],
-                        "tags": {"domain": "analytics"},
+                        "has_tags": {"domain": "analytics"},
                     }
                 ],
                 "schemas": [
@@ -100,7 +100,7 @@ def test_grant_policy_config_rejects_missing_privileges():
                     {
                         "type": "grant",
                         "to": ["analysts"],
-                        "tags": {"domain": "analytics"},
+                        "has_tags": {"domain": "analytics"},
                     }
                 ],
             }
@@ -208,7 +208,7 @@ def test_schema_config_accepts_policies():
                                 "type": "grant",
                                 "privileges": ["select"],
                                 "to": ["analysts"],
-                                "tags": {"team": "data"},
+                                "has_tags": {"team": "data"},
                             }
                         ],
                     }
@@ -238,7 +238,7 @@ def test_table_config_accepts_policies():
                                         "type": "grant",
                                         "privileges": ["modify"],
                                         "to": ["writers"],
-                                        "tags": {"sales": None},
+                                        "has_tags": {"sales": None},
                                     }
                                 ],
                             }
@@ -286,7 +286,7 @@ def test_grant_policy_config_converts_null_tag_values_to_empty_string():
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
-                            "tags": {"env": "prod", "operations": None},
+                            "has_tags": {"env": "prod", "operations": None},
                         }
                     ],
                 }
@@ -294,8 +294,8 @@ def test_grant_policy_config_converts_null_tag_values_to_empty_string():
         }
     )
     policy = config.catalogs["my_catalog"].policies[0]
-    assert policy.tags["env"] == "prod"
-    assert policy.tags["operations"] == ""
+    assert policy.has_tags["env"] == "prod"
+    assert policy.has_tags["operations"] == ""
 
 
 # ---------------------------------------------------------------------------
@@ -316,7 +316,7 @@ def test_grant_policy_config_accepts_expiry_date():
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
-                            "tags": {"env": "prod"},
+                            "has_tags": {"env": "prod"},
                             "expiry_date": date(2026, 5, 1),
                         }
                     ],
@@ -339,7 +339,7 @@ def test_grant_policy_config_defaults_expiry_date_to_none():
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
-                            "tags": {"env": "prod"},
+                            "has_tags": {"env": "prod"},
                         }
                     ],
                 }

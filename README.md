@@ -285,43 +285,44 @@ Policy fields:
 - **`expiry_date`** — (`grant` type only) ISO 8601 date (`YYYY-MM-DD`) after which the grant is automatically revoked.
 
 ```yaml
-# definitions/shared/policies/mask_pii_email.yaml
+# definitions/shared/policies/mask_email_pii.yaml
 definitions:
   policies:
-    shared|mask_pii_email:
-      name: mask_pii_email
-      comment: Mask PII email data from all users except account admins
+    shared|mask_email_pii:
+      name: mask_email_pii
+      comment: Mask email PII from all users except account admins
       type: mask
-      function: platform.abac.mask_pii_email
+      function: platform.abac.mask_email_pii
       to:
         - account_users
       except:
         - pii_viewers
-      tags:
+      column_has_tags:
         pii: email
 
-# definitions/shared/policies/filter_trips_by_region.yaml
+# definitions/shared/policies/mask_customer_name_pii.yaml
 definitions:
   policies:
-    shared|filter_trips_by_region:
-      name: filter_trips_by_region
-      comment: Filter trips by region
-      type: filter
-      function: $defs/functions/platform|shared|fn_filter_trips_by_region
+    shared|mask_customer_name_pii
+      name: mask_customer_name_pii
+      comment: Mask customer name PII from all users except account admins
+      type: mask
+      function: $defs/functions/shared|abac|mask_name_pii
       to:
         - account_users
       except:
-        - account_admins
-      tags:
-        from_region: ~
-        to_region: ~
+        - customer_pii_viewers
+      has_tags:
+        domain: customer
+      column_has_tags:
+        pii: name
 
 # definitions/shared/policies/filter_by_region.yaml
 definitions:
   policies:
-    shared|filter_by_region:
-      name: filter_by_region
-      comment: Users can only see records from their region
+    shared|filter_transactions_by_region:
+      name: filter_transactions_by_region
+      comment: Users can only see sensitive transaction records from their region
       type: filter
       function:
         name: fn_region_filter
@@ -338,7 +339,10 @@ definitions:
         - account_users
       except:
         - account_admins
-      tags:
+      has_tags:
+        transactions: ~
+        sensitivity: high
+      column_has_tags:
         region: ~
 
 # definitions/shared/policies/grant_read_on_sales.yaml
@@ -354,16 +358,16 @@ definitions:
         - data_engineers
         - sales_team
         - sp_sales_job_runner
-      tags:
-        domain: sales
+      has_tags:
+        business_area: sales
       expiry_date: 2026-05-01
 ```
 
-If an ABAC policy specifies multiple tags, the policy is only applied to objects that match **all** of the listed tags (AND semantics). For example, a policy with `tags: { pii: email, classification: confidential }` would only apply to objects tagged with both `pii: email` and `classification: confidential`.
+For **grant** policies attached at a given level, the optional `has_tags` property is scoped to match only the tagged objects within that level — a policy on a schema only matches the schema and the tables and volumes within that schema; a policy on a table only matches that table. If multiple tags are specified, the policy is only applied to objects that match **all** of the listed tags (AND semantics). Omitting the `has_tags` property for a **grant** policy applies the privileges directly on the object to which the policy is attached.
 
-ABAC policy definitions are catalog-agnostic. Catalogs, schemas, and tables reference which policies to apply via `$ref`/`$defs` entries in their `policies:` list, and can override fields (e.g. `function`) per instance. When a policy is attached at a given level, it is scoped to match only the tagged objects within that level — a policy on a schema only matches objects within that schema, a policy on a table only matches that table and its columns.
+If a **mask** or **filter** policy specifies the optional `has_tags` property, this matches against tagged **tables** only. Use the mandatory `column_has_tags` to match against tagged columns that you want to use for row filtering logic, or that you want to apply column masking to. Similarly, if multiple tags are specified, the policy will only be applied to tables/columns that have **all** tags present (AND semantics). The values of the tagged column are passed as a single parameter to the specified function.
 
-For column mask and row filter policies, the `function` property can either be the fully qualified name of an existing UC function (string), or an inline function definition (object or reference to a "definition", i.e., `$defs/<type>/<key>`). When defining an inline function, the function resource will be deployed into the same catalog and schema as the policy. If the policy is attached at the catalog level, then the inline function will be deployed to the `default` schema of that catalog.
+For mask and filter policies, the `function` property can either be the fully qualified name of an existing UC function (string), or an inline function definition (object or reference to a "definition", i.e., `$defs/<type>/<key>`). When defining an inline function, the function resource will be deployed into the same catalog and schema as the policy. If the policy is attached at the catalog level, then the inline function will be deployed to the `default` schema of that catalog.
 
 ### Resources
 

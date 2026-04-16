@@ -144,14 +144,14 @@ def _match_policies(
     """
     result: set[UnresolvedPrivilege] = set()
     for policy in policies:
-        if not policy.tags:
+        if not policy.has_tags:
             # Tagless policy — grant directly to the attached securable
             sec_type = _policy_securable_type(policy)
             result |= _emit_privileges(sec_type, policy.parent_full_name, policy)
             continue
 
         # Tag-matching policy — scoped to the attached securable and its children
-        required = {(k, v) for k, v in policy.tags.items()}
+        required = {(k, v) for k, v in policy.has_tags.items()}
         for full_name, (sec_type, actual_tags) in tag_index.items():
             if not _is_within_scope(full_name, policy):
                 continue

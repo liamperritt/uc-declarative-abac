@@ -25,7 +25,7 @@ def test_privilege_compiler_computes_privileges_from_policy():
                             "type": "grant",
                             "privileges": ["select", "modify"],
                             "to": ["analysts", "engineers"],
-                            "tags": {"sales": None},
+                            "has_tags": {"sales": None},
                         }
                     ],
                     "schemas": [
@@ -89,7 +89,7 @@ def test_privilege_compiler_policy_uses_and_semantics_for_multiple_tags():
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
-                            "tags": {"a": "x", "b": "y"},
+                            "has_tags": {"a": "x", "b": "y"},
                         }
                     ],
                 }
@@ -143,7 +143,7 @@ def test_privilege_compiler_policy_skips_objects_without_matching_tags():
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
-                            "tags": {"env": "prod"},
+                            "has_tags": {"env": "prod"},
                         }
                     ],
                 }
@@ -176,13 +176,13 @@ def test_privilege_compiler_handles_multiple_policies_per_catalog():
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["readers"],
-                            "tags": {"public": None},
+                            "has_tags": {"public": None},
                         },
                         {
                             "type": "grant",
                             "privileges": ["modify"],
                             "to": ["writers"],
-                            "tags": {"writable": None},
+                            "has_tags": {"writable": None},
                         },
                     ],
                 }
@@ -269,7 +269,7 @@ def test_privilege_compiler_matches_schema_level_policy():
                                     "type": "grant",
                                     "privileges": ["select"],
                                     "to": ["data_engineers"],
-                                    "tags": {"team": "data"},
+                                    "has_tags": {"team": "data"},
                                 }
                             ],
                         }
@@ -316,7 +316,7 @@ def test_privilege_compiler_matches_table_level_policy():
                                             "type": "grant",
                                             "privileges": ["modify"],
                                             "to": ["sales_team"],
-                                            "tags": {"sales": None},
+                                            "has_tags": {"sales": None},
                                         }
                                     ],
                                 }
@@ -358,7 +358,7 @@ def test_privilege_compiler_collects_policies_from_all_levels():
                             "type": "grant",
                             "privileges": ["use_catalog"],
                             "to": ["all_users"],
-                            "tags": {"env": "prod"},
+                            "has_tags": {"env": "prod"},
                         }
                     ],
                     "schemas": [
@@ -369,7 +369,7 @@ def test_privilege_compiler_collects_policies_from_all_levels():
                                     "type": "grant",
                                     "privileges": ["select"],
                                     "to": ["data_engineers"],
-                                    "tags": {"team": "data"},
+                                    "has_tags": {"team": "data"},
                                 }
                             ],
                             "tables": [
@@ -380,7 +380,7 @@ def test_privilege_compiler_collects_policies_from_all_levels():
                                             "type": "grant",
                                             "privileges": ["modify"],
                                             "to": ["sales_team"],
-                                            "tags": {"sales": None},
+                                            "has_tags": {"sales": None},
                                         }
                                     ],
                                 }
@@ -455,7 +455,7 @@ def test_privilege_compiler_matches_against_desired_tags():
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
-                            "tags": {"env": "prod"},
+                            "has_tags": {"env": "prod"},
                         }
                     ],
                     "schemas": [
@@ -495,7 +495,7 @@ def test_privilege_compiler_emits_compiled_privilege_type():
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["my_team"],
-                            "tags": {"dept": "eng"},
+                            "has_tags": {"dept": "eng"},
                         }
                     ],
                 }
@@ -537,7 +537,7 @@ def test_privilege_compiler_filters_incompatible_privilege_for_volume():
                             "type": "grant",
                             "privileges": ["select", "read_volume"],
                             "to": ["team"],
-                            "tags": {"zone": "landing"},
+                            "has_tags": {"zone": "landing"},
                         }
                     ],
                 }
@@ -579,7 +579,7 @@ def test_privilege_compiler_allows_select_on_table():
                             "type": "grant",
                             "privileges": ["select", "read_volume"],
                             "to": ["team"],
-                            "tags": {"zone": "landing"},
+                            "has_tags": {"zone": "landing"},
                         }
                     ],
                 }
@@ -621,7 +621,7 @@ def test_privilege_compiler_allows_all_privileges_on_any_securable():
                             "type": "grant",
                             "privileges": ["all_privileges"],
                             "to": ["team"],
-                            "tags": {"zone": "landing"},
+                            "has_tags": {"zone": "landing"},
                         }
                     ],
                 }
@@ -666,7 +666,7 @@ def test_privilege_compiler_excludes_expired_policy():
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
-                            "tags": {"env": "prod"},
+                            "has_tags": {"env": "prod"},
                             "expiry_date": date(2025, 1, 1),
                         }
                     ],
@@ -702,7 +702,7 @@ def test_privilege_compiler_includes_active_policy():
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
-                            "tags": {"env": "prod"},
+                            "has_tags": {"env": "prod"},
                             "expiry_date": date(2026, 12, 31),
                         }
                     ],
@@ -738,7 +738,7 @@ def test_privilege_compiler_includes_policy_with_no_expiry():
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
-                            "tags": {"env": "prod"},
+                            "has_tags": {"env": "prod"},
                         }
                     ],
                 }
@@ -776,7 +776,7 @@ def test_privilege_compiler_grants_directly_when_policy_has_no_tags():
                             "type": "grant",
                             "privileges": ["use_catalog"],
                             "to": ["team"],
-                            "tags": {},
+                            "has_tags": {},
                         }
                     ],
                 }
@@ -808,7 +808,7 @@ def test_privilege_compiler_grants_directly_to_schema_when_policy_has_no_tags():
                                     "type": "grant",
                                     "privileges": ["use_schema"],
                                     "to": ["team"],
-                                    "tags": {},
+                                    "has_tags": {},
                                 }
                             ],
                         }
@@ -849,7 +849,7 @@ def test_privilege_compiler_scopes_policy_to_attached_securable():
                                     "type": "grant",
                                     "privileges": ["select"],
                                     "to": ["team"],
-                                    "tags": {"dept": "eng"},
+                                    "has_tags": {"dept": "eng"},
                                 }
                             ],
                             "tables": [{"name": "orders", "tags": {"dept": "eng"}}],
@@ -910,7 +910,7 @@ def test_privilege_compiler_scopes_catalog_policy_to_all_children():
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
-                            "tags": {"env": "prod"},
+                            "has_tags": {"env": "prod"},
                         }
                     ],
                     "schemas": [
@@ -976,7 +976,7 @@ def test_privilege_compiler_and_semantics_with_scoped_policy():
                                     "type": "grant",
                                     "privileges": ["select"],
                                     "to": ["team"],
-                                    "tags": {"dept": "eng", "level": "senior"},
+                                    "has_tags": {"dept": "eng", "level": "senior"},
                                 }
                             ],
                             "tables": [

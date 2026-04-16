@@ -7,5 +7,5 @@ definitions:
         - read_volume
       to:
         - uc_governor_test_team
-      tags:
+      has_tags:
         uc_gov_zone: landing
