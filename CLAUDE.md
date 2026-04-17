@@ -88,18 +88,18 @@ Always use the `.venv` virtual environment when running `python`, `pip`, `pytest
 
 ## Testing
 
-- Unit tests for YAML parsing, $ref resolution, override merging, and diff computation
-- Integration tests require a Databricks workspace with Unity Catalog
 - Use `pytest` as the test framework
 - Test functions are root-level functions (no test classes)
-- Test naming convention: `test_<class_or_module>_<does_behaviour>` or `test_<class_or_module>_<does_behaviour>_when_<state>` — the prefix is the class or module name (e.g. `test_discovery_`, `test_config_file_`, `test_uc_helper_`), never an individual function name — functions/methods are behaviours of a class or module
-- Use block comments (`# ---` separator lines) to visually group tests by the class or function they target within a test file
+- Test naming follows BDD (Behviour-Driven Development) convention: `test_<class_or_module>_<does_behaviour>` or `test_<class_or_module>_<does_behaviour>_when_<state>` — the prefix is the class or module name (e.g. `test_discovery_`, `test_catalog_config_`, `test_uc_helper_`), never an individual function name — functions/methods are behaviours of a class or module
+- Use block comments (`# ---` separator lines) to visually group tests by the class they target within a test file when applicable
+- Tests should only touch public functions and methods and should never import private ones
+- Test assertions should be loose enough to test the behaviour without tightly coupling to the internals of the implementation. The implementation should be changeable without breaking the test, as long as the same behaviour and public interface are maintained.
 
 ## Implementation approach
 
 See `docs/implementation_design.md` for the full implementation plan.
 
-This project uses **Test-Driven Development (TDD)** with a three-agent pattern. **All implementation plans must follow TDD** — when creating a new plan, structure it around the TDD cycle (stubs → tester agent → RED → implementer agent → GREEN → refactor).
+This project uses **Test-Driven Development (TDD)**/**Behaviour-Driven Development (BDD)** with a three-agent pattern. **All implementation plans must follow TDD/BDD** — when creating a new plan, structure it around the TDD/BDD cycle (stubs → tester agent → RED → implementer agent → GREEN → refactor).
 
 ### Agent roles
 
@@ -111,7 +111,7 @@ This project uses **Test-Driven Development (TDD)** with a three-agent pattern. 
   - Tracks progress and advances to the next module
 
 - **Tester agent** (sub-agent) — writes a single test case. Give it:
-  - The test case name and description from the implementation design
+  - The BDD-style test case name and description from the implementation design
   - The public API signature of the function/method under test
   - The relevant state/model dataclasses
   - The test file path and any existing fixtures from `conftest.py`
@@ -124,7 +124,7 @@ This project uses **Test-Driven Development (TDD)** with a three-agent pattern. 
   - The test output showing the failure
   - It must NOT modify tests or refactor
 
-### TDD cycle per module
+### TDD/BDD cycle per module
 
 ```
 For each test case in the module:
