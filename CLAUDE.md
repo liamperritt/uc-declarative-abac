@@ -90,7 +90,7 @@ Always use the `.venv` virtual environment when running `python`, `pip`, `pytest
 
 - Use `pytest` as the test framework
 - Test functions are root-level functions (no test classes)
-- Test naming follows BDD (Behviour-Driven Development) convention: `test_<class_or_module>_<does_behaviour>` or `test_<class_or_module>_<does_behaviour>_when_<state>` — the prefix is the class or module name (e.g. `test_discovery_`, `test_catalog_config_`, `test_uc_helper_`), never an individual function name — functions/methods are behaviours of a class or module
+- Test naming follows BDD (Behaviour-Driven Development) convention: `test_<class_or_module>_<does_behaviour>` or `test_<class_or_module>_<does_behaviour>_when_<state>` — the prefix is the class or module name (e.g. `test_discovery_`, `test_catalog_config_`, `test_uc_helper_`), never an individual function name — functions/methods are behaviours of a class or module
 - Use block comments (`# ---` separator lines) to visually group tests by the class they target within a test file when applicable
 - Tests should only touch public functions and methods and should never import private ones
 - Test assertions should be loose enough to test the behaviour without tightly coupling to the internals of the implementation. The implementation should be changeable without breaking the test, as long as the same behaviour and public interface are maintained.
