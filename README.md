@@ -21,9 +21,10 @@ Definitions define *what* exists; resources define *where* it gets deployed.
 
 ## What You Can Define in YAML
 
-### Definitions (catalog-agnostic templates)
+### Definitions (reusable templates)
 
-- **Schema definitions** — catalog-agnostic schema templates listing their child tables, volumes, and functions.
+- **Catalog definitions** — top-level templates that list the schemas and policies a catalog should contain. You can define the canonical shape of a catalog once, then have a catalog **resource** `$ref` the definition and override only what differs between environments.
+- **Schema definitions** — schema templates listing their child tables, volumes, and functions.
 - **Table definitions** — table definitions tied to a schema definition.
 - **Volume definitions** — volume definitions tied to a schema definition.
 - **Function definitions** — UDF definitions with parameters and return expressions.
@@ -32,8 +33,8 @@ Definitions define *what* exists; resources define *where* it gets deployed.
 ### Resources (deployed UC objects)
 
 - **Governed tags** — enforced usage rules for UC governed tags with allowed values, allowed principals, and comments.
-- **Catalogs** — compose schema and ABAC policy definitions into deployable units, with per-catalog overrides.
-- **Schemas, tables, volumes, functions, mask/filter ABAC policies** — concrete instances that can reference relevant definitions.
+- **Catalogs** — usually a thin `$ref` to a catalog definition with optional overrides (e.g. a different `name` or `tags` for a test vs prod environment). Can also be written fully inline when no reuse is needed.
+- **Schemas, tables, volumes, functions, mask/filter ABAC policies** — concrete instances that can reference relevant definitions. Generally you shouldn't need to declare these at the resource level because they're pulled in transitively via the catalog definition. BUt both options are supported.
 
 ### Metadata on all objects
 
@@ -68,19 +69,63 @@ You maintain YAML as the source of truth; the engine turns it into UC objects an
 
 ## YAML Config Structures
 
-Configs use **dictionaries keyed by definition IDs**. The recommended convention is to use `|`-delimited keys (e.g. `operations|sales`, `operations|sales|orders`, `platform|shared|mask_pii_email`), following the same pattern as the Databricks Terraform provider which uses `|` for composite resource IDs (e.g. `<metastore_id>|<name>` for UC connections). However, the `|` delimiter is a convention only and is not enforced by the engine — keys can be any valid YAML string.
+Configs use **dictionaries keyed by definition IDs**. The recommended convention is to use `|`-delimited keys that mirror the Unity Catalog path of the object — e.g. `my_catalog` for a catalog, `my_catalog|sales` for a schema, `my_catalog|sales|orders` for a table. This matches the Databricks Terraform provider's composite resource IDs (e.g. `<metastore_id>|<name>` for UC connections). For reusable, catalog-agnostic definitions (typically policies and shared functions), a `<domain>|<name>` style works well — e.g. `abac|mask_pii`. The `|` delimiter is a convention only and is not enforced by the engine — keys can be any valid YAML string.
+
+Key conventions by type:
+
+| Type | Convention | Example |
+|------|-----------|---------|
+| catalogs | `<catalog_name>` | `operations` |
+| schemas | `<catalog_name>\|<schema_name>` | `operations\|sales` |
+| tables | `<catalog_name>\|<schema_name>\|<table_name>` | `operations\|sales\|orders` |
+| volumes | `<catalog_name>\|<schema_name>\|<volume_name>` | `operations\|landing\|raw_events` |
+| functions (catalog-specific) | `<catalog_name>\|<schema_name>\|<function_name>` | `operations\|shared\|mask_pii_email` |
+| functions (cross-catalog, reusable) | `<domain>\|<function_name>` | `abac\|mask_pii` |
+| policies (cross-catalog, reusable) | `<domain>\|<policy_name>` | `abac\|mask_pii_email` |
 
 These keys are the stable identity for each entity and let you reference entities across files via `$defs/<type>/<key>` or `$ref: $defs/<type>/<key>` syntax (inspired by JSON Schema's `$defs` and `$ref` keywords) which also supports selective config overrides (see the **Overrides** section below).
 
-Any definition type (schemas, tables, volumes, functions, mask/filter policy) can be promoted to a concrete resource by placing it under `resources:` with a `$ref`/`$defs` reference to the definition and a fixed `catalog_name`/`schema_name`. This is useful when you need a specific deployed instance outside of a catalog composition.
+Any definition type (catalogs, schemas, tables, volumes, functions, mask/filter policy) can be promoted to a concrete resource by placing it under `resources:` with a `$ref`/`$defs` reference to the definition. For catalogs this is the usual pattern — the catalog definition captures the shape, and a resource catalog references it. For leaf types (table, volume, function) you can also promote them directly when you need a single deployed instance outside of a catalog composition; these require `catalog_name`/`schema_name` to be set.
 
 ### Definitions
 
-Definition configs are catalog-agnostic, reusable templates (schemas, tables, volumes, functions, policies).
+Definition configs are reusable templates for every UC object type — catalogs, schemas, tables, volumes, functions, and policies. The recommended pattern is to structure your definitions like the UC catalog itself: one top-level `catalog` definition that composes the schemas, policies, tags, and other catalog-level metadata, and then nested schema / table / volume / function definitions organised by catalog and schema. This keeps definitions close to the UC object they describe and makes the resource side of the config trivial — usually just a `$ref` to the catalog definition with a few overrides (e.g. a name change between prod and test environments).
+
+Cross-catalog reusable definitions (typically ABAC policies and shared functions) can live outside the catalog tree under `definitions/policies/` or `definitions/functions/` and be `$ref`'d from multiple catalogs.
+
+#### Catalog definitions
+
+Catalog definitions capture the canonical shape of a catalog — its tags, owner, RFA destination, catalog-level policies, and the list of schemas it contains. Key convention: `<catalog_name>`. A catalog definition composes schemas and policies via `$ref`/`$defs` entries; a resource catalog then references the whole definition and overrides only what differs between environments (commonly just `name` and a few tags).
+
+```yaml
+# definitions/catalogs/operations_prod/operations_prod.yaml
+definitions:
+  catalogs:
+    operations:
+      name: operations
+      comment: Operations catalog
+      owner: data_platform_team
+      rfa_destination: data-governance@company.com
+      tags:
+        env: prod
+      policies:
+        - $ref: $defs/policies/abac|grant_use_catalog
+        - $ref: $defs/policies/abac|mask_pii_email
+      schemas:
+        - $ref: $defs/schemas/operations_prod|sales
+        - $ref: $defs/schemas/operations_prod|landing
+
+# resources/catalogs/operations_prod.yaml
+resources:
+  catalogs:
+    operations_prod:
+      $ref: $defs/catalogs/operations
+      name: operations_prod
+```
 
 #### Schema definitions
 
-Schema definitions are catalog-agnostic templates: name, comment, owner, tags, policies, and RFA. Key convention: `<domain>|<schema_name>` (e.g. `operations|sales`, `people|hr`). Each schema definition lists the **tables**, **volumes**, **functions**, and/or **policies** it contains as `$ref`/`$defs` entries. Catalogs reference which schema definitions to instantiate; the engine creates each schema and its listed children in every catalog that includes it.
+Schema definitions capture the shape of a schema: name, comment, owner, tags, policies, and RFA. Key convention: `<catalog_name>|<schema_name>` (e.g. `operations|sales`, `operations|landing`). Each schema definition lists the **tables**, **volumes**, **functions**, and/or **policies** it contains as `$ref`/`$defs` entries. A catalog definition references which schemas to include; the engine creates each schema and its listed children inside the owning catalog.
 
 ```yaml
 # definitions/operations/schemas/sales/sales.yaml
@@ -436,50 +481,49 @@ Once a tag policy is created, you can apply it to tables, columns, schemas, and 
 
 #### Catalogs
 
-Catalogs are defined under `resources: catalogs:` and compose schema definitions and policy definitions into a deployable unit. Each catalog lists the schemas to instantiate and the policies to apply, with optional per-catalog overrides on any `$ref`/`$defs` entry. Policies can also be attached at the schema and table level for finer-grained scoping.
+Catalogs are deployed by placing an entry under `resources: catalogs:`. The recommended form is a thin `$ref` to a matching catalog definition — this keeps all the interesting composition (schemas, policies, tags) in the definition, and leaves the resource side as a one-line pointer. Overrides can be applied on the `$ref` entry when a resource needs to differ from its definition (for example, a test catalog that reuses a prod definition but changes `name`, a couple of tags, or a function reference).
+
+**Pattern 1 — thin `$ref` with optional overrides.** One catalog definition, one matching resource:
 
 ```yaml
-# resources/catalogs/operations/operations_prod.yaml
+# definitions/catalogs/operations/operations.yaml
+definitions:
+  catalogs:
+    operations:
+      name: operations
+      comment: Operations catalog
+      owner: data_platform_team
+      tags:
+        env: prod
+      policies:
+        - $ref: $defs/policies/abac|mask_pii_email
+      schemas:
+        - $ref: $defs/schemas/operations_prod|sales
+        - $ref: $defs/schemas/operations_prod|landing
+
+# resources/catalogs/operations_prod.yaml
+resources:
+  catalogs:
+    operations_prod:
+      $ref: $defs/catalogs/operations
+      name: operations_prod
+```
+
+**Pattern 3 — fully inline.** If you don't need reuse, skip the definition layer entirely and declare the catalog straight under `resources:`:
+
+```yaml
+# resources/catalogs/operations_prod.yaml
 resources:
   catalogs:
     operations_prod:
       name: operations_prod
-      comment: Production operations catalog
       owner: data_platform_team
-      rfa_destination: data-governance@company.com
       tags:
-        operations: ~
         env: prod
       policies:
-        - $defs/policies/shared|mask_pii_email
-      schemas:
-        - $defs/schemas/operations|sales
-        - $defs/schemas/people|hr
-        - $defs/schemas/platform|landing
-
-# resources/catalogs/operations/operations_test.yaml
-resources:
-  catalogs:
-    operations_test:
-      name: operations_test
-      comment: Test operations catalog
-      owner: data_platform_team
-      rfa_destination: data-governance@company.com
-      tags:
-        operations: ~
-        env: test
-      policies:
-        - $ref: $defs/policies/shared|mask_pii_email
-          function: platform_test.abac.mask_pii_email
+        - $ref: $defs/policies/abac|mask_pii_email
       schemas:
         - $ref: $defs/schemas/operations|sales
-          tables:
-            - $ref: $defs/tables/operations|sales|orders
-            - $ref: $defs/tables/operations|sales|quotes
-        - $ref: $defs/schemas/people|hr
-        - $ref: $defs/schemas/platform|landing
-        - $ref: $defs/schemas/platform|shared
-          owner: sp_test_job_runner
 ```
 
 ### Overrides
@@ -509,12 +553,41 @@ resources:
 
 ## File Organization
 
-The recommended convention is to place your YAML configs under two top-level directories:
+The recommended convention is to **mirror the Unity Catalog directory structure** under `definitions/catalogs/`, so each catalog/schema/table/volume/function config file sits where you'd expect to find it in UC. Cross-catalog reusable content (policies, shared functions) lives outside the catalog tree under `definitions/policies/` or `definitions/functions/`. The resource side stays thin — typically one file per catalog that `$ref`s the matching catalog definition.
 
-- **`definitions/`** — catalog-agnostic templates organised by domain (e.g. `definitions/operations/schemas/sales/`).
-- **`resources/`** — concrete deployable instances organised by catalog (e.g. `resources/catalogs/operations/`).
+Recommended layout (mirrors the structure used by the e2e tests in `tests/e2e/configs/`):
 
-This folder structure is not enforced by the engine — you can organise files however you like. The engine discovers all YAML files regardless of directory layout and resolves `$ref`/`$defs` entries by definition key, not by file path.
+```
+configs/
+├── definitions/
+│   ├── catalogs/
+│   │   └── operations/
+│   │       ├── operations.yaml         # catalog definition
+│   │       └── schemas/
+│   │           ├── sales/
+│   │           │   ├── sales.yaml           # schema definition
+│   │           │   ├── tables/
+│   │           │   │   ├── orders.yaml      # table definition
+│   │           │   │   └── quotes.yaml
+│   │           │   └── functions/
+│   │           │       └── lookup_region.yaml
+│   │           └── landing/
+│   │               ├── landing.yaml
+│   │               └── volumes/
+│   │                   └── raw_events.yaml
+│   ├── policies/                            # cross-catalog reusable policies
+│   │   ├── mask_pii.yaml
+│   │   └── grant_catalog_read.yaml
+│   └── functions/                           # cross-catalog reusable functions (optional)
+│       └── mask_pii_email.yaml
+└── resources/
+    ├── catalogs/
+    │   └── operations_prod.yaml             # thin $ref to the catalog definition
+    └── governed_tags/
+        └── pii.yaml
+```
+
+This folder structure is a recommendation, not enforced by the engine — the engine discovers every `.yaml` / `.yml` file under the config root and resolves references by definition key, not by file path. But keeping files where you'd expect them in a UC browser makes configs easy to navigate, and pairing each catalog definition with a matching one-line resource file is a clean split: **definitions describe what exists; resources describe where it gets deployed.**
 
 ## Deployment
 

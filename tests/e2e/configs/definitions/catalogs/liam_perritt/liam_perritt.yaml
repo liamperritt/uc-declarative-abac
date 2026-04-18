@@ -1,6 +1,7 @@
-resources:
+definitions:
   catalogs:
     liam_perritt:
+      name: liam_perritt
       tags:
         uc_gov_env: test
         uc_gov_managed_by: uc_abac_governor
@@ -12,5 +13,6 @@ resources:
         - $ref: $defs/policies/abac|grant_pipeline_select
         - $ref: $defs/policies/abac|grant_landing_read
       schemas:
+        - $ref: $defs/schemas/liam_perritt|default
         - $ref: $defs/schemas/liam_perritt|lff_sqlserver_bronze
         - $ref: $defs/schemas/liam_perritt|sqlserver_lff

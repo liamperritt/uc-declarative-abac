@@ -1,7 +1,6 @@
-resources:
+definitions:
   schemas:
     liam_perritt|default:
-      catalog_name: liam_perritt
       name: default
       tags:
         uc_gov_team: platform

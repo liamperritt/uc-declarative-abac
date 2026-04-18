@@ -1,0 +1,4 @@
+resources:
+  catalogs:
+    liam_perritt:
+      $ref: $defs/catalogs/liam_perritt
