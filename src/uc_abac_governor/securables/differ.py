@@ -68,7 +68,7 @@ def _resolve_attribute_owners(
             result.add(attr)
             continue
         try:
-            (resolved_owner,) = resolver.resolve_principals([attr.owner])
+            resolved_owner = resolver.resolve_principal(attr.owner)
         except PrincipalValidationError as exc:
             change_logger.log_error(ExecutionError(
                 context=f"Resolve owner for {attr.securable_type.value} {attr.full_name}",

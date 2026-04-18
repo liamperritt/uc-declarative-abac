@@ -47,7 +47,7 @@ def _resolve_privileges(
     result: set[SecurablePrivilege] = set()
     for priv in unresolved:
         try:
-            (resolved_principal,) = resolver.resolve_principals([priv.principal])
+            resolved_principal = resolver.resolve_principal(priv.principal)
         except PrincipalValidationError as exc:
             change_logger.log_error(ExecutionError(
                 context=f"Resolve principal for {priv.privilege_type.value.upper()} on {priv.securable_type.value} {priv.securable_full_name}",
