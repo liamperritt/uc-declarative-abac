@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 from uc_abac_governor.configs.models import ResourcesConfig
+from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.securables.compiler import compile_desired_attributes, compile_desired_securables
 from uc_abac_governor.securables.state import FunctionInfo, SecurableAttributes
-from uc_abac_governor.types import SecurableType
+from uc_abac_governor.types import PrincipalType, SecurableType
+
+
+def _unknown_owner(name: str) -> Principal:
+    return Principal(principal_type=PrincipalType.UNKNOWN, name=name)
 
 
 # ---------------------------------------------------------------------------
@@ -29,7 +34,7 @@ def test_securable_compiler_emits_catalog_owner():
         SecurableAttributes(
             securable_type=SecurableType.CATALOG,
             full_name="my_catalog",
-            owner="admin_user",
+            owner=_unknown_owner("admin_user"),
         )
     }
 
@@ -56,7 +61,7 @@ def test_securable_compiler_emits_schema_owner():
     assert SecurableAttributes(
         securable_type=SecurableType.SCHEMA,
         full_name="my_catalog.sales",
-        owner="schema_owner",
+        owner=_unknown_owner("schema_owner"),
     ) in result
 
 
@@ -87,7 +92,7 @@ def test_securable_compiler_emits_table_owner():
     assert SecurableAttributes(
         securable_type=SecurableType.TABLE,
         full_name="my_catalog.sales.orders",
-        owner="table_owner",
+        owner=_unknown_owner("table_owner"),
     ) in result
 
 
@@ -118,7 +123,7 @@ def test_securable_compiler_emits_volume_owner():
     assert SecurableAttributes(
         securable_type=SecurableType.VOLUME,
         full_name="my_catalog.landing.files",
-        owner="vol_owner",
+        owner=_unknown_owner("vol_owner"),
     ) in result
 
 
@@ -151,7 +156,7 @@ def test_securable_compiler_emits_function_owner():
     assert SecurableAttributes(
         securable_type=SecurableType.FUNCTION,
         full_name="my_catalog.shared.mask_email",
-        owner="func_owner",
+        owner=_unknown_owner("func_owner"),
     ) in result
 
 

@@ -32,6 +32,7 @@ class PrivilegeType(str, Enum):
     CREATE_MATERIALIZED_VIEW = "create_materialized_view"
     CREATE_MODEL = "create_model"
     CREATE_MODEL_VERSION = "create_model_version"
+    BROWSE = "browse"
 
 
 class PolicyType(str, Enum):
@@ -44,20 +45,7 @@ class PrincipalType(str, Enum):
     USER = "USER"
     GROUP = "GROUP"
     SERVICE_PRINCIPAL = "SERVICE_PRINCIPAL"
-
-
-@dataclass(frozen=True)
-class Principal:
-    """Represents a workspace principal with both its identifier and name.
-
-    - User: identifier=username, name=username
-    - Group: identifier=display_name, name=display_name
-    - Service Principal: identifier=application_id, name=display_name
-    """
-
-    principal_type: PrincipalType
-    identifier: str
-    name: str
+    UNKNOWN = "UNKNOWN"  # marks an unresolved Principal
 
 
 class GovernorError(Exception):

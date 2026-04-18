@@ -1,8 +1,22 @@
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
+from uc_abac_governor.logger import ChangeLogger
+from uc_abac_governor.principals.resolver import PrincipalResolver
+from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.privileges.differ import compute_privilege_diff
 from uc_abac_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
-from uc_abac_governor.types import Principal, PrincipalType, PrivilegeType, SecurableType
+from uc_abac_governor.types import PrincipalType, PrivilegeType, SecurableType
+
+
+def _resolver() -> PrincipalResolver:
+    """A resolver whose ws_helper is never consulted — test inputs are already resolved."""
+    return PrincipalResolver(MagicMock())
+
+
+def _change_logger() -> ChangeLogger:
+    return ChangeLogger()
 
 
 # ---------------------------------------------------------------------------
@@ -35,7 +49,7 @@ def test_privilege_differ_computes_privileges_to_grant():
         ),
     }
 
-    diff = compute_privilege_diff(desired, actual)
+    diff = compute_privilege_diff(desired, actual, _resolver(), _change_logger())
 
     assert diff.to_grant == {
         SecurablePrivilege(
@@ -73,7 +87,7 @@ def test_privilege_differ_computes_privileges_to_revoke():
         ),
     }
 
-    diff = compute_privilege_diff(desired, actual)
+    diff = compute_privilege_diff(desired, actual, _resolver(), _change_logger())
 
     assert diff.to_grant == set()
     assert diff.to_revoke == {
@@ -108,7 +122,7 @@ def test_privilege_differ_returns_empty_diff_when_in_sync():
         ),
     }
 
-    diff = compute_privilege_diff(privileges, privileges)
+    diff = compute_privilege_diff(privileges, privileges, _resolver(), _change_logger())
 
     assert diff == PrivilegeDiff()
 
@@ -130,7 +144,7 @@ def test_privilege_differ_handles_empty_desired():
         ),
     }
 
-    diff = compute_privilege_diff(set(), actual)
+    diff = compute_privilege_diff(set(), actual, _resolver(), _change_logger())
 
     assert diff.to_revoke == actual
     assert diff.to_grant == set()
@@ -153,7 +167,7 @@ def test_privilege_differ_handles_empty_actual():
         ),
     }
 
-    diff = compute_privilege_diff(desired, set())
+    diff = compute_privilege_diff(desired, set(), _resolver(), _change_logger())
 
     assert diff.to_grant == desired
     assert diff.to_revoke == set()

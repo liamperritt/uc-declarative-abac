@@ -22,10 +22,11 @@ from uc_abac_governor.configs.models import (
     ResourcesConfig,
 )
 from uc_abac_governor.policies.state import Policy
+from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.tags.state import SecurableTag
-from uc_abac_governor.privileges.state import UnresolvedPrivilege
+from uc_abac_governor.privileges.state import SecurablePrivilege
 from uc_abac_governor.securables.state import FunctionInfo, SecurableAttributes, SecurableInfo
-from uc_abac_governor.types import GovernorError, PolicyType, PrivilegeType, SecurableType
+from uc_abac_governor.types import GovernorError, PolicyType, PrincipalType, PrivilegeType, SecurableType
 
 _logger = logging.getLogger("uc_abac_governor")
 
@@ -109,13 +110,16 @@ def _parse_tag_rows(rows: list[list[str]]) -> set[SecurableTag]:
     }
 
 
-def _parse_privilege_rows(rows: list[list[str]]) -> set[UnresolvedPrivilege]:
-    """Parse raw SQL result rows into a set of UnresolvedPrivilege.
+def _parse_privilege_rows(rows: list[list[str]]) -> set[SecurablePrivilege]:
+    """Parse raw SQL result rows into a set of SecurablePrivilege with
+    unresolved Principals.
 
     Converts privilege_type strings to PrivilegeType enums. Rows with
-    unsupported privilege types are skipped with a logged error.
+    unsupported privilege types are skipped with a logged error. Each
+    grantee becomes an unresolved Principal carrying the raw identifier;
+    resolution happens in the per-domain resolver post-fetch.
     """
-    result: set[UnresolvedPrivilege] = set()
+    result: set[SecurablePrivilege] = set()
     for row in rows:
         try:
             privilege_type = PrivilegeType(row[3].lower())
@@ -123,10 +127,10 @@ def _parse_privilege_rows(rows: list[list[str]]) -> set[UnresolvedPrivilege]:
             _logger.error(f"Skipping privilege from system table: unsupported type '{row[3]}'")
             continue
         result.add(
-            UnresolvedPrivilege(
+            SecurablePrivilege(
                 securable_type=SecurableType(row[0]),
                 securable_full_name=row[1],
-                principal=row[2],
+                principal=Principal(principal_type=PrincipalType.UNKNOWN, identifier=row[2]),
                 privilege_type=privilege_type,
             )
         )
@@ -207,11 +211,15 @@ def _parse_securable_rows(
         parameters_json = row[3]
         routine_definition = row[4]
 
+        owner_principal = (
+            Principal(principal_type=PrincipalType.UNKNOWN, identifier=owner)
+            if owner else None
+        )
         attributes.add(
             SecurableAttributes(
                 securable_type=securable_type,
                 full_name=full_name,
-                owner=owner,
+                owner=owner_principal,
             )
         )
 
@@ -278,8 +286,14 @@ def _normalise_policy_info(
     else:
         return None
 
-    to_principals = tuple(sorted(info.to_principals or []))
-    except_principals = tuple(sorted(info.except_principals or []))
+    to_principals = tuple(
+        Principal(principal_type=PrincipalType.UNKNOWN, identifier=p)
+        for p in (info.to_principals or [])
+    )
+    except_principals = tuple(
+        Principal(principal_type=PrincipalType.UNKNOWN, identifier=p)
+        for p in (info.except_principals or [])
+    )
     match_columns = tuple(
         (mc.alias, mc.condition) for mc in (info.match_columns or [])
     )
@@ -315,7 +329,7 @@ class UnityCatalogHelper:
         self._client = workspace_client
         self._warehouse_id = warehouse_id
         self._tags_cache: set[SecurableTag] | None = None
-        self._privileges_cache: set[UnresolvedPrivilege] | None = None
+        self._privileges_cache: set[SecurablePrivilege] | None = None
         self._securables_cache: set[SecurableInfo] | None = None
         self._attributes_cache: set[SecurableAttributes] | None = None
         self._policies_cache: set[Policy] | None = None
@@ -361,7 +375,7 @@ class UnityCatalogHelper:
         self._tags_cache = _parse_tag_rows(rows)
         return self._tags_cache
 
-    def fetch_actual_privileges(self, catalog_names: list[str]) -> set[UnresolvedPrivilege]:
+    def fetch_actual_privileges(self, catalog_names: list[str]) -> set[SecurablePrivilege]:
         """Query system tables for all explicit privileges on securables in the given catalogs.
 
         Filters to inherited_from='NONE' to only return directly granted privileges.

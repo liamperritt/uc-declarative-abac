@@ -6,14 +6,15 @@ if TYPE_CHECKING:
     from uc_abac_governor.helpers.unity_catalog import UnityCatalogHelper
     from uc_abac_governor.logger import ChangeLogger
 
-from uc_abac_governor.helpers.sql import quote_securable as _quote_securable
+from uc_abac_governor.helpers import quote_securable as quote_securable
 from uc_abac_governor.securables.state import (
-    AttributeUpdate,
     FunctionInfo,
     SecurableInfo,
     SecurableDiff,
 )
-from uc_abac_governor.types import ExecutionError, Principal
+from uc_abac_governor.principals.resolver import ensure_resolved
+from uc_abac_governor.principals.state import Principal
+from uc_abac_governor.types import ExecutionError
 
 
 def _build_create_sql(info: SecurableInfo) -> str:
@@ -44,14 +45,14 @@ def _build_function_params(parameters: tuple[tuple[str, str], ...]) -> str:
 
 def _build_create_function_sql(info: FunctionInfo) -> str:
     """Build CREATE FUNCTION SQL."""
-    quoted = _quote_securable(info.full_name)
+    quoted = quote_securable(info.full_name)
     params = _build_function_params(info.parameters)
     return f"CREATE FUNCTION {quoted}{params} RETURN {info.definition}"
 
 
 def _build_replace_function_sql(info: FunctionInfo) -> str:
     """Build CREATE OR REPLACE FUNCTION SQL."""
-    quoted = _quote_securable(info.full_name)
+    quoted = quote_securable(info.full_name)
     params = _build_function_params(info.parameters)
     return f"CREATE OR REPLACE FUNCTION {quoted}{params} RETURN {info.definition}"
 
@@ -98,7 +99,10 @@ def execute_securable_diff(
         if update.attribute == "owner":
             if not dry_run:
                 try:
-                    owner_id = update.new_value.identifier if isinstance(update.new_value, Principal) else update.new_value
+                    if isinstance(update.new_value, Principal):
+                        owner_id = ensure_resolved(update.new_value).identifier
+                    else:
+                        owner_id = update.new_value
                     uc_helper.update_owner(update.securable_type, update.full_name, owner_id)
                 except Exception as exc:
                     change_logger.log_error(ExecutionError(

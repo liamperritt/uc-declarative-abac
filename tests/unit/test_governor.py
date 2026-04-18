@@ -543,7 +543,7 @@ def test_governor_runs_policies_workflow_end_to_end(
     """A MASK policy with no corresponding actual UC policy -> CREATE POLICY SQL is executed."""
     root = tmp_yaml_dir({"resources/catalog.yaml": _catalog_with_mask_policy_config()})
     _setup_mock_workspace_empty_state(mock_workspace_client)
-    _setup_mock_principals(mock_workspace_client, "analysts")
+    _setup_mock_principals_with_groups(mock_workspace_client, ["analysts", "admins"])
 
     _, _, policy_diff, _ = run(
         config_dir=root,
@@ -562,7 +562,7 @@ def test_governor_policies_workflow_is_idempotent(
     """When list_policies returns the same policy already exists, no CREATE POLICY SQL is executed."""
     root = tmp_yaml_dir({"resources/catalog.yaml": _catalog_with_mask_policy_config()})
     _setup_mock_workspace_empty_state(mock_workspace_client)
-    _setup_mock_principals(mock_workspace_client, "analysts")
+    _setup_mock_principals_with_groups(mock_workspace_client, ["analysts", "admins"])
 
     # Configure list_policies to return the matching desired policy
     from databricks.sdk.service.catalog import PolicyType as SdkPolicyType
@@ -593,6 +593,188 @@ def test_governor_policies_workflow_is_idempotent(
     assert policy_diff.to_replace == set()
     create_stmts = [s for s in mock_workspace_client.executed_sql if "CREATE POLICY" in s.upper()]
     assert create_stmts == []
+
+
+# ---------------------------------------------------------------------------
+# Service principal display-name ↔ application_id idempotency
+# ---------------------------------------------------------------------------
+
+
+def _setup_mock_principals_with_sp(
+    mock_workspace_client: MagicMock,
+    sp_display_name: str,
+    sp_application_id: str,
+) -> None:
+    """Configure the mock account SCIM proxy to return a single service principal."""
+    def _scim_do(method, path, **kwargs):
+        if "/account/scim/v2/ServicePrincipals" in path:
+            return {
+                "totalResults": 1,
+                "startIndex": 1,
+                "itemsPerPage": 100,
+                "Resources": [{
+                    "displayName": sp_display_name,
+                    "applicationId": sp_application_id,
+                }],
+            }
+        return {"totalResults": 0, "startIndex": 1, "itemsPerPage": 100, "Resources": []}
+    mock_workspace_client.api_client.do.side_effect = _scim_do
+
+
+def test_governor_is_idempotent_for_service_principal_across_display_name_and_app_id():
+    """Same workspace principal referenced by display_name in YAML and application_id in UC
+    state (GRANT system tables, list_policies SDK response) should produce an empty diff on
+    the second run — proving that PrincipalResolver bridges the two representations correctly."""
+    sp_display = "sp_sales_runner"
+    sp_app_id = "abc-1234-app-id"
+
+    # YAML: one grant policy + one mask policy, both referencing the SP by display name
+    config = {
+        "resources": {
+            "catalogs": {
+                "my_catalog": {
+                    "tags": {"team": "sales"},
+                    "policies": [
+                        {
+                            "name": "grant_sales_select",
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": [sp_display],
+                            "has_tags": {"team": "sales"},
+                        },
+                        {
+                            "name": "mask_sales_pii",
+                            "type": "mask",
+                            "function": "my_catalog.default.mask_fn",
+                            "to": [sp_display],
+                            "except": [],
+                            "columns": [{"alias": "c_pii", "has_tags": {"pii": "email"}}],
+                        },
+                    ],
+                }
+            }
+        }
+    }
+
+    mock_workspace_client = _new_mock_client()
+    tmp_root = _tmp_yaml_root(config)
+
+    # Mock SCIM: the SP exists; app_id is the identifier UC uses in system tables.
+    _setup_mock_principals_with_sp(mock_workspace_client, sp_display, sp_app_id)
+
+    # Mock UC state: grant to sp by app_id on the tagged catalog + a matching column mask.
+    # Seed: catalog tag {team: sales}, privilege GRANT SELECT ON CATALOG my_catalog to app_id,
+    # and list_policies returns the matching mask policy with app_id in to_principals.
+    _seed_actual_state_for_sp_idempotency(mock_workspace_client, sp_app_id)
+
+    # Run and assert empty diffs
+    _, tag_diff, policy_diff, privilege_diff = run(
+        config_dir=tmp_root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+    )
+
+    assert tag_diff.to_add == set(), f"Expected no tag changes, got to_add: {tag_diff.to_add}"
+    assert tag_diff.to_update == set()
+    assert tag_diff.to_remove == set()
+    assert privilege_diff.to_grant == set(), f"Expected no grants, got: {privilege_diff.to_grant}"
+    assert privilege_diff.to_revoke == set(), f"Expected no revokes, got: {privilege_diff.to_revoke}"
+    assert policy_diff.to_create == set(), f"Expected no policy creates, got: {policy_diff.to_create}"
+    assert policy_diff.to_replace == set(), f"Expected no policy replaces, got: {policy_diff.to_replace}"
+
+    # No mutation SQL executed
+    mutation_stmts = [
+        s for s in mock_workspace_client.executed_sql
+        if any(kw in s.upper() for kw in ["ALTER", "GRANT ", "REVOKE", "CREATE POLICY"])
+    ]
+    assert mutation_stmts == [], f"Expected no mutation SQL on second run, got: {mutation_stmts}"
+
+
+def _new_mock_client() -> MagicMock:
+    """Construct a fresh MagicMock workspace client with the baseline wiring
+    used by conftest.mock_workspace_client (empty SQL results + empty policies)."""
+    from databricks.sdk.service.sql import StatementState
+    client = MagicMock()
+    client.executed_sql = []
+    client.policies.list_policies.return_value = iter([])
+
+    def _capture_sql(*args, **kwargs):
+        statement = kwargs.get("statement", args[0] if args else None)
+        if statement:
+            client.executed_sql.append(statement)
+        response = MagicMock()
+        response.status.state = StatementState.SUCCEEDED
+        return response
+
+    client.statement_execution.execute_statement.side_effect = _capture_sql
+    return client
+
+
+def _tmp_yaml_root(config: dict) -> "pathlib.Path":
+    """Write the single-file config to a fresh tmp dir and return the dir path."""
+    import pathlib
+    import tempfile
+    import yaml
+    root = pathlib.Path(tempfile.mkdtemp())
+    (root / "resources").mkdir()
+    (root / "resources" / "catalog.yaml").write_text(yaml.dump(config))
+    return root
+
+
+def _seed_actual_state_for_sp_idempotency(mock_workspace_client: MagicMock, sp_app_id: str) -> None:
+    """Seed tags, grants, and policies system-table/SDK responses so that actual ==
+    desired for the SP test. The catalog has tag {team: sales}; a GRANT SELECT is
+    present for the SP (app_id) on the catalog; a mask policy matches desired fields."""
+    from databricks.sdk.service.catalog import PolicyType as SdkPolicyType
+    from databricks.sdk.service.sql import StatementState
+
+    # _fetch_external_links_rows is called per-query; route by SQL content.
+    def _rows_for_sql(sql: str) -> list[list[str]]:
+        lower = sql.lower()
+        # Tags query
+        if "catalog_tags" in lower or "schema_tags" in lower:
+            return [["CATALOG", "my_catalog", "team", "sales"]]
+        # Privileges query
+        if "catalog_privileges" in lower or "schema_privileges" in lower:
+            return [["CATALOG", "my_catalog", sp_app_id, "SELECT"]]
+        return []
+
+    def _execute_with_sql_tag(*args, **kwargs):
+        statement = kwargs.get("statement", args[0] if args else None)
+        if statement:
+            mock_workspace_client.executed_sql.append(statement)
+        response = MagicMock()
+        response.status.state = StatementState.SUCCEEDED
+        response.result.external_links = []
+        response._sql = statement
+        return response
+
+    mock_workspace_client.statement_execution.execute_statement.side_effect = _execute_with_sql_tag
+
+    # Patch _fetch_external_links_rows at test scope
+    import unittest.mock as _mock
+    patcher = _mock.patch(
+        "uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows",
+        side_effect=lambda response: _rows_for_sql(getattr(response, "_sql", "") or ""),
+    )
+    patcher.start()
+
+    # Actual mask policy (list_policies SDK response) — identifier is the SP app_id
+    fake_policy = MagicMock()
+    fake_policy.name = "mask_sales_pii"
+    fake_policy.on_securable_type = MagicMock(value="CATALOG")
+    fake_policy.on_securable_fullname = "my_catalog"
+    fake_policy.policy_type = SdkPolicyType.POLICY_TYPE_COLUMN_MASK
+    fake_policy.column_mask = MagicMock()
+    fake_policy.column_mask.function_name = "my_catalog.default.mask_fn"
+    fake_policy.column_mask.on_column = "c_pii"
+    fake_policy.column_mask.using = []
+    fake_policy.row_filter = None
+    fake_policy.to_principals = [sp_app_id]
+    fake_policy.except_principals = []
+    fake_policy.when_condition = None
+    fake_policy.match_columns = [MagicMock(alias="c_pii", condition="has_tag_value('pii', 'email')")]
+    mock_workspace_client.policies.list_policies.return_value = iter([fake_policy])
 
 
 def test_governor_collects_unknown_principal_errors(

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from uc_abac_governor.types import Principal, SecurableType
+from uc_abac_governor.principals.state import Principal
+from uc_abac_governor.types import SecurableType
 
 
 @dataclass(frozen=True)
@@ -22,7 +23,7 @@ class SecurableAttributes:
 
     securable_type: SecurableType
     full_name: str
-    owner: str | None = None
+    owner: Principal | None = None
 
 
 @dataclass(frozen=True)

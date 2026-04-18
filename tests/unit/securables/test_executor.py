@@ -9,7 +9,8 @@ from uc_abac_governor.securables.state import (
     FunctionInfo,
     SecurableDiff,
 )
-from uc_abac_governor.types import Principal, PrincipalType, SecurableType
+from uc_abac_governor.principals.state import Principal
+from uc_abac_governor.types import PrincipalType, SecurableType
 
 
 def _assert_sql_contains(sql: str, *fragments: str):

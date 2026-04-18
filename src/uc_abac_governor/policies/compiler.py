@@ -6,7 +6,8 @@ from uc_abac_governor.configs.models import (
     ResourcesConfig,
 )
 from uc_abac_governor.policies.state import Policy
-from uc_abac_governor.types import PolicyType, SecurableType
+from uc_abac_governor.principals.state import Principal
+from uc_abac_governor.types import PolicyType, PrincipalType, SecurableType
 
 
 _WILDCARD = "*"
@@ -46,8 +47,12 @@ def _build_policy(
         name=policy.name,
         policy_type=policy.type,
         function_name=policy.function,
-        to_principals=tuple(sorted(policy.to)),
-        except_principals=tuple(sorted(policy.exceptions or [])),
+        to_principals=tuple(
+            Principal(principal_type=PrincipalType.UNKNOWN, name=n) for n in policy.to
+        ),
+        except_principals=tuple(
+            Principal(principal_type=PrincipalType.UNKNOWN, name=n) for n in (policy.exceptions or [])
+        ),
         when_condition=_render_when(policy.has_tags),
         match_columns=match_columns,
         on_column=on_column,

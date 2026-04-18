@@ -106,16 +106,25 @@ def test_policy_compiler_emits_table_level_mask_policy():
 # ---------------------------------------------------------------------------
 
 
-def test_policy_compiler_sorts_principals():
-    """to / except principals are stored as sorted tuples."""
+def test_policy_compiler_emits_principals_as_unresolved():
+    """to / except principals are emitted as unresolved Principal objects (name set, type UNKNOWN).
+
+    Canonical sorting by (identifier, name) happens post-resolution in the
+    domain resolver, not in the compiler.
+    """
     policy_dict = _fgac_policy(to=["z_group", "a_group"], **{"except": ["z_adm", "a_adm"]})
     config = ResourcesConfig.model_validate(
         _catalog_with_policy(policy_dict, level="table")
     )
 
     (policy,) = compile_desired_policies(config)
-    assert policy.to_principals == ("a_group", "z_group")
-    assert policy.except_principals == ("a_adm", "z_adm")
+    to_names = [p.name for p in policy.to_principals]
+    except_names = [p.name for p in policy.except_principals]
+    assert set(to_names) == {"z_group", "a_group"}
+    assert set(except_names) == {"z_adm", "a_adm"}
+    for p in (*policy.to_principals, *policy.except_principals):
+        assert p.principal_type.name == "UNKNOWN"
+        assert p.identifier == ""
 
 
 def test_policy_compiler_handles_missing_except_principals():

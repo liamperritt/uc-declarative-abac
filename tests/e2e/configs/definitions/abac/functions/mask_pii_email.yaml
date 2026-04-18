@@ -1,9 +1,0 @@
-definitions:
-  functions:
-    abac|mask_pii_email:
-      name: mask_pii_email
-      owner: sp_uc_governor_test
-      parameters:
-        - name: col
-          type: string
-      return: "CASE WHEN is_member('uc_governor_test_team') THEN col ELSE '***' END"

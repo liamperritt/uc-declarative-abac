@@ -10,9 +10,10 @@ from uc_abac_governor.configs.models import ResourcesConfig
 from uc_abac_governor.helpers.unity_catalog import UnityCatalogHelper
 from uc_abac_governor.policies.state import Policy
 from uc_abac_governor.tags.state import SecurableTag
-from uc_abac_governor.privileges.state import UnresolvedPrivilege
+from uc_abac_governor.principals.state import Principal
+from uc_abac_governor.privileges.state import SecurablePrivilege
 from uc_abac_governor.securables.state import FunctionInfo, SecurableAttributes
-from uc_abac_governor.types import GovernorError, PolicyType, PrivilegeType, SecurableType
+from uc_abac_governor.types import GovernorError, PolicyType, PrincipalType, PrivilegeType, SecurableType
 
 WAREHOUSE_ID = "test-warehouse-id"
 
@@ -198,16 +199,16 @@ def test_uc_helper_fetches_actual_privileges_from_query_results(mock_fetch):
     result = helper.fetch_actual_privileges(["my_catalog"])
 
     expected = {
-        UnresolvedPrivilege(
+        SecurablePrivilege(
             securable_type=SecurableType.CATALOG,
             securable_full_name="my_catalog",
-            principal="data_engineers",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, identifier="data_engineers"),
             privilege_type=PrivilegeType.USE_CATALOG,
         ),
-        UnresolvedPrivilege(
+        SecurablePrivilege(
             securable_type=SecurableType.SCHEMA,
             securable_full_name="my_catalog.sales",
-            principal="analysts",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, identifier="analysts"),
             privilege_type=PrivilegeType.SELECT,
         ),
     }
@@ -216,7 +217,7 @@ def test_uc_helper_fetches_actual_privileges_from_query_results(mock_fetch):
 
 @patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_fetches_volume_privileges_from_query_results(mock_fetch):
-    """Mock returns volume privilege rows -> correct set of UnresolvedPrivilege."""
+    """Mock returns volume privilege rows -> correct set of SecurablePrivilege."""
     rows = [
         ["VOLUME", "my_catalog.landing.raw_events", "data_engineers", "READ_VOLUME"],
         ["VOLUME", "my_catalog.landing.raw_events", "data_engineers", "WRITE_VOLUME"],
@@ -228,16 +229,16 @@ def test_uc_helper_fetches_volume_privileges_from_query_results(mock_fetch):
     result = helper.fetch_actual_privileges(["my_catalog"])
 
     expected = {
-        UnresolvedPrivilege(
+        SecurablePrivilege(
             securable_type=SecurableType.VOLUME,
             securable_full_name="my_catalog.landing.raw_events",
-            principal="data_engineers",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, identifier="data_engineers"),
             privilege_type=PrivilegeType.READ_VOLUME,
         ),
-        UnresolvedPrivilege(
+        SecurablePrivilege(
             securable_type=SecurableType.VOLUME,
             securable_full_name="my_catalog.landing.raw_events",
-            principal="data_engineers",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, identifier="data_engineers"),
             privilege_type=PrivilegeType.WRITE_VOLUME,
         ),
     }
@@ -520,22 +521,22 @@ def test_uc_helper_parses_securable_rows_for_attributes(mock_fetch):
         SecurableAttributes(
             securable_type=SecurableType.CATALOG,
             full_name="my_catalog",
-            owner="admin_user",
+            owner=Principal(principal_type=PrincipalType.UNKNOWN, identifier="admin_user"),
         ),
         SecurableAttributes(
             securable_type=SecurableType.SCHEMA,
             full_name="my_catalog.sales",
-            owner="schema_owner",
+            owner=Principal(principal_type=PrincipalType.UNKNOWN, identifier="schema_owner"),
         ),
         SecurableAttributes(
             securable_type=SecurableType.TABLE,
             full_name="my_catalog.sales.orders",
-            owner="table_owner",
+            owner=Principal(principal_type=PrincipalType.UNKNOWN, identifier="table_owner"),
         ),
         SecurableAttributes(
             securable_type=SecurableType.VOLUME,
             full_name="my_catalog.landing.files",
-            owner="vol_owner",
+            owner=Principal(principal_type=PrincipalType.UNKNOWN, identifier="vol_owner"),
         ),
     }
     assert attributes == expected_attributes
@@ -593,7 +594,7 @@ def test_uc_helper_parses_securable_rows_emits_function_attributes(mock_fetch):
         SecurableAttributes(
             securable_type=SecurableType.FUNCTION,
             full_name="my_catalog.shared.mask_email",
-            owner="func_owner",
+            owner=Principal(principal_type=PrincipalType.UNKNOWN, identifier="func_owner"),
         ),
     }
     assert attributes == expected
@@ -847,8 +848,12 @@ def test_uc_helper_fetch_actual_policies_normalises_column_mask():
     assert policy.securable_full_name == "cat.s.t"
     assert policy.name == "p1"
     assert policy.function_name == "cat.default.fn"
-    assert policy.to_principals == ("analysts",)
-    assert policy.except_principals == ("admins",)
+    assert policy.to_principals == (
+        Principal(principal_type=PrincipalType.UNKNOWN, identifier="analysts"),
+    )
+    assert policy.except_principals == (
+        Principal(principal_type=PrincipalType.UNKNOWN, identifier="admins"),
+    )
     assert policy.on_column == "c"
     assert policy.using_columns == ("c_extra",)
     assert policy.match_columns == (

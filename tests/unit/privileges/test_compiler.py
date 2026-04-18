@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from uc_abac_governor.configs.models import ResourcesConfig
+from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.privileges.compiler import compile_desired_privileges
 from uc_abac_governor.privileges.state import SecurablePrivilege
 from uc_abac_governor.tags.state import SecurableTag
-from uc_abac_governor.privileges.state import UnresolvedPrivilege
-from uc_abac_governor.types import PrivilegeType, SecurableType
+from uc_abac_governor.types import PrincipalType, PrivilegeType, SecurableType
 
 
 # ---------------------------------------------------------------------------
@@ -15,7 +15,7 @@ from uc_abac_governor.types import PrivilegeType, SecurableType
 
 def test_privilege_compiler_computes_privileges_from_policy():
     """A grant policy with tags: {sales: None} and a table tagged {sales: ""}
-    produces UnresolvedPrivilege entries for each principal x privilege."""
+    produces SecurablePrivilege entries for each principal x privilege."""
     config = ResourcesConfig.model_validate(
         {
             "catalogs": {
@@ -51,28 +51,28 @@ def test_privilege_compiler_computes_privileges_from_policy():
     result = compile_desired_privileges(config, desired_tags)
 
     assert result == {
-        UnresolvedPrivilege(
+        SecurablePrivilege(
             securable_type=SecurableType.TABLE,
             securable_full_name="my_catalog.default.orders",
-            principal="analysts",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="analysts"),
             privilege_type=PrivilegeType.SELECT,
         ),
-        UnresolvedPrivilege(
+        SecurablePrivilege(
             securable_type=SecurableType.TABLE,
             securable_full_name="my_catalog.default.orders",
-            principal="analysts",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="analysts"),
             privilege_type=PrivilegeType.MODIFY,
         ),
-        UnresolvedPrivilege(
+        SecurablePrivilege(
             securable_type=SecurableType.TABLE,
             securable_full_name="my_catalog.default.orders",
-            principal="engineers",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="engineers"),
             privilege_type=PrivilegeType.SELECT,
         ),
-        UnresolvedPrivilege(
+        SecurablePrivilege(
             securable_type=SecurableType.TABLE,
             securable_full_name="my_catalog.default.orders",
-            principal="engineers",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="engineers"),
             privilege_type=PrivilegeType.MODIFY,
         ),
     }
@@ -123,10 +123,10 @@ def test_privilege_compiler_policy_uses_and_semantics_for_multiple_tags():
     result = compile_desired_privileges(config, desired_tags)
 
     assert result == {
-        UnresolvedPrivilege(
+        SecurablePrivilege(
             securable_type=SecurableType.TABLE,
             securable_full_name="cat.s.table_both",
-            principal="team",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
             privilege_type=PrivilegeType.SELECT,
         ),
     }
@@ -208,16 +208,16 @@ def test_privilege_compiler_handles_multiple_policies_per_catalog():
     result = compile_desired_privileges(config, desired_tags)
 
     assert result == {
-        UnresolvedPrivilege(
+        SecurablePrivilege(
             securable_type=SecurableType.TABLE,
             securable_full_name="cat.s.t1",
-            principal="readers",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="readers"),
             privilege_type=PrivilegeType.SELECT,
         ),
-        UnresolvedPrivilege(
+        SecurablePrivilege(
             securable_type=SecurableType.TABLE,
             securable_full_name="cat.s.t2",
-            principal="writers",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="writers"),
             privilege_type=PrivilegeType.MODIFY,
         ),
     }
@@ -290,10 +290,10 @@ def test_privilege_compiler_matches_schema_level_policy():
 
     result = compile_desired_privileges(config, desired_tags)
 
-    assert UnresolvedPrivilege(
+    assert SecurablePrivilege(
         securable_type=SecurableType.SCHEMA,
         securable_full_name="my_catalog.sales",
-        principal="data_engineers",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="data_engineers"),
         privilege_type=PrivilegeType.SELECT,
     ) in result
 
@@ -339,10 +339,10 @@ def test_privilege_compiler_matches_table_level_policy():
 
     result = compile_desired_privileges(config, desired_tags)
 
-    assert UnresolvedPrivilege(
+    assert SecurablePrivilege(
         securable_type=SecurableType.TABLE,
         securable_full_name="my_catalog.sales.orders",
-        principal="sales_team",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="sales_team"),
         privilege_type=PrivilegeType.MODIFY,
     ) in result
 
@@ -416,22 +416,22 @@ def test_privilege_compiler_collects_policies_from_all_levels():
     result = compile_desired_privileges(config, desired_tags)
 
     assert len(result) >= 3
-    assert UnresolvedPrivilege(
+    assert SecurablePrivilege(
         securable_type=SecurableType.CATALOG,
         securable_full_name="my_catalog",
-        principal="all_users",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="all_users"),
         privilege_type=PrivilegeType.USE_CATALOG,
     ) in result
-    assert UnresolvedPrivilege(
+    assert SecurablePrivilege(
         securable_type=SecurableType.SCHEMA,
         securable_full_name="my_catalog.sales",
-        principal="data_engineers",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="data_engineers"),
         privilege_type=PrivilegeType.SELECT,
     ) in result
-    assert UnresolvedPrivilege(
+    assert SecurablePrivilege(
         securable_type=SecurableType.TABLE,
         securable_full_name="my_catalog.sales.orders",
-        principal="sales_team",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="sales_team"),
         privilege_type=PrivilegeType.MODIFY,
     ) in result
 
@@ -480,12 +480,12 @@ def test_privilege_compiler_matches_against_desired_tags():
 
 
 # ---------------------------------------------------------------------------
-# UnresolvedPrivilege output type
+# SecurablePrivilege output type
 # ---------------------------------------------------------------------------
 
 
-def test_privilege_compiler_emits_compiled_privilege_type():
-    """The compiler emits UnresolvedPrivilege instances (not SecurablePrivilege)."""
+def test_privilege_compiler_emits_securable_privileges_with_unresolved_principals():
+    """The compiler emits SecurablePrivilege instances whose principals are unresolved."""
     config = ResourcesConfig.model_validate(
         {
             "catalogs": {
@@ -516,8 +516,10 @@ def test_privilege_compiler_emits_compiled_privilege_type():
 
     assert isinstance(result, set)
     for elem in result:
-        assert isinstance(elem, UnresolvedPrivilege)
-        assert not isinstance(elem, SecurablePrivilege)
+        assert isinstance(elem, SecurablePrivilege)
+        assert elem.principal.principal_type == PrincipalType.UNKNOWN
+        assert elem.principal.name == "my_team"
+        assert elem.principal.identifier == ""
 
 
 # ---------------------------------------------------------------------------
@@ -556,10 +558,10 @@ def test_privilege_compiler_filters_incompatible_privilege_for_volume():
 
     result = compile_desired_privileges(config, desired_tags)
 
-    assert UnresolvedPrivilege(
+    assert SecurablePrivilege(
         securable_type=SecurableType.VOLUME,
         securable_full_name="cat.raw.events",
-        principal="team",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
         privilege_type=PrivilegeType.READ_VOLUME,
     ) in result
 
@@ -598,10 +600,10 @@ def test_privilege_compiler_allows_select_on_table():
 
     result = compile_desired_privileges(config, desired_tags)
 
-    assert UnresolvedPrivilege(
+    assert SecurablePrivilege(
         securable_type=SecurableType.TABLE,
         securable_full_name="cat.raw.events",
-        principal="team",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
         privilege_type=PrivilegeType.SELECT,
     ) in result
 
@@ -640,10 +642,10 @@ def test_privilege_compiler_allows_all_privileges_on_any_securable():
 
     result = compile_desired_privileges(config, desired_tags)
 
-    assert UnresolvedPrivilege(
+    assert SecurablePrivilege(
         securable_type=SecurableType.VOLUME,
         securable_full_name="cat.raw.files",
-        principal="team",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
         privilege_type=PrivilegeType.ALL_PRIVILEGES,
     ) in result
 
@@ -786,10 +788,10 @@ def test_privilege_compiler_grants_directly_when_policy_has_no_tags():
 
     result = compile_desired_privileges(config, set())
 
-    assert UnresolvedPrivilege(
+    assert SecurablePrivilege(
         securable_type=SecurableType.CATALOG,
         securable_full_name="my_cat",
-        principal="team",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
         privilege_type=PrivilegeType.USE_CATALOG,
     ) in result
 
@@ -820,10 +822,10 @@ def test_privilege_compiler_grants_directly_to_schema_when_policy_has_no_tags():
 
     result = compile_desired_privileges(config, set())
 
-    assert UnresolvedPrivilege(
+    assert SecurablePrivilege(
         securable_type=SecurableType.SCHEMA,
         securable_full_name="my_cat.sales",
-        principal="team",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
         privilege_type=PrivilegeType.USE_SCHEMA,
     ) in result
 
@@ -882,18 +884,18 @@ def test_privilege_compiler_scopes_policy_to_attached_securable():
     result = compile_desired_privileges(config, desired_tags)
 
     # Policy is on schema 'sales' — should match its child table only
-    assert UnresolvedPrivilege(
+    assert SecurablePrivilege(
         securable_type=SecurableType.TABLE,
         securable_full_name="my_cat.sales.orders",
-        principal="team",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
         privilege_type=PrivilegeType.SELECT,
     ) in result
 
     # Should NOT match table in sibling schema 'hr'
-    assert UnresolvedPrivilege(
+    assert SecurablePrivilege(
         securable_type=SecurableType.TABLE,
         securable_full_name="my_cat.hr.employees",
-        principal="team",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
         privilege_type=PrivilegeType.SELECT,
     ) not in result
 
@@ -946,17 +948,17 @@ def test_privilege_compiler_scopes_catalog_policy_to_all_children():
     result = compile_desired_privileges(config, desired_tags)
 
     # Catalog-level policy should match tables in BOTH schemas
-    assert UnresolvedPrivilege(
+    assert SecurablePrivilege(
         securable_type=SecurableType.TABLE,
         securable_full_name="my_cat.sales.orders",
-        principal="team",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
         privilege_type=PrivilegeType.SELECT,
     ) in result
 
-    assert UnresolvedPrivilege(
+    assert SecurablePrivilege(
         securable_type=SecurableType.TABLE,
         securable_full_name="my_cat.hr.employees",
-        principal="team",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
         privilege_type=PrivilegeType.SELECT,
     ) in result
 
@@ -1016,17 +1018,17 @@ def test_privilege_compiler_and_semantics_with_scoped_policy():
     result = compile_desired_privileges(config, desired_tags)
 
     # orders should match — has both tags
-    assert UnresolvedPrivilege(
+    assert SecurablePrivilege(
         securable_type=SecurableType.TABLE,
         securable_full_name="my_cat.sales.orders",
-        principal="team",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
         privilege_type=PrivilegeType.SELECT,
     ) in result
 
     # users should NOT match — missing 'level: senior' tag
-    assert UnresolvedPrivilege(
+    assert SecurablePrivilege(
         securable_type=SecurableType.TABLE,
         securable_full_name="my_cat.sales.users",
-        principal="team",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
         privilege_type=PrivilegeType.SELECT,
     ) not in result

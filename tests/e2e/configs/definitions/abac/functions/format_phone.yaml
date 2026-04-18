@@ -2,6 +2,7 @@ definitions:
   functions:
     abac|format_phone:
       name: format_phone
+      owner: sp_uc_governor_test
       parameters:
         - name: code
           type: string

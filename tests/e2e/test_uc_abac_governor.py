@@ -24,7 +24,8 @@ from uc_abac_governor.governor import run
 from uc_abac_governor.securables.state import AttributeUpdate, FunctionInfo, SecurableAttributes
 from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.privileges.state import SecurablePrivilege
-from uc_abac_governor.types import Principal, PrincipalType, PrivilegeType, SecurableType
+from uc_abac_governor.principals.state import Principal
+from uc_abac_governor.types import PrincipalType, PrivilegeType, SecurableType
 
 
 # ---------------------------------------------------------------------------

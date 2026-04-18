@@ -1,0 +1,9 @@
+definitions:
+  functions:
+    abac|fn_mask_pii:
+      name: fn_mask_pii
+      owner: liam.perritt@databricks.com
+      parameters:
+        - name: pii
+          type: string
+      return: "'***'"

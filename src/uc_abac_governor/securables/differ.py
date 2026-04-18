@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from uc_abac_governor.logger import ChangeLogger
+    from uc_abac_governor.principals.resolver import PrincipalResolver
+
 from uc_abac_governor.securables.state import (
     AttributeUpdate,
     SecurableAttributes,
     SecurableDiff,
     SecurableInfo,
 )
-from uc_abac_governor.types import Principal
+from uc_abac_governor.types import ExecutionError, PrincipalValidationError
 
 _GOVERNED_ATTRIBUTES = ["owner"]
 
@@ -16,10 +22,19 @@ def compute_securable_diff(
     actual_attrs: set[SecurableAttributes],
     desired_securables: set[SecurableInfo],
     actual_securables: set[SecurableInfo],
-    desired_owner_principals: dict[str, Principal] | None = None,
-    actual_owner_principals: dict[str, Principal] | None = None,
+    resolver: PrincipalResolver,
+    change_logger: ChangeLogger,
 ) -> SecurableDiff:
-    """Compute the diff between desired and actual securable state."""
+    """Compute the diff between desired and actual securable state.
+
+    Resolves owner Principals on both sides before diffing. Owner-resolution
+    failures are logged via change_logger and clear the owner field on the
+    affected row (the SecurableAttributes itself is retained so the securable's
+    create/replace info isn't lost).
+    """
+    desired_attrs = _resolve_attribute_owners(desired_attrs, resolver, change_logger)
+    actual_attrs = _resolve_attribute_owners(actual_attrs, resolver, change_logger)
+
     securables_to_create, securables_to_replace = _diff_securables(
         desired_securables, actual_securables
     )
@@ -28,8 +43,6 @@ def compute_securable_diff(
 
     attributes_to_update = _diff_attributes(
         desired_attrs, actual_attrs, created_full_names,
-        desired_owner_principals or {},
-        actual_owner_principals or {},
     )
 
     return SecurableDiff(
@@ -37,6 +50,42 @@ def compute_securable_diff(
         securables_to_create=securables_to_create,
         securables_to_replace=securables_to_replace,
     )
+
+
+def _resolve_attribute_owners(
+    unresolved: set[SecurableAttributes],
+    resolver: PrincipalResolver,
+    change_logger: ChangeLogger,
+) -> set[SecurableAttributes]:
+    """Resolve owner Principals on a set of SecurableAttributes.
+
+    On failure, clears the owner field but retains the SecurableAttributes —
+    dropping it would lose the securable's create/replace info.
+    """
+    result: set[SecurableAttributes] = set()
+    for attr in unresolved:
+        if attr.owner is None:
+            result.add(attr)
+            continue
+        try:
+            (resolved_owner,) = resolver.resolve_principals([attr.owner])
+        except PrincipalValidationError as exc:
+            change_logger.log_error(ExecutionError(
+                context=f"Resolve owner for {attr.securable_type.value} {attr.full_name}",
+                exception=exc,
+            ))
+            result.add(SecurableAttributes(
+                securable_type=attr.securable_type,
+                full_name=attr.full_name,
+                owner=None,
+            ))
+            continue
+        result.add(SecurableAttributes(
+            securable_type=attr.securable_type,
+            full_name=attr.full_name,
+            owner=resolved_owner,
+        ))
+    return result
 
 
 def _diff_securables(
@@ -63,14 +112,11 @@ def _diff_attributes(
     desired_attrs: set[SecurableAttributes],
     actual_attrs: set[SecurableAttributes],
     created_full_names: set[str],
-    desired_owner_principals: dict[str, Principal],
-    actual_owner_principals: dict[str, Principal],
 ) -> list[AttributeUpdate]:
     """Return attribute updates by comparing desired vs actual attributes.
 
-    When principal mappings are provided for the owner attribute, comparison
-    uses Principal.identifier and the AttributeUpdate values are Principal
-    objects. Otherwise falls back to raw string comparison.
+    For resolved Principals, equality uses dataclass field equality — two
+    resolved principals with the same identifier + name + type compare equal.
 
     Desired-only attributes are skipped unless the securable is being created.
     """
@@ -88,33 +134,19 @@ def _diff_attributes(
             continue
 
         for attr in _GOVERNED_ATTRIBUTES:
-            new_raw = getattr(desired, attr)
-            if new_raw is None:
+            new_value = getattr(desired, attr)
+            if new_value is None:
                 continue
 
-            if attr == "owner" and desired.full_name in desired_owner_principals:
-                new_principal = desired_owner_principals[desired.full_name]
-                old_principal = actual_owner_principals.get(desired.full_name)
-                if old_principal is not None and new_principal.identifier == old_principal.identifier:
-                    continue
-                updates.append(AttributeUpdate(
-                    securable_type=desired.securable_type,
-                    full_name=desired.full_name,
-                    attribute=attr,
-                    old_value=old_principal if old_principal is not None else "",
-                    new_value=new_principal,
-                ))
-            else:
-                old_value = getattr(actual, attr, None) if actual is not None else ""
-                if old_value is None:
-                    old_value = ""
-                if new_raw != old_value:
-                    updates.append(AttributeUpdate(
-                        securable_type=desired.securable_type,
-                        full_name=desired.full_name,
-                        attribute=attr,
-                        old_value=old_value,
-                        new_value=new_raw,
-                    ))
+            old_value = getattr(actual, attr, None) if actual is not None else None
+            if old_value == new_value:
+                continue
+            updates.append(AttributeUpdate(
+                securable_type=desired.securable_type,
+                full_name=desired.full_name,
+                attribute=attr,
+                old_value=old_value if old_value is not None else "",
+                new_value=new_value,
+            ))
 
     return updates

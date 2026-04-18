@@ -17,15 +17,14 @@ from uc_abac_governor.policies.compiler import compile_desired_policies
 from uc_abac_governor.policies.differ import compute_policy_diff
 from uc_abac_governor.policies.executor import execute_policy_diff
 from uc_abac_governor.policies.state import PolicyDiff
+from uc_abac_governor.principals.resolver import PrincipalResolver
 from uc_abac_governor.privileges.compiler import compile_desired_privileges
 from uc_abac_governor.privileges.differ import compute_privilege_diff
 from uc_abac_governor.privileges.executor import execute_privilege_diff
-from uc_abac_governor.privileges.resolver import resolve_actual_privileges, resolve_compiled_privileges
 from uc_abac_governor.privileges.state import PrivilegeDiff
 from uc_abac_governor.securables.compiler import compile_desired_attributes, compile_desired_securables
 from uc_abac_governor.securables.differ import compute_securable_diff
 from uc_abac_governor.securables.executor import execute_securable_diff
-from uc_abac_governor.securables.resolver import resolve_actual_owners, resolve_desired_owners
 from uc_abac_governor.securables.state import SecurableDiff
 from uc_abac_governor.logger import ChangeLogger
 from uc_abac_governor.tags.compiler import compile_desired_tags
@@ -75,17 +74,16 @@ def run(
         actual_policies = actual_policies_f.result()
         principals_f.result()
     _logger.info("  Successfully fetched current state")
-    _logger.info("")
 
-    # 3. Securables workflow (before tags and privileges)
+    # 3. Construct the shared PrincipalResolver now that ws_helper cache is populated.
+    resolver = PrincipalResolver(ws_helper)
+
+    # 4. Securables workflow (before tags and privileges)
     desired_attributes = compile_desired_attributes(config)
     desired_securables = compile_desired_securables(config)
-    desired_owner_principals = resolve_desired_owners(desired_attributes, ws_helper, change_logger)
-    actual_owner_principals = resolve_actual_owners(actual_attributes, ws_helper)
     securable_diff = compute_securable_diff(
         desired_attributes, actual_attributes, desired_securables, actual_securables,
-        desired_owner_principals=desired_owner_principals,
-        actual_owner_principals=actual_owner_principals,
+        resolver, change_logger,
     )
 
     if securable_diff.securables_to_create or securable_diff.securables_to_replace or securable_diff.attributes_to_update:
@@ -98,13 +96,15 @@ def run(
 
     # 5. Policies workflow (mask/filter)
     desired_policies = compile_desired_policies(config)
-    policy_diff = compute_policy_diff(desired_policies, actual_policies)
+    policy_diff = compute_policy_diff(
+        desired_policies, actual_policies, resolver, change_logger,
+    )
 
     # 6. Privileges workflow
     compiled_privileges = compile_desired_privileges(config, desired_tags, run_date=date.today())
-    resolved_desired = resolve_compiled_privileges(compiled_privileges, ws_helper, change_logger)
-    resolved_actual = resolve_actual_privileges(actual_privileges, ws_helper)
-    privilege_diff = compute_privilege_diff(resolved_desired, resolved_actual)
+    privilege_diff = compute_privilege_diff(
+        compiled_privileges, actual_privileges, resolver, change_logger,
+    )
 
     # 7. Log and execute (or dry-run)
     if tag_diff.to_add or tag_diff.to_update or tag_diff.to_remove:

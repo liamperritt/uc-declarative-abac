@@ -1,21 +1,26 @@
 from __future__ import annotations
 
 from uc_abac_governor.configs.models import FunctionConfig, ResourcesConfig, SecurableConfig
+from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.securables.state import FunctionInfo, SecurableAttributes, SecurableInfo
-from uc_abac_governor.types import SecurableType
+from uc_abac_governor.types import PrincipalType, SecurableType
 
 
 def _emit_attributes(
     securable_type: SecurableType,
     obj: SecurableConfig,
 ) -> SecurableAttributes | None:
-    """Return a SecurableAttributes if the object has a non-None owner, else None."""
+    """Return a SecurableAttributes if the object has a non-None owner, else None.
+
+    The owner is emitted as an unresolved Principal (principal_type=UNKNOWN)
+    carrying the display name from config. Resolution happens post-fetch.
+    """
     if obj.owner is None:
         return None
     return SecurableAttributes(
         securable_type=securable_type,
         full_name=obj.full_name,
-        owner=obj.owner,
+        owner=Principal(principal_type=PrincipalType.UNKNOWN, name=obj.owner),
     )
 
 

@@ -9,4 +9,4 @@ definitions:
       columns:
         - name: data
           tags:
-            uc_gov_classification: internal
+            uc_gov_pii: ~

@@ -5,7 +5,13 @@ from unittest.mock import MagicMock
 from uc_abac_governor.logger import ChangeLogger
 from uc_abac_governor.policies.executor import execute_policy_diff
 from uc_abac_governor.policies.state import Policy, PolicyDiff
-from uc_abac_governor.types import ExecutionError, PolicyType, SecurableType
+from uc_abac_governor.principals.state import Principal
+from uc_abac_governor.types import ExecutionError, PolicyType, PrincipalType, SecurableType
+
+
+def _resolved(name: str, principal_type: PrincipalType = PrincipalType.GROUP) -> Principal:
+    """Construct a resolved Principal with identifier == name (for GROUP/USER)."""
+    return Principal(principal_type=principal_type, name=name, identifier=name)
 
 
 def _assert_sql_contains(sql: str, *fragments: str):
@@ -31,7 +37,7 @@ def _make_policy(**overrides) -> Policy:
         name="mask_pii",
         policy_type=PolicyType.MASK,
         function_name="cat.default.mask_fn",
-        to_principals=("analysts",),
+        to_principals=(_resolved("analysts"),),
         except_principals=(),
         when_condition=None,
         match_columns=(("c", "has_column_tag_value('pii', 'email')"),),
@@ -180,7 +186,7 @@ def test_policy_executor_row_filter_omits_using_when_no_columns():
 
 def test_policy_executor_includes_to_principals():
     uc_helper = MagicMock()
-    diff = PolicyDiff(to_create={_make_policy(to_principals=("a_group", "b_group"))})
+    diff = PolicyDiff(to_create={_make_policy(to_principals=(_resolved("a_group"), _resolved("b_group")))})
 
     (sql,) = execute_policy_diff(uc_helper, diff, ChangeLogger())
     _assert_sql_contains(sql, "TO `a_group`, `b_group`")
@@ -188,7 +194,7 @@ def test_policy_executor_includes_to_principals():
 
 def test_policy_executor_includes_except_when_present():
     uc_helper = MagicMock()
-    diff = PolicyDiff(to_create={_make_policy(except_principals=("admin",))})
+    diff = PolicyDiff(to_create={_make_policy(except_principals=(_resolved("admin"),))})
 
     (sql,) = execute_policy_diff(uc_helper, diff, ChangeLogger())
     _assert_sql_contains(sql, "EXCEPT `admin`")

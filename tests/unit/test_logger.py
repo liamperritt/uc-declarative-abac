@@ -8,7 +8,8 @@ from uc_abac_governor.privileges.state import SecurablePrivilege
 from uc_abac_governor.logger import ChangeLogger
 from uc_abac_governor.securables.state import AttributeUpdate, FunctionInfo, SecurableInfo
 from uc_abac_governor.tags.state import SecurableTag
-from uc_abac_governor.types import Principal, PrincipalType, PolicyType, PrivilegeType, SecurableType, ExecutionError
+from uc_abac_governor.principals.state import Principal
+from uc_abac_governor.types import PrincipalType, PolicyType, PrivilegeType, SecurableType, ExecutionError
 
 
 # ---------------------------------------------------------------------------

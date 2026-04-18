@@ -6,8 +6,10 @@ if TYPE_CHECKING:
     from uc_abac_governor.helpers.unity_catalog import UnityCatalogHelper
     from uc_abac_governor.logger import ChangeLogger
 
-from uc_abac_governor.helpers.sql import quote_securable as _quote_securable
+from uc_abac_governor.helpers import quote_securable as quote_securable
 from uc_abac_governor.policies.state import Policy, PolicyDiff
+from uc_abac_governor.principals.resolver import ensure_all_resolved
+from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.types import ExecutionError, PolicyType
 
 
@@ -58,8 +60,9 @@ def _run_statement(
     return True
 
 
-def _quote_principals(principals: tuple[str, ...]) -> str:
-    return ", ".join(f"`{p}`" for p in principals)
+def _quote_principals(principals: tuple[Principal, ...]) -> str:
+    resolved = ensure_all_resolved(principals)
+    return ", ".join(f"`{p.identifier}`" for p in resolved)
 
 
 def _build_policy_sql(policy: Policy, or_replace: bool) -> str:
@@ -68,8 +71,8 @@ def _build_policy_sql(policy: Policy, or_replace: bool) -> str:
 
     lines = [
         f"{prefix} `{policy.name}`",
-        f"ON {policy.securable_type.value} {_quote_securable(policy.securable_full_name)}",
-        f"{body_type} {_quote_securable(policy.function_name)}",
+        f"ON {policy.securable_type.value} {quote_securable(policy.securable_full_name)}",
+        f"{body_type} {quote_securable(policy.function_name)}",
         f"TO {_quote_principals(policy.to_principals)}",
     ]
     if policy.except_principals:

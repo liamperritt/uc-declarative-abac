@@ -6,7 +6,8 @@ from uc_abac_governor.policies.state import Policy
 from uc_abac_governor.privileges.state import SecurablePrivilege
 from uc_abac_governor.securables.state import AttributeUpdate, SecurableInfo
 from uc_abac_governor.tags.state import SecurableTag
-from uc_abac_governor.types import ExecutionError, Principal
+from uc_abac_governor.principals.state import Principal
+from uc_abac_governor.types import ExecutionError
 
 _default_logger = logging.getLogger("uc_abac_governor")
 
@@ -91,6 +92,7 @@ class ChangeLogger:
         """Log a section header with underline."""
         suffix = " (dry run)" if self._dry_run else ""
         header = f"{name}{suffix}"
+        self._logger.info("")
         self._logger.info(header)
         self._logger.info("-" * len(header))
 

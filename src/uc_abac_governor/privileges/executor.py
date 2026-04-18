@@ -6,28 +6,31 @@ if TYPE_CHECKING:
     from uc_abac_governor.helpers.unity_catalog import UnityCatalogHelper
     from uc_abac_governor.logger import ChangeLogger
 
-from uc_abac_governor.helpers.sql import quote_securable as _quote_securable
+from uc_abac_governor.helpers import quote_securable as quote_securable
+from uc_abac_governor.principals.resolver import ensure_resolved
 from uc_abac_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
 from uc_abac_governor.types import ExecutionError
 
 
 def _build_grant_sql(priv: SecurablePrivilege) -> str:
     """Build a GRANT SQL statement for a single privilege."""
-    quoted = _quote_securable(priv.securable_full_name)
+    quoted = quote_securable(priv.securable_full_name)
+    principal = ensure_resolved(priv.principal)
     return (
         f"GRANT {priv.privilege_type.upper()} "
         f"ON {priv.securable_type.value} {quoted} "
-        f"TO `{priv.principal.identifier}`"
+        f"TO `{principal.identifier}`"
     )
 
 
 def _build_revoke_sql(priv: SecurablePrivilege) -> str:
     """Build a REVOKE SQL statement for a single privilege."""
-    quoted = _quote_securable(priv.securable_full_name)
+    quoted = quote_securable(priv.securable_full_name)
+    principal = ensure_resolved(priv.principal)
     return (
         f"REVOKE {priv.privilege_type.upper()} "
         f"ON {priv.securable_type.value} {quoted} "
-        f"FROM `{priv.principal.identifier}`"
+        f"FROM `{principal.identifier}`"
     )
 
 

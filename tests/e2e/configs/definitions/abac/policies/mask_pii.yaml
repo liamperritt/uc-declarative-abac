@@ -1,0 +1,14 @@
+definitions:
+  policies:
+    abac|mask_pii:
+      name: mask_pii
+      type: mask
+      function: liam_perritt.default.fn_mask_pii
+      to:
+        - uc_governor_test_team
+        - liam.perritt@databricks.com
+      except: []
+      columns:
+        - alias: pii
+          has_tags:
+            uc_gov_pii: '*'

@@ -28,6 +28,41 @@ See `README.md` for the full design specification, YAML config structures, and e
 - **Tags & grant policies**: additive + removals/revokes
 - **Mask & filter policies**: additive only (UC limitation — no system table to track these yet)
 
+### Principal resolution
+
+Any domain that references principals (users, groups, service principals) in its diff **must** resolve them from display-name form to identifier form before diffing. The two sides speak different dialects:
+
+- **Desired state (from YAML config)** uses **display names** for every principal type.
+- **Actual state (from UC system tables or SDK list APIs)** uses **canonical identifiers**. For users the identifier is the username, for groups it's the display name, but for service principals it's the **application_id (UUID)** — not the display name.
+
+Comparing raw strings (or pre-resolution `Principal`s with only one side populated) would make every SP-bearing row look like a change on every run.
+
+#### The `Principal` type
+
+A single frozen dataclass at `src/uc_abac_governor/principals/state.py` represents both unresolved and resolved principals. Resolution status is a runtime property, not a type:
+
+- **Unresolved:** `principal_type == PrincipalType.UNKNOWN`, with exactly one of `name` / `identifier` truthy. Config-side has `name` set; UC-side has `identifier` set.
+- **Resolved:** `principal_type` ∈ {USER, GROUP, SERVICE_PRINCIPAL}, with both `name` and `identifier` truthy. This invariant is enforced by `__post_init__`.
+
+#### Pipeline shape
+
+1. **Compilers** (`<domain>/compiler.py`) produce state with `Principal(principal_type=UNKNOWN, name=<from YAML>)`.
+2. **Fetch helpers** (`UnityCatalogHelper.fetch_actual_*`) produce state with `Principal(principal_type=UNKNOWN, identifier=<from UC>)`. They do **not** depend on `WorkspaceHelper` — this keeps them safe inside the parallel fetch block.
+3. **Differs** (`<domain>/differ.py`) own principal resolution. `compute_*_diff` accepts a `PrincipalResolver` and a `ChangeLogger`, resolves principals on both desired and actual state internally (via a private `_resolve_*` helper in the same module), and returns a fully-resolved diff. Unknown principals are logged and the affected state row is dropped.
+4. **Executors** call `ensure_resolved(principal)` from `principals/resolver.py` before reading `.identifier`. This asserts the runtime invariant.
+
+#### Key APIs (all in `src/uc_abac_governor/principals/resolver.py`)
+
+- `PrincipalResolver(ws_helper).resolve_principal(p)` — resolve one, raises `PrincipalValidationError` on failure.
+- `PrincipalResolver(ws_helper).resolve_principals(batch)` — all-or-nothing; on any failure raises one `PrincipalValidationError` whose message lists every offender.
+- `ensure_resolved(p)` / `ensure_all_resolved(iterable)` — runtime guards used at the executor boundary.
+
+`Principal.identifier` and `.name` default to the empty string. An unresolved Principal from config has `name` truthy and `identifier` empty; an unresolved Principal from UC state is the reverse. The resolver picks its lookup direction by checking which field is truthy.
+
+Unknown principals are collected as `ExecutionError(PrincipalValidationError)` on `ChangeLogger` and excluded from the diff; they do not abort the run.
+
+The privileges, securables, and policies differs all follow this pattern — see the private `_resolve_*` function at the bottom of each `<domain>/differ.py`. No separate per-domain `resolver.py` modules exist.
+
 ## YAML config conventions
 
 ### Definition IDs

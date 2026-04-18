@@ -4,9 +4,10 @@ from collections import defaultdict
 from datetime import date
 
 from uc_abac_governor.configs.models import ResourcesConfig, GrantPolicyConfig
+from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.tags.state import SecurableTag
-from uc_abac_governor.privileges.state import UnresolvedPrivilege
-from uc_abac_governor.types import PrivilegeType, SecurableType
+from uc_abac_governor.privileges.state import SecurablePrivilege
+from uc_abac_governor.types import PrincipalType, PrivilegeType, SecurableType
 
 # Privileges valid for each securable type. Higher-level securables inherit
 # all privileges from lower levels. Unknown privileges are allowed on all types.
@@ -28,7 +29,7 @@ _SCHEMA_PRIVILEGES = (
         PrivilegeType.CREATE_MODEL_VERSION,
     }
 )
-_CATALOG_PRIVILEGES = _SCHEMA_PRIVILEGES | {PrivilegeType.USE_CATALOG, PrivilegeType.CREATE_SCHEMA}
+_CATALOG_PRIVILEGES = _SCHEMA_PRIVILEGES | {PrivilegeType.USE_CATALOG, PrivilegeType.CREATE_SCHEMA, PrivilegeType.BROWSE}
 _UNIVERSAL_PRIVILEGES = {PrivilegeType.ALL_PRIVILEGES, PrivilegeType.MANAGE}
 
 SECURABLE_TYPE_PRIVILEGE_MAP: dict[SecurableType, set[PrivilegeType]] = {
@@ -44,12 +45,12 @@ def compile_desired_privileges(
     config: ResourcesConfig,
     desired_tags: set[SecurableTag],
     run_date: date | None = None,
-) -> set[UnresolvedPrivilege]:
+) -> set[SecurablePrivilege]:
     """Compute desired privileges by matching grant policies against desired tags.
 
     For each grant policy, finds objects whose tags are a superset of the
-    policy's tags (AND semantics, exact value match). Emits a UnresolvedPrivilege
-    for each (matching_object, principal, privilege_type).
+    policy's tags (AND semantics, exact value match). Emits a SecurablePrivilege
+    (with unresolved Principal) for each (matching_object, principal, privilege_type).
     """
     if run_date is None:
         run_date = date.today()
@@ -114,19 +115,20 @@ def _emit_privileges(
     sec_type: SecurableType,
     full_name: str,
     policy: GrantPolicyConfig,
-) -> set[UnresolvedPrivilege]:
-    """Emit UnresolvedPrivilege entries for each principal × privilege combination."""
+) -> set[SecurablePrivilege]:
+    """Emit SecurablePrivilege entries (with unresolved Principals) for each
+    principal × privilege combination."""
     allowed = SECURABLE_TYPE_PRIVILEGE_MAP.get(sec_type)
-    result: set[UnresolvedPrivilege] = set()
+    result: set[SecurablePrivilege] = set()
     for principal_name in policy.to:
         for privilege in policy.privileges:
             if allowed is not None and privilege not in allowed:
                 continue
             result.add(
-                UnresolvedPrivilege(
+                SecurablePrivilege(
                     securable_type=sec_type,
                     securable_full_name=full_name,
-                    principal=principal_name,
+                    principal=Principal(principal_type=PrincipalType.UNKNOWN, name=principal_name),
                     privilege_type=privilege,
                 )
             )
@@ -136,14 +138,14 @@ def _emit_privileges(
 def _match_policies(
     policies: list[GrantPolicyConfig],
     tag_index: dict[str, tuple[SecurableType, set[tuple[str, str | None]]]],
-) -> set[UnresolvedPrivilege]:
+) -> set[SecurablePrivilege]:
     """Match policies against the tag index and emit compiled privileges.
 
     Tagless policies (empty tags) grant directly to their attached securable.
     Policies with tags only match securables within their scope (attached
     securable and its children).
     """
-    result: set[UnresolvedPrivilege] = set()
+    result: set[SecurablePrivilege] = set()
     for policy in policies:
         if not policy.has_tags:
             # Tagless policy — grant directly to the attached securable

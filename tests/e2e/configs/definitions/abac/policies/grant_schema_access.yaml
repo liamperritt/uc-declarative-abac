@@ -5,7 +5,10 @@ definitions:
       privileges:
         - use_schema
         - select
+        - execute
+        - read_volume
       to:
         - j.wang@databricks.com
+        - liam.perritt@databricks.com
       has_tags:
         uc_gov_team: platform

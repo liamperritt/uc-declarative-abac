@@ -4,9 +4,9 @@ import logging
 
 from databricks.sdk import WorkspaceClient
 
+from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.types import (
     DuplicateServicePrincipalError,
-    Principal,
     PrincipalType,
     PrincipalValidationError,
 )

@@ -11,5 +11,5 @@ resources:
           tags:
             uc_gov_classification: internal
       functions:
-        - $defs/functions/abac|mask_pii_email
+        - $defs/functions/abac|fn_mask_pii
         - $defs/functions/abac|format_phone

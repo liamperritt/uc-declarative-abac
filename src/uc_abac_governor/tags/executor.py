@@ -7,7 +7,7 @@ if TYPE_CHECKING:
     from uc_abac_governor.helpers.unity_catalog import UnityCatalogHelper
     from uc_abac_governor.logger import ChangeLogger
 
-from uc_abac_governor.helpers.sql import quote_securable as _quote_securable
+from uc_abac_governor.helpers import quote_securable as quote_securable
 from uc_abac_governor.tags.state import SecurableTag, TagDiff
 from uc_abac_governor.types import ExecutionError, SecurableType
 
@@ -30,8 +30,8 @@ def _build_set_tags_sql(
         parts = securable_full_name.split(".")
         table_name = ".".join(parts[:3])
         column_name = parts[3]
-        return f"ALTER TABLE {_quote_securable(table_name)} ALTER COLUMN `{column_name}` SET TAGS ({entries})"
-    quoted = _quote_securable(securable_full_name)
+        return f"ALTER TABLE {quote_securable(table_name)} ALTER COLUMN `{column_name}` SET TAGS ({entries})"
+    quoted = quote_securable(securable_full_name)
     return f"ALTER {securable_type.value} {quoted} SET TAGS ({entries})"
 
 
@@ -46,8 +46,8 @@ def _build_unset_tags_sql(
         parts = securable_full_name.split(".")
         table_name = ".".join(parts[:3])
         column_name = parts[3]
-        return f"ALTER TABLE {_quote_securable(table_name)} ALTER COLUMN `{column_name}` UNSET TAGS ({entries})"
-    quoted = _quote_securable(securable_full_name)
+        return f"ALTER TABLE {quote_securable(table_name)} ALTER COLUMN `{column_name}` UNSET TAGS ({entries})"
+    quoted = quote_securable(securable_full_name)
     return f"ALTER {securable_type.value} {quoted} UNSET TAGS ({entries})"
 
 

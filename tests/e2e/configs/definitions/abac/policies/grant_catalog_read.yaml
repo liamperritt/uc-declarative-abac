@@ -6,6 +6,7 @@ definitions:
         - select
       to:
         - j.wang@databricks.com
+        - liam.perritt@databricks.com
       has_tags:
         uc_gov_env: test
         uc_gov_managed_by: uc_abac_governor
