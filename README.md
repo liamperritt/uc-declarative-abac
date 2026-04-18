@@ -17,7 +17,87 @@ Definitions define *what* exists; resources define *where* it gets deployed.
 
 ## Quick Start
 
-``python -m uc_abac_governor --config-dir tests/e2e/configs --warehouse-id 19460c3cc045a577 --use-workspace-scim --profile field-eng-east --dry-run``
+Env-based auth (CI, GitHub Actions, Databricks Apps):
+
+```bash
+export DATABRICKS_HOST=https://<workspace>.cloud.databricks.com
+export DATABRICKS_TOKEN=<personal-access-token>
+python -m uc_abac_governor --config-dir tests/e2e/configs --warehouse-id <warehouse-id> --dry-run
+```
+
+Local development via `~/.databrickscfg` profile:
+
+```bash
+python -m uc_abac_governor --config-dir tests/e2e/configs --warehouse-id <warehouse-id> --profile <profile-name> --dry-run
+```
+
+### Authentication
+
+The engine delegates authentication to the Databricks SDK's [unified authentication](https://docs.databricks.com/aws/en/dev-tools/auth/unified-auth) layer, so any mechanism the SDK supports will work. Common options:
+
+| Mechanism | Required inputs | Typical use |
+|---|---|---|
+| Personal Access Token (PAT) | `DATABRICKS_HOST`, `DATABRICKS_TOKEN` | CI, scripted runs, GitHub Actions |
+| OAuth M2M client credentials | `DATABRICKS_HOST`, `DATABRICKS_CLIENT_ID`, `DATABRICKS_CLIENT_SECRET` | Service-principal automation |
+| Azure service principal | `DATABRICKS_HOST`, `ARM_CLIENT_ID`, `ARM_CLIENT_SECRET`, `ARM_TENANT_ID` | Azure Databricks workspaces |
+| CLI profile | `--profile <name>` + matching entry in `~/.databrickscfg` | Local development |
+| Default profile | `[DEFAULT]` section in `~/.databrickscfg` (no `--profile` flag needed) | Local development |
+| Metadata service / managed identity | Runtime-supplied credentials | Databricks Apps, cluster-bound runs |
+
+Resolution precedence matches the SDK's unified-auth chain: explicit `--profile` takes precedence, followed by env vars, `~/.databrickscfg`, and finally the metadata service. Omit `--profile` entirely to let the SDK pick whichever source is configured in the current environment.
+
+> **Required permissions.** Whichever identity the engine authenticates as (typically a service principal for automation) must hold:
+> - **Workspace admin** on the target workspace — needed to execute SQL on the configured warehouse and manage UC object owners.
+> - **Metastore admin** on the target metastore — needed to create/alter catalogs, schemas, tables, volumes, functions, tags, grants, masks, and filters.
+> - **Governed tag manager** on the account — needed to create and update account-level governed tags (tag policies) under `resources.governed_tags`.
+
+### GitHub Action
+
+The repo ships a composite GitHub Action at `govern/action.yml` so any other repo that stores its governance YAML in Git can reconcile Unity Catalog on every push / PR / schedule without installing the package or scripting a Python run. Reference it as `liam-perritt/uc-abac-governor/govern@<ref>` (where `<ref>` is a tag, branch, or commit SHA).
+
+**Inputs:**
+
+| Input | Required | Default | Description |
+|---|---|---|---|
+| `config-dir` | yes | — | Path to the YAML config directory, relative to the caller's repo root |
+| `warehouse-id` | yes | — | SQL warehouse ID used to execute UC queries |
+| `profile` | no | `''` | Databricks CLI profile name from `~/.databrickscfg`; omit to use env-based auth (see the [Authentication](#authentication) table) |
+| `dry-run` | no | `'false'` | Print planned changes without executing when `'true'` |
+| `use-workspace-scim` | no | `'false'` | Fetch principals from the workspace SCIM API instead of the account SCIM proxy when `'true'` |
+
+**Example workflow in a caller repo** (`.github/workflows/uc-governance.yml`):
+
+```yaml
+name: UC governance
+on:
+  pull_request:
+    paths: ['configs/**']
+  push:
+    branches: [main]
+    paths: ['configs/**']
+  schedule:
+    # It is recommended to schedule daily, preferrably once in the morning and once in the evening
+    - cron: '0 22 * * *'  # ~8–9am Sydney time — revoke any privileges whose expiry_date has just passed
+    - cron: '0 7 * * *'   # ~5–6pm Sydney time — re-sync to catch any drift introduced during the day
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: <github-org>/uc-abac-governor/govern@v1
+        with:
+          config-dir: configs/
+          warehouse-id: ${{ vars.DATABRICKS_WAREHOUSE_ID }}
+          dry-run: ${{ github.event_name == 'pull_request' }}
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+```
+
+Swap `DATABRICKS_TOKEN` for `DATABRICKS_CLIENT_ID` + `DATABRICKS_CLIENT_SECRET` for OAuth M2M, or the Azure SP variables for Azure Databricks. Pinning to an immutable ref (e.g. a commit SHA or a signed tag) is recommended over `@main`.
 
 ## What You Can Define in YAML
 
@@ -664,6 +744,7 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 - **Privilege compilation** — matches grant policies against desired tags with AND semantics, scoped to the policy's attached securable and its children
 - **Wildcard tag values** — `has_tags: {k: '*'}` matches any value for tag `k` (presence check); concrete values match exactly
 - **Privilege-securable compatibility** — filters incompatible privilege/securable combinations (e.g. `READ_VOLUME` only on volumes)
+- **USE_CATALOG / USE_SCHEMA cascade** — when a grant policy matches a child securable and lists a USE privilege, the privilege is emitted against the correct parent ancestor (catalog for `USE_CATALOG`, schema for `USE_SCHEMA`) rather than being silently dropped by the compatibility filter. Bounded by policy scope: a schema-attached policy cannot cascade `USE_CATALOG` up to the catalog, and a table-attached policy cannot cascade either USE privilege onto its ancestors
 - **Tagless policies** — policies with no tags grant directly to their attached securable
 - **Policy expiry** — `expiry_date` field; expired policies are excluded from compilation
 - **Privilege diffing** — computes grants and revokes by comparing desired vs actual state from `information_schema.*_privileges` system tables
@@ -691,7 +772,8 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 - **Structured logging** — `Securables` / `Governed tags` / `Tags` / `Policies` / `Privileges` section headers, ordered by securable type then name, with dry-run prefix support and summary counts
 
 #### Infrastructure
-- **CLI** (`python -m uc_abac_governor`) — `--config-dir`, `--warehouse-id`, `--profile`, `--dry-run`, `--use-workspace-scim`
+- **CLI** (`python -m uc_abac_governor`) — required: `--config-dir`, `--warehouse-id`. Optional: `--profile` (CLI profile name from `~/.databrickscfg`; omit to use unified auth via env vars / default profile / metadata service — see the [Authentication](#authentication) section), `--dry-run`, `--use-workspace-scim`
+- **GitHub Action** — reusable composite action at `govern/action.yml`; caller repos invoke it as `liam-perritt/uc-abac-governor/govern@<ref>` to reconcile their own YAML configs against UC on push / PR / schedule (see the [GitHub Action](#github-action) section)
 - **Hybrid SQL polling** — `wait_timeout=50s` with `on_wait_timeout=CONTINUE` and 10s polling for long-running queries
 - **External links** — fetches SQL results via external link URLs for large result sets
 - **Parallel state fetch** — securables, tags, privileges, policies, governed tags, and principals are fetched concurrently
@@ -705,7 +787,6 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 - **Object attributes** — `comment`, `rfa_destination` on securables (the `owner` attribute is implemented; adding new attributes requires only a field on `SecurableAttributes` and an executor dispatch branch)
 - **Direct mask/filter** — `filter` on tables and `mask` on columns (non-ABAC, directly applied functions)
 - **Abstracted privilege names** — `read`, `edit`, `create` expanding to multiple UC privileges
-- **GitHub Action** — CI/CD deployment action
 
 ---
 
