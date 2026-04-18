@@ -84,7 +84,7 @@ def _build_match_columns(
     if not columns:
         return ()
     return tuple(
-        (col.name, _render_tag_expr(col.has_tags or {}))
+        (col.alias, _render_tag_expr(col.has_tags or {}))
         for col in columns
     )
 
@@ -96,5 +96,5 @@ def _split_columns(
     if not columns:
         return None, ()
     if policy.type == PolicyType.MASK:
-        return columns[0].name, tuple(col.name for col in columns[1:])
-    return None, tuple(col.name for col in columns)
+        return columns[0].alias, tuple(col.alias for col in columns[1:])
+    return None, tuple(col.alias for col in columns)

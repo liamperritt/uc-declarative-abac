@@ -17,12 +17,15 @@ def _coerce_null_tag_values(tags: dict | None) -> dict | None:
     return {k: (v if v is not None else "") for k, v in tags.items()}
 
 
-def _check_duplicate_names(items: list, child_label: str, parent_label: str) -> None:
-    """Raise DuplicateResourceError if any two dicts in items share the same 'name'."""
+def _check_duplicate_names(
+    items: list, child_label: str, parent_label: str, key: str = "name",
+) -> None:
+    """Raise DuplicateResourceError if any two dicts in items share the same value
+    for ``key``. Defaults to the 'name' key so existing call sites are unchanged."""
     seen: set[str] = set()
     for item in items:
         if isinstance(item, dict):
-            name = item.get("name", "")
+            name = item.get(key, "")
             if name in seen:
                 raise DuplicateResourceError(
                     f"Duplicate {child_label} name '{name}' in {parent_label}"
@@ -31,7 +34,7 @@ def _check_duplicate_names(items: list, child_label: str, parent_label: str) -> 
 
 
 class PolicyColumnConfig(BaseModel):
-    name: str = Field(alias="alias")
+    alias: str
     has_tags: dict[str, str]
 
 
@@ -68,6 +71,18 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
     exceptions: list[str] | None = Field(default=None, alias="except")
     columns: list[PolicyColumnConfig] | None = None
     comment: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_duplicate_column_aliases(cls, data: dict) -> dict:
+        if isinstance(data, dict):
+            _check_duplicate_names(
+                data.get("columns", []) or [],
+                "column alias",
+                f"policy '{data.get('name', '')}'",
+                key="alias",
+            )
+        return data
 
 
 class MaskPolicyConfig(BaseFgacPolicyConfig):

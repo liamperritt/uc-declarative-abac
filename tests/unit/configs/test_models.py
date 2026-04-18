@@ -805,7 +805,7 @@ def test_mask_policy_config_accepts_single_column():
 
     policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
     assert len(policy.columns) == 1
-    assert policy.columns[0].name == "c"
+    assert policy.columns[0].alias == "c"
 
 
 def test_mask_policy_config_accepts_multiple_columns():
@@ -820,7 +820,48 @@ def test_mask_policy_config_accepts_multiple_columns():
     config = ResourcesConfig.model_validate(data)
 
     policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
-    assert [c.name for c in policy.columns] == ["c1", "c2"]
+    assert [c.alias for c in policy.columns] == ["c1", "c2"]
+
+
+def test_fgac_policy_rejects_duplicate_column_aliases():
+    """Two column entries sharing the same 'alias' in the same policy raise DuplicateResourceError."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "shared", "has_tags": {"pii": "email"}},
+            {"alias": "shared", "has_tags": {"pii": "phone"}},
+        ],
+    )
+    with pytest.raises(DuplicateResourceError, match="shared"):
+        ResourcesConfig.model_validate(data)
+
+
+def test_fgac_policy_allows_distinct_column_aliases():
+    """Distinct aliases (already covered) — sanity check that the duplicate guard is specific."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "a", "has_tags": {"pii": "email"}},
+            {"alias": "b", "has_tags": {"pii": "phone"}},
+            {"alias": "c", "has_tags": {"pii": "ssn"}},
+        ],
+    )
+    config = ResourcesConfig.model_validate(data)
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert [c.alias for c in policy.columns] == ["a", "b", "c"]
+
+
+def test_filter_policy_rejects_duplicate_column_aliases():
+    """Duplicate check applies to FILTER policies too."""
+    data = _mask_or_filter_policy_catalog(
+        "filter",
+        columns=[
+            {"alias": "region", "has_tags": {"geo": "*"}},
+            {"alias": "region", "has_tags": {"area": "*"}},
+        ],
+    )
+    with pytest.raises(DuplicateResourceError):
+        ResourcesConfig.model_validate(data)
 
 
 def test_mask_policy_config_accepts_none_except():
