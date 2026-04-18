@@ -18,6 +18,3 @@ definitions:
         - alias: pii
           has_tags:
             uc_gov_pii: '*'
-        - alias: pii
-          has_tags:
-            uc_gov_pii: '*'
