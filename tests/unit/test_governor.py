@@ -89,22 +89,97 @@ def _catalog_with_tags_and_grants_config() -> dict:
 
 
 def _setup_mock_workspace_empty_state(mock_workspace_client: MagicMock) -> None:
-    """Configure the mock workspace client to return empty actual state."""
-    from databricks.sdk.service.sql import StatementState
+    """Configure the mock workspace client to return empty actual state.
 
-    result_mock = MagicMock()
-    result_mock.status.state = StatementState.SUCCEEDED
-    result_mock.result.data_array = []
-    result_mock.result.external_links = []
+    Each returned response carries ``._sql`` (the executed statement) so that a
+    monkeypatched ``_fetch_external_links_rows`` can route by SQL content.
+    """
+    from databricks.sdk.service.sql import StatementState
 
     def _capture_and_return(*args, **kwargs):
         statement = kwargs.get("statement", args[0] if args else None)
         if statement:
             mock_workspace_client.executed_sql.append(statement)
-        return result_mock
+        response = MagicMock()
+        response.status.state = StatementState.SUCCEEDED
+        response.result.data_array = []
+        response.result.external_links = []
+        response._sql = statement
+        return response
 
     mock_workspace_client.statement_execution.execute_statement.side_effect = (
         _capture_and_return
+    )
+
+
+def _securable_existence_rows(config_dict: dict) -> list[list]:
+    """Build securables-fetch rows matching every catalog/schema/table/volume declared
+    in a resources-config dict, *after consolidation* (so consolidator-auto-created
+    schemas like ``default`` are included). Row format matches fetch_actual_securables:
+    ``[securable_type, full_name, owner, parameters_json, routine_definition, routine_comment]``.
+    """
+    import copy
+
+    from uc_abac_governor.configs.consolidator import consolidate_resources
+
+    resources = copy.deepcopy(config_dict.get("resources") or {})
+    consolidated = consolidate_resources(resources)
+    catalogs = consolidated.get("catalogs") or {}
+
+    rows: list[list] = []
+    for cat_key, cat in catalogs.items():
+        cat_data = cat if isinstance(cat, dict) else {}
+        cat_name = cat_data.get("name", cat_key)
+        rows.append(["CATALOG", cat_name, None, None, None, None])
+        for schema in cat_data.get("schemas") or []:
+            if not isinstance(schema, dict):
+                continue
+            schema_name = schema.get("name")
+            if not schema_name:
+                continue
+            schema_full = f"{cat_name}.{schema_name}"
+            rows.append(["SCHEMA", schema_full, None, None, None, None])
+            for table in schema.get("tables") or []:
+                if isinstance(table, dict) and table.get("name"):
+                    rows.append(["TABLE", f"{schema_full}.{table['name']}", None, None, None, None])
+            for vol in schema.get("volumes") or []:
+                if isinstance(vol, dict) and vol.get("name"):
+                    rows.append(["VOLUME", f"{schema_full}.{vol['name']}", None, None, None, None])
+    return rows
+
+
+def _install_fetch_router(
+    monkeypatch,
+    config_dict: dict,
+    tag_rows: list[list] | None = None,
+    privilege_rows: list[list] | None = None,
+) -> None:
+    """Monkeypatch ``_fetch_external_links_rows`` so it routes by the executed SQL:
+
+    - securables query -> existence rows for every declared catalog/schema/table/volume
+      in ``config_dict`` (so the differ's nonexistent-securable check passes),
+    - tags query -> ``tag_rows`` or ``[]``,
+    - privileges query -> ``privilege_rows`` or ``[]``,
+    - anything else -> ``[]``.
+
+    Assumes each response returned by execute_statement carries ``._sql`` — set by
+    ``_setup_mock_workspace_empty_state`` and its cousins.
+    """
+    sec_rows = _securable_existence_rows(config_dict)
+
+    def _route(response):
+        sql = (getattr(response, "_sql", "") or "").lower()
+        if "catalog_owner" in sql or "schema_owner" in sql or "routine_owner" in sql:
+            return sec_rows
+        if any(t in sql for t in ("catalog_tags", "schema_tags", "table_tags", "volume_tags", "column_tags")):
+            return tag_rows or []
+        if "_privileges" in sql:
+            return privilege_rows or []
+        return []
+
+    monkeypatch.setattr(
+        "uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows",
+        _route,
     )
 
 
@@ -151,10 +226,12 @@ def _setup_mock_principals_with_groups(
 
 
 def test_governor_runs_tags_workflow_end_to_end(
-    tmp_yaml_dir, mock_workspace_client):
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """YAML configs with tagged catalog -> tag_diff.to_add is non-empty, SQL was executed."""
-    root = tmp_yaml_dir({"resources/catalog.yaml": _catalog_with_tags_config()})
+    config = _catalog_with_tags_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
     _, _, tag_diff, _, _ = run(
@@ -175,12 +252,12 @@ def test_governor_runs_tags_workflow_end_to_end(
 
 
 def test_governor_runs_privileges_workflow_end_to_end(
-    tmp_yaml_dir, mock_workspace_client):
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """YAML with grant policy + tagged objects, empty actual privileges -> privilege_diff.to_grant is non-empty."""
-    root = tmp_yaml_dir(
-        {"resources/catalog.yaml": _catalog_with_grant_policy_config()}
-    )
+    config = _catalog_with_grant_policy_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
     _, _, _, _, privilege_diff = run(
@@ -203,12 +280,12 @@ def test_governor_runs_privileges_workflow_end_to_end(
 
 
 def test_governor_runs_both_domains_independently(
-    tmp_yaml_dir, mock_workspace_client):
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """Both tag and privilege changes are computed; verify both diffs are populated."""
-    root = tmp_yaml_dir(
-        {"resources/catalog.yaml": _catalog_with_tags_and_grants_config()}
-    )
+    config = _catalog_with_tags_and_grants_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
     _, _, tag_diff, _, privilege_diff = run(
@@ -244,9 +321,8 @@ def test_governor_runs_both_domains_independently(
 def test_governor_produces_empty_diffs_when_in_sync(
     mock_fetch, tmp_yaml_dir, mock_workspace_client):
     """When actual state matches desired, both diffs are empty and no SQL is executed."""
-    root = tmp_yaml_dir(
-        {"resources/catalog.yaml": _catalog_with_grant_policy_config()}
-    )
+    config = _catalog_with_grant_policy_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
 
     actual_tags = [
         ["CATALOG", "my_catalog", '[{"tag_name":"env","tag_value":"prod"}]'],
@@ -255,13 +331,15 @@ def test_governor_produces_empty_diffs_when_in_sync(
     actual_privileges = [
         ["SCHEMA", "my_catalog.sales", "data_engineers", "select"],
     ]
+    actual_securables = _securable_existence_rows(config)
 
     def _route_rows_by_sql(response):
-        sql = getattr(response, "_sql", "") or ""
-        sql_lower = sql.lower()
-        if "tag" in sql_lower:
+        sql = (getattr(response, "_sql", "") or "").lower()
+        if "catalog_owner" in sql or "schema_owner" in sql or "routine_owner" in sql:
+            return actual_securables
+        if "tag" in sql:
             return actual_tags
-        if "privilege" in sql_lower:
+        if "privilege" in sql:
             return actual_privileges
         return []
 
@@ -314,12 +392,12 @@ def test_governor_produces_empty_diffs_when_in_sync(
 
 
 def test_governor_validates_principals_before_applying(
-    tmp_yaml_dir, mock_workspace_client):
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """Policy references unknown principal -> ExecutionBatchError, no GRANT/REVOKE SQL executed."""
-    root = tmp_yaml_dir(
-        {"resources/catalog.yaml": _catalog_with_grant_policy_config()}
-    )
+    config = _catalog_with_grant_policy_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
     _setup_mock_empty_principals(mock_workspace_client)
 
     with pytest.raises(ExecutionBatchError):
@@ -341,12 +419,12 @@ def test_governor_validates_principals_before_applying(
 
 
 def test_governor_dry_run_does_not_execute_sql(
-    tmp_yaml_dir, mock_workspace_client):
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """dry_run=True -> diffs are computed but no mutation SQL is executed."""
-    root = tmp_yaml_dir(
-        {"resources/catalog.yaml": _catalog_with_tags_and_grants_config()}
-    )
+    config = _catalog_with_tags_and_grants_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
     _, _, tag_diff, _, privilege_diff = run(
@@ -376,11 +454,10 @@ def test_governor_dry_run_does_not_execute_sql(
 
 
 def test_governor_fetches_tags_privileges_and_principals_in_parallel(
-    tmp_yaml_dir, mock_workspace_client):
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """Mock delays on fetch methods; total elapsed < sum of delays proves parallelism."""
-    root = tmp_yaml_dir(
-        {"resources/catalog.yaml": _catalog_with_tags_and_grants_config()}
-    )
+    config = _catalog_with_tags_and_grants_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
 
     delay_seconds = 0.3
     total_sequential_time = delay_seconds * 3
@@ -397,11 +474,13 @@ def test_governor_fetches_tags_privileges_and_principals_in_parallel(
         result.status.state = StatementState.SUCCEEDED
         result.result.data_array = []
         result.result.external_links = []
+        result._sql = statement
         return result
 
     mock_workspace_client.statement_execution.execute_statement.side_effect = (
         _slow_execute
     )
+    _install_fetch_router(monkeypatch, config)
 
     def _slow_scim_do(method, path, **kwargs):
         if "/account/scim/v2/Groups" in path:
@@ -432,13 +511,12 @@ def test_governor_fetches_tags_privileges_and_principals_in_parallel(
 
 
 def test_governor_raises_execution_batch_error_when_sql_fails(
-    tmp_yaml_dir, mock_workspace_client):
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """When mutation SQL fails, governor.run() raises ExecutionBatchError with collected errors."""
     from uc_abac_governor.types import ExecutionBatchError
 
-    root = tmp_yaml_dir(
-        {"resources/catalog.yaml": _catalog_with_tags_and_grants_config()}
-    )
+    config = _catalog_with_tags_and_grants_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
 
     def _fail_mutations(*args, **kwargs):
         from databricks.sdk.service.sql import StatementState
@@ -455,11 +533,13 @@ def test_governor_raises_execution_batch_error_when_sql_fails(
         result.status.state = StatementState.SUCCEEDED
         result.result.data_array = []
         result.result.external_links = []
+        result._sql = statement
         return result
 
     mock_workspace_client.statement_execution.execute_statement.side_effect = (
         _fail_mutations
     )
+    _install_fetch_router(monkeypatch, config)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
     with pytest.raises(ExecutionBatchError) as exc_info:
@@ -539,10 +619,12 @@ def _catalog_with_mask_policy_config() -> dict:
 
 
 def test_governor_runs_policies_workflow_end_to_end(
-    tmp_yaml_dir, mock_workspace_client):
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """A MASK policy with no corresponding actual UC policy -> CREATE POLICY SQL is executed."""
-    root = tmp_yaml_dir({"resources/catalog.yaml": _catalog_with_mask_policy_config()})
+    config = _catalog_with_mask_policy_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
     _setup_mock_principals_with_groups(mock_workspace_client, ["analysts", "admins"])
 
     _, _, _, policy_diff, _ = run(
@@ -558,10 +640,12 @@ def test_governor_runs_policies_workflow_end_to_end(
 
 
 def test_governor_policies_workflow_is_idempotent(
-    tmp_yaml_dir, mock_workspace_client):
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """When list_policies returns the same policy already exists, no CREATE POLICY SQL is executed."""
-    root = tmp_yaml_dir({"resources/catalog.yaml": _catalog_with_mask_policy_config()})
+    config = _catalog_with_mask_policy_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
     _setup_mock_principals_with_groups(mock_workspace_client, ["analysts", "admins"])
 
     # Configure list_policies to return the matching desired policy
@@ -732,6 +816,14 @@ def _seed_actual_state_for_sp_idempotency(mock_workspace_client: MagicMock, sp_a
     # _fetch_external_links_rows is called per-query; route by SQL content.
     def _rows_for_sql(sql: str) -> list[list[str]]:
         lower = sql.lower()
+        # Securables query — return rows for the declared catalog (plus the default
+        # schema auto-created by the consolidator because the catalog has catalog-
+        # level policies) so the nonexistent-securable check in the differ passes.
+        if "catalog_owner" in lower or "schema_owner" in lower or "routine_owner" in lower:
+            return [
+                ["CATALOG", "my_catalog", None, None, None, None],
+                ["SCHEMA", "my_catalog.default", None, None, None, None],
+            ]
         # Tags query (aggregated: one row per securable, tags as JSON array)
         if "catalog_tags" in lower or "schema_tags" in lower:
             return [["CATALOG", "my_catalog", '[{"tag_name":"team","tag_value":"sales"}]']]
@@ -780,14 +872,14 @@ def _seed_actual_state_for_sp_idempotency(mock_workspace_client: MagicMock, sp_a
 
 
 def test_governor_collects_unknown_principal_errors(
-    tmp_yaml_dir, mock_workspace_client):
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """Unknown principals are collected as errors in ExecutionBatchError, not raised as PrincipalValidationError."""
     from uc_abac_governor.types import ExecutionBatchError, ExecutionError
 
-    root = tmp_yaml_dir(
-        {"resources/catalog.yaml": _catalog_with_grant_policy_config()}
-    )
+    config = _catalog_with_grant_policy_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
     _setup_mock_empty_principals(mock_workspace_client)
 
     with pytest.raises(ExecutionBatchError) as exc_info:
@@ -809,14 +901,14 @@ def test_governor_collects_unknown_principal_errors(
 
 
 def test_governor_continues_with_valid_principals_when_some_are_unknown(
-    tmp_yaml_dir, mock_workspace_client):
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """Valid principals get GRANT SQL executed; unknown ones become errors in ExecutionBatchError."""
     from uc_abac_governor.types import ExecutionBatchError
 
-    root = tmp_yaml_dir(
-        {"resources/catalog.yaml": _catalog_with_two_grant_policies_config()}
-    )
+    config = _catalog_with_two_grant_policies_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
     _setup_mock_principals_with_groups(mock_workspace_client, ["data_engineers"])
 
     with pytest.raises(ExecutionBatchError) as exc_info:

@@ -66,11 +66,35 @@ def _compile_function(func: FunctionConfig) -> Function:
 
 
 def compile_desired_securables(config: ResourcesConfig) -> set[Securable]:
-    """Walk the config tree and emit Securable for each securable that should be created."""
+    """Walk the config tree and emit a Securable for every declared securable.
+
+    Catalogs, schemas, tables, and volumes are emitted as base ``Securable``
+    (type + full_name only). Functions are emitted as ``Function`` instances
+    carrying their parameters, definition, and optional comment so the differ
+    can detect replacement-worthy changes.
+    """
     securables: set[Securable] = set()
 
     for catalog in config.catalogs.values():
+        securables.add(Securable(
+            securable_type=SecurableType.CATALOG,
+            full_name=catalog.full_name,
+        ))
         for schema in catalog.schemas or []:
+            securables.add(Securable(
+                securable_type=SecurableType.SCHEMA,
+                full_name=schema.full_name,
+            ))
+            for table in schema.tables or []:
+                securables.add(Securable(
+                    securable_type=SecurableType.TABLE,
+                    full_name=table.full_name,
+                ))
+            for volume in schema.volumes or []:
+                securables.add(Securable(
+                    securable_type=SecurableType.VOLUME,
+                    full_name=volume.full_name,
+                ))
             for func in schema.functions or []:
                 securables.add(_compile_function(func))
 

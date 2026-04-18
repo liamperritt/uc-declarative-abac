@@ -282,6 +282,10 @@ def _parse_securable_rows(
                     comment=routine_comment if routine_comment else None,
                 )
             )
+        else:
+            securables.add(
+                Securable(securable_type=securable_type, full_name=full_name)
+            )
 
     return securables, attributes
 

@@ -9,10 +9,13 @@ from uc_abac_governor.securables.differ import compute_securable_diff
 from uc_abac_governor.securables.state import (
     AttributeUpdate,
     Function,
+    Securable,
     SecurableAttributes,
     SecurableDiff,
 )
-from uc_abac_governor.types import PrincipalType, SecurableType
+from uc_abac_governor.types import NonexistentSecurableError, PrincipalType, SecurableType
+
+import pytest
 
 
 def _resolver() -> PrincipalResolver:
@@ -302,6 +305,133 @@ def test_securable_differ_ignores_matching_function_comments():
     diff = compute_securable_diff(
         set(), set(), {func}, {func}, _resolver(), _change_logger(),
     )
+
+    assert diff.securables_to_create == []
+    assert diff.securables_to_replace == []
+
+
+# ---------------------------------------------------------------------------
+# Nonexistent-securable existence enforcement
+# ---------------------------------------------------------------------------
+
+
+def _sec(sec_type: SecurableType, full_name: str) -> Securable:
+    return Securable(securable_type=sec_type, full_name=full_name)
+
+
+def test_securable_differ_raises_nonexistent_securable_error_when_catalog_does_not_exist():
+    """A desired catalog absent from actual raises NonexistentSecurableError."""
+    desired = {_sec(SecurableType.CATALOG, "ghost_catalog")}
+
+    with pytest.raises(NonexistentSecurableError) as exc:
+        compute_securable_diff(set(), set(), desired, set(), _resolver(), _change_logger())
+
+    assert exc.value.nonexistent == [(SecurableType.CATALOG, "ghost_catalog")]
+
+
+def test_securable_differ_raises_nonexistent_securable_error_when_schema_does_not_exist():
+    """A desired schema absent from actual raises NonexistentSecurableError."""
+    desired = {
+        _sec(SecurableType.CATALOG, "cat"),
+        _sec(SecurableType.SCHEMA, "cat.ghost_schema"),
+    }
+    actual = {_sec(SecurableType.CATALOG, "cat")}
+
+    with pytest.raises(NonexistentSecurableError) as exc:
+        compute_securable_diff(set(), set(), desired, actual, _resolver(), _change_logger())
+
+    assert (SecurableType.SCHEMA, "cat.ghost_schema") in exc.value.nonexistent
+
+
+def test_securable_differ_raises_nonexistent_securable_error_when_table_does_not_exist():
+    """A desired table absent from actual raises NonexistentSecurableError."""
+    desired = {
+        _sec(SecurableType.CATALOG, "cat"),
+        _sec(SecurableType.SCHEMA, "cat.sch"),
+        _sec(SecurableType.TABLE, "cat.sch.ghost_table"),
+    }
+    actual = {
+        _sec(SecurableType.CATALOG, "cat"),
+        _sec(SecurableType.SCHEMA, "cat.sch"),
+    }
+
+    with pytest.raises(NonexistentSecurableError) as exc:
+        compute_securable_diff(set(), set(), desired, actual, _resolver(), _change_logger())
+
+    assert (SecurableType.TABLE, "cat.sch.ghost_table") in exc.value.nonexistent
+
+
+def test_securable_differ_raises_nonexistent_securable_error_when_volume_does_not_exist():
+    """A desired volume absent from actual raises NonexistentSecurableError."""
+    desired = {
+        _sec(SecurableType.CATALOG, "cat"),
+        _sec(SecurableType.SCHEMA, "cat.raw"),
+        _sec(SecurableType.VOLUME, "cat.raw.ghost_volume"),
+    }
+    actual = {
+        _sec(SecurableType.CATALOG, "cat"),
+        _sec(SecurableType.SCHEMA, "cat.raw"),
+    }
+
+    with pytest.raises(NonexistentSecurableError) as exc:
+        compute_securable_diff(set(), set(), desired, actual, _resolver(), _change_logger())
+
+    assert (SecurableType.VOLUME, "cat.raw.ghost_volume") in exc.value.nonexistent
+
+
+def test_securable_differ_nonexistent_error_lists_all_offenders():
+    """Every nonexistent non-function securable appears in NonexistentSecurableError.nonexistent."""
+    desired = {
+        _sec(SecurableType.CATALOG, "ghost_cat_a"),
+        _sec(SecurableType.CATALOG, "ghost_cat_b"),
+        _sec(SecurableType.SCHEMA, "ghost_cat_a.ghost_sch"),
+    }
+
+    with pytest.raises(NonexistentSecurableError) as exc:
+        compute_securable_diff(set(), set(), desired, set(), _resolver(), _change_logger())
+
+    assert set(exc.value.nonexistent) == {
+        (SecurableType.CATALOG, "ghost_cat_a"),
+        (SecurableType.CATALOG, "ghost_cat_b"),
+        (SecurableType.SCHEMA, "ghost_cat_a.ghost_sch"),
+    }
+
+
+def test_securable_differ_does_not_raise_when_function_is_nonexistent_in_actual():
+    """A Function absent from actual is engine-created, not an error; it flows into
+    securables_to_create so the executor can CREATE FUNCTION it."""
+    func = Function(
+        securable_type=SecurableType.FUNCTION,
+        full_name="cat.sch.new_func",
+        parameters=(),
+        definition="1",
+    )
+    desired = {
+        _sec(SecurableType.CATALOG, "cat"),
+        _sec(SecurableType.SCHEMA, "cat.sch"),
+        func,
+    }
+    actual = {
+        _sec(SecurableType.CATALOG, "cat"),
+        _sec(SecurableType.SCHEMA, "cat.sch"),
+    }
+
+    diff = compute_securable_diff(set(), set(), desired, actual, _resolver(), _change_logger())
+
+    assert func in diff.securables_to_create
+
+
+def test_securable_differ_returns_diff_normally_when_every_declared_securable_is_in_actual():
+    """When every declared non-function securable exists in actual, the diff is computed
+    normally and no NonexistentSecurableError is raised."""
+    desired = {
+        _sec(SecurableType.CATALOG, "cat"),
+        _sec(SecurableType.SCHEMA, "cat.sch"),
+        _sec(SecurableType.TABLE, "cat.sch.tbl"),
+    }
+    actual = dict(desired) if False else set(desired)
+
+    diff = compute_securable_diff(set(), set(), desired, actual, _resolver(), _change_logger())
 
     assert diff.securables_to_create == []
     assert diff.securables_to_replace == []

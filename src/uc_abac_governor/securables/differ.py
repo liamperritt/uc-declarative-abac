@@ -8,11 +8,12 @@ if TYPE_CHECKING:
 
 from uc_abac_governor.securables.state import (
     AttributeUpdate,
+    Function,
     SecurableAttributes,
     SecurableDiff,
     Securable,
 )
-from uc_abac_governor.types import ExecutionError, PrincipalValidationError
+from uc_abac_governor.types import ExecutionError, NonexistentSecurableError, PrincipalValidationError
 
 _GOVERNED_ATTRIBUTES = ["owner"]
 
@@ -38,6 +39,7 @@ def compute_securable_diff(
     securables_to_create, securables_to_replace = _diff_securables(
         desired_securables, actual_securables
     )
+    _fail_if_non_function_securables_are_nonexistent(securables_to_create)
 
     created_full_names = {s.full_name for s in securables_to_create}
 
@@ -92,20 +94,37 @@ def _diff_securables(
     desired: set[Securable],
     actual: set[Securable],
 ) -> tuple[list[Securable], list[Securable]]:
-    """Return (to_create, to_replace) lists by keying on full_name."""
-    actual_by_name = {s.full_name: s for s in actual}
+    """Return (to_create, to_replace) lists by keying on (securable_type, full_name)."""
+    actual_by_key = {(s.securable_type, s.full_name): s for s in actual}
 
     to_create: list[Securable] = []
     to_replace: list[Securable] = []
 
     for desired_sec in desired:
-        actual_sec = actual_by_name.get(desired_sec.full_name)
+        actual_sec = actual_by_key.get((desired_sec.securable_type, desired_sec.full_name))
         if actual_sec is None:
             to_create.append(desired_sec)
         elif desired_sec != actual_sec:
             to_replace.append(desired_sec)
 
     return to_create, to_replace
+
+
+def _fail_if_non_function_securables_are_nonexistent(to_create: list[Securable]) -> None:
+    """Raise NonexistentSecurableError if any non-function securable is in to_create.
+
+    Functions are engine-created, so nonexistent functions legitimately flow through
+    to_create for the executor to CREATE FUNCTION. Any other securable type in
+    to_create means the config references a UC object that does not exist; the
+    engine does not yet support creating those, so we fail fast and list every
+    offender.
+    """
+    nonexistent = sorted(
+        [(s.securable_type, s.full_name) for s in to_create if not isinstance(s, Function)],
+        key=lambda n: (n[0].value, n[1]),
+    )
+    if nonexistent:
+        raise NonexistentSecurableError(nonexistent)
 
 
 def _diff_attributes(

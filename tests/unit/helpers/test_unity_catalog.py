@@ -12,7 +12,7 @@ from uc_abac_governor.policies.state import Policy
 from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.privileges.state import SecurablePrivilege
-from uc_abac_governor.securables.state import Function, SecurableAttributes
+from uc_abac_governor.securables.state import Function, Securable, SecurableAttributes
 from uc_abac_governor.types import GovernorError, PolicyType, PrincipalType, PrivilegeType, SecurableType
 
 WAREHOUSE_ID = "test-warehouse-id"
@@ -584,7 +584,7 @@ def test_uc_helper_returns_empty_privileges_for_empty_catalog_list():
 
 @patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_parses_securable_rows_for_attributes(mock_fetch):
-    """Non-function rows produce SecurableAttributes; securables set is empty."""
+    """Non-function rows produce SecurableAttributes plus a base Securable per row."""
     rows = [
         ["CATALOG", "my_catalog", "admin_user", None, None],
         ["SCHEMA", "my_catalog.sales", "schema_owner", None, None],
@@ -620,7 +620,56 @@ def test_uc_helper_parses_securable_rows_for_attributes(mock_fetch):
         ),
     }
     assert attributes == expected_attributes
-    assert securables == set()
+    assert securables == {
+        Securable(securable_type=SecurableType.CATALOG, full_name="my_catalog"),
+        Securable(securable_type=SecurableType.SCHEMA, full_name="my_catalog.sales"),
+        Securable(securable_type=SecurableType.TABLE, full_name="my_catalog.sales.orders"),
+        Securable(securable_type=SecurableType.VOLUME, full_name="my_catalog.landing.files"),
+    }
+
+
+@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetch_actual_securables_returns_base_securable_for_catalog_rows(mock_fetch):
+    """A CATALOG row produces a base Securable(CATALOG, full_name) in the securables set."""
+    mock_fetch.return_value = [["CATALOG", "cat_a", None, None, None]]
+    helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
+
+    securables, _ = helper.fetch_actual_securables(["cat_a"])
+
+    assert Securable(securable_type=SecurableType.CATALOG, full_name="cat_a") in securables
+
+
+@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetch_actual_securables_returns_base_securable_for_schema_rows(mock_fetch):
+    """A SCHEMA row produces a base Securable(SCHEMA, full_name)."""
+    mock_fetch.return_value = [["SCHEMA", "cat.sales", None, None, None]]
+    helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
+
+    securables, _ = helper.fetch_actual_securables(["cat"])
+
+    assert Securable(securable_type=SecurableType.SCHEMA, full_name="cat.sales") in securables
+
+
+@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetch_actual_securables_returns_base_securable_for_table_rows(mock_fetch):
+    """A TABLE row produces a base Securable(TABLE, full_name)."""
+    mock_fetch.return_value = [["TABLE", "cat.sales.orders", None, None, None]]
+    helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
+
+    securables, _ = helper.fetch_actual_securables(["cat"])
+
+    assert Securable(securable_type=SecurableType.TABLE, full_name="cat.sales.orders") in securables
+
+
+@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetch_actual_securables_returns_base_securable_for_volume_rows(mock_fetch):
+    """A VOLUME row produces a base Securable(VOLUME, full_name)."""
+    mock_fetch.return_value = [["VOLUME", "cat.landing.files", None, None, None]]
+    helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
+
+    securables, _ = helper.fetch_actual_securables(["cat"])
+
+    assert Securable(securable_type=SecurableType.VOLUME, full_name="cat.landing.files") in securables
 
 
 @patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")

@@ -3,7 +3,7 @@ from __future__ import annotations
 from uc_abac_governor.configs.models import ResourcesConfig
 from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.securables.compiler import compile_desired_attributes, compile_desired_securables
-from uc_abac_governor.securables.state import Function, SecurableAttributes
+from uc_abac_governor.securables.state import Function, Securable, SecurableAttributes
 from uc_abac_governor.types import PrincipalType, SecurableType
 
 
@@ -269,7 +269,8 @@ def test_securable_compiler_emits_function_comment_when_provided():
         }
     )
 
-    (func,) = compile_desired_securables(config)
+    result = compile_desired_securables(config)
+    func = next(s for s in result if isinstance(s, Function))
     assert func.comment == "Returns a greeting"
 
 
@@ -292,5 +293,133 @@ def test_securable_compiler_function_comment_defaults_to_none():
         }
     )
 
-    (func,) = compile_desired_securables(config)
+    result = compile_desired_securables(config)
+    func = next(s for s in result if isinstance(s, Function))
     assert func.comment is None
+
+
+# ---------------------------------------------------------------------------
+# compile_desired_securables — base Securable emissions for catalog/schema/table/volume
+# ---------------------------------------------------------------------------
+
+
+def test_securables_compiler_emits_securable_for_each_declared_catalog():
+    """Every declared catalog appears in the desired-securables set as a base Securable."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat_a": {},
+                "cat_b": {},
+            }
+        }
+    )
+
+    result = compile_desired_securables(config)
+
+    assert Securable(securable_type=SecurableType.CATALOG, full_name="cat_a") in result
+    assert Securable(securable_type=SecurableType.CATALOG, full_name="cat_b") in result
+
+
+def test_securables_compiler_emits_securable_for_each_declared_schema():
+    """Every declared schema appears in the desired-securables set as a base Securable."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "schemas": [
+                        {"name": "sales"},
+                        {"name": "hr"},
+                    ],
+                }
+            }
+        }
+    )
+
+    result = compile_desired_securables(config)
+
+    assert Securable(securable_type=SecurableType.SCHEMA, full_name="cat.sales") in result
+    assert Securable(securable_type=SecurableType.SCHEMA, full_name="cat.hr") in result
+
+
+def test_securables_compiler_emits_securable_for_each_declared_table():
+    """Every declared table appears in the desired-securables set as a base Securable."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {"name": "orders"},
+                                {"name": "customers"},
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    result = compile_desired_securables(config)
+
+    assert Securable(securable_type=SecurableType.TABLE, full_name="cat.sales.orders") in result
+    assert Securable(securable_type=SecurableType.TABLE, full_name="cat.sales.customers") in result
+
+
+def test_securables_compiler_emits_securable_for_each_declared_volume():
+    """Every declared volume appears in the desired-securables set as a base Securable."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "schemas": [
+                        {
+                            "name": "raw",
+                            "volumes": [
+                                {"name": "events"},
+                                {"name": "files"},
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    result = compile_desired_securables(config)
+
+    assert Securable(securable_type=SecurableType.VOLUME, full_name="cat.raw.events") in result
+    assert Securable(securable_type=SecurableType.VOLUME, full_name="cat.raw.files") in result
+
+
+def test_securables_compiler_emits_function_subclass_for_each_declared_function():
+    """Functions continue to be emitted as Function instances, not base Securables."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "schemas": [
+                        {
+                            "name": "shared",
+                            "functions": [
+                                {"name": "greet", "return": "'hi'"},
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    result = compile_desired_securables(config)
+
+    func = next(s for s in result if s.full_name == "cat.shared.greet")
+    assert isinstance(func, Function)
+
+
+def test_securables_compiler_emits_nothing_for_empty_config():
+    """A config with no catalogs produces an empty desired-securables set."""
+    config = ResourcesConfig.model_validate({"catalogs": {}})
+
+    assert compile_desired_securables(config) == set()

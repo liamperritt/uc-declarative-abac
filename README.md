@@ -784,7 +784,8 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 - **UC object creation** — creating/updating catalogs, schemas, tables, volumes (functions are supported; other securable types require adding `Securable` subclasses)
 - **Object attributes** — `comment`, `rfa_destination` on securables (the `owner` attribute is implemented; adding new attributes requires only a field on `SecurableAttributes` and an executor dispatch branch)
 - **Direct mask/filter** — `filter` on tables and `mask` on columns (non-ABAC, directly applied functions)
-- **Abstracted privilege names** — `read`, `edit`, `create` expanding to multiple UC privileges
+- **Abstracted privilege names** — `use`, `read`, `edit`, `create` expanding to multiple UC privileges
+- **Nonexistent column validation** — the securables differ raises `NonexistentSecurableError` on dry-run (and real-run) when a catalog, schema, table, or volume declared in config doesn't exist in UC, but **columns are not checked**. A config that references a column that doesn't exist on its parent table will pass dry-run and only fail at execute time (when the `ALTER TABLE ... ALTER COLUMN ... SET TAGS` or `CREATE POLICY ... ON COLUMN` SQL runs). Column-level existence checking would require either extending `fetch_actual_securables` to include columns or querying `information_schema.columns` separately.
 
 ---
 

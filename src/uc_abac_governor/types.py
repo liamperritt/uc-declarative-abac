@@ -76,6 +76,28 @@ class DuplicateServicePrincipalError(GovernorError):
     """Raised when two service principals share the same display name."""
 
 
+class NonexistentSecurableError(GovernorError):
+    """Raised when one or more securables declared in config don't exist in UC.
+
+    Functions are created by the engine and are excluded from this check; only
+    catalogs, schemas, tables, and volumes can trigger this error.
+    """
+
+    def __init__(self, nonexistent: list[tuple[SecurableType, str]]) -> None:
+        self.nonexistent = nonexistent
+        super().__init__(self._build_message())
+
+    def _build_message(self) -> str:
+        lines = [
+            f"{len(self.nonexistent)} nonexistent securable(s) declared in config but "
+            f"not found in Unity Catalog. Either create them in UC, or remove them "
+            f"from config:",
+        ]
+        for sec_type, full_name in self.nonexistent:
+            lines.append(f"  - {sec_type.value} {full_name}")
+        return "\n".join(lines)
+
+
 @dataclass(frozen=True)
 class ExecutionError:
     """A single error that occurred during SQL execution."""
