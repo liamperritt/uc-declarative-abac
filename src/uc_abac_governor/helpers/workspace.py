@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 from databricks.sdk import WorkspaceClient
 
@@ -64,26 +65,55 @@ class WorkspaceHelper:
             self._fetch_account_principals()
 
     def _fetch_account_principals(self) -> None:
-        """Fetch principals via the workspace account SCIM proxy (all account principals)."""
-        users_data = self._scim_list_all("/api/2.0/account/scim/v2/Users", "userName")
+        """Fetch principals via the workspace account SCIM proxy (all account principals).
+
+        Users, groups, and service principals are fetched concurrently.
+        """
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            users_f = pool.submit(
+                self._scim_list_all, "/api/2.0/account/scim/v2/Users", "userName",
+            )
+            groups_f = pool.submit(
+                self._scim_list_all, "/api/2.0/account/scim/v2/Groups", "displayName",
+            )
+            sps_f = pool.submit(
+                self._scim_list_all,
+                "/api/2.0/account/scim/v2/ServicePrincipals",
+                "displayName,applicationId",
+            )
+            users_data = users_f.result()
+            groups_data = groups_f.result()
+            sps_data = sps_f.result()
+
         self._users = {u["userName"] for u in users_data if "userName" in u}
-
-        groups_data = self._scim_list_all("/api/2.0/account/scim/v2/Groups", "displayName")
         self._groups = {g["displayName"] for g in groups_data if "displayName" in g}
-
-        sps_data = self._scim_list_all("/api/2.0/account/scim/v2/ServicePrincipals", "displayName,applicationId")
         self._build_sp_map(sps_data)
 
     def _fetch_workspace_principals(self) -> None:
-        """Fetch principals via the SDK's workspace SCIM API (workspace principals only)."""
-        self._users = {user.user_name for user in self._client.users.list(attributes="userName")}
-        self._groups = {group.display_name for group in self._client.groups.list(attributes="displayName")}
+        """Fetch principals via the SDK's workspace SCIM API (workspace principals only).
 
-        sps_data = [
+        Users, groups, and service principals are fetched concurrently.
+        """
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            users_f = pool.submit(
+                lambda: list(self._client.users.list(attributes="userName")),
+            )
+            groups_f = pool.submit(
+                lambda: list(self._client.groups.list(attributes="displayName")),
+            )
+            sps_f = pool.submit(
+                lambda: list(self._client.service_principals.list(attributes="displayName,applicationId")),
+            )
+            users = users_f.result()
+            groups = groups_f.result()
+            sps = sps_f.result()
+
+        self._users = {user.user_name for user in users}
+        self._groups = {group.display_name for group in groups}
+        self._build_sp_map([
             {"displayName": sp.display_name, "applicationId": sp.application_id}
-            for sp in self._client.service_principals.list(attributes="displayName,applicationId")
-        ]
-        self._build_sp_map(sps_data)
+            for sp in sps
+        ])
 
     def _build_sp_map(self, sps_data: list[dict]) -> None:
         """Build the service principal maps from SCIM-format dicts."""

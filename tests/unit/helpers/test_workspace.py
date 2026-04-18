@@ -445,3 +445,61 @@ def test_workspace_helper_uses_sdk_list_when_scope_is_workspace() -> None:
     # Principals should be found
     assert helper.validate_principal("jane@co.com")
     assert helper.validate_principal("data_engineers")
+
+
+# ---------------------------------------------------------------------------
+# Parallel principal fetch
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_helper_fetches_account_principal_types_in_parallel() -> None:
+    """Users, groups, and service principals are fetched concurrently — total wall
+    time should be close to one delay, not three."""
+    import time
+    client = MagicMock()
+
+    delay_seconds = 0.3
+
+    def _slow_do(method, path, **kwargs):
+        time.sleep(delay_seconds)
+        return {"totalResults": 0, "startIndex": 1, "itemsPerPage": 100, "Resources": []}
+
+    client.api_client.do.side_effect = _slow_do
+
+    helper = WorkspaceHelper(client)
+    start = time.monotonic()
+    helper.fetch_principals()
+    elapsed = time.monotonic() - start
+
+    # With sequential fetch: 3 * delay; with parallel: ~1 * delay.
+    # Allow slack for thread scheduling.
+    assert elapsed < delay_seconds * 2, (
+        f"Expected parallel fetch (~{delay_seconds}s) but elapsed {elapsed:.2f}s "
+        f"suggests sequential execution ({delay_seconds * 3:.2f}s)"
+    )
+
+
+def test_workspace_helper_fetches_workspace_principal_types_in_parallel() -> None:
+    """Same parallelism check for the use_workspace_scim=True code path."""
+    import time
+    client = MagicMock()
+
+    delay_seconds = 0.3
+
+    def _slow_list(*args, **kwargs):
+        time.sleep(delay_seconds)
+        return iter([])
+
+    client.users.list.side_effect = _slow_list
+    client.groups.list.side_effect = _slow_list
+    client.service_principals.list.side_effect = _slow_list
+
+    helper = WorkspaceHelper(client, use_workspace_scim=True)
+    start = time.monotonic()
+    helper.fetch_principals()
+    elapsed = time.monotonic() - start
+
+    assert elapsed < delay_seconds * 2, (
+        f"Expected parallel fetch (~{delay_seconds}s) but elapsed {elapsed:.2f}s "
+        f"suggests sequential execution ({delay_seconds * 3:.2f}s)"
+    )

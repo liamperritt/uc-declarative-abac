@@ -120,6 +120,7 @@ Always use the `.venv` virtual environment when running `python`, `pip`, `pytest
 - Keep the engine idempotent — running the same configs twice should produce no changes on the second run
 - Minimise nesting and cognitive complexity — extract logic into well-named helper functions to keep top-level functions flat
 - Prefer immutability — helper functions should return new values rather than modifying state passed in as arguments
+- No forward references within a module — always define a function/helper *above* the function that calls it. The top-level public function(s) of a module should sit at the bottom, so a reader scrolling top-down sees primitives → helpers → entry point. Python allows forward references at runtime, but readability suffers when you have to scroll down to find a definition
 
 ## Testing
 
