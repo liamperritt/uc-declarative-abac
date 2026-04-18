@@ -10,8 +10,8 @@ See `README.md` for the full design specification, YAML config structures, and e
 
 ### Two config namespaces
 
-- **`definitions:`** — catalog-agnostic, reusable templates (schemas, tables, volumes, functions, policies). These are never deployed directly; they are referenced by resources.
-- **`resources:`** — concrete, deployable instances (governed_tags, catalogs, and promoted definitions with a fixed catalog/schema).
+- **`definitions:`** — catalog-agnostic, reusable templates (catalogs, schemas, tables, volumes, functions, policies). These are never deployed directly; they are referenced by resources.
+- **`resources:`** — concrete, deployable instances (governed_tags, catalog, schemas, etc. with a fixed catalog_name/schema_name).
 
 ### Core engine pipeline
 
