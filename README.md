@@ -553,38 +553,39 @@ resources:
 
 ## File Organization
 
-The recommended convention is to **mirror the Unity Catalog directory structure** under `definitions/catalogs/`, so each catalog/schema/table/volume/function config file sits where you'd expect to find it in UC. Cross-catalog reusable content (policies, shared functions) lives outside the catalog tree under `definitions/policies/` or `definitions/functions/`. The resource side stays thin — typically one file per catalog that `$ref`s the matching catalog definition.
+The recommended convention is to **mirror the Unity Catalog directory structure** under `definitions/catalogs/`, so each catalog, schema, table, volume and function config file sits where you'd expect to find it in UC. Cross-catalog reusable content (policies, shared functions) lives outside the catalog tree under `definitions/policies/` or `definitions/functions/`. The resource side stays thin — typically one file per catalog that `$ref`s the matching catalog definition.
 
-Recommended layout (mirrors the structure used by the e2e tests in `tests/e2e/configs/`):
+Recommended layout:
 
 ```
-configs/
-├── definitions/
-│   ├── catalogs/
-│   │   └── operations/
-│   │       ├── operations.yaml         # catalog definition
-│   │       └── schemas/
-│   │           ├── sales/
-│   │           │   ├── sales.yaml           # schema definition
-│   │           │   ├── tables/
-│   │           │   │   ├── orders.yaml      # table definition
-│   │           │   │   └── quotes.yaml
-│   │           │   └── functions/
-│   │           │       └── lookup_region.yaml
-│   │           └── landing/
-│   │               ├── landing.yaml
-│   │               └── volumes/
-│   │                   └── raw_events.yaml
-│   ├── policies/                            # cross-catalog reusable policies
-│   │   ├── mask_pii.yaml
-│   │   └── grant_catalog_read.yaml
-│   └── functions/                           # cross-catalog reusable functions (optional)
-│       └── mask_pii_email.yaml
-└── resources/
+definitions/
+├── catalogs/
+│   └── operations/
+│       ├── operations.yaml              # catalog definition
+│       └── schemas/
+│           ├── sales/
+│           │   ├── sales.yaml           # schema definition
+│           │   ├── tables/
+│           │   │   ├── orders.yaml      # table definition
+│           │   │   └── quotes.yaml
+│           │   └── functions/
+│           │       └── lookup_region.yaml
+│           └── landing/
+│               ├── landing.yaml
+│               └── volumes/
+│                   └── raw_events.yaml
+├── policies/                            # cross-catalog reusable policies
+│   ├── mask_pii.yaml
+│   └── grant_catalog_read.yaml
+└── functions/                           # cross-catalog reusable functions (optional)
+    └── mask_pii_email.yaml
+resources/
     ├── catalogs/
-    │   └── operations_prod.yaml             # thin $ref to the catalog definition
+    │   ├── operations_prod.yaml         # thin $ref to the catalog definition
+    │   └── operations_test.yaml
     └── governed_tags/
-        └── pii.yaml
+        ├── pii.yaml
+        └── sensitivity.yaml
 ```
 
 This folder structure is a recommendation, not enforced by the engine — the engine discovers every `.yaml` / `.yml` file under the config root and resolves references by definition key, not by file path. But keeping files where you'd expect them in a UC browser makes configs easy to navigate, and pairing each catalog definition with a matching one-line resource file is a clean split: **definitions describe what exists; resources describe where it gets deployed.**
