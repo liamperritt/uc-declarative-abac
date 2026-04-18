@@ -246,28 +246,18 @@ definitions:
 # definitions/platform/schemas/shared/functions/filter_by_region.yaml
 definitions:
   functions:
-    platform|shared|fn_filter_trips_by_region:
-      name: fn_filter_trips_by_region
-      comment: Users can only see trips to or from their region
+    platform|shared|fn_filter_by_region:
+      name: fn_filter_by_region
+      comment: Users can only see records from their region
       parameters:
-        - name: from_region
-          type: string
-        - name: to_region
+        - name: region
           type: string
       return: |-
-        (
-          (from_region = 'AFRICA' AND is_account_group_member('africa_users'))
-          OR (from_region = 'AMERICA' AND is_account_group_member('america_users'))
-          OR (from_region = 'EUROPE' AND is_account_group_member('europe_users'))
-          OR (from_region = 'ASIA' AND is_account_group_member('asia_users'))
-          OR (from_region = 'MIDDLE EAST' AND is_account_group_member('middle_east_users')
-        ) OR (
-          (to_region = 'AFRICA' AND is_account_group_member('africa_users'))
-          OR (to_region = 'AMERICA' AND is_account_group_member('america_users'))
-          OR (to_region = 'EUROPE' AND is_account_group_member('europe_users'))
-          OR (to_region = 'ASIA' AND is_account_group_member('asia_users'))
-          OR (to_region = 'MIDDLE EAST' AND is_account_group_member('middle_east_users')
-        )
+        (region = 'AFRICA' AND is_account_group_member('africa_users'))
+        OR (region = 'AMERICA' AND is_account_group_member('america_users'))
+        OR (region = 'EUROPE' AND is_account_group_member('europe_users'))
+        OR (region = 'ASIA' AND is_account_group_member('asia_users'))
+        OR (region = 'MIDDLE EAST' AND is_account_group_member('middle_east_users'))
 ```
 
 #### Policy definitions
@@ -297,8 +287,10 @@ definitions:
         - account_users
       except:
         - pii_viewers
-      column_has_tags:
-        pii: email
+      columns:
+        - alias: email
+          has_tags:
+            pii: email
 
 # definitions/shared/policies/mask_customer_name_pii.yaml
 definitions:
@@ -313,37 +305,54 @@ definitions:
       except:
         - customer_pii_viewers
       has_tags:
-        domain: customer
-      column_has_tags:
-        pii: name
+        customer: '*'
+      columns:
+        - alias: name
+          has_tags:
+            pii: name
 
 # definitions/shared/policies/filter_by_region.yaml
 definitions:
   policies:
-    shared|filter_transactions_by_region:
-      name: filter_transactions_by_region
-      comment: Users can only see sensitive transaction records from their region
+    shared|filter_trips_by_region:
+      name: filter_trips_by_region
+      comment: Users can only see high sensitivity trips to or from their region
       type: filter
       function:
-        name: fn_region_filter
+        name: to_or_from_region_filter
         parameters:
-          - name: region
+          - name: from_region
+            type: string
+          - name: to_region
             type: string
         return: |-
-          (region = 'AFRICA' AND is_account_group_member('africa_users'))
-          OR (region = 'AMERICA' AND is_account_group_member('america_users'))
-          OR (region = 'EUROPE' AND is_account_group_member('europe_users'))
-          OR (region = 'ASIA' AND is_account_group_member('asia_users'))
-          OR (region = 'MIDDLE EAST' AND is_account_group_member('middle_east_users'))
+          (
+            (from_region = 'AFRICA' AND is_account_group_member('africa_users'))
+            OR (from_region = 'AMERICA' AND is_account_group_member('america_users'))
+            OR (from_region = 'EUROPE' AND is_account_group_member('europe_users'))
+            OR (from_region = 'ASIA' AND is_account_group_member('asia_users'))
+            OR (from_region = 'MIDDLE EAST' AND is_account_group_member('middle_east_users')
+          ) OR (
+            (to_region = 'AFRICA' AND is_account_group_member('africa_users'))
+            OR (to_region = 'AMERICA' AND is_account_group_member('america_users'))
+            OR (to_region = 'EUROPE' AND is_account_group_member('europe_users'))
+            OR (to_region = 'ASIA' AND is_account_group_member('asia_users'))
+            OR (to_region = 'MIDDLE EAST' AND is_account_group_member('middle_east_users')
+          )
       to:
         - account_users
       except:
         - account_admins
       has_tags:
-        transactions: ~
+        domain: trips
         sensitivity: high
-      column_has_tags:
-        region: ~
+      columns:
+        - alias: from_region
+          has_tags:
+            from_region: '*'
+        - alias: to_region
+          has_tags:
+            to_region: '*'
 
 # definitions/shared/policies/grant_read_on_sales.yaml
 definitions:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from abc import abstractmethod
+from abc import ABC, abstractmethod
+from typing import Union
 from datetime import date
 from typing import Literal
 
@@ -29,7 +30,12 @@ def _check_duplicate_names(items: list, child_label: str, parent_label: str) -> 
             seen.add(name)
 
 
-class PolicyConfig(BaseModel):
+class PolicyColumnConfig(BaseModel):
+    name: str = Field(alias="alias")
+    has_tags: dict[str, str]
+
+
+class BasePolicyConfig(BaseModel, ABC):
     """Base model for all policy configs. Not intended to be instantiated directly."""
     catalog_name: str
     schema_name: str | None = None
@@ -53,11 +59,32 @@ class PolicyConfig(BaseModel):
         return self.catalog_name
 
 
-class GrantPolicyConfig(PolicyConfig):
+class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
+    """Base model for Fine-Grained Access Control (FGAC) policy configs. Not intended to be instantiated directly."""
+    name: str
+    type: Union[Literal[PolicyType.MASK], Literal[PolicyType.FILTER]]
+    function: str
+    to: list[str]
+    exceptions: list[str] | None = Field(alias="except")
+    columns: list[PolicyColumnConfig] | None = None
+
+
+class MaskPolicyConfig(BaseFgacPolicyConfig):
+    type: Literal[PolicyType.MASK] = PolicyType.MASK
+
+
+class FilterPolicyConfig(BaseFgacPolicyConfig):
+    type: Literal[PolicyType.FILTER] = PolicyType.FILTER
+
+
+class GrantPolicyConfig(BasePolicyConfig):
     type: Literal[PolicyType.GRANT] = PolicyType.GRANT
     privileges: list[PrivilegeType]
     to: list[str]
     expiry_date: date | None = None
+
+
+PolicyConfig = Union[MaskPolicyConfig, FilterPolicyConfig, GrantPolicyConfig]
 
 
 class ParameterConfig(BaseModel):
@@ -72,7 +99,7 @@ class ParameterConfig(BaseModel):
         return v
 
 
-class SecurableConfig(BaseModel):
+class BaseSecurableConfig(BaseModel, ABC):
     """Base model for all UC securable configs. Not intended to be instantiated directly."""
     name: str
     owner: str | None = None
@@ -92,7 +119,7 @@ class SecurableConfig(BaseModel):
         return _coerce_null_tag_values(v)
 
 
-class FunctionConfig(SecurableConfig):
+class FunctionConfig(BaseSecurableConfig):
     catalog_name: str
     schema_name: str
     parameters: list[ParameterConfig] | None = None
@@ -112,7 +139,7 @@ class FunctionConfig(SecurableConfig):
         return data
 
 
-class ColumnConfig(SecurableConfig):
+class ColumnConfig(BaseSecurableConfig):
     catalog_name: str
     schema_name: str
     table_name: str
@@ -131,7 +158,7 @@ class ColumnConfig(SecurableConfig):
         return f"{self.catalog_name}.{self.schema_name}.{self.table_name}.{self.name}"
 
 
-class VolumeConfig(SecurableConfig):
+class VolumeConfig(BaseSecurableConfig):
     catalog_name: str
     schema_name: str
 
@@ -141,10 +168,10 @@ class VolumeConfig(SecurableConfig):
         return f"{self.catalog_name}.{self.schema_name}.{self.name}"
 
 
-class TableConfig(SecurableConfig):
+class TableConfig(BaseSecurableConfig):
     catalog_name: str
     schema_name: str
-    policies: list[GrantPolicyConfig] | None = None
+    policies: list[PolicyConfig] | None = None
     columns: list[ColumnConfig] | None = None
 
     @model_validator(mode="before")
@@ -176,9 +203,9 @@ class TableConfig(SecurableConfig):
         return f"{self.catalog_name}.{self.schema_name}.{self.name}"
 
 
-class SchemaConfig(SecurableConfig):
+class SchemaConfig(BaseSecurableConfig):
     catalog_name: str
-    policies: list[GrantPolicyConfig] | None = None
+    policies: list[PolicyConfig] | None = None
     tables: list[TableConfig] | None = None
     volumes: list[VolumeConfig] | None = None
     functions: list[FunctionConfig] | None = None
@@ -227,8 +254,8 @@ class SchemaConfig(SecurableConfig):
         return f"{self.catalog_name}.{self.name}"
 
 
-class CatalogConfig(SecurableConfig):
-    policies: list[GrantPolicyConfig] | None = None
+class CatalogConfig(BaseSecurableConfig):
+    policies: list[PolicyConfig] | None = None
     schemas: list[SchemaConfig] | None = None
 
     @model_validator(mode="before")
@@ -255,6 +282,9 @@ class CatalogConfig(SecurableConfig):
     @property
     def full_name(self) -> str:
         return self.name
+
+
+SecurableConfig = Union[CatalogConfig, SchemaConfig, TableConfig, VolumeConfig, FunctionConfig, ColumnConfig]
 
 
 class ResourcesConfig(BaseModel):

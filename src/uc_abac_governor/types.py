@@ -36,6 +36,8 @@ class PrivilegeType(str, Enum):
 
 class PolicyType(str, Enum):
     GRANT = "grant"
+    MASK = "mask"
+    FILTER = "filter"
 
 
 class PrincipalType(str, Enum):
