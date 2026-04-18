@@ -884,3 +884,83 @@ def test_mask_policy_config_allows_missing_except():
 
     policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
     assert policy.exceptions is None
+
+
+# ---------------------------------------------------------------------------
+# GovernedTagConfig
+# ---------------------------------------------------------------------------
+
+
+def test_resources_config_parses_governed_tags():
+    """A ResourcesConfig with a governed_tags block parses each entry into a GovernedTagConfig."""
+    data = {
+        "catalogs": {"cat": {"name": "cat"}},
+        "governed_tags": {
+            "pii": {
+                "name": "pii",
+                "comment": "Personally identifiable information",
+                "allowed_values": ["name", "email", "phone"],
+            }
+        },
+    }
+    config = ResourcesConfig.model_validate(data)
+
+    assert config.governed_tags is not None
+    gt = config.governed_tags["pii"]
+    assert gt.name == "pii"
+    assert gt.comment == "Personally identifiable information"
+    assert gt.allowed_values == ["name", "email", "phone"]
+
+
+def test_resources_config_injects_governed_tag_name_from_key():
+    """When a governed_tags entry has no explicit 'name', the dict key is used."""
+    data = {
+        "catalogs": {"cat": {"name": "cat"}},
+        "governed_tags": {
+            "classification": {
+                "allowed_values": ["public", "internal"],
+            }
+        },
+    }
+    config = ResourcesConfig.model_validate(data)
+
+    assert config.governed_tags["classification"].name == "classification"
+
+
+def test_resources_config_allows_missing_governed_tags():
+    """A config without a governed_tags block is valid; governed_tags defaults to None."""
+    data = {"catalogs": {"cat": {"name": "cat"}}}
+    config = ResourcesConfig.model_validate(data)
+
+    assert config.governed_tags is None
+
+
+def test_governed_tag_config_defaults_empty_allowed_values():
+    """A governed_tags entry without allowed_values parses with an empty list default."""
+    data = {
+        "catalogs": {"cat": {"name": "cat"}},
+        "governed_tags": {
+            "bare": {"name": "bare", "comment": "Nothing but a name"},
+        },
+    }
+    config = ResourcesConfig.model_validate(data)
+
+    assert config.governed_tags["bare"].allowed_values == []
+
+
+def test_governed_tag_config_accepts_allowed_principals_without_failing():
+    """allowed_principals is accepted for forward compatibility — no validation error."""
+    data = {
+        "catalogs": {"cat": {"name": "cat"}},
+        "governed_tags": {
+            "pii": {
+                "name": "pii",
+                "allowed_values": ["name"],
+                "allowed_principals": ["data_governance_team", "user@company.com"],
+            }
+        },
+    }
+    config = ResourcesConfig.model_validate(data)
+
+    gt = config.governed_tags["pii"]
+    assert gt.allowed_principals == ["data_governance_team", "user@company.com"]

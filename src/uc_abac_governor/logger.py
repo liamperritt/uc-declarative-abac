@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 
+from uc_abac_governor.governed_tags.state import GovernedTag
 from uc_abac_governor.policies.state import Policy
 from uc_abac_governor.privileges.state import SecurablePrivilege
 from uc_abac_governor.securables.state import AttributeUpdate, Securable
@@ -12,7 +13,7 @@ from uc_abac_governor.types import ExecutionError
 _default_logger = logging.getLogger("uc_abac_governor")
 
 # Column widths for aligned output
-_TYPE_WIDTH = 7  # len("CATALOG") — longest SecurableType value
+_TYPE_WIDTH = 12  # len("GOVERNED_TAG") — longest SecurableType value
 _NAME_WIDTH = 36
 
 
@@ -54,6 +55,8 @@ class ChangeLogger:
         self._securables_replaced = 0
         self._policies_created = 0
         self._policies_replaced = 0
+        self._governed_tags_created = 0
+        self._governed_tags_updated = 0
         self._errors: list[ExecutionError] = []
 
     @property
@@ -230,6 +233,34 @@ class ChangeLogger:
         ))
 
     # ------------------------------------------------------------------
+    # Governed tag logging
+    # ------------------------------------------------------------------
+
+    def log_governed_tag_create(self, gt: GovernedTag) -> None:
+        """Log a governed tag (account-level tag policy) being created."""
+        self._governed_tags_created += 1
+        action_verb = "Create" if self._dry_run else "Created"
+        self._log_info(_format_change_line(
+            "+", "GOVERNED_TAG", gt.name,
+            f"{action_verb} governed tag ({len(gt.allowed_values)} allowed values)",
+        ))
+
+    def log_governed_tag_update(self, gt: GovernedTag, old: GovernedTag | None) -> None:
+        """Log a governed tag being updated, noting which fields changed."""
+        self._governed_tags_updated += 1
+        action_verb = "Update" if self._dry_run else "Updated"
+        changes: list[str] = []
+        if old is None or gt.comment != (old.comment if old else ""):
+            changes.append("description")
+        if old is None or gt.allowed_values != (old.allowed_values if old else frozenset()):
+            changes.append("values")
+        summary = ", ".join(changes) if changes else "no fields"
+        self._log_info(_format_change_line(
+            "~", "GOVERNED_TAG", gt.name,
+            f"{action_verb} governed tag ({summary})",
+        ))
+
+    # ------------------------------------------------------------------
     # Error section
     # ------------------------------------------------------------------
 
@@ -281,9 +312,17 @@ class ChangeLogger:
         if self._privileges_revoked:
             priv_parts.append(f"{self._privileges_revoked} revoked")
 
+        gt_parts: list[str] = []
+        if self._governed_tags_created:
+            gt_parts.append(f"{self._governed_tags_created} created")
+        if self._governed_tags_updated:
+            gt_parts.append(f"{self._governed_tags_updated} updated")
+
         sections: list[str] = []
         if sec_parts:
             sections.append("Securables: " + ", ".join(sec_parts))
+        if gt_parts:
+            sections.append("Governed tags: " + ", ".join(gt_parts))
         if tag_parts:
             sections.append("Tags: " + ", ".join(tag_parts))
         if policy_parts:
@@ -324,9 +363,17 @@ class ChangeLogger:
         if self._privileges_revoked:
             priv_parts.append(f"{self._privileges_revoked} to revoke")
 
+        gt_parts: list[str] = []
+        if self._governed_tags_created:
+            gt_parts.append(f"{self._governed_tags_created} to create")
+        if self._governed_tags_updated:
+            gt_parts.append(f"{self._governed_tags_updated} to update")
+
         sections: list[str] = []
         if sec_parts:
             sections.append("Securables: " + ", ".join(sec_parts))
+        if gt_parts:
+            sections.append("Governed tags: " + ", ".join(gt_parts))
         if tag_parts:
             sections.append("Tags: " + ", ".join(tag_parts))
         if policy_parts:

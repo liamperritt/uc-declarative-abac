@@ -503,3 +503,101 @@ def test_workspace_helper_fetches_workspace_principal_types_in_parallel() -> Non
         f"Expected parallel fetch (~{delay_seconds}s) but elapsed {elapsed:.2f}s "
         f"suggests sequential execution ({delay_seconds * 3:.2f}s)"
     )
+
+
+# ---------------------------------------------------------------------------
+# WorkspaceHelper.fetch_actual_governed_tags / create_tag_policy / update_tag_policy
+# ---------------------------------------------------------------------------
+
+
+def _make_tag_policy_mock(tag_key: str, description: str | None = None, values: list[str] | None = None) -> MagicMock:
+    """Build a mock TagPolicy with the fields the helper consumes."""
+    policy = MagicMock()
+    policy.tag_key = tag_key
+    policy.description = description
+    if values is None:
+        policy.values = None
+    else:
+        mock_values = []
+        for v in values:
+            mv = MagicMock()
+            mv.name = v
+            mock_values.append(mv)
+        policy.values = mock_values
+    return policy
+
+
+def test_workspace_helper_fetch_actual_governed_tags_returns_policies() -> None:
+    """fetch_actual_governed_tags iterates the SDK list and returns a GovernedTag per policy."""
+    from uc_abac_governor.governed_tags.state import GovernedTag
+
+    client = MagicMock()
+    client.tag_policies.list_tag_policies.return_value = iter([
+        _make_tag_policy_mock("pii", "PII data", ["name", "email"]),
+        _make_tag_policy_mock("classification", "Data classification", ["public", "internal"]),
+    ])
+
+    helper = WorkspaceHelper(client)
+    result = helper.fetch_actual_governed_tags()
+
+    assert GovernedTag(
+        name="pii", comment="PII data", allowed_values=frozenset({"name", "email"}),
+    ) in result
+    assert GovernedTag(
+        name="classification",
+        comment="Data classification",
+        allowed_values=frozenset({"public", "internal"}),
+    ) in result
+
+
+def test_workspace_helper_fetch_actual_governed_tags_is_empty_when_no_policies() -> None:
+    """When the account has no tag policies, fetch returns an empty set."""
+    client = MagicMock()
+    client.tag_policies.list_tag_policies.return_value = iter([])
+
+    helper = WorkspaceHelper(client)
+
+    assert helper.fetch_actual_governed_tags() == set()
+
+
+def test_workspace_helper_fetch_actual_governed_tags_parses_description_and_values() -> None:
+    """Null description becomes empty string; absent values becomes empty frozenset."""
+    from uc_abac_governor.governed_tags.state import GovernedTag
+
+    client = MagicMock()
+    client.tag_policies.list_tag_policies.return_value = iter([
+        _make_tag_policy_mock("bare", None, None),
+    ])
+
+    helper = WorkspaceHelper(client)
+    result = helper.fetch_actual_governed_tags()
+
+    assert GovernedTag(name="bare", comment="", allowed_values=frozenset()) in result
+
+
+def test_workspace_helper_create_tag_policy_passes_sdk_args() -> None:
+    """create_tag_policy forwards the TagPolicy object to the SDK create method."""
+    from databricks.sdk.service.tags import TagPolicy, Value
+
+    client = MagicMock()
+    helper = WorkspaceHelper(client)
+
+    policy = TagPolicy(tag_key="pii", description="PII", values=[Value(name="name")])
+    helper.create_tag_policy(policy)
+
+    client.tag_policies.create_tag_policy.assert_called_once_with(policy)
+
+
+def test_workspace_helper_update_tag_policy_uses_provided_update_mask() -> None:
+    """update_tag_policy forwards the tag_key, TagPolicy body, and update_mask verbatim to the SDK."""
+    from databricks.sdk.service.tags import TagPolicy, Value
+
+    client = MagicMock()
+    helper = WorkspaceHelper(client)
+
+    policy = TagPolicy(tag_key="pii", description="New desc", values=[Value(name="email")])
+    helper.update_tag_policy("pii", policy, update_mask="description,values")
+
+    client.tag_policies.update_tag_policy.assert_called_once_with(
+        tag_key="pii", tag_policy=policy, update_mask="description,values",
+    )

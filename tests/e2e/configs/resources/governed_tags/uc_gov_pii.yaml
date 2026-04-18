@@ -4,8 +4,9 @@ resources:
       name: uc_gov_pii
       comment: PII
       allowed_values:
-        - ''
         - name
         - email
         - phone
         - address
+        - ssn
+        - drivers_licence

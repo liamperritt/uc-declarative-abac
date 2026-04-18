@@ -40,6 +40,9 @@ def mock_workspace_client() -> MagicMock:
     # Default: no existing policies in UC. Individual tests can override.
     client.policies.list_policies.return_value = iter([])
 
+    # Default: no existing account-level tag policies. Individual tests can override.
+    client.tag_policies.list_tag_policies.return_value = iter([])
+
     return client
 
 

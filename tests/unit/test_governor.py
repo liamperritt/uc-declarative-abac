@@ -157,7 +157,7 @@ def test_governor_runs_tags_workflow_end_to_end(
     _setup_mock_workspace_empty_state(mock_workspace_client)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    _, tag_diff, _, _ = run(
+    _, _, tag_diff, _, _ = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
@@ -183,7 +183,7 @@ def test_governor_runs_privileges_workflow_end_to_end(
     _setup_mock_workspace_empty_state(mock_workspace_client)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    _, _, _, privilege_diff = run(
+    _, _, _, _, privilege_diff = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
@@ -211,7 +211,7 @@ def test_governor_runs_both_domains_independently(
     _setup_mock_workspace_empty_state(mock_workspace_client)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    _, tag_diff, _, privilege_diff = run(
+    _, _, tag_diff, _, privilege_diff = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
@@ -285,7 +285,7 @@ def test_governor_produces_empty_diffs_when_in_sync(
     )
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    _, tag_diff, _, privilege_diff = run(
+    _, _, tag_diff, _, privilege_diff = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
@@ -349,7 +349,7 @@ def test_governor_dry_run_does_not_execute_sql(
     _setup_mock_workspace_empty_state(mock_workspace_client)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    _, tag_diff, _, privilege_diff = run(
+    _, _, tag_diff, _, privilege_diff = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
@@ -545,7 +545,7 @@ def test_governor_runs_policies_workflow_end_to_end(
     _setup_mock_workspace_empty_state(mock_workspace_client)
     _setup_mock_principals_with_groups(mock_workspace_client, ["analysts", "admins"])
 
-    _, _, policy_diff, _ = run(
+    _, _, _, policy_diff, _ = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
         warehouse_id="test-warehouse-id",
@@ -584,7 +584,7 @@ def test_governor_policies_workflow_is_idempotent(
     fake_policy.comment = None
     mock_workspace_client.policies.list_policies.return_value = iter([fake_policy])
 
-    _, _, policy_diff, _ = run(
+    _, _, _, policy_diff, _ = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
         warehouse_id="test-warehouse-id",
@@ -669,7 +669,7 @@ def test_governor_is_idempotent_for_service_principal_across_display_name_and_ap
     _seed_actual_state_for_sp_idempotency(mock_workspace_client, sp_app_id)
 
     # Run and assert empty diffs
-    _, tag_diff, policy_diff, privilege_diff = run(
+    _, _, tag_diff, policy_diff, privilege_diff = run(
         config_dir=tmp_root,
         workspace_client=mock_workspace_client,
         warehouse_id="test-warehouse-id",

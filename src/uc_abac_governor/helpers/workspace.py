@@ -4,7 +4,9 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.tags import TagPolicy
 
+from uc_abac_governor.governed_tags.state import GovernedTag
 from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.types import (
     DuplicateServicePrincipalError,
@@ -218,3 +220,29 @@ class WorkspaceHelper:
                 sp_reverse[identifier],
             )
         raise PrincipalValidationError(f"Principal not found by identifier: {identifier}")
+
+    def fetch_actual_governed_tags(self) -> set[GovernedTag]:
+        """Fetch the account's current tag policies and convert them to GovernedTag state.
+
+        Safe to call inside the parallel fetch block — does not depend on the
+        principal cache.
+        """
+        return {
+            GovernedTag(
+                name=policy.tag_key,
+                comment=policy.description or "",
+                allowed_values=frozenset(v.name for v in (policy.values or [])),
+            )
+            for policy in self._client.tag_policies.list_tag_policies()
+        }
+
+    def create_tag_policy(self, policy: TagPolicy) -> TagPolicy:
+        """Create a new tag policy in the account. Thin passthrough to the SDK."""
+        return self._client.tag_policies.create_tag_policy(policy)
+
+    def update_tag_policy(self, tag_key: str, policy: TagPolicy, update_mask: str) -> TagPolicy:
+        """Update an existing tag policy. `update_mask` is a comma-separated list
+        of field names (e.g. 'description,values'); `*` is discouraged by the SDK."""
+        return self._client.tag_policies.update_tag_policy(
+            tag_key=tag_key, tag_policy=policy, update_mask=update_mask,
+        )

@@ -11,6 +11,10 @@ from uc_abac_governor.configs.consolidator import consolidate_resources
 from uc_abac_governor.configs.discovery import discover_yaml_files, load_raw_configs
 from uc_abac_governor.configs.models import ResourcesConfig
 from uc_abac_governor.configs.resolver import resolve_refs
+from uc_abac_governor.governed_tags.compiler import compile_desired_governed_tags
+from uc_abac_governor.governed_tags.differ import compute_governed_tag_diff
+from uc_abac_governor.governed_tags.executor import execute_governed_tag_diff
+from uc_abac_governor.governed_tags.state import GovernedTagDiff
 from uc_abac_governor.helpers.workspace import WorkspaceHelper
 from uc_abac_governor.helpers.unity_catalog import UnityCatalogHelper
 from uc_abac_governor.policies.compiler import compile_desired_policies
@@ -42,7 +46,7 @@ def run(
     warehouse_id: str,
     dry_run: bool = False,
     use_workspace_scim: bool = False,
-) -> tuple[SecurableDiff, TagDiff, PolicyDiff, PrivilegeDiff]:
+) -> tuple[SecurableDiff, GovernedTagDiff, TagDiff, PolicyDiff, PrivilegeDiff]:
     """Run the full governance pipeline: discover, resolve, compile, diff, apply.
 
     Returns the computed diffs for every domain in execution order.
@@ -67,11 +71,13 @@ def run(
         actual_tags_f = pool.submit(uc_helper.fetch_actual_tags, catalog_names)
         actual_privs_f = pool.submit(uc_helper.fetch_actual_privileges, catalog_names)
         actual_policies_f = pool.submit(uc_helper.fetch_actual_policies, config)
+        actual_governed_tags_f = pool.submit(ws_helper.fetch_actual_governed_tags)
         principals_f = pool.submit(ws_helper.fetch_principals)
         actual_securables, actual_attributes = actual_securables_f.result()
         actual_tags = actual_tags_f.result()
         actual_privileges = actual_privs_f.result()
         actual_policies = actual_policies_f.result()
+        actual_governed_tags = actual_governed_tags_f.result()
         principals_f.result()
     _logger.info("  Successfully fetched current state")
 
@@ -90,23 +96,32 @@ def run(
         change_logger.log_section_header("Securables")
     execute_securable_diff(uc_helper, securable_diff, change_logger, dry_run=dry_run)
 
-    # 4. Tags workflow
+    # 4. Governed tags workflow (account-level tag policies — must run before
+    # catalog-scoped tag assignments, so new tag keys exist before SET TAGS).
+    desired_governed_tags = compile_desired_governed_tags(config)
+    governed_tag_diff = compute_governed_tag_diff(desired_governed_tags, actual_governed_tags)
+
+    # 5. Tags workflow
     desired_tags = compile_desired_tags(config)
     tag_diff = compute_tag_diff(desired_tags, actual_tags)
 
-    # 5. Policies workflow (mask/filter)
+    # 6. Policies workflow (mask/filter)
     desired_policies = compile_desired_policies(config)
     policy_diff = compute_policy_diff(
         desired_policies, actual_policies, resolver, change_logger,
     )
 
-    # 6. Privileges workflow
+    # 7. Privileges workflow
     compiled_privileges = compile_desired_privileges(config, desired_tags, run_date=date.today())
     privilege_diff = compute_privilege_diff(
         compiled_privileges, actual_privileges, resolver, change_logger,
     )
 
-    # 7. Log and execute (or dry-run)
+    # 8. Log and execute (or dry-run)
+    if governed_tag_diff.to_create or governed_tag_diff.to_update:
+        change_logger.log_section_header("Governed tags")
+    execute_governed_tag_diff(ws_helper, governed_tag_diff, change_logger, dry_run=dry_run)
+
     if tag_diff.to_add or tag_diff.to_update or tag_diff.to_remove:
         change_logger.log_section_header("Tags")
     execute_tag_diff(uc_helper, tag_diff, change_logger, dry_run=dry_run)
@@ -125,4 +140,4 @@ def run(
     if change_logger.has_errors:
         raise ExecutionBatchError(change_logger.errors)
 
-    return securable_diff, tag_diff, policy_diff, privilege_diff
+    return securable_diff, governed_tag_diff, tag_diff, policy_diff, privilege_diff

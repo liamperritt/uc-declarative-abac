@@ -454,7 +454,7 @@ resources:
   governed_tags:
     pii:
       name: pii
-      comment: Personally identifiable information
+      comment: Personally identifiable information tag
       allowed_values:
         - name
         - address
@@ -652,6 +652,14 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 - **Policy model validation** — `MaskPolicyConfig` requires at least one column entry; `FilterPolicyConfig` allows an empty column list
 - **Inline function definitions** — a mask or filter policy's `function` field can be either a fully qualified UC function name or an inline function definition (plain dict or `$ref` / `$defs/...` that resolves to a dict). The consolidator moves inline definitions into the policy's enclosing schema — or the catalog's `default` schema when the policy is attached at the catalog level — and rewrites the policy's `function` field to the synthesised full name. Duplicate-name collisions surface as `DuplicateResourceError` at model validation
 
+#### Governed tags domain
+- **Governed tag compilation** — walks `resources.governed_tags`, emitting `GovernedTag` state with `comment` and `allowed_values` per entry; dict key is used as the default tag name
+- **Governed tag fetch** — account-level tag policies are retrieved via `WorkspaceClient.tag_policies.list_tag_policies` on `WorkspaceHelper`; runs in parallel with the other initial state fetches
+- **Governed tag diffing** — computes creates and updates by comparing desired vs actual state; `allowed_values` is compared as a set so cosmetic YAML reordering does not trigger an update; tag policies present in the account but absent from YAML are left alone (no-delete invariant for this iteration)
+- **Governed tag execution** — `create_tag_policy` for new entries; `update_tag_policy` with a precise `update_mask` (`description`, `values`, or both) per changed field on existing entries; allowed values are sorted before being sent to the SDK for deterministic output
+- **Ordering** — governed tags are reconciled *before* catalog-scoped `SET TAGS` statements, so new tag keys exist in the account before assignments reference them
+- **Forward compatibility** — `allowed_principals` is accepted by the config parser but not yet enforced; assignment ACL management will arrive in a later iteration
+
 #### Privileges domain
 - **Privilege compilation** — matches grant policies against desired tags with AND semantics, scoped to the policy's attached securable and its children
 - **Wildcard tag values** — `has_tags: {k: '*'}` matches any value for tag `k` (presence check); concrete values match exactly
@@ -680,18 +688,19 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 #### Error handling
 - **Error collection** — SQL execution errors and principal validation errors are collected (not raised immediately), allowing the pipeline to process as many operations as possible before reporting all failures
 - **`ExecutionBatchError`** — raised at the end with all collected errors
-- **Structured logging** — `Securables` / `Tags` / `Policies` / `Privileges` section headers, ordered by securable type then name, with dry-run prefix support and summary counts
+- **Structured logging** — `Securables` / `Governed tags` / `Tags` / `Policies` / `Privileges` section headers, ordered by securable type then name, with dry-run prefix support and summary counts
 
 #### Infrastructure
 - **CLI** (`python -m uc_abac_governor`) — `--config-dir`, `--warehouse-id`, `--profile`, `--dry-run`, `--use-workspace-scim`
 - **Hybrid SQL polling** — `wait_timeout=50s` with `on_wait_timeout=CONTINUE` and 10s polling for long-running queries
 - **External links** — fetches SQL results via external link URLs for large result sets
-- **Parallel state fetch** — securables, tags, privileges, policies, and principals are fetched concurrently
+- **Parallel state fetch** — securables, tags, privileges, policies, governed tags, and principals are fetched concurrently
 - **`information_schema` filtering** — all state queries exclude the `information_schema` schema and its child objects
 
 ### Not yet implemented
 
-- **Governed tags** — `resources.governed_tags` with `allowed_values`, `allowed_principals`, `comment` (documented in README but not built)
+- **Governed tag assignment ACLs** — `allowed_principals` is parsed but not yet enforced; assigning which users, groups, or service principals may `ASSIGN` a governed tag to UC objects will be wired through `AccountAccessControlProxyAPI` in a future iteration
+- **Governed tag deletes** — tag policies present in the account but absent from YAML are currently left alone; full source-of-truth enforcement (matching the tags/privileges delete semantics) is deferred
 - **UC object creation** — creating/updating catalogs, schemas, tables, volumes (functions are supported; other securable types require adding `Securable` subclasses)
 - **Object attributes** — `comment`, `rfa_destination` on securables (the `owner` attribute is implemented; adding new attributes requires only a field on `SecurableAttributes` and an executor dispatch branch)
 - **Direct mask/filter** — `filter` on tables and `mask` on columns (non-ABAC, directly applied functions)

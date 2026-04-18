@@ -310,17 +310,30 @@ class CatalogConfig(BaseSecurableConfig):
 SecurableConfig = Union[CatalogConfig, SchemaConfig, TableConfig, VolumeConfig, FunctionConfig, ColumnConfig]
 
 
+class GovernedTagConfig(BaseModel):
+    """Account-level governed tag declaration. Serialised under `resources.governed_tags`."""
+    name: str
+    comment: str | None = None
+    allowed_values: list[str] = Field(default_factory=list)
+    allowed_principals: list[str] = Field(default_factory=list)
+
+
 class ResourcesConfig(BaseModel):
     catalogs: dict[str, CatalogConfig]
+    governed_tags: dict[str, GovernedTagConfig] | None = None
 
     @model_validator(mode="before")
     @classmethod
-    def _inject_catalog_names_from_keys(cls, data: dict) -> dict:
-        """Set each catalog's name from its dict key when name is not provided."""
+    def _inject_names_from_keys(cls, data: dict) -> dict:
+        """Set each catalog's and governed tag's name from its dict key when not provided."""
         catalogs = data.get("catalogs")
-        if not isinstance(catalogs, dict):
-            return data
-        for key, catalog in catalogs.items():
-            if isinstance(catalog, dict):
-                catalog.setdefault("name", key)
+        if isinstance(catalogs, dict):
+            for key, catalog in catalogs.items():
+                if isinstance(catalog, dict):
+                    catalog.setdefault("name", key)
+        governed_tags = data.get("governed_tags")
+        if isinstance(governed_tags, dict):
+            for key, gt in governed_tags.items():
+                if isinstance(gt, dict):
+                    gt.setdefault("name", key)
         return data

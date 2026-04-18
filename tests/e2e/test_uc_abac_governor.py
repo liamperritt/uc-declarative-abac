@@ -21,6 +21,7 @@ from pathlib import Path
 from databricks.sdk import WorkspaceClient
 
 from uc_abac_governor.governor import run
+from uc_abac_governor.governed_tags.state import GovernedTag
 from uc_abac_governor.securables.state import AttributeUpdate, Function, SecurableAttributes
 from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.privileges.state import SecurablePrivilege
@@ -108,6 +109,15 @@ EXPECTED_ATTRIBUTES = {
     SecurableAttributes(SecurableType.FUNCTION, "liam_perritt.default.mask_pii_email", owner="sp_uc_governor_test"),
 }
 
+EXPECTED_GOVERNED_TAGS = {
+    # Account-level governed tag declared in tests/e2e/configs/resources/governed_tags/uc_gov_pii.yaml
+    GovernedTag(
+        name="uc_gov_pii",
+        comment="PII",
+        allowed_values=frozenset({"", "name", "email", "phone", "address"}),
+    ),
+}
+
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -120,7 +130,7 @@ def test_uc_abac_governor_dry_run(
     warehouse_id: str,
 ):
     """Dry run computes correct tag, privilege, and securable diffs without applying changes."""
-    securable_diff, tag_diff, privilege_diff = run(
+    securable_diff, governed_tag_diff, tag_diff, _policy_diff, privilege_diff = run(
         config_dir=config_dir,
         workspace_client=workspace_client,
 
@@ -128,6 +138,15 @@ def test_uc_abac_governor_dry_run(
         dry_run=True,
         use_workspace_scim=True,
     )
+
+    # All expected governed tags should be pending create/update or already in sync
+    pending_governed_tags = governed_tag_diff.to_create | governed_tag_diff.to_update
+    for gt in EXPECTED_GOVERNED_TAGS:
+        in_diff = gt in pending_governed_tags
+        already_in_sync = gt not in pending_governed_tags
+        assert in_diff or already_in_sync, (
+            f"Expected governed tag not found in diff and not in sync: {gt}"
+        )
 
     # All expected functions should be pending create/replace or already in sync
     pending_securables = set(securable_diff.securables_to_create) | set(securable_diff.securables_to_replace)
@@ -183,7 +202,7 @@ def test_uc_abac_governor_deploy(
 ):
     """First run applies all changes; second run confirms idempotency."""
     # First run — apply changes
-    sec_diff_1, tag_diff_1, priv_diff_1 = run(
+    sec_diff_1, gt_diff_1, tag_diff_1, _policy_diff_1, priv_diff_1 = run(
         config_dir=config_dir,
         workspace_client=workspace_client,
 
@@ -191,6 +210,15 @@ def test_uc_abac_governor_deploy(
         dry_run=False,
         use_workspace_scim=True,
     )
+
+    # All expected governed tags should have been created/updated (or already in sync)
+    applied_governed_tags = gt_diff_1.to_create | gt_diff_1.to_update
+    for gt in EXPECTED_GOVERNED_TAGS:
+        in_applied = gt in applied_governed_tags
+        already_in_sync = gt not in applied_governed_tags
+        assert in_applied or already_in_sync, (
+            f"Expected governed tag was not applied and not already in sync: {gt}"
+        )
 
     # All expected functions should have been created/replaced (or already in sync)
     applied_securables = set(sec_diff_1.securables_to_create) | set(sec_diff_1.securables_to_replace)
