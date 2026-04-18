@@ -821,3 +821,25 @@ def test_mask_policy_config_accepts_multiple_columns():
 
     policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
     assert [c.name for c in policy.columns] == ["c1", "c2"]
+
+
+def test_mask_policy_config_accepts_none_except():
+    """A MaskPolicyConfig with 'except' explicitly set to None parses successfully
+    with exceptions=None."""
+    data = _mask_or_filter_policy_catalog("mask")
+    data["catalogs"]["cat"]["schemas"][0]["tables"][0]["policies"][0]["except"] = None
+    config = ResourcesConfig.model_validate(data)
+
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert policy.exceptions is None
+
+
+def test_mask_policy_config_allows_missing_except():
+    """A MaskPolicyConfig without an 'except' key parses successfully with
+    exceptions=None — 'except' is optional, not required."""
+    data = _mask_or_filter_policy_catalog("mask")
+    data["catalogs"]["cat"]["schemas"][0]["tables"][0]["policies"][0].pop("except")
+    config = ResourcesConfig.model_validate(data)
+
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert policy.exceptions is None

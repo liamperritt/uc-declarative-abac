@@ -1032,3 +1032,93 @@ def test_privilege_compiler_and_semantics_with_scoped_policy():
         principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
         privilege_type=PrivilegeType.SELECT,
     ) not in result
+
+
+# ---------------------------------------------------------------------------
+# Wildcard tag value ("*")
+# ---------------------------------------------------------------------------
+
+
+def test_privilege_compiler_wildcard_matches_any_tag_value():
+    """has_tags: {domain: '*'} should match objects with any value for 'domain'."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["team"],
+                            "has_tags": {"domain": "*"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="my_cat.s.orders",
+            tag_name="domain",
+            tag_value="sales",
+        ),
+        SecurableTag(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="my_cat.s.logs",
+            tag_name="domain",
+            tag_value="platform",
+        ),
+        SecurableTag(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="my_cat.s.untagged",
+            tag_name="other",
+            tag_value="x",
+        ),
+    }
+
+    result = compile_desired_privileges(config, desired_tags)
+
+    matched_names = {p.securable_full_name for p in result}
+    # Both tagged objects match regardless of value
+    assert "my_cat.s.orders" in matched_names
+    assert "my_cat.s.logs" in matched_names
+    # Object without the 'domain' tag does not match
+    assert "my_cat.s.untagged" not in matched_names
+
+
+def test_privilege_compiler_wildcard_combines_with_concrete_tags():
+    """has_tags with one '*' and one concrete value uses AND semantics —
+    both tags must be present, the concrete one must also have the matching value."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["team"],
+                            "has_tags": {"domain": "*", "level": "senior"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    desired_tags = {
+        # Matches: has both tags, 'level' is senior
+        SecurableTag(SecurableType.TABLE, "my_cat.s.orders", "domain", "sales"),
+        SecurableTag(SecurableType.TABLE, "my_cat.s.orders", "level", "senior"),
+        # Does not match: wrong level value
+        SecurableTag(SecurableType.TABLE, "my_cat.s.logs", "domain", "platform"),
+        SecurableTag(SecurableType.TABLE, "my_cat.s.logs", "level", "junior"),
+        # Does not match: missing 'level' tag
+        SecurableTag(SecurableType.TABLE, "my_cat.s.untagged", "domain", "sales"),
+    }
+
+    result = compile_desired_privileges(config, desired_tags)
+
+    matched_names = {p.securable_full_name for p in result}
+    assert matched_names == {"my_cat.s.orders"}

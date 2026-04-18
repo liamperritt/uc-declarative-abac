@@ -31,7 +31,7 @@ Definitions define *what* exists; resources define *where* it gets deployed.
 
 ### Resources (deployed UC objects)
 
-- **Tag policies** — enforced usage rules for UC governed tags with allowed values, allowed principals, and comments.
+- **Governed tags** — enforced usage rules for UC governed tags with allowed values, allowed principals, and comments.
 - **Catalogs** — compose schema and ABAC policy definitions into deployable units, with per-catalog overrides.
 - **Schemas, tables, volumes, functions, mask/filter ABAC policies** — concrete instances that can reference relevant definitions.
 
@@ -390,9 +390,9 @@ For mask and filter policies, the `function` property can either be the fully qu
 
 Resource configs are concrete, deployable instances (e.g., catalogs and their contents) that can compose definitions into real UC objects.
 
-#### Tag Policies
+#### Governed Tags
 
-Tag policies enforce usage rules for Unity Catalog governed tags. They specify a tag name with a controlled set of allowed values. They are defined under `resources: tag_policies:` (not definitions) because they are account-level singletons—there is no catalog-scoped variant. The dictionary key is used as the tag name if `name` is not provided. All tag policies should exclusively be created through this framework.
+Governed tags specify a tag name with a enforced set of allowed values. They are defined under `resources: governed_tags:` (not definitions) because they are account-level singletons—there is no catalog-scoped variant. The dictionary key is used as the tag name if `name` is not provided. All governed tags should exclusively be created through this framework.
 
 - **`name`** — the governed tag key.
 - **`comment`** — a human-readable description of the governed tag's purpose.
@@ -400,9 +400,9 @@ Tag policies enforce usage rules for Unity Catalog governed tags. They specify a
 - **`allowed_principals`** — the list of principals who allowed to `ASSIGN` the tag to Unity Catalog objects. This can be useful for users to test tag assignments within `dev` catalogs that are not governed by this `uc_abac_governor` framework. It is not recommended to manually assign tags to UC objects that are governed by this framework, as this will result in those tags being blown away the next time that this framework runs.
 
 ```yaml
-# resources/tag_policies/pii.yaml
+# resources/governed_tags/pii.yaml
 resources:
-  tag_policies:
+  governed_tags:
     pii:
       name: pii
       comment: Personally identifiable information
@@ -413,9 +413,9 @@ resources:
       allowed_principals:
         - account_users
 
-# resources/tag_policies/classification.yaml
+# resources/governed_tags/classification.yaml
 resources:
-  tag_policies:
+  governed_tags:
     classification:
       name: classification
       comment: Data classification level
@@ -550,7 +550,6 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 
 #### Securables domain
 - **Owner management** — detects owner drift between config and workspace; updates via WorkspaceClient API for all securable types (catalogs, schemas, tables, volumes, functions)
-- **Owner principal resolution** — resolves YAML owner display names to `Principal` objects with system identifiers (application IDs for service principals), and resolves actual owner identifiers from system tables back to `Principal` objects for comparison
 - **Function creation** — creates new functions via `CREATE FUNCTION` SQL with parameters and return expression (no `RETURNS` clause; UC infers the type)
 - **Function replacement** — replaces existing functions whose parameters or definition have changed via `CREATE OR REPLACE FUNCTION` SQL
 - **Polymorphic securable state** — `SecurableInfo` base class with `FunctionInfo` subclass; executor dispatches via structural pattern matching (`match`/`case`), extensible for future securable types
@@ -563,44 +562,60 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 - **Tag execution** — generates and executes `ALTER SET/UNSET TAGS` SQL, including `ALTER TABLE ... ALTER COLUMN ... SET/UNSET TAGS` for column-level tags
 - **Tag types** — CATALOG, SCHEMA, TABLE, VOLUME, COLUMN
 
+#### Policies domain (mask / filter ABAC)
+- **Policy compilation** — walks catalog → schema → table hierarchy, emitting `MASK` and `FILTER` policy definitions; grant policies are filtered out and handled by the privileges domain
+- **Tag-to-WHEN translation** — policy `has_tags` maps to a `WHEN` clause: `has_tag_value('k', 'v')` for concrete values, `has_tag('k')` for the `'*'` wildcard, AND-joined
+- **Column-tag-to-MATCH-COLUMNS translation** — per-column `has_tags` maps to `MATCH COLUMNS <condition> AS <alias>` entries
+- **MASK column split** — the first `columns[]` entry becomes `ON COLUMN <alias>`; remaining columns become `USING COLUMNS (...)` args
+- **FILTER columns** — no `ON COLUMN`; all columns become `USING COLUMNS (...)` args
+- **Parallel policy state fetch** — `WorkspaceClient.policies.list_policies` is invoked per configured catalog/schema/table concurrently via a `ThreadPoolExecutor(max_workers=32)` pool
+- **Policy diffing** — computes creates and replaces keyed by `(securable_type, full_name, name)`; actual-only policies are silently skipped (UC policies are never deleted)
+- **Policy execution** — generates and executes `CREATE POLICY` / `CREATE OR REPLACE POLICY` SQL with `ON`, `TO`, optional `EXCEPT`, `FOR TABLES`, optional `WHEN`, optional `MATCH COLUMNS`, `ON COLUMN` (MASK only), and `USING COLUMNS`
+- **Policy model validation** — `MaskPolicyConfig` requires at least one column entry; `FilterPolicyConfig` allows an empty column list
+
 #### Privileges domain
 - **Privilege compilation** — matches grant policies against desired tags with AND semantics, scoped to the policy's attached securable and its children
+- **Wildcard tag values** — `has_tags: {k: '*'}` matches any value for tag `k` (presence check); concrete values match exactly
 - **Privilege-securable compatibility** — filters incompatible privilege/securable combinations (e.g. `READ_VOLUME` only on volumes)
 - **Tagless policies** — policies with no tags grant directly to their attached securable
 - **Policy expiry** — `expiry_date` field; expired policies are excluded from compilation
-- **Principal resolution** — resolves YAML principal names to `Principal` objects with system identifiers (application IDs for service principals)
 - **Privilege diffing** — computes grants and revokes by comparing desired vs actual state from `information_schema.*_privileges` system tables
 - **Privilege execution** — generates and executes `GRANT`/`REVOKE` SQL
+
+#### Principal management
+- **Account SCIM proxy** (default) — fetches all account-level principals via `/api/2.0/account/scim/v2/` endpoints with pagination
+- **Workspace SCIM** (optional `--use-workspace-scim`) — fetches workspace-level principals via SDK
+- **Centralised resolution** — `PrincipalResolver` (in `uc_abac_governor.principals`) bridges YAML display names with UC identifiers. Service principals appear in config by display name but in UC system tables / SDK responses as `application_id`; the resolver normalises both sides to the same `Principal` object so diffs compare correctly across all domains
+- **Per-domain integration** — each domain's `compute_*_diff` accepts the shared `PrincipalResolver` and `ChangeLogger` and resolves principals internally on both desired and actual state before diffing
+- **Runtime guards** — `ensure_resolved(p)` / `ensure_all_resolved(iterable)` assert the resolved invariant at the executor boundary before SQL emission
+- **Batch failure reporting** — unresolved principals in a single state object are aggregated into one `PrincipalValidationError` message listing every offender
+- **Duplicate SP handling** — warns on duplicate service principal display names, errors if a duplicate SP is referenced in a policy
 
 #### Pydantic model validation
 - **`FunctionConfig`** — function definitions with `parameters` (list of `ParameterConfig`), `definition` (aliased as `return` in YAML), and tags rejection validator
 - **`ParameterConfig`** — function parameters with automatic lowercase-to-uppercase `ColumnTypeName` coercion
 - **Column owner rejection** — `ColumnConfig` rejects explicit `owner` field (always inherited from table)
 - **Schema function support** — `SchemaConfig.functions` with parent name injection and duplicate detection
-
-#### Principal management
-- **Account SCIM proxy** (default) — fetches all account-level principals via `/api/2.0/account/scim/v2/` endpoints with pagination
-- **Workspace SCIM** (optional `--use-workspace-scim`) — fetches workspace-level principals via SDK
-- **Duplicate SP handling** — warns on duplicate service principal display names, errors if a duplicate SP is referenced in a policy
+- **Mask/filter policy models** — `MaskPolicyConfig`, `FilterPolicyConfig` with optional `except`, optional `columns` (FILTER) and required non-empty `columns` (MASK)
 
 #### Error handling
 - **Error collection** — SQL execution errors and principal validation errors are collected (not raised immediately), allowing the pipeline to process as many operations as possible before reporting all failures
 - **`ExecutionBatchError`** — raised at the end with all collected errors
-- **Structured logging** — `[SECURABLES]`/`[TAGS]`/`[PRIVILEGES]` section headers, ordered by securable type then name, with dry-run prefix support and summary counts
+- **Structured logging** — `Securables` / `Tags` / `Policies` / `Privileges` section headers, ordered by securable type then name, with dry-run prefix support and summary counts
 
 #### Infrastructure
 - **CLI** (`python -m uc_abac_governor`) — `--config-dir`, `--warehouse-id`, `--profile`, `--dry-run`, `--use-workspace-scim`
 - **Hybrid SQL polling** — `wait_timeout=50s` with `on_wait_timeout=CONTINUE` and 10s polling for long-running queries
 - **External links** — fetches SQL results via external link URLs for large result sets
-- **Parallel state fetch** — securables, tags, privileges, and principals are fetched concurrently
+- **Parallel state fetch** — securables, tags, privileges, policies, and principals are fetched concurrently
 - **`information_schema` filtering** — all state queries exclude the `information_schema` schema and its child objects
 
 ### Not yet implemented
 
-- **Tag policies** — `resources.tag_policies` with `allowed_values`, `allowed_principals`, `comment` (documented in README but not built)
+- **Governed tags** — `resources.governed_tags` with `allowed_values`, `allowed_principals`, `comment` (documented in README but not built)
 - **UC object creation** — creating/updating catalogs, schemas, tables, volumes (functions are supported; other securable types require adding `SecurableInfo` subclasses)
 - **Object attributes** — `comment`, `rfa_destination` on securables (the `owner` attribute is implemented; adding new attributes requires only a field on `SecurableAttributes` and an executor dispatch branch)
-- **Mask & filter policies** — `type: mask` and `type: filter` policy support
+- **Inline function definitions on mask/filter policies** — currently `function` must be the fully qualified name of an existing UC function; auto-deploying an inline function definition alongside a policy is not yet supported
 - **Direct mask/filter** — `filter` on tables and `mask` on columns (non-ABAC, directly applied functions)
 - **Abstracted privilege names** — `read`, `edit`, `create` expanding to multiple UC privileges
 - **GitHub Action** — CI/CD deployment action

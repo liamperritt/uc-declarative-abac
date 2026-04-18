@@ -7,7 +7,6 @@ definitions:
       to:
         - uc_governor_test_team
         - liam.perritt@databricks.com
-      except: []
       columns:
         - alias: pii
           has_tags:

@@ -32,6 +32,8 @@ _SCHEMA_PRIVILEGES = (
 _CATALOG_PRIVILEGES = _SCHEMA_PRIVILEGES | {PrivilegeType.USE_CATALOG, PrivilegeType.CREATE_SCHEMA, PrivilegeType.BROWSE}
 _UNIVERSAL_PRIVILEGES = {PrivilegeType.ALL_PRIVILEGES, PrivilegeType.MANAGE}
 
+_TAG_VALUE_WILDCARD = "*"
+
 SECURABLE_TYPE_PRIVILEGE_MAP: dict[SecurableType, set[PrivilegeType]] = {
     SecurableType.CATALOG: _CATALOG_PRIVILEGES | _UNIVERSAL_PRIVILEGES,
     SecurableType.SCHEMA: _SCHEMA_PRIVILEGES | _UNIVERSAL_PRIVILEGES,
@@ -154,11 +156,30 @@ def _match_policies(
             continue
 
         # Tag-matching policy — scoped to the attached securable and its children
-        required = {(k, v) for k, v in policy.has_tags.items()}
         for full_name, (sec_type, actual_tags) in tag_index.items():
             if not _is_within_scope(full_name, policy):
                 continue
-            if not required.issubset(actual_tags):
+            if not _tags_match(policy.has_tags, actual_tags):
                 continue
             result |= _emit_privileges(sec_type, full_name, policy)
     return result
+
+
+def _tags_match(
+    required: dict[str, str],
+    actual_tags: set[tuple[str, str | None]],
+) -> bool:
+    """Return True iff every required tag is present on the object (AND semantics).
+
+    A required value of '*' matches any value — only the tag's presence is checked.
+    Any other required value must equal the actual value exactly.
+    """
+    actual_by_key = {key: value for key, value in actual_tags}
+    for key, required_value in required.items():
+        if key not in actual_by_key:
+            return False
+        if required_value == _TAG_VALUE_WILDCARD:
+            continue
+        if actual_by_key[key] != required_value:
+            return False
+    return True

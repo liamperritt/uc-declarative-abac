@@ -65,7 +65,7 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
     type: Union[Literal[PolicyType.MASK], Literal[PolicyType.FILTER]]
     function: str
     to: list[str]
-    exceptions: list[str] | None = Field(alias="except")
+    exceptions: list[str] | None = Field(default=None, alias="except")
     columns: list[PolicyColumnConfig] | None = None
 
 

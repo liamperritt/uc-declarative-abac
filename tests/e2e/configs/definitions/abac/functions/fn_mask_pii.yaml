@@ -6,4 +6,4 @@ definitions:
       parameters:
         - name: pii
           type: string
-      return: "'***'"
+      return: "CONCAT('***', SUBSTRING(pii, -4))"
