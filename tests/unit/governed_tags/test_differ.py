@@ -4,10 +4,10 @@ from uc_abac_governor.governed_tags.differ import compute_governed_tag_diff
 from uc_abac_governor.governed_tags.state import GovernedTag
 
 
-def _gt(name: str, comment: str = "", values: set[str] | None = None) -> GovernedTag:
+def _gt(name: str, description: str = "", values: set[str] | None = None) -> GovernedTag:
     return GovernedTag(
         name=name,
-        comment=comment,
+        description=description,
         allowed_values=frozenset(values or set()),
     )
 
@@ -23,14 +23,14 @@ def test_governed_tag_differ_creates_tag_when_missing_in_actual():
     assert diff.to_update == set()
 
 
-def test_governed_tag_differ_updates_tag_when_comment_changes():
-    """An existing tag with a changed comment produces a to_update entry."""
-    desired = {_gt("pii", "Updated comment", {"name"})}
-    actual = {_gt("pii", "Original comment", {"name"})}
+def test_governed_tag_differ_updates_tag_when_description_changes():
+    """An existing tag with a changed description produces a to_update entry."""
+    desired = {_gt("pii", "Updated description", {"name"})}
+    actual = {_gt("pii", "Original description", {"name"})}
 
     diff = compute_governed_tag_diff(desired, actual)
 
-    assert _gt("pii", "Updated comment", {"name"}) in diff.to_update
+    assert _gt("pii", "Updated description", {"name"}) in diff.to_update
     assert diff.to_create == set()
 
 

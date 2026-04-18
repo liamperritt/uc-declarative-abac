@@ -524,7 +524,7 @@ Resource configs are concrete, deployable instances (e.g., catalogs and their co
 Governed tags specify a tag name with a enforced set of allowed values. They are defined under `resources: governed_tags:` (not definitions) because they are account-level singletons—there is no catalog-scoped variant. The dictionary key is used as the tag name if `name` is not provided. All governed tags should exclusively be created through this framework.
 
 - **`name`** — the governed tag key.
-- **`comment`** — a human-readable description of the governed tag's purpose.
+- **`description`** — a human-readable description of the governed tag's purpose. `comment` is still accepted as a backward-compatible alias on input.
 - **`allowed_values`** — the fixed list of values that can be assigned to this tag. ABAC policies reference these tag key-value pairs to determine which columns to mask, which rows to filter, or which objects to grant access on.
 - **`allowed_principals`** — the list of principals who allowed to `ASSIGN` the tag to Unity Catalog objects. This can be useful for users to test tag assignments within `dev` catalogs that are not governed by this `uc_abac_governor` framework. It is not recommended to manually assign tags to UC objects that are governed by this framework, as this will result in those tags being blown away the next time that this framework runs.
 
@@ -534,7 +534,7 @@ resources:
   governed_tags:
     pii:
       name: pii
-      comment: Personally identifiable information tag
+      description: Personally identifiable information tag
       allowed_values:
         - name
         - address
@@ -547,7 +547,7 @@ resources:
   governed_tags:
     classification:
       name: classification
-      comment: Data classification level
+      description: Data classification level
       allowed_values:
         - public
         - internal
@@ -706,13 +706,19 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 - **Resource consolidation** — standalone `resources.schemas`, `resources.tables`, `resources.volumes` are restructured into the nested catalog hierarchy with parent auto-creation
 - **Pydantic model validation** — full config validation with parent context injection (`catalog_name`, `schema_name`, `table_name`), `full_name` computed fields, null tag coercion, and duplicate resource detection
 
+#### Governed tags domain
+- **Governed tag compilation** — walks `resources.governed_tags`, emitting `GovernedTag` state with `description` and `allowed_values` per entry; dict key is used as the default tag name
+- **Governed tag fetch** — account-level tag policies are retrieved via `WorkspaceClient.tag_policies.list_tag_policies` on `WorkspaceHelper`; runs in parallel with the other initial state fetches
+- **Governed tag diffing** — computes creates and updates by comparing desired vs actual state; `allowed_values` is compared as a set so cosmetic YAML reordering does not trigger an update; tag policies present in the account but absent from YAML are left alone (no-delete invariant for this iteration)
+- **Governed tag execution** — `create_tag_policy` for new entries; `update_tag_policy` with a precise `update_mask` (`description`, `values`, or both) per changed field on existing entries; allowed values are sorted before being sent to the SDK for deterministic output
+- **Ordering** — governed tags are reconciled *before* catalog-scoped `SET TAGS` statements, so new tag keys exist in the account before assignments reference them
+- **Forward compatibility** — `allowed_principals` is accepted by the config parser but not yet enforced; assignment ACL management will arrive in a later iteration
+
 #### Securables domain
 - **Owner management** — detects owner drift between config and workspace; updates via WorkspaceClient API for all securable types (catalogs, schemas, tables, volumes, functions)
 - **Function creation** — creates new functions via `CREATE FUNCTION` SQL with parameters and return expression (no `RETURNS` clause; UC infers the type)
 - **Function replacement** — replaces existing functions whose parameters or definition have changed via `CREATE OR REPLACE FUNCTION` SQL
-- **Polymorphic securable state** — `Securable` base class with `Function` subclass; executor dispatches via structural pattern matching (`match`/`case`), extensible for future securable types
-- **Generic attribute updates** — `AttributeUpdate` type supports any attribute (currently `owner`); adding future attributes (comment, RFA destination) requires only adding a field to `SecurableAttributes` and a dispatch branch in the executor
-- **Single state query** — `fetch_actual_securables` combines attributes and function definitions in one UNION ALL query with `collect_list`/`sort_array`/`transform` aggregation for parameters
+- **Single state query** — `fetch_actual_securables` combines attributes and function definitions in one UNION ALL query with `collect_list`/`sort_array`/`transform` aggregation for function parameters
 
 #### Tags domain
 - **Tag compilation** — walks catalog → schema → table → column → volume hierarchy, emitting desired tags
@@ -731,14 +737,6 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 - **Policy execution** — generates and executes `CREATE POLICY` / `CREATE OR REPLACE POLICY` SQL with `ON`, `TO`, optional `EXCEPT`, `FOR TABLES`, optional `WHEN`, optional `MATCH COLUMNS`, `ON COLUMN` (MASK only), and `USING COLUMNS`
 - **Policy model validation** — `MaskPolicyConfig` requires at least one column entry; `FilterPolicyConfig` allows an empty column list
 - **Inline function definitions** — a mask or filter policy's `function` field can be either a fully qualified UC function name or an inline function definition (plain dict or `$ref` / `$defs/...` that resolves to a dict). The consolidator moves inline definitions into the policy's enclosing schema — or the catalog's `default` schema when the policy is attached at the catalog level — and rewrites the policy's `function` field to the synthesised full name. Duplicate-name collisions surface as `DuplicateResourceError` at model validation
-
-#### Governed tags domain
-- **Governed tag compilation** — walks `resources.governed_tags`, emitting `GovernedTag` state with `comment` and `allowed_values` per entry; dict key is used as the default tag name
-- **Governed tag fetch** — account-level tag policies are retrieved via `WorkspaceClient.tag_policies.list_tag_policies` on `WorkspaceHelper`; runs in parallel with the other initial state fetches
-- **Governed tag diffing** — computes creates and updates by comparing desired vs actual state; `allowed_values` is compared as a set so cosmetic YAML reordering does not trigger an update; tag policies present in the account but absent from YAML are left alone (no-delete invariant for this iteration)
-- **Governed tag execution** — `create_tag_policy` for new entries; `update_tag_policy` with a precise `update_mask` (`description`, `values`, or both) per changed field on existing entries; allowed values are sorted before being sent to the SDK for deterministic output
-- **Ordering** — governed tags are reconciled *before* catalog-scoped `SET TAGS` statements, so new tag keys exist in the account before assignments reference them
-- **Forward compatibility** — `allowed_principals` is accepted by the config parser but not yet enforced; assignment ACL management will arrive in a later iteration
 
 #### Privileges domain
 - **Privilege compilation** — matches grant policies against desired tags with AND semantics, scoped to the policy's attached securable and its children

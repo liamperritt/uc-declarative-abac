@@ -5,7 +5,7 @@ from typing import Union
 from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, Field, computed_field, field_validator, model_validator
 
 from uc_abac_governor.types import DuplicateResourceError, PolicyType, PrivilegeType
 
@@ -313,7 +313,10 @@ SecurableConfig = Union[CatalogConfig, SchemaConfig, TableConfig, VolumeConfig, 
 class GovernedTagConfig(BaseModel):
     """Account-level governed tag declaration. Serialised under `resources.governed_tags`."""
     name: str
-    comment: str | None = None
+    description: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("description", "comment"),
+    )
     allowed_values: list[str] = Field(default_factory=list)
     allowed_principals: list[str] = Field(default_factory=list)
 

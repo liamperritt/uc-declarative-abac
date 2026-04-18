@@ -67,10 +67,10 @@ def _make_mock_workspace_client(data_array: list[list[str]] | None = None) -> Ma
 
 @patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_fetches_actual_tags_from_query_results(mock_fetch):
-    """Mock returns tag rows -> correct set of SecurableTag."""
+    """Mock returns aggregated tag rows (one row per securable, tags as JSON) -> correct set of SecurableTag."""
     rows = [
-        ["CATALOG", "my_catalog", "env", "prod"],
-        ["TABLE", "my_catalog.sales.orders", "pii", "true"],
+        ["CATALOG", "my_catalog", '[{"tag_name":"env","tag_value":"prod"}]'],
+        ["TABLE", "my_catalog.sales.orders", '[{"tag_name":"pii","tag_value":"true"}]'],
     ]
     mock_fetch.return_value = rows
     client = _make_mock_workspace_client()
@@ -93,6 +93,54 @@ def test_uc_helper_fetches_actual_tags_from_query_results(mock_fetch):
         ),
     }
     assert result == expected
+
+
+@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_parses_multiple_tags_from_single_securable_row(mock_fetch):
+    """One input row with a JSON array of multiple tag structs produces one SecurableTag per tag,
+    all sharing the same (securable_type, securable_full_name)."""
+    rows = [
+        [
+            "TABLE",
+            "my_catalog.sales.orders",
+            '[{"tag_name":"pii","tag_value":"true"},'
+            '{"tag_name":"classification","tag_value":"confidential"},'
+            '{"tag_name":"team","tag_value":"sales"}]',
+        ],
+    ]
+    mock_fetch.return_value = rows
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    result = helper.fetch_actual_tags(["my_catalog"])
+
+    assert result == {
+        SecurableTag(SecurableType.TABLE, "my_catalog.sales.orders", "pii", "true"),
+        SecurableTag(SecurableType.TABLE, "my_catalog.sales.orders", "classification", "confidential"),
+        SecurableTag(SecurableType.TABLE, "my_catalog.sales.orders", "team", "sales"),
+    }
+
+
+@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_coerces_null_tag_value_to_empty_string(mock_fetch):
+    """A JSON tag_value of null is coerced to the empty string, matching SecurableTag's default."""
+    rows = [
+        ["TABLE", "my_catalog.sales.orders", '[{"tag_name":"pii","tag_value":null}]'],
+    ]
+    mock_fetch.return_value = rows
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    result = helper.fetch_actual_tags(["my_catalog"])
+
+    assert result == {
+        SecurableTag(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="my_catalog.sales.orders",
+            tag_name="pii",
+            tag_value="",
+        ),
+    }
 
 
 def test_uc_helper_fetches_no_tags_given_no_rows():
@@ -149,7 +197,8 @@ def test_uc_helper_caches_tags_after_fetch():
 
 
 def test_uc_helper_tags_query_is_valid_sql():
-    """The tags fetch query parses as valid SQL and references the expected system tables."""
+    """The tags fetch query parses as valid SQL, references the expected system tables,
+    and aggregates tags per securable via collect_list + GROUP BY."""
     client = _make_mock_workspace_client()
     helper = UnityCatalogHelper(client, WAREHOUSE_ID)
 
@@ -168,16 +217,47 @@ def test_uc_helper_tags_query_is_valid_sql():
     assert "table_tags" in tables
     assert "volume_tags" in tables
 
-    # Output columns should include the expected names
+    # Output columns should still include the securable identity; tags are now aggregated
     sql_upper = sql.upper()
     assert "SECURABLE_TYPE" in sql_upper
     assert "SECURABLE_FULL_NAME" in sql_upper
-    assert "TAG_NAME" in sql_upper
-    assert "TAG_VALUE" in sql_upper
+
+    # Aggregation pattern must be present
+    assert "COLLECT_LIST" in sql_upper
+    assert "GROUP BY" in sql_upper
+    assert "TO_JSON" in sql_upper
 
     # Catalog names should appear in WHERE IN clauses
     assert "'my_catalog'" in sql
     assert "'other_catalog'" in sql
+
+
+def test_uc_helper_tags_query_groups_by_securable_columns_per_arm():
+    """Each UNION ALL arm GROUPs BY the securable's identifying columns so the result is
+    at the securable grain (one row per securable)."""
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.fetch_actual_tags(["my_catalog"])
+
+    sql = _get_executed_sql(client).lower()
+
+    # Each arm must carry an appropriate GROUP BY covering its securable's identity.
+    # Loose substring checks — GROUP BY clauses are on the same line as the table.
+    assert "from system.information_schema.catalog_tags" in sql
+    assert "group by catalog_name" in sql
+
+    assert "from system.information_schema.schema_tags" in sql
+    assert "group by catalog_name, schema_name" in sql
+
+    assert "from system.information_schema.table_tags" in sql
+    assert "group by catalog_name, schema_name, table_name" in sql
+
+    assert "from system.information_schema.volume_tags" in sql
+    assert "group by catalog_name, schema_name, volume_name" in sql
+
+    assert "from system.information_schema.column_tags" in sql
+    assert "group by catalog_name, schema_name, table_name, column_name" in sql
 
 
 # ---------------------------------------------------------------------------
@@ -349,7 +429,7 @@ def _make_statement_response(
 def test_uc_helper_returns_results_when_query_completes_within_timeout(mock_fetch):
     """When execute_statement returns SUCCEEDED, results are returned without polling."""
     tag_rows = [
-        ["CATALOG", "my_catalog", "env", "prod"],
+        ["CATALOG", "my_catalog", '[{"tag_name":"env","tag_value":"prod"}]'],
     ]
     mock_fetch.return_value = tag_rows
 
@@ -380,7 +460,7 @@ def test_uc_helper_returns_results_when_query_completes_within_timeout(mock_fetc
 def test_uc_helper_polls_for_results_when_query_exceeds_timeout(mock_fetch, mock_sleep):
     """When execute_statement returns PENDING, polls get_statement until SUCCEEDED."""
     tag_rows = [
-        ["TABLE", "my_catalog.sales.orders", "pii", "true"],
+        ["TABLE", "my_catalog.sales.orders", '[{"tag_name":"pii","tag_value":"true"}]'],
     ]
 
     # execute_statement returns PENDING

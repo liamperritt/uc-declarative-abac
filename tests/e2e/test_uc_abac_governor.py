@@ -113,7 +113,7 @@ EXPECTED_GOVERNED_TAGS = {
     # Account-level governed tag declared in tests/e2e/configs/resources/governed_tags/uc_gov_pii.yaml
     GovernedTag(
         name="uc_gov_pii",
-        comment="PII",
+        description="PII",
         allowed_values=frozenset({"", "name", "email", "phone", "address"}),
     ),
 }

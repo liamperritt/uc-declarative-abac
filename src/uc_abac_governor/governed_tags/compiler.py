@@ -11,7 +11,7 @@ def compile_desired_governed_tags(config: ResourcesConfig) -> set[GovernedTag]:
     return {
         GovernedTag(
             name=gt.name,
-            comment=gt.comment or "",
+            description=gt.description or "",
             allowed_values=frozenset(gt.allowed_values or ()),
         )
         for gt in config.governed_tags.values()

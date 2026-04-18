@@ -898,7 +898,7 @@ def test_resources_config_parses_governed_tags():
         "governed_tags": {
             "pii": {
                 "name": "pii",
-                "comment": "Personally identifiable information",
+                "description": "Personally identifiable information",
                 "allowed_values": ["name", "email", "phone"],
             }
         },
@@ -908,8 +908,25 @@ def test_resources_config_parses_governed_tags():
     assert config.governed_tags is not None
     gt = config.governed_tags["pii"]
     assert gt.name == "pii"
-    assert gt.comment == "Personally identifiable information"
+    assert gt.description == "Personally identifiable information"
     assert gt.allowed_values == ["name", "email", "phone"]
+
+
+def test_governed_tag_config_accepts_comment_as_alias_for_description():
+    """`comment` is accepted on input as a backward-compatible alias of `description`."""
+    data = {
+        "catalogs": {"cat": {"name": "cat"}},
+        "governed_tags": {
+            "pii": {
+                "name": "pii",
+                "comment": "Legacy field name",
+                "allowed_values": ["name"],
+            }
+        },
+    }
+    config = ResourcesConfig.model_validate(data)
+
+    assert config.governed_tags["pii"].description == "Legacy field name"
 
 
 def test_resources_config_injects_governed_tag_name_from_key():
@@ -940,7 +957,7 @@ def test_governed_tag_config_defaults_empty_allowed_values():
     data = {
         "catalogs": {"cat": {"name": "cat"}},
         "governed_tags": {
-            "bare": {"name": "bare", "comment": "Nothing but a name"},
+            "bare": {"name": "bare", "description": "Nothing but a name"},
         },
     }
     config = ResourcesConfig.model_validate(data)

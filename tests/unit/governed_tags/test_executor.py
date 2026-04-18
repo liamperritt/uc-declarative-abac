@@ -9,10 +9,10 @@ from uc_abac_governor.governed_tags.state import GovernedTag, GovernedTagDiff
 from uc_abac_governor.logger import ChangeLogger
 
 
-def _gt(name: str, comment: str = "", values: set[str] | None = None) -> GovernedTag:
+def _gt(name: str, description: str = "", values: set[str] | None = None) -> GovernedTag:
     return GovernedTag(
         name=name,
-        comment=comment,
+        description=description,
         allowed_values=frozenset(values or set()),
     )
 
@@ -42,9 +42,9 @@ def test_governed_tag_executor_creates_new_tag_policy(ws_helper, change_logger):
 
 
 def test_governed_tag_executor_updates_description_only_when_description_changes(ws_helper, change_logger):
-    """When only comment differs, update_mask is 'description'."""
-    new = _gt("pii", "New comment", {"name"})
-    old = _gt("pii", "Old comment", {"name"})
+    """When only description differs, update_mask is 'description'."""
+    new = _gt("pii", "New description", {"name"})
+    old = _gt("pii", "Old description", {"name"})
     diff = GovernedTagDiff(to_update={new}, old_values={"pii": old})
 
     execute_governed_tag_diff(ws_helper, diff, change_logger, dry_run=False)
@@ -68,7 +68,7 @@ def test_governed_tag_executor_updates_values_only_when_values_change(ws_helper,
 
 
 def test_governed_tag_executor_combines_update_mask_when_both_change(ws_helper, change_logger):
-    """When both comment and allowed_values differ, update_mask includes both fields."""
+    """When both description and allowed_values differ, update_mask includes both fields."""
     new = _gt("pii", "New", {"name", "email"})
     old = _gt("pii", "Old", {"name"})
     diff = GovernedTagDiff(to_update={new}, old_values={"pii": old})

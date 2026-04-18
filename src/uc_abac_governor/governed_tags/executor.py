@@ -16,7 +16,7 @@ def _to_tag_policy(gt: GovernedTag) -> TagPolicy:
     """Convert a desired GovernedTag into the SDK's TagPolicy request body."""
     return TagPolicy(
         tag_key=gt.name,
-        description=gt.comment or None,
+        description=gt.description or None,
         values=[Value(name=v) for v in sorted(gt.allowed_values)],
     )
 
@@ -24,7 +24,7 @@ def _to_tag_policy(gt: GovernedTag) -> TagPolicy:
 def _compute_update_mask(new: GovernedTag, old: GovernedTag | None) -> str:
     """Return the comma-separated list of TagPolicy fields that differ between old and new."""
     fields: list[str] = []
-    if old is None or new.comment != old.comment:
+    if old is None or new.description != old.description:
         fields.append("description")
     if old is None or new.allowed_values != old.allowed_values:
         fields.append("values")

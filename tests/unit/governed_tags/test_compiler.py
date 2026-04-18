@@ -15,13 +15,13 @@ def test_governed_tag_compiler_emits_empty_set_when_no_governed_tags():
 
 
 def test_governed_tag_compiler_emits_governed_tag_from_config():
-    """A governed_tags entry compiles into a GovernedTag with matching name, comment, and values."""
+    """A governed_tags entry compiles into a GovernedTag with matching name, description, and values."""
     config = ResourcesConfig.model_validate({
         "catalogs": {"cat": {"name": "cat"}},
         "governed_tags": {
             "pii": {
                 "name": "pii",
-                "comment": "PII data",
+                "description": "PII data",
                 "allowed_values": ["name", "email"],
             }
         },
@@ -31,7 +31,7 @@ def test_governed_tag_compiler_emits_governed_tag_from_config():
 
     assert GovernedTag(
         name="pii",
-        comment="PII data",
+        description="PII data",
         allowed_values=frozenset({"name", "email"}),
     ) in result
 
@@ -51,19 +51,19 @@ def test_governed_tag_compiler_uses_dict_key_as_name_default():
     assert "classification" in names
 
 
-def test_governed_tag_compiler_preserves_comment_when_provided():
-    """The comment field on a governed_tags entry is preserved on the compiled GovernedTag."""
+def test_governed_tag_compiler_preserves_description_when_provided():
+    """The description field on a governed_tags entry is preserved on the compiled GovernedTag."""
     config = ResourcesConfig.model_validate({
         "catalogs": {"cat": {"name": "cat"}},
         "governed_tags": {
-            "pii": {"name": "pii", "comment": "Personally identifiable information"},
+            "pii": {"name": "pii", "description": "Personally identifiable information"},
         },
     })
 
     result = compile_desired_governed_tags(config)
 
     pii = next(gt for gt in result if gt.name == "pii")
-    assert pii.comment == "Personally identifiable information"
+    assert pii.description == "Personally identifiable information"
 
 
 def test_governed_tag_compiler_deduplicates_allowed_values_via_frozenset():

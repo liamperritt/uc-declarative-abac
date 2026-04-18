@@ -249,8 +249,8 @@ def test_governor_produces_empty_diffs_when_in_sync(
     )
 
     actual_tags = [
-        ["CATALOG", "my_catalog", "env", "prod"],
-        ["SCHEMA", "my_catalog.sales", "team", "data"],
+        ["CATALOG", "my_catalog", '[{"tag_name":"env","tag_value":"prod"}]'],
+        ["SCHEMA", "my_catalog.sales", '[{"tag_name":"team","tag_value":"data"}]'],
     ]
     actual_privileges = [
         ["SCHEMA", "my_catalog.sales", "data_engineers", "select"],
@@ -732,9 +732,9 @@ def _seed_actual_state_for_sp_idempotency(mock_workspace_client: MagicMock, sp_a
     # _fetch_external_links_rows is called per-query; route by SQL content.
     def _rows_for_sql(sql: str) -> list[list[str]]:
         lower = sql.lower()
-        # Tags query
+        # Tags query (aggregated: one row per securable, tags as JSON array)
         if "catalog_tags" in lower or "schema_tags" in lower:
-            return [["CATALOG", "my_catalog", "team", "sales"]]
+            return [["CATALOG", "my_catalog", '[{"tag_name":"team","tag_value":"sales"}]']]
         # Privileges query
         if "catalog_privileges" in lower or "schema_privileges" in lower:
             return [["CATALOG", "my_catalog", sp_app_id, "SELECT"]]

@@ -250,7 +250,7 @@ class ChangeLogger:
         self._governed_tags_updated += 1
         action_verb = "Update" if self._dry_run else "Updated"
         changes: list[str] = []
-        if old is None or gt.comment != (old.comment if old else ""):
+        if old is None or gt.description != (old.description if old else ""):
             changes.append("description")
         if old is None or gt.allowed_values != (old.allowed_values if old else frozenset()):
             changes.append("values")

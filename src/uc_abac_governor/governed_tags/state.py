@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 class GovernedTag:
     """Desired or actual state of an account-level governed tag (tag policy)."""
     name: str
-    comment: str = ""
+    description: str = ""
     allowed_values: frozenset[str] = frozenset()
 
 

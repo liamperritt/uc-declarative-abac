@@ -42,26 +42,53 @@ def _build_catalog_in_clause(catalog_names: list[str]) -> str:
 
 
 def _build_tags_query(catalog_names: list[str]) -> str:
-    """Build a UNION ALL query across all tag system tables for the given catalogs."""
+    """Build a UNION ALL query across all tag system tables for the given catalogs.
+
+    Each arm aggregates to the per-securable grain: one row per securable, with all
+    of that securable's tags packed into a JSON `tags` column as an array of
+    ``{tag_name, tag_value}`` objects. This cuts row count — and therefore external-
+    link transfer/parse cost — from one row per tag down to one row per securable.
+    """
     in_clause = _build_catalog_in_clause(catalog_names)
-    full_name_exprs = {
-        "catalog_tags": ("CATALOG", "catalog_name", False),
-        "schema_tags": ("SCHEMA", "concat(catalog_name, '.', schema_name)", True),
-        "table_tags": ("TABLE", "concat(catalog_name, '.', schema_name, '.', table_name)", True),
-        "volume_tags": ("VOLUME", "concat(catalog_name, '.', schema_name, '.', volume_name)", True),
-        "column_tags": ("COLUMN", "concat(catalog_name, '.', schema_name, '.', table_name, '.', column_name)", True),
+    arms = {
+        "catalog_tags": ("CATALOG", "catalog_name", "catalog_name", False),
+        "schema_tags": (
+            "SCHEMA",
+            "concat(catalog_name, '.', schema_name)",
+            "catalog_name, schema_name",
+            True,
+        ),
+        "table_tags": (
+            "TABLE",
+            "concat(catalog_name, '.', schema_name, '.', table_name)",
+            "catalog_name, schema_name, table_name",
+            True,
+        ),
+        "volume_tags": (
+            "VOLUME",
+            "concat(catalog_name, '.', schema_name, '.', volume_name)",
+            "catalog_name, schema_name, volume_name",
+            True,
+        ),
+        "column_tags": (
+            "COLUMN",
+            "concat(catalog_name, '.', schema_name, '.', table_name, '.', column_name)",
+            "catalog_name, schema_name, table_name, column_name",
+            True,
+        ),
     }
     parts = []
-    for table, (sec_type, full_name_expr, has_schema) in full_name_exprs.items():
+    for table, (sec_type, full_name_expr, group_by_cols, has_schema) in arms.items():
         where = f"catalog_name IN {in_clause}"
         if has_schema:
             where += " AND schema_name != 'information_schema'"
         parts.append(
             f"SELECT '{sec_type}' AS securable_type, "
             f"{full_name_expr} AS securable_full_name, "
-            f"tag_name, tag_value "
+            f"to_json(sort_array(collect_list(struct(tag_name, tag_value)))) AS tags "
             f"FROM system.information_schema.{table} "
-            f"WHERE {where}"
+            f"WHERE {where} "
+            f"GROUP BY {group_by_cols}"
         )
     return " UNION ALL ".join(parts)
 
@@ -98,16 +125,29 @@ def _build_privileges_query(catalog_names: list[str]) -> str:
 
 
 def _parse_tag_rows(rows: list[list[str]]) -> set[SecurableTag]:
-    """Parse raw SQL result rows into a set of SecurableTag."""
-    return {
-        SecurableTag(
-            securable_type=SecurableType(row[0]),
-            securable_full_name=row[1],
-            tag_name=row[2],
-            tag_value=row[3],
-        )
-        for row in rows
-    }
+    """Parse raw SQL result rows into a set of SecurableTag.
+
+    Each row carries all tags for a single securable in a JSON-encoded array of
+    ``{tag_name, tag_value}`` objects. NULL tag values decode to Python ``None`` and
+    are coerced to the empty string to match SecurableTag's default.
+    """
+    result: set[SecurableTag] = set()
+    for row in rows:
+        securable_type = SecurableType(row[0])
+        full_name = row[1]
+        tags_json = row[2]
+        if not tags_json:
+            continue
+        for tag in json.loads(tags_json):
+            result.add(
+                SecurableTag(
+                    securable_type=securable_type,
+                    securable_full_name=full_name,
+                    tag_name=tag["tag_name"],
+                    tag_value=tag["tag_value"] or "",
+                )
+            )
+    return result
 
 
 def _parse_privilege_rows(rows: list[list[str]]) -> set[SecurablePrivilege]:

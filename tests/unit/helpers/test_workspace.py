@@ -541,11 +541,11 @@ def test_workspace_helper_fetch_actual_governed_tags_returns_policies() -> None:
     result = helper.fetch_actual_governed_tags()
 
     assert GovernedTag(
-        name="pii", comment="PII data", allowed_values=frozenset({"name", "email"}),
+        name="pii", description="PII data", allowed_values=frozenset({"name", "email"}),
     ) in result
     assert GovernedTag(
         name="classification",
-        comment="Data classification",
+        description="Data classification",
         allowed_values=frozenset({"public", "internal"}),
     ) in result
 
@@ -572,7 +572,7 @@ def test_workspace_helper_fetch_actual_governed_tags_parses_description_and_valu
     helper = WorkspaceHelper(client)
     result = helper.fetch_actual_governed_tags()
 
-    assert GovernedTag(name="bare", comment="", allowed_values=frozenset()) in result
+    assert GovernedTag(name="bare", description="", allowed_values=frozenset()) in result
 
 
 def test_workspace_helper_create_tag_policy_passes_sdk_args() -> None:

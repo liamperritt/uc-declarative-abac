@@ -230,7 +230,7 @@ class WorkspaceHelper:
         return {
             GovernedTag(
                 name=policy.tag_key,
-                comment=policy.description or "",
+                description=policy.description or "",
                 allowed_values=frozenset(v.name for v in (policy.values or [])),
             )
             for policy in self._client.tag_policies.list_tag_policies()

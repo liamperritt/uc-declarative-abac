@@ -2,7 +2,7 @@ resources:
   governed_tags:
     uc_gov_pii:
       name: uc_gov_pii
-      comment: PII
+      description: PII
       allowed_values:
         - name
         - email
