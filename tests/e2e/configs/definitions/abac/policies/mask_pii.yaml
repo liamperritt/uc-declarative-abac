@@ -4,7 +4,13 @@ definitions:
       name: mask_pii
       type: mask
       comment: Policy for masking columns with PII values via the 'uc_gov_pii' column tag
-      function: liam_perritt.default.fn_mask_pii
+      function:
+        name: fn_mask_pii
+        comment: Function that masks a given PII value
+        parameters:
+          - name: pii
+            type: string
+        return: "CONCAT('***', SUBSTRING(pii, -4))"
       to:
         - uc_governor_test_team
         - liam.perritt@databricks.com

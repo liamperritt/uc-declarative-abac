@@ -1,6 +1,76 @@
 from __future__ import annotations
 
+from typing import Iterable
+
 from uc_abac_governor.types import GovernorError
+
+
+_DEFAULT_SCHEMA_NAME = "default"
+
+
+def _iter_nested_policies_with_target_schema(
+    catalogs: dict,
+) -> Iterable[tuple[dict, str, dict]]:
+    """Yield (policy_dict, catalog_name, target_schema_dict) for every mask/filter
+    policy nested in the catalog hierarchy.
+
+    - Table-level policy → target is the enclosing schema.
+    - Schema-level policy → target is the enclosing schema.
+    - Catalog-level policy → target is the catalog's 'default' schema
+      (created if it doesn't exist).
+    """
+    for cat_name, catalog in catalogs.items():
+        catalog_policies = catalog.get("policies") or []
+        if catalog_policies:
+            default_schema = _find_or_create_schema(catalog, _DEFAULT_SCHEMA_NAME)
+            for policy in catalog_policies:
+                if isinstance(policy, dict):
+                    yield policy, cat_name, default_schema
+
+        for schema in catalog.get("schemas") or []:
+            for policy in schema.get("policies") or []:
+                if isinstance(policy, dict):
+                    yield policy, cat_name, schema
+            for table in schema.get("tables") or []:
+                for policy in table.get("policies") or []:
+                    if isinstance(policy, dict):
+                        yield policy, cat_name, schema
+
+
+def _rewrite_policy_function_to_full_name(
+    policy: dict, catalog_name: str, schema: dict,
+) -> None:
+    """If policy['function'] is an inline function dict, move the function
+    definition into the target schema's functions list and rewrite
+    policy['function'] to the fully qualified name string. No-op for strings
+    or missing function fields.
+
+    SchemaConfig._inject_parent_names stamps catalog_name / schema_name on each
+    function dict during validation, so the consolidator doesn't need to.
+    """
+    function = policy.get("function")
+    if not isinstance(function, dict):
+        return
+    fn_name = function.get("name")
+    if not fn_name:
+        raise GovernorError(
+            f"Inline function definition in policy '{policy.get('name', '<unnamed>')}' is missing required 'name' field"
+        )
+    schema.setdefault("functions", []).append(function)
+    policy["function"] = f"{catalog_name}.{schema.get('name')}.{fn_name}"
+
+
+def _extract_inline_policy_functions(catalogs: dict) -> None:
+    """Walk every policy nested under a catalog; for each policy whose
+    ``function`` field is an inline dict, move the function into the target
+    schema's functions list and rewrite the policy's function field to the
+    fully qualified name.
+
+    Collision detection (two inline functions with the same name in the same
+    schema) is delegated to SchemaConfig._inject_parent_names via pydantic.
+    """
+    for policy, catalog_name, target_schema in _iter_nested_policies_with_target_schema(catalogs):
+        _rewrite_policy_function_to_full_name(policy, catalog_name, target_schema)
 
 
 def consolidate_resources(resolved: dict) -> dict:
@@ -60,6 +130,8 @@ def consolidate_resources(resolved: dict) -> dict:
             schema.setdefault("policies", []).append(policy)
         else:
             catalogs[cat_name].setdefault("policies", []).append(policy)
+
+    _extract_inline_policy_functions(catalogs)
 
     return resolved
 

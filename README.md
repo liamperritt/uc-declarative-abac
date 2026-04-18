@@ -305,7 +305,7 @@ definitions:
       name: mask_retail_segment_customer_names_pii
       comment: Mask retail-segment customer names (not commercial-segment customer names) from all users except account admins
       type: mask
-      function: $defs/functions/shared|abac|mask_retail_segment_customer_names_pii
+      function: platform.abac.mask_retail_segment_customer_names_pii
       to:
         - account_users
       except:
@@ -386,7 +386,7 @@ For **grant** policies attached at a given level, the optional `has_tags` proper
 
 If a **mask** or **filter** policy specifies the optional `has_tags` property, this matches against tagged **tables** only. Use the mandatory `columns.[*].has_tags` to match against tagged columns that you want to use for row filtering logic, or that you want to apply column masking to. Similarly, if multiple tags are specified, the policy will only be applied to tables/columns that have **all** tags present (AND semantics). The values of the tagged column are passed as a single parameter to the specified function.
 
-For mask and filter policies, the `function` property can either be the fully qualified name of an existing UC function (string), or an inline function definition (object or reference to a "definition", i.e., `$defs/<type>/<key>`). When defining an inline function, the function resource will be deployed into the same catalog and schema as the policy. If the policy is attached at the catalog level, then the inline function will be deployed to the `default` schema of that catalog.
+For mask and filter policies, the `function` property can either be the fully qualified name of an existing UC function (string), or an inline function definition. When defining an inline function, the function resource will be deployed into the same catalog and schema as the policy. If the policy is attached at the catalog level, then the inline function will be deployed to the `default` schema of that catalog. If this results in duplicate functions with identical names, the framework will raise an error.
 
 ### Resources
 
@@ -574,6 +574,7 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 - **Policy diffing** — computes creates and replaces keyed by `(securable_type, full_name, name)`; actual-only policies are silently skipped (UC policies are never deleted)
 - **Policy execution** — generates and executes `CREATE POLICY` / `CREATE OR REPLACE POLICY` SQL with `ON`, `TO`, optional `EXCEPT`, `FOR TABLES`, optional `WHEN`, optional `MATCH COLUMNS`, `ON COLUMN` (MASK only), and `USING COLUMNS`
 - **Policy model validation** — `MaskPolicyConfig` requires at least one column entry; `FilterPolicyConfig` allows an empty column list
+- **Inline function definitions** — a mask or filter policy's `function` field can be either a fully qualified UC function name or an inline function definition (plain dict or `$ref` / `$defs/...` that resolves to a dict). The consolidator moves inline definitions into the policy's enclosing schema — or the catalog's `default` schema when the policy is attached at the catalog level — and rewrites the policy's `function` field to the synthesised full name. Duplicate-name collisions surface as `DuplicateResourceError` at model validation
 
 #### Privileges domain
 - **Privilege compilation** — matches grant policies against desired tags with AND semantics, scoped to the policy's attached securable and its children
@@ -617,7 +618,6 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 - **Governed tags** — `resources.governed_tags` with `allowed_values`, `allowed_principals`, `comment` (documented in README but not built)
 - **UC object creation** — creating/updating catalogs, schemas, tables, volumes (functions are supported; other securable types require adding `Securable` subclasses)
 - **Object attributes** — `comment`, `rfa_destination` on securables (the `owner` attribute is implemented; adding new attributes requires only a field on `SecurableAttributes` and an executor dispatch branch)
-- **Inline function definitions on mask/filter policies** — currently `function` must be the fully qualified name of an existing UC function; auto-deploying an inline function definition alongside a policy is not yet supported
 - **Direct mask/filter** — `filter` on tables and `mask` on columns (non-ABAC, directly applied functions)
 - **Abstracted privilege names** — `read`, `edit`, `create` expanding to multiple UC privileges
 - **GitHub Action** — CI/CD deployment action
