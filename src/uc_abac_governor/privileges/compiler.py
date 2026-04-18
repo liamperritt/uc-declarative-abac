@@ -113,23 +113,63 @@ def _is_within_scope(full_name: str, policy: GrantPolicyConfig) -> bool:
     return full_name == scope or full_name.startswith(f"{scope}.")
 
 
+def _catalog_full_name(full_name: str) -> str:
+    """Return the catalog portion of a dot-delimited securable full name."""
+    return full_name.split(".", 1)[0]
+
+
+def _schema_full_name(full_name: str) -> str | None:
+    """Return the `catalog.schema` portion of a dot-delimited full name,
+    or None if the name has no schema segment (catalog-only)."""
+    parts = full_name.split(".")
+    if len(parts) < 2:
+        return None
+    return ".".join(parts[:2])
+
+
+def _target_for_privilege(
+    privilege: PrivilegeType,
+    sec_type: SecurableType,
+    full_name: str,
+) -> tuple[SecurableType, str]:
+    """Resolve the securable a privilege should be emitted on, given the
+    matched object. USE_CATALOG always targets the containing catalog;
+    USE_SCHEMA targets the containing schema when there is one (otherwise
+    falls back to the matched object, preserving the UC semantic of granting
+    USE_SCHEMA on a catalog = across all its schemas)."""
+    if privilege == PrivilegeType.USE_CATALOG:
+        return SecurableType.CATALOG, _catalog_full_name(full_name)
+    if privilege == PrivilegeType.USE_SCHEMA:
+        schema_name = _schema_full_name(full_name)
+        if schema_name is not None:
+            return SecurableType.SCHEMA, schema_name
+    return sec_type, full_name
+
+
 def _emit_privileges(
     sec_type: SecurableType,
     full_name: str,
     policy: GrantPolicyConfig,
 ) -> set[SecurablePrivilege]:
     """Emit SecurablePrivilege entries (with unresolved Principals) for each
-    principal × privilege combination."""
-    allowed = SECURABLE_TYPE_PRIVILEGE_MAP.get(sec_type)
+    principal × privilege combination. USE_CATALOG and USE_SCHEMA cascade to
+    the appropriate parent ancestor of the matched object, but only when
+    that ancestor is within the policy's scope — so a schema- or table-attached
+    policy cannot reach up into its parent catalog. The compatibility filter
+    is applied against the resolved target type."""
     result: set[SecurablePrivilege] = set()
     for principal_name in policy.to:
         for privilege in policy.privileges:
+            target_type, target_full_name = _target_for_privilege(privilege, sec_type, full_name)
+            if not _is_within_scope(target_full_name, policy):
+                continue
+            allowed = SECURABLE_TYPE_PRIVILEGE_MAP.get(target_type)
             if allowed is not None and privilege not in allowed:
                 continue
             result.add(
                 SecurablePrivilege(
-                    securable_type=sec_type,
-                    securable_full_name=full_name,
+                    securable_type=target_type,
+                    securable_full_name=target_full_name,
                     principal=Principal(principal_type=PrincipalType.UNKNOWN, name=principal_name),
                     privilege_type=privilege,
                 )

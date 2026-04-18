@@ -1122,3 +1122,525 @@ def test_privilege_compiler_wildcard_combines_with_concrete_tags():
 
     matched_names = {p.securable_full_name for p in result}
     assert matched_names == {"my_cat.s.orders"}
+
+
+# ---------------------------------------------------------------------------
+# USE_CATALOG / USE_SCHEMA cascading to parent securables
+# ---------------------------------------------------------------------------
+
+
+def test_privilege_compiler_cascades_use_catalog_up_to_parent_when_match_is_schema():
+    """USE_CATALOG on a policy whose tag matches a schema is emitted on the parent catalog."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["use_catalog"],
+                            "to": ["team"],
+                            "has_tags": {"env": "prod"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    desired_tags = {
+        SecurableTag(SecurableType.SCHEMA, "cat.sales", "env", "prod"),
+    }
+
+    result = compile_desired_privileges(config, desired_tags)
+
+    assert SecurablePrivilege(
+        securable_type=SecurableType.CATALOG,
+        securable_full_name="cat",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+        privilege_type=PrivilegeType.USE_CATALOG,
+    ) in result
+    # USE_CATALOG must not land on the schema itself
+    assert not any(
+        p.securable_type == SecurableType.SCHEMA and p.privilege_type == PrivilegeType.USE_CATALOG
+        for p in result
+    )
+
+
+def test_privilege_compiler_cascades_use_catalog_up_to_parent_when_match_is_table():
+    """USE_CATALOG on a policy whose tag matches a table is emitted on the grandparent catalog."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["use_catalog"],
+                            "to": ["team"],
+                            "has_tags": {"env": "prod"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    desired_tags = {
+        SecurableTag(SecurableType.TABLE, "cat.sales.orders", "env", "prod"),
+    }
+
+    result = compile_desired_privileges(config, desired_tags)
+
+    assert SecurablePrivilege(
+        securable_type=SecurableType.CATALOG,
+        securable_full_name="cat",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+        privilege_type=PrivilegeType.USE_CATALOG,
+    ) in result
+    # USE_CATALOG must not land on the table
+    assert not any(
+        p.securable_type == SecurableType.TABLE and p.privilege_type == PrivilegeType.USE_CATALOG
+        for p in result
+    )
+
+
+def test_privilege_compiler_cascades_use_catalog_up_to_parent_when_match_is_volume():
+    """USE_CATALOG on a policy whose tag matches a volume is emitted on the grandparent catalog."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["use_catalog"],
+                            "to": ["team"],
+                            "has_tags": {"zone": "landing"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    desired_tags = {
+        SecurableTag(SecurableType.VOLUME, "cat.raw.events", "zone", "landing"),
+    }
+
+    result = compile_desired_privileges(config, desired_tags)
+
+    assert SecurablePrivilege(
+        securable_type=SecurableType.CATALOG,
+        securable_full_name="cat",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+        privilege_type=PrivilegeType.USE_CATALOG,
+    ) in result
+    assert not any(
+        p.securable_type == SecurableType.VOLUME and p.privilege_type == PrivilegeType.USE_CATALOG
+        for p in result
+    )
+
+
+def test_privilege_compiler_cascades_use_schema_up_to_parent_when_match_is_table():
+    """USE_SCHEMA on a policy whose tag matches a table is emitted on the parent schema."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["use_schema"],
+                            "to": ["team"],
+                            "has_tags": {"env": "prod"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    desired_tags = {
+        SecurableTag(SecurableType.TABLE, "cat.sales.orders", "env", "prod"),
+    }
+
+    result = compile_desired_privileges(config, desired_tags)
+
+    assert SecurablePrivilege(
+        securable_type=SecurableType.SCHEMA,
+        securable_full_name="cat.sales",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+        privilege_type=PrivilegeType.USE_SCHEMA,
+    ) in result
+    assert not any(
+        p.securable_type == SecurableType.TABLE and p.privilege_type == PrivilegeType.USE_SCHEMA
+        for p in result
+    )
+
+
+def test_privilege_compiler_cascades_use_schema_up_to_parent_when_match_is_volume():
+    """USE_SCHEMA on a policy whose tag matches a volume is emitted on the parent schema."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["use_schema"],
+                            "to": ["team"],
+                            "has_tags": {"zone": "landing"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    desired_tags = {
+        SecurableTag(SecurableType.VOLUME, "cat.raw.events", "zone", "landing"),
+    }
+
+    result = compile_desired_privileges(config, desired_tags)
+
+    assert SecurablePrivilege(
+        securable_type=SecurableType.SCHEMA,
+        securable_full_name="cat.raw",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+        privilege_type=PrivilegeType.USE_SCHEMA,
+    ) in result
+    assert not any(
+        p.securable_type == SecurableType.VOLUME and p.privilege_type == PrivilegeType.USE_SCHEMA
+        for p in result
+    )
+
+
+def test_privilege_compiler_emits_use_catalog_on_catalog_when_match_is_catalog():
+    """USE_CATALOG on a policy whose tag matches the catalog is emitted on that catalog (identity)."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["use_catalog"],
+                            "to": ["team"],
+                            "has_tags": {"env": "prod"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    desired_tags = {
+        SecurableTag(SecurableType.CATALOG, "cat", "env", "prod"),
+    }
+
+    result = compile_desired_privileges(config, desired_tags)
+
+    assert SecurablePrivilege(
+        securable_type=SecurableType.CATALOG,
+        securable_full_name="cat",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+        privilege_type=PrivilegeType.USE_CATALOG,
+    ) in result
+
+
+def test_privilege_compiler_emits_use_schema_on_schema_when_match_is_schema():
+    """USE_SCHEMA on a policy whose tag matches a schema is emitted on that schema (identity)."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["use_schema"],
+                            "to": ["team"],
+                            "has_tags": {"env": "prod"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    desired_tags = {
+        SecurableTag(SecurableType.SCHEMA, "cat.sales", "env", "prod"),
+    }
+
+    result = compile_desired_privileges(config, desired_tags)
+
+    assert SecurablePrivilege(
+        securable_type=SecurableType.SCHEMA,
+        securable_full_name="cat.sales",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+        privilege_type=PrivilegeType.USE_SCHEMA,
+    ) in result
+
+
+def test_privilege_compiler_emits_use_schema_on_catalog_when_match_is_catalog():
+    """USE_SCHEMA on a policy whose tag matches the catalog itself is emitted on the catalog
+    (UC semantics: grant USE_SCHEMA across all schemas in the catalog). Preserves existing behavior."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["use_schema"],
+                            "to": ["team"],
+                            "has_tags": {"env": "prod"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    desired_tags = {
+        SecurableTag(SecurableType.CATALOG, "cat", "env", "prod"),
+    }
+
+    result = compile_desired_privileges(config, desired_tags)
+
+    assert SecurablePrivilege(
+        securable_type=SecurableType.CATALOG,
+        securable_full_name="cat",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+        privilege_type=PrivilegeType.USE_SCHEMA,
+    ) in result
+
+
+def test_privilege_compiler_deduplicates_cascaded_use_catalog_when_many_children_match_same_policy():
+    """Multiple tables in the same catalog all cascading USE_CATALOG produce one emission, not many."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["use_catalog"],
+                            "to": ["team"],
+                            "has_tags": {"env": "prod"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    desired_tags = {
+        SecurableTag(SecurableType.TABLE, "cat.sales.orders", "env", "prod"),
+        SecurableTag(SecurableType.TABLE, "cat.sales.customers", "env", "prod"),
+        SecurableTag(SecurableType.TABLE, "cat.hr.employees", "env", "prod"),
+        SecurableTag(SecurableType.VOLUME, "cat.raw.events", "env", "prod"),
+    }
+
+    result = compile_desired_privileges(config, desired_tags)
+
+    use_catalog_entries = [
+        p for p in result if p.privilege_type == PrivilegeType.USE_CATALOG
+    ]
+    assert len(use_catalog_entries) == 1
+    assert use_catalog_entries[0].securable_type == SecurableType.CATALOG
+    assert use_catalog_entries[0].securable_full_name == "cat"
+
+
+def test_privilege_compiler_deduplicates_cascaded_use_schema_when_many_tables_match_same_policy_in_one_schema():
+    """Multiple tagged tables in the same schema cascade to a single USE_SCHEMA emission on that schema."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["use_schema"],
+                            "to": ["team"],
+                            "has_tags": {"env": "prod"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    desired_tags = {
+        SecurableTag(SecurableType.TABLE, "cat.sales.orders", "env", "prod"),
+        SecurableTag(SecurableType.TABLE, "cat.sales.customers", "env", "prod"),
+        SecurableTag(SecurableType.TABLE, "cat.sales.invoices", "env", "prod"),
+    }
+
+    result = compile_desired_privileges(config, desired_tags)
+
+    use_schema_entries = [
+        p for p in result if p.privilege_type == PrivilegeType.USE_SCHEMA
+    ]
+    assert len(use_schema_entries) == 1
+    assert use_schema_entries[0].securable_type == SecurableType.SCHEMA
+    assert use_schema_entries[0].securable_full_name == "cat.sales"
+
+
+def test_privilege_compiler_emits_select_on_table_and_cascades_use_catalog_and_use_schema_when_policy_lists_all_three():
+    """A single policy listing [select, use_catalog, use_schema] matching a table emits:
+    SELECT on the table, USE_SCHEMA on the parent schema, USE_CATALOG on the grandparent catalog."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select", "use_catalog", "use_schema"],
+                            "to": ["team"],
+                            "has_tags": {"env": "prod"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    desired_tags = {
+        SecurableTag(SecurableType.TABLE, "cat.sales.orders", "env", "prod"),
+    }
+
+    result = compile_desired_privileges(config, desired_tags)
+
+    assert SecurablePrivilege(
+        securable_type=SecurableType.TABLE,
+        securable_full_name="cat.sales.orders",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+        privilege_type=PrivilegeType.SELECT,
+    ) in result
+    assert SecurablePrivilege(
+        securable_type=SecurableType.SCHEMA,
+        securable_full_name="cat.sales",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+        privilege_type=PrivilegeType.USE_SCHEMA,
+    ) in result
+    assert SecurablePrivilege(
+        securable_type=SecurableType.CATALOG,
+        securable_full_name="cat",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+        privilege_type=PrivilegeType.USE_CATALOG,
+    ) in result
+
+
+def test_privilege_compiler_drops_use_catalog_when_policy_attached_at_table_level():
+    """A grant policy attached to a table cannot reach up to the catalog — USE_CATALOG
+    and USE_SCHEMA targets fall outside the policy's scope and are dropped; only
+    table-level privileges survive."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "policies": [
+                                        {
+                                            "type": "grant",
+                                            "privileges": ["select", "use_catalog", "use_schema"],
+                                            "to": ["team"],
+                                            "has_tags": {},
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    result = compile_desired_privileges(config, set())
+
+    assert SecurablePrivilege(
+        securable_type=SecurableType.TABLE,
+        securable_full_name="cat.sales.orders",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+        privilege_type=PrivilegeType.SELECT,
+    ) in result
+    # USE_CATALOG and USE_SCHEMA must not leak outside the table-level scope.
+    assert not any(p.privilege_type == PrivilegeType.USE_CATALOG for p in result)
+    assert not any(p.privilege_type == PrivilegeType.USE_SCHEMA for p in result)
+
+
+def test_privilege_compiler_drops_use_catalog_when_policy_attached_at_schema_level_matches_child_table():
+    """A schema-attached grant policy that matches a tagged child table still cannot
+    reach the catalog — USE_CATALOG is dropped, while USE_SCHEMA (target = the schema
+    itself, which is in scope) is emitted on the schema."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "policies": [
+                                {
+                                    "type": "grant",
+                                    "privileges": ["select", "use_catalog", "use_schema"],
+                                    "to": ["team"],
+                                    "has_tags": {"env": "prod"},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    desired_tags = {
+        SecurableTag(SecurableType.TABLE, "cat.sales.orders", "env", "prod"),
+    }
+
+    result = compile_desired_privileges(config, desired_tags)
+
+    assert SecurablePrivilege(
+        securable_type=SecurableType.TABLE,
+        securable_full_name="cat.sales.orders",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+        privilege_type=PrivilegeType.SELECT,
+    ) in result
+    assert SecurablePrivilege(
+        securable_type=SecurableType.SCHEMA,
+        securable_full_name="cat.sales",
+        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+        privilege_type=PrivilegeType.USE_SCHEMA,
+    ) in result
+    # Parent catalog is outside the policy's scope.
+    assert not any(p.privilege_type == PrivilegeType.USE_CATALOG for p in result)
+
+
+def test_privilege_compiler_cascades_use_catalog_for_each_principal_when_policy_has_multiple_principals():
+    """A policy listing multiple principals cascades USE_CATALOG to the parent catalog for each."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["use_catalog"],
+                            "to": ["analysts", "engineers", "auditors"],
+                            "has_tags": {"env": "prod"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    desired_tags = {
+        SecurableTag(SecurableType.TABLE, "cat.sales.orders", "env", "prod"),
+    }
+
+    result = compile_desired_privileges(config, desired_tags)
+
+    for principal_name in ("analysts", "engineers", "auditors"):
+        assert SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name=principal_name),
+            privilege_type=PrivilegeType.USE_CATALOG,
+        ) in result

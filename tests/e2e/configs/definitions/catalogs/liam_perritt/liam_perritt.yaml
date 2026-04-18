@@ -12,6 +12,7 @@ definitions:
         - $ref: $defs/policies/abac|grant_bronze_access
         - $ref: $defs/policies/abac|grant_pipeline_select
         - $ref: $defs/policies/abac|grant_landing_read
+        - $ref: $defs/policies/abac|grant_cascade_pipeline
       schemas:
         - $ref: $defs/schemas/liam_perritt|default
         - $ref: $defs/schemas/liam_perritt|lff_sqlserver_bronze

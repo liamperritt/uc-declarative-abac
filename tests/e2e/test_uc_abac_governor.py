@@ -75,6 +75,15 @@ EXPECTED_PRIVILEGES = {
     SecurablePrivilege(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_table_cdc_st", Principal(PrincipalType.GROUP, "uc_governor_test_team", "uc_governor_test_team"), PrivilegeType.SELECT),
     # Volume-level policy: READ_VOLUME to test group (matches uc_gov_zone=landing)
     SecurablePrivilege(SecurableType.VOLUME, "liam_perritt.lff_sqlserver_bronze.test", Principal(PrincipalType.GROUP, "uc_governor_test_team", "uc_governor_test_team"), PrivilegeType.READ_VOLUME),
+    # Catalog-level cascade policy (matches uc_gov_pipeline=lff on tables):
+    # SELECT lands on each matched table; USE_SCHEMA cascades to the parent
+    # schema; USE_CATALOG cascades to the catalog. All emitted for the SP.
+    SecurablePrivilege(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_cdc_sink", Principal(PrincipalType.SERVICE_PRINCIPAL, "72a5956b-8469-4c26-b414-bfc1a7e279c4", "sp_uc_governor_test"), PrivilegeType.SELECT),
+    SecurablePrivilege(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_table_cdc_st", Principal(PrincipalType.SERVICE_PRINCIPAL, "72a5956b-8469-4c26-b414-bfc1a7e279c4", "sp_uc_governor_test"), PrivilegeType.SELECT),
+    SecurablePrivilege(SecurableType.CATALOG, "liam_perritt", Principal(PrincipalType.SERVICE_PRINCIPAL, "72a5956b-8469-4c26-b414-bfc1a7e279c4", "sp_uc_governor_test"), PrivilegeType.USE_CATALOG),
+    # USE_SCHEMA on liam_perritt.lff_sqlserver_bronze for the SP is already
+    # declared above via grant_bronze_access; the cascade produces the same
+    # entry and is deduplicated at the set level.
 }
 
 EXPECTED_FUNCTIONS = {
