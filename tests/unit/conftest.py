@@ -37,6 +37,9 @@ def mock_workspace_client() -> MagicMock:
 
     client.statement_execution.execute_statement.side_effect = _capture_sql
 
+    # Default: no existing policies in UC. Individual tests can override.
+    client.policies.list_policies.return_value = iter([])
+
     return client
 
 

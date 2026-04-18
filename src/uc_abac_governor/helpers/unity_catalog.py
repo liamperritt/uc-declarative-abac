@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.catalog import PolicyInfo
+from databricks.sdk.service.catalog import PolicyType as SdkPolicyType
 from databricks.sdk.service.sql import (
     Disposition,
     ExecuteStatementRequestOnWaitTimeout,
@@ -14,14 +17,21 @@ from databricks.sdk.service.sql import (
 
 import logging
 
+from uc_abac_governor.configs.models import (
+    BaseFgacPolicyConfig,
+    ResourcesConfig,
+)
+from uc_abac_governor.policies.state import Policy
 from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.privileges.state import UnresolvedPrivilege
 from uc_abac_governor.securables.state import FunctionInfo, SecurableAttributes, SecurableInfo
-from uc_abac_governor.types import GovernorError, PrivilegeType, SecurableType
+from uc_abac_governor.types import GovernorError, PolicyType, PrivilegeType, SecurableType
 
 _logger = logging.getLogger("uc_abac_governor")
 
 _POLL_INTERVAL_SECONDS = 10
+
+_MAX_POLICY_LIST_WORKERS = 32
 
 
 def _build_catalog_in_clause(catalog_names: list[str]) -> str:
@@ -225,6 +235,75 @@ def _parse_securable_rows(
     return securables, attributes
 
 
+def _collect_policy_securables(
+    config: ResourcesConfig,
+) -> set[tuple[SecurableType, str]]:
+    """Return the set of securables that have at least one mask/filter policy."""
+    result: set[tuple[SecurableType, str]] = set()
+    for catalog in config.catalogs.values():
+        if _has_fgac_policy(catalog.policies):
+            result.add((SecurableType.CATALOG, catalog.full_name))
+        for schema in catalog.schemas or []:
+            if _has_fgac_policy(schema.policies):
+                result.add((SecurableType.SCHEMA, schema.full_name))
+            for table in schema.tables or []:
+                if _has_fgac_policy(table.policies):
+                    result.add((SecurableType.TABLE, table.full_name))
+    return result
+
+
+def _has_fgac_policy(policies) -> bool:
+    if not policies:
+        return False
+    return any(isinstance(p, BaseFgacPolicyConfig) for p in policies)
+
+
+def _normalise_policy_info(
+    info: PolicyInfo,
+    securable_type: SecurableType,
+    securable_full_name: str,
+) -> Policy | None:
+    """Convert an SDK PolicyInfo to a Policy. Returns None for unsupported types."""
+    sdk_type = getattr(info.policy_type, "value", info.policy_type)
+    if sdk_type == SdkPolicyType.POLICY_TYPE_COLUMN_MASK.value:
+        policy_type = PolicyType.MASK
+        function_name = info.column_mask.function_name
+        on_column = info.column_mask.on_column
+        using_columns = _extract_using_columns(info.column_mask.using)
+    elif sdk_type == SdkPolicyType.POLICY_TYPE_ROW_FILTER.value:
+        policy_type = PolicyType.FILTER
+        function_name = info.row_filter.function_name
+        on_column = None
+        using_columns = _extract_using_columns(info.row_filter.using)
+    else:
+        return None
+
+    to_principals = tuple(sorted(info.to_principals or []))
+    except_principals = tuple(sorted(info.except_principals or []))
+    match_columns = tuple(
+        (mc.alias, mc.condition) for mc in (info.match_columns or [])
+    )
+    return Policy(
+        securable_type=securable_type,
+        securable_full_name=securable_full_name,
+        name=info.name,
+        policy_type=policy_type,
+        function_name=function_name,
+        to_principals=to_principals,
+        except_principals=except_principals,
+        when_condition=info.when_condition,
+        match_columns=match_columns,
+        on_column=on_column,
+        using_columns=using_columns,
+    )
+
+
+def _extract_using_columns(using) -> tuple[str, ...]:
+    if not using:
+        return ()
+    return tuple(arg.column for arg in using if arg.column is not None)
+
+
 class UnityCatalogHelper:
     """Wraps WorkspaceClient for querying UC state and executing SQL.
 
@@ -239,6 +318,7 @@ class UnityCatalogHelper:
         self._privileges_cache: set[UnresolvedPrivilege] | None = None
         self._securables_cache: set[SecurableInfo] | None = None
         self._attributes_cache: set[SecurableAttributes] | None = None
+        self._policies_cache: set[Policy] | None = None
 
     def _execute_and_poll(self, statement: str) -> StatementResponse:
         """Execute a SQL statement with hybrid polling for long-running queries.
@@ -335,6 +415,52 @@ class UnityCatalogHelper:
                 self._client.volumes.update(full_name, owner=new_owner)
             case SecurableType.FUNCTION:
                 self._client.functions.update(full_name, owner=new_owner)
+
+    def fetch_actual_policies(self, config: ResourcesConfig) -> set[Policy]:
+        """Return mask/filter policies attached to any configured securable.
+
+        Walks the config to find every catalog/schema/table that declares at
+        least one mask or filter policy, then fans out one list_policies SDK
+        call per securable via a thread pool (max 32 concurrent). Results
+        from the SDK are normalised into Policy instances. Policies of
+        non-mask/filter types are skipped.
+
+        Results are cached after the first call.
+        """
+        if self._policies_cache is not None:
+            return self._policies_cache
+
+        securables = _collect_policy_securables(config)
+        if not securables:
+            self._policies_cache = set()
+            return self._policies_cache
+
+        result: set[Policy] = set()
+        with ThreadPoolExecutor(max_workers=_MAX_POLICY_LIST_WORKERS) as pool:
+            futures = {
+                pool.submit(self._list_policies, sec_type, full_name): (sec_type, full_name)
+                for sec_type, full_name in securables
+            }
+            for future in as_completed(futures):
+                result |= future.result()
+
+        self._policies_cache = result
+        return self._policies_cache
+
+    def _list_policies(
+        self, securable_type: SecurableType, full_name: str
+    ) -> set[Policy]:
+        infos = self._client.policies.list_policies(
+            on_securable_type=securable_type.value,
+            on_securable_fullname=full_name,
+            include_inherited=False,
+        )
+        result: set[Policy] = set()
+        for info in infos:
+            normalised = _normalise_policy_info(info, securable_type, full_name)
+            if normalised is not None:
+                result.add(normalised)
+        return result
 
     def execute_sql(self, statement: str) -> None:
         """Execute a SQL statement via the Statement Execution API."""

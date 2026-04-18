@@ -6,11 +6,13 @@ import pytest
 import sqlglot
 from databricks.sdk.service.sql import Disposition, StatementState
 
+from uc_abac_governor.configs.models import ResourcesConfig
 from uc_abac_governor.helpers.unity_catalog import UnityCatalogHelper
+from uc_abac_governor.policies.state import Policy
 from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.privileges.state import UnresolvedPrivilege
 from uc_abac_governor.securables.state import FunctionInfo, SecurableAttributes
-from uc_abac_governor.types import GovernorError, PrivilegeType, SecurableType
+from uc_abac_governor.types import GovernorError, PolicyType, PrivilegeType, SecurableType
 
 WAREHOUSE_ID = "test-warehouse-id"
 
@@ -659,3 +661,248 @@ def test_uc_helper_update_owner_dispatches_to_function_api():
     client.functions.update.assert_called_once_with(
         "my_catalog.shared.mask_email", owner="new_owner"
     )
+
+
+# ---------------------------------------------------------------------------
+# UnityCatalogHelper.fetch_actual_policies
+# ---------------------------------------------------------------------------
+
+
+def _mask_policy_dict(**overrides) -> dict:
+    base = {
+        "name": "p1",
+        "type": "mask",
+        "function": "cat.default.fn",
+        "to": ["analysts"],
+        "except": ["admins"],
+        "columns": [{"alias": "c", "has_tags": {"pii": "email"}}],
+    }
+    base.update(overrides)
+    return base
+
+
+def _config_with_policy(level: str = "table", **policy_overrides) -> ResourcesConfig:
+    policy = _mask_policy_dict(**policy_overrides)
+    if level == "catalog":
+        data = {"catalogs": {"cat": {"name": "cat", "policies": [policy]}}}
+    elif level == "schema":
+        data = {
+            "catalogs": {
+                "cat": {
+                    "name": "cat",
+                    "schemas": [{"name": "s", "policies": [policy]}],
+                }
+            }
+        }
+    else:
+        data = {
+            "catalogs": {
+                "cat": {
+                    "name": "cat",
+                    "schemas": [
+                        {
+                            "name": "s",
+                            "tables": [{"name": "t", "policies": [policy]}],
+                        }
+                    ],
+                }
+            }
+        }
+    return ResourcesConfig.model_validate(data)
+
+
+def _make_column_mask_policy_info(
+    *,
+    name: str = "p1",
+    on_securable_type: str = "TABLE",
+    on_securable_fullname: str = "cat.s.t",
+    function_name: str = "cat.default.fn",
+    on_column: str = "c",
+    using_column_aliases: tuple[str, ...] = (),
+    to_principals: tuple[str, ...] = ("analysts",),
+    except_principals: tuple[str, ...] | None = ("admins",),
+    when_condition: str | None = None,
+    match_column_defs: tuple[tuple[str, str], ...] = (("c", "has_column_tag_value('pii', 'email')"),),
+) -> MagicMock:
+    """Build a minimal fake PolicyInfo-like object for a column mask policy."""
+    from databricks.sdk.service.catalog import PolicyType as SdkPolicyType
+
+    info = MagicMock()
+    info.name = name
+    info.on_securable_type = MagicMock()
+    info.on_securable_type.value = on_securable_type
+    info.on_securable_fullname = on_securable_fullname
+    info.policy_type = SdkPolicyType.POLICY_TYPE_COLUMN_MASK
+    info.column_mask = MagicMock()
+    info.column_mask.function_name = function_name
+    info.column_mask.on_column = on_column
+    info.column_mask.using = [MagicMock(column=a, constant=None) for a in using_column_aliases]
+    info.row_filter = None
+    info.to_principals = list(to_principals)
+    info.except_principals = list(except_principals) if except_principals else None
+    info.when_condition = when_condition
+    info.match_columns = [MagicMock(alias=a, condition=c) for a, c in match_column_defs]
+    return info
+
+
+def _make_row_filter_policy_info(
+    *,
+    name: str = "p1",
+    on_securable_type: str = "TABLE",
+    on_securable_fullname: str = "cat.s.t",
+    function_name: str = "cat.default.filter_fn",
+    using_column_aliases: tuple[str, ...] = ("c_region",),
+    to_principals: tuple[str, ...] = ("analysts",),
+    except_principals: tuple[str, ...] | None = None,
+    when_condition: str | None = None,
+    match_column_defs: tuple[tuple[str, str], ...] = (("c_region", "has_column_tag('geo')"),),
+) -> MagicMock:
+    from databricks.sdk.service.catalog import PolicyType as SdkPolicyType
+
+    info = MagicMock()
+    info.name = name
+    info.on_securable_type = MagicMock()
+    info.on_securable_type.value = on_securable_type
+    info.on_securable_fullname = on_securable_fullname
+    info.policy_type = SdkPolicyType.POLICY_TYPE_ROW_FILTER
+    info.column_mask = None
+    info.row_filter = MagicMock()
+    info.row_filter.function_name = function_name
+    info.row_filter.using = [MagicMock(column=a, constant=None) for a in using_column_aliases]
+    info.to_principals = list(to_principals)
+    info.except_principals = list(except_principals) if except_principals else None
+    info.when_condition = when_condition
+    info.match_columns = [MagicMock(alias=a, condition=c) for a, c in match_column_defs]
+    return info
+
+
+def test_uc_helper_fetch_actual_policies_skips_sdk_when_no_policies_configured():
+    """A config with no mask/filter policies returns empty set without calling list_policies."""
+    config = ResourcesConfig.model_validate({"catalogs": {"cat": {"name": "cat"}}})
+    client = MagicMock()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    assert helper.fetch_actual_policies(config) == set()
+    client.policies.list_policies.assert_not_called()
+
+
+def test_uc_helper_fetch_actual_policies_calls_list_per_configured_securable():
+    """list_policies is called once per securable that has a mask/filter policy configured."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "name": "cat",
+                    "policies": [_mask_policy_dict(name="cp")],
+                    "schemas": [
+                        {
+                            "name": "s",
+                            "policies": [_mask_policy_dict(name="sp")],
+                            "tables": [
+                                {"name": "t", "policies": [_mask_policy_dict(name="tp")]}
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    client = MagicMock()
+    client.policies.list_policies.return_value = iter([])
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.fetch_actual_policies(config)
+
+    assert client.policies.list_policies.call_count == 3
+    call_args = {
+        (c.kwargs.get("on_securable_type"), c.kwargs.get("on_securable_fullname"))
+        for c in client.policies.list_policies.call_args_list
+    }
+    assert call_args == {
+        ("CATALOG", "cat"),
+        ("SCHEMA", "cat.s"),
+        ("TABLE", "cat.s.t"),
+    }
+
+
+def test_uc_helper_fetch_actual_policies_normalises_column_mask():
+    config = _config_with_policy("table")
+    client = MagicMock()
+    client.policies.list_policies.return_value = iter([
+        _make_column_mask_policy_info(
+            using_column_aliases=("c_extra",),
+            match_column_defs=(
+                ("c", "has_column_tag_value('pii', 'email')"),
+                ("c_extra", "has_column_tag('geo')"),
+            ),
+        )
+    ])
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    result = helper.fetch_actual_policies(config)
+    (policy,) = result
+    assert isinstance(policy, Policy)
+    assert policy.policy_type == PolicyType.MASK
+    assert policy.securable_type == SecurableType.TABLE
+    assert policy.securable_full_name == "cat.s.t"
+    assert policy.name == "p1"
+    assert policy.function_name == "cat.default.fn"
+    assert policy.to_principals == ("analysts",)
+    assert policy.except_principals == ("admins",)
+    assert policy.on_column == "c"
+    assert policy.using_columns == ("c_extra",)
+    assert policy.match_columns == (
+        ("c", "has_column_tag_value('pii', 'email')"),
+        ("c_extra", "has_column_tag('geo')"),
+    )
+
+
+def test_uc_helper_fetch_actual_policies_normalises_row_filter():
+    config = _config_with_policy("table", type="filter", function="cat.default.filter_fn")
+    client = MagicMock()
+    client.policies.list_policies.return_value = iter([_make_row_filter_policy_info()])
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    (policy,) = helper.fetch_actual_policies(config)
+    assert policy.policy_type == PolicyType.FILTER
+    assert policy.function_name == "cat.default.filter_fn"
+    assert policy.on_column is None
+    assert policy.using_columns == ("c_region",)
+
+
+def test_uc_helper_fetch_actual_policies_filters_out_unknown_policy_types():
+    """Policies of non-mask/filter types (future SDK additions) are skipped."""
+    config = _config_with_policy("table")
+    fake = MagicMock()
+    fake.policy_type = MagicMock()
+    fake.policy_type.value = "POLICY_TYPE_OTHER"
+    client = MagicMock()
+    client.policies.list_policies.return_value = iter([fake])
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    assert helper.fetch_actual_policies(config) == set()
+
+
+def test_uc_helper_fetch_actual_policies_caches_result():
+    config = _config_with_policy("table")
+    client = MagicMock()
+    client.policies.list_policies.side_effect = [iter([_make_column_mask_policy_info()])]
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    first = helper.fetch_actual_policies(config)
+    second = helper.fetch_actual_policies(config)
+
+    assert first == second
+    client.policies.list_policies.assert_called_once()
+
+
+def test_uc_helper_fetch_actual_policies_handles_empty_except_principals():
+    config = _config_with_policy("table")
+    client = MagicMock()
+    client.policies.list_policies.return_value = iter([
+        _make_column_mask_policy_info(except_principals=None)
+    ])
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    (policy,) = helper.fetch_actual_policies(config)
+    assert policy.except_principals == ()

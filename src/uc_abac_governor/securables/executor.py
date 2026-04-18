@@ -6,6 +6,7 @@ if TYPE_CHECKING:
     from uc_abac_governor.helpers.unity_catalog import UnityCatalogHelper
     from uc_abac_governor.logger import ChangeLogger
 
+from uc_abac_governor.helpers.sql import quote_securable as _quote_securable
 from uc_abac_governor.securables.state import (
     AttributeUpdate,
     FunctionInfo,
@@ -13,11 +14,6 @@ from uc_abac_governor.securables.state import (
     SecurableDiff,
 )
 from uc_abac_governor.types import ExecutionError, Principal
-
-
-def _quote_securable(full_name: str) -> str:
-    """Backtick-quote each segment of a dot-delimited securable name."""
-    return ".".join(f"`{seg}`" for seg in full_name.split("."))
 
 
 def _build_create_sql(info: SecurableInfo) -> str:

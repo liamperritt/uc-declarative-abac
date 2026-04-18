@@ -7,6 +7,7 @@ if TYPE_CHECKING:
     from uc_abac_governor.helpers.unity_catalog import UnityCatalogHelper
     from uc_abac_governor.logger import ChangeLogger
 
+from uc_abac_governor.helpers.sql import quote_securable as _quote_securable
 from uc_abac_governor.tags.state import SecurableTag, TagDiff
 from uc_abac_governor.types import ExecutionError, SecurableType
 
@@ -16,11 +17,6 @@ def _format_tag_entry(tag: SecurableTag) -> str:
     if tag.tag_value is None:
         return f"'{tag.tag_name}'"
     return f"'{tag.tag_name}' = '{tag.tag_value}'"
-
-
-def _quote_securable(full_name: str) -> str:
-    """Backtick-quote each segment of a dot-delimited securable name."""
-    return ".".join(f"`{seg}`" for seg in full_name.split("."))
 
 
 def _build_set_tags_sql(

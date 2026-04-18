@@ -295,21 +295,25 @@ definitions:
 # definitions/shared/policies/mask_customer_name_pii.yaml
 definitions:
   policies:
-    shared|mask_customer_name_pii
-      name: mask_customer_name_pii
-      comment: Mask customer name PII from all users except account admins
+    shared|mask_retail_segment_customer_names_pii
+      name: mask_retail_segment_customer_names_pii
+      comment: Mask retail-segment customer names (not commercial-segment customer names) from all users except account admins
       type: mask
-      function: $defs/functions/shared|abac|mask_name_pii
+      function: $defs/functions/shared|abac|mask_retail_segment_customer_names_pii
       to:
         - account_users
       except:
         - customer_pii_viewers
       has_tags:
-        customer: '*'
+        domain: customer
       columns:
         - alias: name
           has_tags:
-            pii: name
+            is_pii: 'true'
+            class: name
+        - alias: segment
+          has_tags:
+            segment: '*'
 
 # definitions/shared/policies/filter_by_region.yaml
 definitions:
@@ -344,7 +348,7 @@ definitions:
       except:
         - account_admins
       has_tags:
-        domain: trips
+        trips: '*'
         sensitivity: high
       columns:
         - alias: from_region
@@ -374,7 +378,7 @@ definitions:
 
 For **grant** policies attached at a given level, the optional `has_tags` property is scoped to match only the tagged objects within that level — a policy on a schema only matches the schema and the tables and volumes within that schema; a policy on a table only matches that table. If multiple tags are specified, the policy is only applied to objects that match **all** of the listed tags (AND semantics). Omitting the `has_tags` property for a **grant** policy applies the privileges directly on the object to which the policy is attached.
 
-If a **mask** or **filter** policy specifies the optional `has_tags` property, this matches against tagged **tables** only. Use the mandatory `column_has_tags` to match against tagged columns that you want to use for row filtering logic, or that you want to apply column masking to. Similarly, if multiple tags are specified, the policy will only be applied to tables/columns that have **all** tags present (AND semantics). The values of the tagged column are passed as a single parameter to the specified function.
+If a **mask** or **filter** policy specifies the optional `has_tags` property, this matches against tagged **tables** only. Use the mandatory `columns.[*].has_tags` to match against tagged columns that you want to use for row filtering logic, or that you want to apply column masking to. Similarly, if multiple tags are specified, the policy will only be applied to tables/columns that have **all** tags present (AND semantics). The values of the tagged column are passed as a single parameter to the specified function.
 
 For mask and filter policies, the `function` property can either be the fully qualified name of an existing UC function (string), or an inline function definition (object or reference to a "definition", i.e., `$defs/<type>/<key>`). When defining an inline function, the function resource will be deployed into the same catalog and schema as the policy. If the policy is attached at the catalog level, then the inline function will be deployed to the `default` schema of that catalog.
 

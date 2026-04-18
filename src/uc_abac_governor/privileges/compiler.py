@@ -83,15 +83,16 @@ def _collect_policies(config: ResourcesConfig) -> list[GrantPolicyConfig]:
     """Gather all grant policies across all catalogs, schemas, and tables."""
     policies: list[GrantPolicyConfig] = []
     for catalog in config.catalogs.values():
-        if catalog.policies:
-            policies.extend(catalog.policies)
+        policies.extend(_filter_grants(catalog.policies))
         for schema in catalog.schemas or []:
-            if schema.policies:
-                policies.extend(schema.policies)
+            policies.extend(_filter_grants(schema.policies))
             for table in schema.tables or []:
-                if table.policies:
-                    policies.extend(table.policies)
+                policies.extend(_filter_grants(table.policies))
     return policies
+
+
+def _filter_grants(policies) -> list[GrantPolicyConfig]:
+    return [p for p in (policies or []) if isinstance(p, GrantPolicyConfig)]
 
 
 def _policy_securable_type(policy: GrantPolicyConfig) -> SecurableType:

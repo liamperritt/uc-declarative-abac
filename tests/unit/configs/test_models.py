@@ -727,3 +727,97 @@ def test_function_config_allows_omitted_tags():
         "return": "CASE WHEN is_member('admins') THEN col ELSE '***' END",
     })
     assert function.tags is None
+
+
+# ---------------------------------------------------------------------------
+# MaskPolicyConfig / FilterPolicyConfig
+# ---------------------------------------------------------------------------
+
+
+def _mask_or_filter_policy_catalog(policy_type: str, **policy_overrides) -> dict:
+    """Return a catalogs dict holding one mask or filter policy on a table."""
+    policy = {
+        "name": "p1",
+        "type": policy_type,
+        "function": "cat.default.fn",
+        "to": ["analysts"],
+        "except": ["admins"],
+        "columns": [{"alias": "c", "has_tags": {"pii": "email"}}],
+    }
+    policy.update(policy_overrides)
+    return {
+        "catalogs": {
+            "cat": {
+                "schemas": [
+                    {
+                        "name": "s",
+                        "tables": [
+                            {"name": "t", "policies": [policy]}
+                        ],
+                    }
+                ],
+            }
+        }
+    }
+
+
+def test_filter_policy_config_allows_missing_columns():
+    """A FilterPolicyConfig without a 'columns' field parses successfully with columns=None."""
+    data = _mask_or_filter_policy_catalog("filter")
+    # Remove columns entirely
+    data["catalogs"]["cat"]["schemas"][0]["tables"][0]["policies"][0].pop("columns")
+    config = ResourcesConfig.model_validate(data)
+
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert policy.columns is None
+
+
+def test_filter_policy_config_allows_empty_columns():
+    """A FilterPolicyConfig with an empty 'columns' list parses successfully."""
+    data = _mask_or_filter_policy_catalog("filter", columns=[])
+    config = ResourcesConfig.model_validate(data)
+
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert policy.columns == []
+
+
+def test_mask_policy_config_rejects_missing_columns():
+    """A MaskPolicyConfig without a 'columns' field raises a validation error."""
+    data = _mask_or_filter_policy_catalog("mask")
+    data["catalogs"]["cat"]["schemas"][0]["tables"][0]["policies"][0].pop("columns")
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate(data)
+
+
+def test_mask_policy_config_rejects_empty_columns():
+    """A MaskPolicyConfig with an empty 'columns' list raises a validation error."""
+    data = _mask_or_filter_policy_catalog("mask", columns=[])
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate(data)
+
+    assert "at least one column" in str(exc_info.value)
+
+
+def test_mask_policy_config_accepts_single_column():
+    """A MaskPolicyConfig with exactly one column entry parses successfully."""
+    data = _mask_or_filter_policy_catalog("mask")
+    config = ResourcesConfig.model_validate(data)
+
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert len(policy.columns) == 1
+    assert policy.columns[0].name == "c"
+
+
+def test_mask_policy_config_accepts_multiple_columns():
+    """A MaskPolicyConfig with multiple column entries parses successfully."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "c1", "has_tags": {"pii": "email"}},
+            {"alias": "c2", "has_tags": {"pii": "phone"}},
+        ],
+    )
+    config = ResourcesConfig.model_validate(data)
+
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert [c.name for c in policy.columns] == ["c1", "c2"]

@@ -3,11 +3,12 @@ from __future__ import annotations
 import logging
 from unittest.mock import MagicMock
 
+from uc_abac_governor.policies.state import Policy
 from uc_abac_governor.privileges.state import SecurablePrivilege
 from uc_abac_governor.logger import ChangeLogger
 from uc_abac_governor.securables.state import AttributeUpdate, FunctionInfo, SecurableInfo
 from uc_abac_governor.tags.state import SecurableTag
-from uc_abac_governor.types import Principal, PrincipalType, PrivilegeType, SecurableType, ExecutionError
+from uc_abac_governor.types import Principal, PrincipalType, PolicyType, PrivilegeType, SecurableType, ExecutionError
 
 
 # ---------------------------------------------------------------------------
@@ -452,3 +453,55 @@ def test_logger_includes_securables_in_summary() -> None:
     assert "1 created" in summary
     assert "1 replaced" in summary
     assert "Securables:" in summary
+
+
+# ---------------------------------------------------------------------------
+# Policy logging
+# ---------------------------------------------------------------------------
+
+
+def _make_policy(name: str = "p1") -> Policy:
+    return Policy(
+        securable_type=SecurableType.TABLE,
+        securable_full_name="cat.s.t",
+        name=name,
+        policy_type=PolicyType.MASK,
+        function_name="cat.default.fn",
+        to_principals=("analysts",),
+        except_principals=(),
+        when_condition=None,
+        match_columns=(),
+        on_column="c",
+        using_columns=(),
+    )
+
+
+def test_logger_logs_policy_create_increments_counter() -> None:
+    cl, mock_logger = _make_change_logger()
+    cl.log_policy_create(_make_policy(name="mask_pii"))
+
+    assert cl._policies_created == 1
+    msg = _info_messages(mock_logger)[0].lower()
+    assert "created" in msg
+    assert "mask policy 'mask_pii'" in msg
+    assert "cat.s.t" in msg
+
+
+def test_logger_logs_policy_replace_increments_counter() -> None:
+    cl, mock_logger = _make_change_logger()
+    cl.log_policy_replace(_make_policy(name="mask_pii"))
+
+    assert cl._policies_replaced == 1
+    msg = _info_messages(mock_logger)[0].lower()
+    assert "replaced" in msg
+
+
+def test_logger_includes_policies_in_summary() -> None:
+    cl, _ = _make_change_logger()
+    cl.log_policy_create(_make_policy(name="p1"))
+    cl.log_policy_replace(_make_policy(name="p2"))
+
+    summary = cl._build_summary()
+    assert "Policies:" in summary
+    assert "1 created" in summary
+    assert "1 replaced" in summary

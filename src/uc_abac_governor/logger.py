@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 
+from uc_abac_governor.policies.state import Policy
 from uc_abac_governor.privileges.state import SecurablePrivilege
 from uc_abac_governor.securables.state import AttributeUpdate, SecurableInfo
 from uc_abac_governor.tags.state import SecurableTag
@@ -50,6 +51,8 @@ class ChangeLogger:
         self._attributes_updated = 0
         self._securables_created = 0
         self._securables_replaced = 0
+        self._policies_created = 0
+        self._policies_replaced = 0
         self._errors: list[ExecutionError] = []
 
     @property
@@ -203,6 +206,28 @@ class ChangeLogger:
         ))
 
     # ------------------------------------------------------------------
+    # Policy logging
+    # ------------------------------------------------------------------
+
+    def log_policy_create(self, policy: Policy) -> None:
+        """Log a mask/filter policy being created."""
+        self._policies_created += 1
+        action_verb = "Create" if self._dry_run else "Created"
+        self._log_info(_format_change_line(
+            "+", policy.securable_type.value, policy.securable_full_name,
+            f"{action_verb} {policy.policy_type.value} policy '{policy.name}'",
+        ))
+
+    def log_policy_replace(self, policy: Policy) -> None:
+        """Log a mask/filter policy being replaced."""
+        self._policies_replaced += 1
+        action_verb = "Replace" if self._dry_run else "Replaced"
+        self._log_info(_format_change_line(
+            "~", policy.securable_type.value, policy.securable_full_name,
+            f"{action_verb} {policy.policy_type.value} policy '{policy.name}'",
+        ))
+
+    # ------------------------------------------------------------------
     # Error section
     # ------------------------------------------------------------------
 
@@ -242,6 +267,12 @@ class ChangeLogger:
         if self._tags_removed:
             tag_parts.append(f"{self._tags_removed} removed")
 
+        policy_parts: list[str] = []
+        if self._policies_created:
+            policy_parts.append(f"{self._policies_created} created")
+        if self._policies_replaced:
+            policy_parts.append(f"{self._policies_replaced} replaced")
+
         priv_parts: list[str] = []
         if self._privileges_granted:
             priv_parts.append(f"{self._privileges_granted} granted")
@@ -253,6 +284,8 @@ class ChangeLogger:
             sections.append("Securables: " + ", ".join(sec_parts))
         if tag_parts:
             sections.append("Tags: " + ", ".join(tag_parts))
+        if policy_parts:
+            sections.append("Policies: " + ", ".join(policy_parts))
         if priv_parts:
             sections.append("Privileges: " + ", ".join(priv_parts))
         if self._errors:
@@ -277,6 +310,12 @@ class ChangeLogger:
         if self._tags_removed:
             tag_parts.append(f"{self._tags_removed} to remove")
 
+        policy_parts: list[str] = []
+        if self._policies_created:
+            policy_parts.append(f"{self._policies_created} to create")
+        if self._policies_replaced:
+            policy_parts.append(f"{self._policies_replaced} to replace")
+
         priv_parts: list[str] = []
         if self._privileges_granted:
             priv_parts.append(f"{self._privileges_granted} to grant")
@@ -288,6 +327,8 @@ class ChangeLogger:
             sections.append("Securables: " + ", ".join(sec_parts))
         if tag_parts:
             sections.append("Tags: " + ", ".join(tag_parts))
+        if policy_parts:
+            sections.append("Policies: " + ", ".join(policy_parts))
         if priv_parts:
             sections.append("Privileges: " + ", ".join(priv_parts))
 

@@ -72,6 +72,12 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
 class MaskPolicyConfig(BaseFgacPolicyConfig):
     type: Literal[PolicyType.MASK] = PolicyType.MASK
 
+    @model_validator(mode="after")
+    def _require_at_least_one_column(self) -> "MaskPolicyConfig":
+        if not self.columns:
+            raise ValueError("Mask policies must define at least one column")
+        return self
+
 
 class FilterPolicyConfig(BaseFgacPolicyConfig):
     type: Literal[PolicyType.FILTER] = PolicyType.FILTER

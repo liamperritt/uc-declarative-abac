@@ -6,9 +6,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from uc_abac_governor.governor import run
+from uc_abac_governor.policies.state import Policy, PolicyDiff
 from uc_abac_governor.privileges.state import PrivilegeDiff
 from uc_abac_governor.tags.state import TagDiff
-from uc_abac_governor.types import ExecutionBatchError, PrincipalValidationError
+from uc_abac_governor.types import ExecutionBatchError, PolicyType, PrincipalValidationError, SecurableType
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +157,7 @@ def test_governor_runs_tags_workflow_end_to_end(
     _setup_mock_workspace_empty_state(mock_workspace_client)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    _, tag_diff, _ = run(
+    _, tag_diff, _, _ = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
@@ -182,7 +183,7 @@ def test_governor_runs_privileges_workflow_end_to_end(
     _setup_mock_workspace_empty_state(mock_workspace_client)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    _, _, privilege_diff = run(
+    _, _, _, privilege_diff = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
@@ -210,7 +211,7 @@ def test_governor_runs_both_domains_independently(
     _setup_mock_workspace_empty_state(mock_workspace_client)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    _, tag_diff, privilege_diff = run(
+    _, tag_diff, _, privilege_diff = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
@@ -284,7 +285,7 @@ def test_governor_produces_empty_diffs_when_in_sync(
     )
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    _, tag_diff, privilege_diff = run(
+    _, tag_diff, _, privilege_diff = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
@@ -348,7 +349,7 @@ def test_governor_dry_run_does_not_execute_sql(
     _setup_mock_workspace_empty_state(mock_workspace_client)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    _, tag_diff, privilege_diff = run(
+    _, tag_diff, _, privilege_diff = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
@@ -506,6 +507,92 @@ def _catalog_with_two_grant_policies_config() -> dict:
             }
         }
     }
+
+
+def _catalog_with_mask_policy_config() -> dict:
+    """A YAML dict with a catalog-level MASK policy targeting a tagged column."""
+    return {
+        "resources": {
+            "catalogs": {
+                "my_catalog": {
+                    "policies": [
+                        {
+                            "name": "mask_pii",
+                            "type": "mask",
+                            "function": "my_catalog.default.mask_fn",
+                            "to": ["analysts"],
+                            "except": ["admins"],
+                            "columns": [
+                                {"alias": "c_pii", "has_tags": {"pii": "email"}}
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    }
+
+
+# ---------------------------------------------------------------------------
+# Policies workflow
+# ---------------------------------------------------------------------------
+
+
+def test_governor_runs_policies_workflow_end_to_end(
+    tmp_yaml_dir, mock_workspace_client):
+    """A MASK policy with no corresponding actual UC policy -> CREATE POLICY SQL is executed."""
+    root = tmp_yaml_dir({"resources/catalog.yaml": _catalog_with_mask_policy_config()})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _setup_mock_principals(mock_workspace_client, "analysts")
+
+    _, _, policy_diff, _ = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+    )
+
+    assert isinstance(policy_diff, PolicyDiff)
+    assert len(policy_diff.to_create) == 1
+    create_stmts = [s for s in mock_workspace_client.executed_sql if "CREATE POLICY" in s.upper()]
+    assert len(create_stmts) == 1, f"Expected CREATE POLICY SQL, got: {mock_workspace_client.executed_sql}"
+
+
+def test_governor_policies_workflow_is_idempotent(
+    tmp_yaml_dir, mock_workspace_client):
+    """When list_policies returns the same policy already exists, no CREATE POLICY SQL is executed."""
+    root = tmp_yaml_dir({"resources/catalog.yaml": _catalog_with_mask_policy_config()})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _setup_mock_principals(mock_workspace_client, "analysts")
+
+    # Configure list_policies to return the matching desired policy
+    from databricks.sdk.service.catalog import PolicyType as SdkPolicyType
+
+    fake_policy = MagicMock()
+    fake_policy.name = "mask_pii"
+    fake_policy.on_securable_type = MagicMock(value="CATALOG")
+    fake_policy.on_securable_fullname = "my_catalog"
+    fake_policy.policy_type = SdkPolicyType.POLICY_TYPE_COLUMN_MASK
+    fake_policy.column_mask = MagicMock()
+    fake_policy.column_mask.function_name = "my_catalog.default.mask_fn"
+    fake_policy.column_mask.on_column = "c_pii"
+    fake_policy.column_mask.using = []
+    fake_policy.row_filter = None
+    fake_policy.to_principals = ["analysts"]
+    fake_policy.except_principals = ["admins"]
+    fake_policy.when_condition = None
+    fake_policy.match_columns = [MagicMock(alias="c_pii", condition="has_tag_value('pii', 'email')")]
+    mock_workspace_client.policies.list_policies.return_value = iter([fake_policy])
+
+    _, _, policy_diff, _ = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+    )
+
+    assert policy_diff.to_create == set()
+    assert policy_diff.to_replace == set()
+    create_stmts = [s for s in mock_workspace_client.executed_sql if "CREATE POLICY" in s.upper()]
+    assert create_stmts == []
 
 
 def test_governor_collects_unknown_principal_errors(
