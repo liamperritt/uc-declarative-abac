@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 from uc_abac_governor.policies.state import Policy
 from uc_abac_governor.privileges.state import SecurablePrivilege
 from uc_abac_governor.logger import ChangeLogger
-from uc_abac_governor.securables.state import AttributeUpdate, FunctionInfo, SecurableInfo
+from uc_abac_governor.securables.state import AttributeUpdate, Function, Securable
 from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.types import PrincipalType, PolicyType, PrivilegeType, SecurableType, ExecutionError
@@ -399,7 +399,7 @@ def test_logger_logs_attribute_update() -> None:
 def test_logger_logs_securable_create() -> None:
     """log_securable_create increments _securables_created counter."""
     cl, _ = _make_change_logger()
-    info = FunctionInfo(
+    info = Function(
         securable_type=SecurableType.FUNCTION,
         full_name="cat.schema.func",
         parameters=(("col", "STRING"),),
@@ -413,7 +413,7 @@ def test_logger_logs_securable_create() -> None:
 def test_logger_logs_securable_replace() -> None:
     """log_securable_replace increments _securables_replaced counter."""
     cl, _ = _make_change_logger()
-    info = FunctionInfo(
+    info = Function(
         securable_type=SecurableType.FUNCTION,
         full_name="cat.schema.func",
         parameters=(("col", "STRING"),),
@@ -435,13 +435,13 @@ def test_logger_includes_securables_in_summary() -> None:
         old_value="old_owner",
         new_value="new_owner",
     ))
-    cl.log_securable_create(FunctionInfo(
+    cl.log_securable_create(Function(
         securable_type=SecurableType.FUNCTION,
         full_name="cat.schema.func",
         parameters=(("col", "STRING"),),
         definition="col",
     ))
-    cl.log_securable_replace(FunctionInfo(
+    cl.log_securable_replace(Function(
         securable_type=SecurableType.FUNCTION,
         full_name="cat.schema.func2",
         parameters=(("col", "STRING"),),

@@ -581,6 +581,7 @@ def test_governor_policies_workflow_is_idempotent(
     fake_policy.except_principals = ["admins"]
     fake_policy.when_condition = None
     fake_policy.match_columns = [MagicMock(alias="c_pii", condition="has_tag_value('pii', 'email')")]
+    fake_policy.comment = None
     mock_workspace_client.policies.list_policies.return_value = iter([fake_policy])
 
     _, _, policy_diff, _ = run(
@@ -774,6 +775,7 @@ def _seed_actual_state_for_sp_idempotency(mock_workspace_client: MagicMock, sp_a
     fake_policy.except_principals = []
     fake_policy.when_condition = None
     fake_policy.match_columns = [MagicMock(alias="c_pii", condition="has_tag_value('pii', 'email')")]
+    fake_policy.comment = None
     mock_workspace_client.policies.list_policies.return_value = iter([fake_policy])
 
 

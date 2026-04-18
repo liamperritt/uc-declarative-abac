@@ -91,6 +91,7 @@ def _resolve_policy_principals(
             match_columns=policy.match_columns,
             on_column=policy.on_column,
             using_columns=policy.using_columns,
+            comment=policy.comment,
         ))
     return result
 

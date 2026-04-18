@@ -72,9 +72,14 @@ def _build_policy_sql(policy: Policy, or_replace: bool) -> str:
     lines = [
         f"{prefix} `{policy.name}`",
         f"ON {policy.securable_type.value} {quote_securable(policy.securable_full_name)}",
+    ]
+    if policy.comment:
+        escaped = policy.comment.replace("'", "\\'")
+        lines.append(f"COMMENT '{escaped}'")
+    lines.extend([
         f"{body_type} {quote_securable(policy.function_name)}",
         f"TO {_quote_principals(policy.to_principals)}",
-    ]
+    ])
     if policy.except_principals:
         lines.append(f"EXCEPT {_quote_principals(policy.except_principals)}")
     lines.append("FOR TABLES")

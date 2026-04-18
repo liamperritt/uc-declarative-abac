@@ -12,7 +12,7 @@ from uc_abac_governor.policies.state import Policy
 from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.privileges.state import SecurablePrivilege
-from uc_abac_governor.securables.state import FunctionInfo, SecurableAttributes
+from uc_abac_governor.securables.state import Function, SecurableAttributes
 from uc_abac_governor.types import GovernorError, PolicyType, PrincipalType, PrivilegeType, SecurableType
 
 WAREHOUSE_ID = "test-warehouse-id"
@@ -545,7 +545,7 @@ def test_uc_helper_parses_securable_rows_for_attributes(mock_fetch):
 
 @patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_parses_securable_rows_for_functions(mock_fetch):
-    """Function rows produce FunctionInfo in the securables set."""
+    """Function rows produce Function in the securables set."""
     rows = [
         [
             "FUNCTION",
@@ -553,6 +553,7 @@ def test_uc_helper_parses_securable_rows_for_functions(mock_fetch):
             "func_owner",
             '[{"parameter_name":"col","data_type":"STRING"}]',
             "CASE WHEN is_member('admins') THEN col ELSE '***' END",
+            None,
         ],
     ]
     mock_fetch.return_value = rows
@@ -562,14 +563,37 @@ def test_uc_helper_parses_securable_rows_for_functions(mock_fetch):
     securables, _attributes = helper.fetch_actual_securables(["my_catalog"])
 
     expected = {
-        FunctionInfo(
+        Function(
             securable_type=SecurableType.FUNCTION,
             full_name="my_catalog.shared.mask_email",
             parameters=(("col", "STRING"),),
             definition="CASE WHEN is_member('admins') THEN col ELSE '***' END",
+            comment=None,
         ),
     }
     assert securables == expected
+
+
+@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_parses_function_routine_comment_into_function_comment(mock_fetch):
+    """When routine_comment is populated, it appears on Function.comment."""
+    rows = [
+        [
+            "FUNCTION",
+            "my_catalog.shared.mask_email",
+            "func_owner",
+            "",
+            "col",
+            "Masks email column",
+        ],
+    ]
+    mock_fetch.return_value = rows
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    securables, _ = helper.fetch_actual_securables(["my_catalog"])
+    (func,) = securables
+    assert func.comment == "Masks email column"
 
 
 @patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
@@ -743,6 +767,7 @@ def _make_column_mask_policy_info(
     info.except_principals = list(except_principals) if except_principals else None
     info.when_condition = when_condition
     info.match_columns = [MagicMock(alias=a, condition=c) for a, c in match_column_defs]
+    info.comment = None
     return info
 
 
@@ -774,6 +799,7 @@ def _make_row_filter_policy_info(
     info.except_principals = list(except_principals) if except_principals else None
     info.when_condition = when_condition
     info.match_columns = [MagicMock(alias=a, condition=c) for a, c in match_column_defs]
+    info.comment = None
     return info
 
 

@@ -57,6 +57,7 @@ def _build_policy(
         match_columns=match_columns,
         on_column=on_column,
         using_columns=using_columns,
+        comment=policy.comment,
     )
 
 

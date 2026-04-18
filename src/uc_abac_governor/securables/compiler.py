@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uc_abac_governor.configs.models import FunctionConfig, ResourcesConfig, SecurableConfig
 from uc_abac_governor.principals.state import Principal
-from uc_abac_governor.securables.state import FunctionInfo, SecurableAttributes, SecurableInfo
+from uc_abac_governor.securables.state import Function, SecurableAttributes, Securable
 from uc_abac_governor.types import PrincipalType, SecurableType
 
 
@@ -51,26 +51,27 @@ def compile_desired_attributes(config: ResourcesConfig) -> set[SecurableAttribut
     return attrs
 
 
-def _compile_function_info(func: FunctionConfig) -> FunctionInfo:
-    """Build a FunctionInfo from a FunctionConfig."""
+def _compile_function(func: FunctionConfig) -> Function:
+    """Build a Function from a FunctionConfig."""
     parameters = tuple(
         (param.name, param.type) for param in func.parameters
     ) if func.parameters else ()
-    return FunctionInfo(
+    return Function(
         securable_type=SecurableType.FUNCTION,
         full_name=func.full_name,
         parameters=parameters,
         definition=func.definition,
+        comment=func.comment,
     )
 
 
-def compile_desired_securables(config: ResourcesConfig) -> set[SecurableInfo]:
-    """Walk the config tree and emit SecurableInfo for each securable that should be created."""
-    securables: set[SecurableInfo] = set()
+def compile_desired_securables(config: ResourcesConfig) -> set[Securable]:
+    """Walk the config tree and emit Securable for each securable that should be created."""
+    securables: set[Securable] = set()
 
     for catalog in config.catalogs.values():
         for schema in catalog.schemas or []:
             for func in schema.functions or []:
-                securables.add(_compile_function_info(func))
+                securables.add(_compile_function(func))
 
     return securables

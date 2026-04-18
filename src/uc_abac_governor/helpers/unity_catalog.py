@@ -25,7 +25,7 @@ from uc_abac_governor.policies.state import Policy
 from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.privileges.state import SecurablePrivilege
-from uc_abac_governor.securables.state import FunctionInfo, SecurableAttributes, SecurableInfo
+from uc_abac_governor.securables.state import Function, SecurableAttributes, Securable
 from uc_abac_governor.types import GovernorError, PolicyType, PrincipalType, PrivilegeType, SecurableType
 
 _logger = logging.getLogger("uc_abac_governor")
@@ -157,25 +157,25 @@ def _build_securables_query(catalog_names: list[str]) -> str:
     in_clause = _build_catalog_in_clause(catalog_names)
     parts = [
         f"SELECT 'CATALOG' AS securable_type, catalog_name AS full_name, "
-        f"catalog_owner AS owner, NULL AS parameters, NULL AS routine_definition "
+        f"catalog_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment "
         f"FROM system.information_schema.catalogs "
         f"WHERE catalog_name IN {in_clause}",
 
         f"SELECT 'SCHEMA' AS securable_type, "
         f"concat(catalog_name, '.', schema_name) AS full_name, "
-        f"schema_owner AS owner, NULL AS parameters, NULL AS routine_definition "
+        f"schema_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment "
         f"FROM system.information_schema.schemata "
         f"WHERE catalog_name IN {in_clause} AND schema_name != 'information_schema'",
 
         f"SELECT 'TABLE' AS securable_type, "
         f"concat(table_catalog, '.', table_schema, '.', table_name) AS full_name, "
-        f"table_owner AS owner, NULL AS parameters, NULL AS routine_definition "
+        f"table_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment "
         f"FROM system.information_schema.tables "
         f"WHERE table_catalog IN {in_clause} AND table_schema != 'information_schema'",
 
         f"SELECT 'VOLUME' AS securable_type, "
         f"concat(volume_catalog, '.', volume_schema, '.', volume_name) AS full_name, "
-        f"volume_owner AS owner, NULL AS parameters, NULL AS routine_definition "
+        f"volume_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment "
         f"FROM system.information_schema.volumes "
         f"WHERE volume_catalog IN {in_clause} AND volume_schema != 'information_schema'",
 
@@ -183,26 +183,27 @@ def _build_securables_query(catalog_names: list[str]) -> str:
         f"concat(r.specific_catalog, '.', r.specific_schema, '.', r.specific_name) AS full_name, "
         f"r.routine_owner AS owner, "
         f"to_json(transform(sort_array(collect_list(struct(p.ordinal_position, p.parameter_name, p.data_type))), x -> struct(x.parameter_name, x.data_type))) AS parameters, "
-        f"r.routine_definition AS routine_definition "
+        f"r.routine_definition AS routine_definition, "
+        f"r.comment AS routine_comment "
         f"FROM system.information_schema.routines r "
         f"LEFT JOIN system.information_schema.parameters p "
         f"ON r.specific_catalog = p.specific_catalog "
         f"AND r.specific_schema = p.specific_schema "
         f"AND r.specific_name = p.specific_name "
         f"WHERE r.specific_catalog IN {in_clause} AND r.routine_type = 'FUNCTION' AND r.specific_schema != 'information_schema' "
-        f"GROUP BY r.specific_catalog, r.specific_schema, r.specific_name, r.routine_owner, r.routine_definition",
+        f"GROUP BY r.specific_catalog, r.specific_schema, r.specific_name, r.routine_owner, r.routine_definition, r.comment",
     ]
     return " UNION ALL ".join(parts)
 
 
 def _parse_securable_rows(
     rows: list[list[str]],
-) -> tuple[set[SecurableInfo], set[SecurableAttributes]]:
+) -> tuple[set[Securable], set[SecurableAttributes]]:
     """Parse raw SQL rows into securables and attributes.
 
-    Row columns: [securable_type, full_name, owner, parameters_json, routine_definition]
+    Row columns: [securable_type, full_name, owner, parameters_json, routine_definition, routine_comment]
     """
-    securables: set[SecurableInfo] = set()
+    securables: set[Securable] = set()
     attributes: set[SecurableAttributes] = set()
     for row in rows:
         securable_type = SecurableType(row[0])
@@ -210,6 +211,7 @@ def _parse_securable_rows(
         owner = row[2]
         parameters_json = row[3]
         routine_definition = row[4]
+        routine_comment = row[5] if len(row) > 5 else None
 
         owner_principal = (
             Principal(principal_type=PrincipalType.UNKNOWN, identifier=owner)
@@ -232,11 +234,12 @@ def _parse_securable_rows(
             else:
                 params = ()
             securables.add(
-                FunctionInfo(
+                Function(
                     securable_type=SecurableType.FUNCTION,
                     full_name=full_name,
                     parameters=params,
                     definition=routine_definition,
+                    comment=routine_comment if routine_comment else None,
                 )
             )
 
@@ -309,6 +312,7 @@ def _normalise_policy_info(
         match_columns=match_columns,
         on_column=on_column,
         using_columns=using_columns,
+        comment=info.comment,
     )
 
 
@@ -330,7 +334,7 @@ class UnityCatalogHelper:
         self._warehouse_id = warehouse_id
         self._tags_cache: set[SecurableTag] | None = None
         self._privileges_cache: set[SecurablePrivilege] | None = None
-        self._securables_cache: set[SecurableInfo] | None = None
+        self._securables_cache: set[Securable] | None = None
         self._attributes_cache: set[SecurableAttributes] | None = None
         self._policies_cache: set[Policy] | None = None
 
@@ -395,7 +399,7 @@ class UnityCatalogHelper:
 
     def fetch_actual_securables(
         self, catalog_names: list[str]
-    ) -> tuple[set[SecurableInfo], set[SecurableAttributes]]:
+    ) -> tuple[set[Securable], set[SecurableAttributes]]:
         """Query system tables for securable attributes and function definitions.
 
         Returns a tuple of (securables, attributes) for the given catalogs.

@@ -3,6 +3,7 @@ definitions:
     abac|mask_pii:
       name: mask_pii
       type: mask
+      comment: Policy for masking columns with PII values via the 'uc_gov_pii' column tag
       function: liam_perritt.default.fn_mask_pii
       to:
         - uc_governor_test_team

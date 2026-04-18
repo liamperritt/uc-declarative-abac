@@ -370,3 +370,28 @@ def test_policy_compiler_returns_frozen_hashable_policies():
     assert len(result) == 1
     (policy,) = result
     assert isinstance(policy, Policy)
+
+
+# ---------------------------------------------------------------------------
+# Policy comment
+# ---------------------------------------------------------------------------
+
+
+def test_policy_compiler_emits_policy_comment_when_provided():
+    policy_dict = _fgac_policy(comment="Mask email PII")
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = compile_desired_policies(config)
+    assert policy.comment == "Mask email PII"
+
+
+def test_policy_compiler_policy_comment_defaults_to_none():
+    policy_dict = _fgac_policy()  # no comment
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = compile_desired_policies(config)
+    assert policy.comment is None

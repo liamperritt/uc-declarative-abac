@@ -28,6 +28,7 @@ class Policy:
     match_columns: tuple[tuple[str, str], ...]
     on_column: str | None
     using_columns: tuple[str, ...]
+    comment: str | None = None
 
 
 @dataclass

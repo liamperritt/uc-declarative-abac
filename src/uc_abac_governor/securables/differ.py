@@ -10,7 +10,7 @@ from uc_abac_governor.securables.state import (
     AttributeUpdate,
     SecurableAttributes,
     SecurableDiff,
-    SecurableInfo,
+    Securable,
 )
 from uc_abac_governor.types import ExecutionError, PrincipalValidationError
 
@@ -20,8 +20,8 @@ _GOVERNED_ATTRIBUTES = ["owner"]
 def compute_securable_diff(
     desired_attrs: set[SecurableAttributes],
     actual_attrs: set[SecurableAttributes],
-    desired_securables: set[SecurableInfo],
-    actual_securables: set[SecurableInfo],
+    desired_securables: set[Securable],
+    actual_securables: set[Securable],
     resolver: PrincipalResolver,
     change_logger: ChangeLogger,
 ) -> SecurableDiff:
@@ -89,14 +89,14 @@ def _resolve_attribute_owners(
 
 
 def _diff_securables(
-    desired: set[SecurableInfo],
-    actual: set[SecurableInfo],
-) -> tuple[list[SecurableInfo], list[SecurableInfo]]:
+    desired: set[Securable],
+    actual: set[Securable],
+) -> tuple[list[Securable], list[Securable]]:
     """Return (to_create, to_replace) lists by keying on full_name."""
     actual_by_name = {s.full_name: s for s in actual}
 
-    to_create: list[SecurableInfo] = []
-    to_replace: list[SecurableInfo] = []
+    to_create: list[Securable] = []
+    to_replace: list[Securable] = []
 
     for desired_sec in desired:
         actual_sec = actual_by_name.get(desired_sec.full_name)

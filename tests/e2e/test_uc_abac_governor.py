@@ -21,7 +21,7 @@ from pathlib import Path
 from databricks.sdk import WorkspaceClient
 
 from uc_abac_governor.governor import run
-from uc_abac_governor.securables.state import AttributeUpdate, FunctionInfo, SecurableAttributes
+from uc_abac_governor.securables.state import AttributeUpdate, Function, SecurableAttributes
 from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.privileges.state import SecurablePrivilege
 from uc_abac_governor.principals.state import Principal
@@ -78,13 +78,13 @@ EXPECTED_PRIVILEGES = {
 }
 
 EXPECTED_FUNCTIONS = {
-    FunctionInfo(
+    Function(
         securable_type=SecurableType.FUNCTION,
         full_name="liam_perritt.default.mask_pii_email",
         parameters=(("col", "STRING"),),
         definition="CASE WHEN is_member('uc_governor_test_team') THEN col ELSE '***' END",
     ),
-    FunctionInfo(
+    Function(
         securable_type=SecurableType.FUNCTION,
         full_name="liam_perritt.default.format_phone",
         parameters=(("phone", "STRING"),),

@@ -27,17 +27,17 @@ class SecurableAttributes:
 
 
 @dataclass(frozen=True)
-class SecurableInfo:
+class Securable:
     """Base state for securable creation/replacement.
 
     Subclass this for each securable type that needs create/replace support.
-    The diff, executor, and uc_helper work with SecurableInfo polymorphically —
-    they dispatch via structural pattern matching (match/case on the SecurableInfo
+    The diff, executor, and uc_helper work with Securable polymorphically —
+    they dispatch via structural pattern matching (match/case on the Securable
     subclass).
 
     To add creation support for a new securable type (e.g. tables):
-    1. Create a TableInfo(SecurableInfo) subclass with table-specific fields
-    2. Update the compiler to emit TableInfo instances
+    1. Create a Table(Securable) subclass with table-specific fields
+    2. Update the compiler to emit Table instances
     3. Add a _build_create_table_sql() function to the executor
     4. Add a _build_replace_table_sql() if replacement is supported
     5. Update _build_create_sql() / _build_replace_sql() dispatch
@@ -48,11 +48,17 @@ class SecurableInfo:
 
 
 @dataclass(frozen=True)
-class FunctionInfo(SecurableInfo):
-    """Function-specific state: parameters and body."""
+class Function(Securable):
+    """Function-specific state: parameters, body, and comment.
+
+    The comment is part of the replaceable function definition — a change to
+    the comment triggers a CREATE OR REPLACE FUNCTION, not a separate attribute
+    update.
+    """
 
     parameters: tuple[tuple[str, str], ...]
     definition: str
+    comment: str | None = None
 
 
 @dataclass(frozen=True)
@@ -75,9 +81,9 @@ class SecurableDiff:
     """All changes the executor needs to apply.
 
     Organised by operation type, not by securable type. The executor
-    dispatches to type-specific logic via SecurableInfo polymorphism.
+    dispatches to type-specific logic via Securable polymorphism.
     """
 
     attributes_to_update: list[AttributeUpdate] = field(default_factory=list)
-    securables_to_create: list[SecurableInfo] = field(default_factory=list)
-    securables_to_replace: list[SecurableInfo] = field(default_factory=list)
+    securables_to_create: list[Securable] = field(default_factory=list)
+    securables_to_replace: list[Securable] = field(default_factory=list)

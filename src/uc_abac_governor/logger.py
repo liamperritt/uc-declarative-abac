@@ -4,7 +4,7 @@ import logging
 
 from uc_abac_governor.policies.state import Policy
 from uc_abac_governor.privileges.state import SecurablePrivilege
-from uc_abac_governor.securables.state import AttributeUpdate, SecurableInfo
+from uc_abac_governor.securables.state import AttributeUpdate, Securable
 from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.types import ExecutionError
@@ -189,7 +189,7 @@ class ChangeLogger:
             f"{action_verb} {update.attribute}: '{old}' -> '{new}'",
         ))
 
-    def log_securable_create(self, info: SecurableInfo) -> None:
+    def log_securable_create(self, info: Securable) -> None:
         """Log a securable being created."""
         self._securables_created += 1
         action_verb = "Create" if self._dry_run else "Created"
@@ -198,7 +198,7 @@ class ChangeLogger:
             f"{action_verb} {info.securable_type.value.lower()}",
         ))
 
-    def log_securable_replace(self, info: SecurableInfo) -> None:
+    def log_securable_replace(self, info: Securable) -> None:
         """Log a securable being replaced."""
         self._securables_replaced += 1
         action_verb = "Replace" if self._dry_run else "Replaced"

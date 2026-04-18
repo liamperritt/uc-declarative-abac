@@ -284,3 +284,45 @@ def test_policy_executor_dry_run_does_not_execute_sql():
 
     assert result == []
     uc_helper.execute_sql.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Policy comment
+# ---------------------------------------------------------------------------
+
+
+def test_policy_executor_includes_comment_when_set():
+    """CREATE POLICY SQL includes a COMMENT clause when Policy.comment is set."""
+    uc_helper = MagicMock()
+    diff = PolicyDiff(to_create={_make_policy(comment="Mask email PII")})
+
+    (sql,) = execute_policy_diff(uc_helper, diff, ChangeLogger())
+    _assert_sql_contains(sql, "COMMENT 'Mask email PII'")
+
+
+def test_policy_executor_omits_comment_clause_when_unset():
+    uc_helper = MagicMock()
+    diff = PolicyDiff(to_create={_make_policy(comment=None)})
+
+    (sql,) = execute_policy_diff(uc_helper, diff, ChangeLogger())
+    _assert_sql_excludes(sql, "COMMENT")
+
+
+def test_policy_executor_escapes_single_quotes_in_comment():
+    uc_helper = MagicMock()
+    diff = PolicyDiff(to_create={_make_policy(comment="It's broken")})
+
+    (sql,) = execute_policy_diff(uc_helper, diff, ChangeLogger())
+    assert "COMMENT 'It\\'s broken'" in sql
+
+
+def test_policy_executor_comment_appears_between_on_and_body():
+    """Per Databricks SQL grammar, COMMENT sits between ON <securable> and {COLUMN MASK|ROW FILTER}."""
+    uc_helper = MagicMock()
+    diff = PolicyDiff(to_create={_make_policy(comment="My policy")})
+
+    (sql,) = execute_policy_diff(uc_helper, diff, ChangeLogger())
+    on_idx = sql.upper().find("ON ")
+    comment_idx = sql.upper().find("COMMENT ")
+    mask_idx = sql.upper().find("COLUMN MASK")
+    assert on_idx < comment_idx < mask_idx

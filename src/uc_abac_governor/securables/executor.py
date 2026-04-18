@@ -8,8 +8,8 @@ if TYPE_CHECKING:
 
 from uc_abac_governor.helpers import quote_securable as quote_securable
 from uc_abac_governor.securables.state import (
-    FunctionInfo,
-    SecurableInfo,
+    Function,
+    Securable,
     SecurableDiff,
 )
 from uc_abac_governor.principals.resolver import ensure_resolved
@@ -17,19 +17,19 @@ from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.types import ExecutionError
 
 
-def _build_create_sql(info: SecurableInfo) -> str:
+def _build_create_sql(info: Securable) -> str:
     """Build a CREATE SQL statement for a securable."""
     match info:
-        case FunctionInfo():
+        case Function():
             return _build_create_function_sql(info)
         case _:
             raise NotImplementedError(f"Create not supported for {type(info).__name__}")
 
 
-def _build_replace_sql(info: SecurableInfo) -> str:
+def _build_replace_sql(info: Securable) -> str:
     """Build a CREATE OR REPLACE SQL statement for a securable."""
     match info:
-        case FunctionInfo():
+        case Function():
             return _build_replace_function_sql(info)
         case _:
             raise NotImplementedError(f"Replace not supported for {type(info).__name__}")
@@ -43,18 +43,28 @@ def _build_function_params(parameters: tuple[tuple[str, str], ...]) -> str:
     return f"({entries})"
 
 
-def _build_create_function_sql(info: FunctionInfo) -> str:
+def _build_function_comment_clause(comment: str | None) -> str:
+    """Return a ' COMMENT '<escaped>'' suffix, or empty string if no comment."""
+    if not comment:
+        return ""
+    escaped = comment.replace("'", "\\'")
+    return f" COMMENT '{escaped}'"
+
+
+def _build_create_function_sql(info: Function) -> str:
     """Build CREATE FUNCTION SQL."""
     quoted = quote_securable(info.full_name)
     params = _build_function_params(info.parameters)
-    return f"CREATE FUNCTION {quoted}{params} RETURN {info.definition}"
+    comment = _build_function_comment_clause(info.comment)
+    return f"CREATE FUNCTION {quoted}{params}{comment} RETURN {info.definition}"
 
 
-def _build_replace_function_sql(info: FunctionInfo) -> str:
+def _build_replace_function_sql(info: Function) -> str:
     """Build CREATE OR REPLACE FUNCTION SQL."""
     quoted = quote_securable(info.full_name)
     params = _build_function_params(info.parameters)
-    return f"CREATE OR REPLACE FUNCTION {quoted}{params} RETURN {info.definition}"
+    comment = _build_function_comment_clause(info.comment)
+    return f"CREATE OR REPLACE FUNCTION {quoted}{params}{comment} RETURN {info.definition}"
 
 
 def execute_securable_diff(

@@ -3,6 +3,7 @@ definitions:
     abac|fn_mask_pii:
       name: fn_mask_pii
       owner: liam.perritt@databricks.com
+      comment: Function that masks a given PII value
       parameters:
         - name: pii
           type: string

@@ -3,7 +3,7 @@ from __future__ import annotations
 from uc_abac_governor.configs.models import ResourcesConfig
 from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.securables.compiler import compile_desired_attributes, compile_desired_securables
-from uc_abac_governor.securables.state import FunctionInfo, SecurableAttributes
+from uc_abac_governor.securables.state import Function, SecurableAttributes
 from uc_abac_governor.types import PrincipalType, SecurableType
 
 
@@ -181,7 +181,7 @@ def test_securable_compiler_skips_securables_without_owner():
 
 
 def test_securable_compiler_emits_function_info():
-    """A function config produces a FunctionInfo with parameters and definition."""
+    """A function config produces a Function with parameters and definition."""
     config = ResourcesConfig.model_validate(
         {
             "catalogs": {
@@ -206,7 +206,7 @@ def test_securable_compiler_emits_function_info():
 
     result = compile_desired_securables(config)
 
-    assert FunctionInfo(
+    assert Function(
         securable_type=SecurableType.FUNCTION,
         full_name="my_catalog.shared.mask_email",
         parameters=(("col", "STRING"),),
@@ -215,7 +215,7 @@ def test_securable_compiler_emits_function_info():
 
 
 def test_securable_compiler_emits_function_info_without_parameters():
-    """A function with no parameters produces a FunctionInfo with parameters=()."""
+    """A function with no parameters produces a Function with parameters=()."""
     config = ResourcesConfig.model_validate(
         {
             "catalogs": {
@@ -238,9 +238,59 @@ def test_securable_compiler_emits_function_info_without_parameters():
 
     result = compile_desired_securables(config)
 
-    assert FunctionInfo(
+    assert Function(
         securable_type=SecurableType.FUNCTION,
         full_name="my_catalog.shared.get_greeting",
         parameters=(),
         definition="'Hello, World!'",
     ) in result
+
+
+def test_securable_compiler_emits_function_comment_when_provided():
+    """FunctionConfig.comment is propagated onto the emitted Function."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "shared",
+                            "functions": [
+                                {
+                                    "name": "greet",
+                                    "return": "'hi'",
+                                    "comment": "Returns a greeting",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    (func,) = compile_desired_securables(config)
+    assert func.comment == "Returns a greeting"
+
+
+def test_securable_compiler_function_comment_defaults_to_none():
+    """A function without a comment emits Function.comment == None."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "shared",
+                            "functions": [
+                                {"name": "greet", "return": "'hi'"}
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    (func,) = compile_desired_securables(config)
+    assert func.comment is None

@@ -554,7 +554,7 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 - **Owner management** — detects owner drift between config and workspace; updates via WorkspaceClient API for all securable types (catalogs, schemas, tables, volumes, functions)
 - **Function creation** — creates new functions via `CREATE FUNCTION` SQL with parameters and return expression (no `RETURNS` clause; UC infers the type)
 - **Function replacement** — replaces existing functions whose parameters or definition have changed via `CREATE OR REPLACE FUNCTION` SQL
-- **Polymorphic securable state** — `SecurableInfo` base class with `FunctionInfo` subclass; executor dispatches via structural pattern matching (`match`/`case`), extensible for future securable types
+- **Polymorphic securable state** — `Securable` base class with `Function` subclass; executor dispatches via structural pattern matching (`match`/`case`), extensible for future securable types
 - **Generic attribute updates** — `AttributeUpdate` type supports any attribute (currently `owner`); adding future attributes (comment, RFA destination) requires only adding a field to `SecurableAttributes` and a dispatch branch in the executor
 - **Single state query** — `fetch_actual_securables` combines attributes and function definitions in one UNION ALL query with `collect_list`/`sort_array`/`transform` aggregation for parameters
 
@@ -615,7 +615,7 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 ### Not yet implemented
 
 - **Governed tags** — `resources.governed_tags` with `allowed_values`, `allowed_principals`, `comment` (documented in README but not built)
-- **UC object creation** — creating/updating catalogs, schemas, tables, volumes (functions are supported; other securable types require adding `SecurableInfo` subclasses)
+- **UC object creation** — creating/updating catalogs, schemas, tables, volumes (functions are supported; other securable types require adding `Securable` subclasses)
 - **Object attributes** — `comment`, `rfa_destination` on securables (the `owner` attribute is implemented; adding new attributes requires only a field on `SecurableAttributes` and an executor dispatch branch)
 - **Inline function definitions on mask/filter policies** — currently `function` must be the fully qualified name of an existing UC function; auto-deploying an inline function definition alongside a policy is not yet supported
 - **Direct mask/filter** — `filter` on tables and `mask` on columns (non-ABAC, directly applied functions)

@@ -8,7 +8,7 @@ from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.securables.differ import compute_securable_diff
 from uc_abac_governor.securables.state import (
     AttributeUpdate,
-    FunctionInfo,
+    Function,
     SecurableAttributes,
     SecurableDiff,
 )
@@ -33,9 +33,9 @@ def _make_function(
     full_name: str = "catalog.schema.my_func",
     parameters: tuple[tuple[str, str], ...] = (("x", "STRING"),),
     definition: str = "RETURN x",
-) -> FunctionInfo:
-    """Helper to build a FunctionInfo with sensible defaults."""
-    return FunctionInfo(
+) -> Function:
+    """Helper to build a Function with sensible defaults."""
+    return Function(
         securable_type=SecurableType.FUNCTION,
         full_name=full_name,
         parameters=parameters,
@@ -144,7 +144,7 @@ def test_securable_differ_records_old_and_new_values():
 
 
 def test_securable_differ_detects_new_function():
-    """A FunctionInfo in desired but not in actual appears in securables_to_create."""
+    """A Function in desired but not in actual appears in securables_to_create."""
     func = _make_function(full_name="catalog.schema.new_func")
 
     diff = compute_securable_diff(set(), set(), {func}, set(), _resolver(), _change_logger())
@@ -188,7 +188,7 @@ def test_securable_differ_detects_changed_parameters():
 
 
 def test_securable_differ_ignores_matching_functions():
-    """Identical FunctionInfo in both sets produces no create or replace entries."""
+    """Identical Function in both sets produces no create or replace entries."""
     func = _make_function(full_name="catalog.schema.stable_func")
 
     diff = compute_securable_diff(set(), set(), {func}, {func}, _resolver(), _change_logger())
@@ -257,3 +257,51 @@ def test_securable_differ_emits_principal_values_in_attribute_update():
     assert update.new_value == new_principal
     assert isinstance(update.old_value, Principal)
     assert update.old_value == old_principal
+
+
+# ---------------------------------------------------------------------------
+# Function comment diffing
+# ---------------------------------------------------------------------------
+
+
+def test_securable_differ_comment_change_triggers_replace_not_attribute_update():
+    """A change to Function.comment lands in securables_to_replace, not attributes_to_update."""
+    desired_func = Function(
+        securable_type=SecurableType.FUNCTION,
+        full_name="catalog.schema.my_func",
+        parameters=(("x", "STRING"),),
+        definition="x",
+        comment="new comment",
+    )
+    actual_func = Function(
+        securable_type=SecurableType.FUNCTION,
+        full_name="catalog.schema.my_func",
+        parameters=(("x", "STRING"),),
+        definition="x",
+        comment="old comment",
+    )
+
+    diff = compute_securable_diff(
+        set(), set(), {desired_func}, {actual_func}, _resolver(), _change_logger(),
+    )
+
+    assert diff.securables_to_replace == [desired_func]
+    assert diff.attributes_to_update == []
+
+
+def test_securable_differ_ignores_matching_function_comments():
+    """Identical Function.comment values produce no diff."""
+    func = Function(
+        securable_type=SecurableType.FUNCTION,
+        full_name="catalog.schema.my_func",
+        parameters=(),
+        definition="x",
+        comment="same",
+    )
+
+    diff = compute_securable_diff(
+        set(), set(), {func}, {func}, _resolver(), _change_logger(),
+    )
+
+    assert diff.securables_to_create == []
+    assert diff.securables_to_replace == []

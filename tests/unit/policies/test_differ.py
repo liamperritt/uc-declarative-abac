@@ -111,3 +111,12 @@ def test_policy_differ_treats_when_condition_change_as_replace():
 
     diff = compute_policy_diff(desired, actual, _resolver(), _change_logger())
     assert diff.to_replace == desired
+
+
+def test_policy_differ_treats_comment_change_as_replace():
+    """A change to Policy.comment triggers a replace on the same identity."""
+    desired = {_make_policy(comment="new description")}
+    actual = {_make_policy(comment="old description")}
+
+    diff = compute_policy_diff(desired, actual, _resolver(), _change_logger())
+    assert diff.to_replace == desired

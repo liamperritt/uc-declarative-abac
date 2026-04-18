@@ -6,7 +6,7 @@ from uc_abac_governor.logger import ChangeLogger
 from uc_abac_governor.securables.executor import execute_securable_diff
 from uc_abac_governor.securables.state import (
     AttributeUpdate,
-    FunctionInfo,
+    Function,
     SecurableDiff,
 )
 from uc_abac_governor.principals.state import Principal
@@ -28,11 +28,11 @@ def _assert_sql_contains(sql: str, *fragments: str):
 
 
 def test_securable_executor_generates_create_function_sql():
-    """A FunctionInfo in securables_to_create produces CREATE FUNCTION SQL."""
+    """A Function in securables_to_create produces CREATE FUNCTION SQL."""
     uc_helper = MagicMock()
     diff = SecurableDiff(
         securables_to_create=[
-            FunctionInfo(
+            Function(
                 securable_type=SecurableType.FUNCTION,
                 full_name="cat.schema.func",
                 parameters=(("col", "STRING"),),
@@ -54,11 +54,11 @@ def test_securable_executor_generates_create_function_sql():
 
 
 def test_securable_executor_generates_replace_function_sql():
-    """A FunctionInfo in securables_to_replace produces CREATE OR REPLACE FUNCTION SQL."""
+    """A Function in securables_to_replace produces CREATE OR REPLACE FUNCTION SQL."""
     uc_helper = MagicMock()
     diff = SecurableDiff(
         securables_to_replace=[
-            FunctionInfo(
+            Function(
                 securable_type=SecurableType.FUNCTION,
                 full_name="cat.schema.func",
                 parameters=(("col", "STRING"),),
@@ -78,11 +78,11 @@ def test_securable_executor_generates_replace_function_sql():
 
 
 def test_securable_executor_generates_create_function_sql_without_parameters():
-    """A FunctionInfo with no parameters produces empty parens before RETURN."""
+    """A Function with no parameters produces empty parens before RETURN."""
     uc_helper = MagicMock()
     diff = SecurableDiff(
         securables_to_create=[
-            FunctionInfo(
+            Function(
                 securable_type=SecurableType.FUNCTION,
                 full_name="c.s.f",
                 parameters=(),
@@ -160,13 +160,13 @@ def test_securable_executor_continues_after_error():
 
     diff = SecurableDiff(
         securables_to_create=[
-            FunctionInfo(
+            Function(
                 securable_type=SecurableType.FUNCTION,
                 full_name="cat.schema.func_a",
                 parameters=(("col", "STRING"),),
                 definition="col",
             ),
-            FunctionInfo(
+            Function(
                 securable_type=SecurableType.FUNCTION,
                 full_name="cat.schema.func_b",
                 parameters=(("col", "STRING"),),
@@ -205,7 +205,7 @@ def test_securable_executor_logs_changes_in_dry_run():
 
     diff = SecurableDiff(
         securables_to_create=[
-            FunctionInfo(
+            Function(
                 securable_type=SecurableType.FUNCTION,
                 full_name="cat.schema.func_create",
                 parameters=(("col", "STRING"),),
@@ -213,7 +213,7 @@ def test_securable_executor_logs_changes_in_dry_run():
             ),
         ],
         securables_to_replace=[
-            FunctionInfo(
+            Function(
                 securable_type=SecurableType.FUNCTION,
                 full_name="cat.schema.func_replace",
                 parameters=(("col", "STRING"),),
@@ -272,3 +272,82 @@ def test_securable_executor_extracts_identifier_from_principal():
     uc_helper.update_owner.assert_called_once_with(
         SecurableType.FUNCTION, "cat.schema.my_func", "72a5956b-app-id"
     )
+
+
+# ---------------------------------------------------------------------------
+# Function comments
+# ---------------------------------------------------------------------------
+
+
+def test_securable_executor_create_function_includes_comment_when_set():
+    """CREATE FUNCTION SQL includes a COMMENT clause when Function.comment is set."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        securables_to_create=[
+            Function(
+                securable_type=SecurableType.FUNCTION,
+                full_name="cat.s.f",
+                parameters=(("x", "STRING"),),
+                definition="x",
+                comment="Identity function",
+            ),
+        ],
+    )
+
+    (sql,) = execute_securable_diff(uc_helper, diff, ChangeLogger())
+    _assert_sql_contains(sql, "CREATE FUNCTION", "COMMENT 'Identity function'")
+
+
+def test_securable_executor_create_function_omits_comment_clause_when_unset():
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        securables_to_create=[
+            Function(
+                securable_type=SecurableType.FUNCTION,
+                full_name="cat.s.f",
+                parameters=(("x", "STRING"),),
+                definition="x",
+            ),
+        ],
+    )
+
+    (sql,) = execute_securable_diff(uc_helper, diff, ChangeLogger())
+    assert "COMMENT" not in sql.upper()
+
+
+def test_securable_executor_replace_function_includes_comment_when_set():
+    """CREATE OR REPLACE FUNCTION also includes the COMMENT clause."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        securables_to_replace=[
+            Function(
+                securable_type=SecurableType.FUNCTION,
+                full_name="cat.s.f",
+                parameters=(("x", "STRING"),),
+                definition="x",
+                comment="Updated docs",
+            ),
+        ],
+    )
+
+    (sql,) = execute_securable_diff(uc_helper, diff, ChangeLogger())
+    _assert_sql_contains(sql, "CREATE OR REPLACE FUNCTION", "COMMENT 'Updated docs'")
+
+
+def test_securable_executor_escapes_single_quotes_in_comment():
+    """Single quotes in a comment are escaped so the SQL doesn't break."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        securables_to_create=[
+            Function(
+                securable_type=SecurableType.FUNCTION,
+                full_name="cat.s.f",
+                parameters=(),
+                definition="'x'",
+                comment="It's a comment",
+            ),
+        ],
+    )
+
+    (sql,) = execute_securable_diff(uc_helper, diff, ChangeLogger())
+    assert "COMMENT 'It\\'s a comment'" in sql

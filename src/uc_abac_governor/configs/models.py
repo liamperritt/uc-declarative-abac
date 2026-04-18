@@ -67,6 +67,7 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
     to: list[str]
     exceptions: list[str] | None = Field(default=None, alias="except")
     columns: list[PolicyColumnConfig] | None = None
+    comment: str | None = None
 
 
 class MaskPolicyConfig(BaseFgacPolicyConfig):
@@ -130,6 +131,7 @@ class FunctionConfig(BaseSecurableConfig):
     schema_name: str
     parameters: list[ParameterConfig] | None = None
     definition: str = Field(alias="return")
+    comment: str | None = None
     tags: None = None
 
     @computed_field
