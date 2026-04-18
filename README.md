@@ -178,7 +178,7 @@ Cross-catalog reusable definitions (typically ABAC policies and shared functions
 Catalog definitions capture the canonical shape of a catalog — its tags, owner, RFA destination, catalog-level policies, and the list of schemas it contains. Key convention: `<catalog_name>`. A catalog definition composes schemas and policies via `$ref`/`$defs` entries; a resource catalog then references the whole definition and overrides only what differs between environments (commonly just `name` and a few tags).
 
 ```yaml
-# definitions/catalogs/operations_prod/operations_prod.yaml
+# definitions/catalogs/operations/operations.yaml
 definitions:
   catalogs:
     operations:
@@ -192,8 +192,8 @@ definitions:
         - $ref: $defs/policies/abac|grant_use_catalog
         - $ref: $defs/policies/abac|mask_pii_email
       schemas:
-        - $ref: $defs/schemas/operations_prod|sales
-        - $ref: $defs/schemas/operations_prod|landing
+        - $ref: $defs/schemas/operations|sales
+        - $ref: $defs/schemas/operations|landing
 
 # resources/catalogs/operations_prod.yaml
 resources:
