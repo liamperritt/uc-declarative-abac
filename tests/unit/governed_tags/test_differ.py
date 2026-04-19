@@ -88,3 +88,47 @@ def test_governed_tag_differ_records_old_values_for_updates():
     diff = compute_governed_tag_diff(desired, actual)
 
     assert diff.old_values["pii"] == _gt("pii", "Old comment", {"name"})
+
+
+# ---------------------------------------------------------------------------
+# --enable-governed-tag-deletion gating
+# ---------------------------------------------------------------------------
+
+
+def test_governed_tag_differ_does_not_mark_for_deletion_when_flag_disabled():
+    """Default behaviour (flag off): actual-only tags are left alone, to_delete stays empty."""
+    desired = {_gt("pii", "PII", {"name"})}
+    actual = {
+        _gt("pii", "PII", {"name"}),
+        _gt("legacy_tag", "legacy", set()),  # present in UC only
+    }
+
+    diff = compute_governed_tag_diff(desired, actual)
+
+    assert diff.to_delete == set()
+
+
+def test_governed_tag_differ_marks_tag_for_deletion_when_flag_enabled_and_tag_absent_from_desired():
+    """With enable_deletion=True, tags in actual but not in desired flow into to_delete."""
+    legacy = _gt("legacy_tag", "legacy", {"a", "b"})
+    desired = {_gt("pii", "PII", {"name"})}
+    actual = {
+        _gt("pii", "PII", {"name"}),
+        legacy,
+    }
+
+    diff = compute_governed_tag_diff(desired, actual, enable_deletion=True)
+
+    assert legacy in diff.to_delete
+    assert diff.to_create == set()
+    assert diff.to_update == set()
+
+
+def test_governed_tag_differ_does_not_mark_for_deletion_when_tag_is_in_desired():
+    """Tags present on both sides never end up in to_delete, even with the flag on."""
+    desired = {_gt("pii", "PII", {"name"})}
+    actual = {_gt("pii", "PII", {"name"})}
+
+    diff = compute_governed_tag_diff(desired, actual, enable_deletion=True)
+
+    assert diff.to_delete == set()

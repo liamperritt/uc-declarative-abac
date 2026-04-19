@@ -56,6 +56,23 @@ inputs:
       when unset, the privileges domain is skipped in both dry-run and real-run.
     required: false
     default: 'false'
+  enable-governed-tag-deletion:
+    description: >-
+      If "true", permit the engine to delete governed tags (account-level tag
+      policies) that exist in UC but are absent from config. Off by default.
+      Requires interactive confirmation unless ``force`` is also "true"; in a
+      non-interactive GitHub Actions runner, ``force`` MUST be set or the run
+      will error out.
+    required: false
+    default: 'false'
+  force:
+    description: >-
+      If "true", skip every interactive confirmation prompt and auto-confirm
+      destructive actions. Required in non-interactive CI contexts (e.g. GitHub
+      Actions) whenever a destructive gate like ``enable-governed-tag-deletion``
+      is also set.
+    required: false
+    default: 'false'
 
 runs:
   using: composite
@@ -85,6 +102,8 @@ runs:
         ENABLE_TAGGABLE_MANAGEMENT: ${{ inputs.enable-taggable-management }}
         ENABLE_TAGGABLE_CREATION: ${{ inputs.enable-taggable-creation }}
         ENABLE_PRIVILEGE_MANAGEMENT: ${{ inputs.enable-privilege-management }}
+        ENABLE_GOVERNED_TAG_DELETION: ${{ inputs.enable-governed-tag-deletion }}
+        FORCE: ${{ inputs.force }}
       run: |
         args=(
           --config-dir "$CONFIG_DIR"
@@ -110,5 +129,11 @@ runs:
         fi
         if [[ "$ENABLE_PRIVILEGE_MANAGEMENT" == "true" ]]; then
           args+=(--enable-privilege-management)
+        fi
+        if [[ "$ENABLE_GOVERNED_TAG_DELETION" == "true" ]]; then
+          args+=(--enable-governed-tag-deletion)
+        fi
+        if [[ "$FORCE" == "true" ]]; then
+          args+=(--force)
         fi
         python -m uc_abac_governor "${args[@]}"

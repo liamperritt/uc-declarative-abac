@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.types import SecurableType
@@ -52,11 +53,12 @@ class Column(Securable):
     """Column state: name (in full_name) + optional UC datatype string.
 
     Columns ride along inside Table.columns rather than being standalone securables
-    in the diff — they're used by the executor to build CREATE TABLE SQL. ``type``
+    in the diff — they're used by the executor to build CREATE TABLE SQL. ``data_type``
     may be None for columns declared purely for tagging on existing tables; table
     creation requires every column to have a non-None type.
     """
 
+    securable_type: Literal[SecurableType.COLUMN]
     type: str | None = None
 
 
@@ -68,6 +70,7 @@ class Table(Securable):
     order; authors' YAML ordering is preserved.
     """
 
+    securable_type: Literal[SecurableType.TABLE]
     columns: tuple[Column, ...] = ()
 
 
@@ -80,6 +83,7 @@ class Function(Securable):
     update.
     """
 
+    securable_type: Literal[SecurableType.FUNCTION]
     parameters: tuple[tuple[str, str], ...]
     definition: str
     comment: str | None = None

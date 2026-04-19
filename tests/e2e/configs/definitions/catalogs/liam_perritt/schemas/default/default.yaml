@@ -5,10 +5,6 @@ definitions:
       tags:
         uc_gov_team: platform
         uc_gov_certified: ~
-      tables:
-        - name: batch_table
-          tags:
-            uc_gov_classification: internal
       volumes:
         - name: test_volume
           owner: uc_governor_test_team
@@ -16,3 +12,15 @@ definitions:
             uc_gov_classification: internal
       functions:
         - $defs/functions/abac|format_phone
+      tables:
+        - name: batch_table
+          tags:
+            uc_gov_classification: internal
+        - name: test_table
+          tags:
+            uc_gov_classification: internal
+          columns:
+            - name: col1
+              type: string
+              tags:
+                uc_gov_team: platform

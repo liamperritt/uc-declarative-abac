@@ -89,15 +89,17 @@ def _catalog_with_tags_and_grants_config() -> dict:
 
 
 def _run_all_enabled(**kwargs):
-    """Shorthand for ``run(..., enable_tag_management=True, enable_taggable_management=True,
-    enable_taggable_creation=True, enable_privilege_management=True)`` — preserves pre-flag
-    test intent for tests that exercise the full reconciliation pipeline. New skip-path
-    tests call ``run(...)`` directly to verify default-off behaviour."""
+    """Shorthand that passes every ``enable_*`` flag as True plus ``force=True`` so
+    governed-tag deletion (if any) doesn't prompt. Preserves pre-flag test intent for
+    tests that exercise the full reconciliation pipeline. New skip-path / gate tests
+    call ``run(...)`` directly to verify default-off behaviour."""
     defaults = {
         "enable_tag_management": True,
         "enable_taggable_management": True,
         "enable_taggable_creation": True,
         "enable_privilege_management": True,
+        "enable_governed_tag_deletion": True,
+        "force": True,
     }
     defaults.update(kwargs)
     return run(**defaults)
@@ -1291,3 +1293,67 @@ def test_governor_still_checks_nonexistent_securables_when_taggable_management_d
     assert len(nonexistent_errors) >= 1, (
         f"Expected a NonexistentSecurableError for ghost_catalog, got: {exc_info.value.errors}"
     )
+
+
+def test_governor_deletes_governed_tag_when_flag_and_force_enabled(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """With enable_governed_tag_deletion=True and force=True, a governed tag that
+    exists in UC but is absent from config triggers a delete_tag_policy call."""
+    # Config declares no governed tags.
+    config = {
+        "resources": {
+            "catalogs": {"cat": {"name": "cat"}},
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    # UC has a legacy governed tag that's not in config.
+    from unittest.mock import MagicMock as _MagicMock
+    legacy_policy = _MagicMock()
+    legacy_policy.tag_key = "legacy_pii"
+    legacy_policy.description = "legacy"
+    legacy_policy.values = []
+    mock_workspace_client.tag_policies.list_tag_policies.return_value = iter([legacy_policy])
+
+    run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_governed_tag_deletion=True,
+        force=True,
+    )
+
+    mock_workspace_client.tag_policies.delete_tag_policy.assert_called_once_with("legacy_pii")
+
+
+def test_governor_does_not_delete_governed_tag_when_flag_disabled(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """Without enable_governed_tag_deletion, UC-only governed tags are left alone."""
+    config = {
+        "resources": {
+            "catalogs": {"cat": {"name": "cat"}},
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    from unittest.mock import MagicMock as _MagicMock
+    legacy_policy = _MagicMock()
+    legacy_policy.tag_key = "legacy_pii"
+    legacy_policy.description = "legacy"
+    legacy_policy.values = []
+    mock_workspace_client.tag_policies.list_tag_policies.return_value = iter([legacy_policy])
+
+    run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_governed_tag_deletion=False,
+    )
+
+    mock_workspace_client.tag_policies.delete_tag_policy.assert_not_called()

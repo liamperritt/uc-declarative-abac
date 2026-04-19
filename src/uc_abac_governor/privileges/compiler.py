@@ -39,6 +39,13 @@ SECURABLE_TYPE_PRIVILEGE_MAP: dict[SecurableType, set[PrivilegeType]] = {
     SecurableType.SCHEMA: _SCHEMA_PRIVILEGES | _UNIVERSAL_PRIVILEGES,
     SecurableType.TABLE: _TABLE_PRIVILEGES | _UNIVERSAL_PRIVILEGES,
     SecurableType.VOLUME: _VOLUME_PRIVILEGES | _UNIVERSAL_PRIVILEGES,
+    # Unity Catalog does not support column-level GRANT/REVOKE. An empty set
+    # causes the compatibility filter in _emit_privileges to drop every
+    # privilege targeted at a COLUMN, so policies that tag-match a column
+    # contribute no column-level entries to the desired-privileges set. (The
+    # cascade rule still re-routes USE_CATALOG / USE_SCHEMA to the column's
+    # ancestor catalog / schema before this filter runs.)
+    SecurableType.COLUMN: frozenset(),
 }
 
 

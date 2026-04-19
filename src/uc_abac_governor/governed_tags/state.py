@@ -15,4 +15,5 @@ class GovernedTag:
 class GovernedTagDiff:
     to_create: set[GovernedTag] = field(default_factory=set)
     to_update: set[GovernedTag] = field(default_factory=set)
+    to_delete: set[GovernedTag] = field(default_factory=set)
     old_values: dict[str, GovernedTag] = field(default_factory=dict)

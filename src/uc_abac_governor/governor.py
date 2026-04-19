@@ -69,6 +69,8 @@ def run(
     enable_taggable_management: bool = False,
     enable_taggable_creation: bool = False,
     enable_privilege_management: bool = False,
+    enable_governed_tag_deletion: bool = False,
+    force: bool = False,
 ) -> GovernorDiffsResult:
     """Run the full governance pipeline: discover, resolve, compile, diff, apply.
 
@@ -141,7 +143,10 @@ def run(
     # 4. Governed tags workflow (account-level tag policies — must run before
     # catalog-scoped tag assignments, so new tag keys exist before SET TAGS).
     desired_governed_tags = compile_desired_governed_tags(config)
-    governed_tag_diff = compute_governed_tag_diff(desired_governed_tags, actual_governed_tags)
+    governed_tag_diff = compute_governed_tag_diff(
+        desired_governed_tags, actual_governed_tags,
+        enable_deletion=enable_governed_tag_deletion,
+    )
 
     # 5. Tags workflow
     if enable_tag_management:
@@ -173,9 +178,11 @@ def run(
         privilege_diff = PrivilegeDiff()
 
     # 8. Log and execute (or dry-run)
-    if governed_tag_diff.to_create or governed_tag_diff.to_update:
+    if governed_tag_diff.to_create or governed_tag_diff.to_update or governed_tag_diff.to_delete:
         change_logger.log_section_header("Governed tags")
-    execute_governed_tag_diff(ws_helper, governed_tag_diff, change_logger, dry_run=dry_run)
+    execute_governed_tag_diff(
+        ws_helper, governed_tag_diff, change_logger, dry_run=dry_run, force=force,
+    )
 
     if tag_diff.to_add or tag_diff.to_update or tag_diff.to_remove:
         change_logger.log_section_header("Tags")

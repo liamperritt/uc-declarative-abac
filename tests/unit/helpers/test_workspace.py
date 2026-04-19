@@ -601,3 +601,13 @@ def test_workspace_helper_update_tag_policy_uses_provided_update_mask() -> None:
     client.tag_policies.update_tag_policy.assert_called_once_with(
         tag_key="pii", tag_policy=policy, update_mask="description,values",
     )
+
+
+def test_workspace_helper_delete_tag_policy_passes_sdk_args() -> None:
+    """delete_tag_policy forwards the tag_key verbatim to the SDK."""
+    client = MagicMock()
+    helper = WorkspaceHelper(client)
+
+    helper.delete_tag_policy("pii")
+
+    client.tag_policies.delete_tag_policy.assert_called_once_with("pii")

@@ -57,6 +57,7 @@ class ChangeLogger:
         self._policies_replaced = 0
         self._governed_tags_created = 0
         self._governed_tags_updated = 0
+        self._governed_tags_deleted = 0
         self._errors: list[ExecutionError] = []
 
     @property
@@ -260,6 +261,15 @@ class ChangeLogger:
             f"{action_verb} governed tag ({summary})",
         ))
 
+    def log_governed_tag_delete(self, gt: GovernedTag) -> None:
+        """Log a governed tag being deleted from the account."""
+        self._governed_tags_deleted += 1
+        action_verb = "Delete" if self._dry_run else "Deleted"
+        self._log_info(_format_change_line(
+            "-", "GOVERNED_TAG", gt.name,
+            f"{action_verb} governed tag",
+        ))
+
     # ------------------------------------------------------------------
     # Error section
     # ------------------------------------------------------------------
@@ -317,6 +327,8 @@ class ChangeLogger:
             gt_parts.append(f"{self._governed_tags_created} created")
         if self._governed_tags_updated:
             gt_parts.append(f"{self._governed_tags_updated} updated")
+        if self._governed_tags_deleted:
+            gt_parts.append(f"{self._governed_tags_deleted} deleted")
 
         sections: list[str] = []
         if sec_parts:
@@ -368,6 +380,8 @@ class ChangeLogger:
             gt_parts.append(f"{self._governed_tags_created} to create")
         if self._governed_tags_updated:
             gt_parts.append(f"{self._governed_tags_updated} to update")
+        if self._governed_tags_deleted:
+            gt_parts.append(f"{self._governed_tags_deleted} to delete")
 
         sections: list[str] = []
         if sec_parts:

@@ -246,3 +246,9 @@ class WorkspaceHelper:
         return self._client.tag_policies.update_tag_policy(
             tag_key=tag_key, tag_policy=policy, update_mask=update_mask,
         )
+
+    def delete_tag_policy(self, tag_key: str) -> None:
+        """Delete a governed tag (account-level tag policy) by its key. Thin
+        passthrough to the SDK — gated at the governor boundary by the
+        ``--enable-governed-tag-deletion`` flag and interactive confirmation."""
+        self._client.tag_policies.delete_tag_policy(tag_key)

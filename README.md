@@ -68,6 +68,8 @@ The repo ships a composite GitHub Action at `govern/action.yml` so any other rep
 | `enable-taggable-management` | no | `'false'` | Permit the engine to update attributes (owner, etc.) on existing catalogs/schemas/tables/volumes |
 | `enable-taggable-creation` | no | `'false'` | Permit the engine to create catalogs/schemas/tables/volumes declared in config but absent from UC |
 | `enable-privilege-management` | no | `'false'` | Permit the engine to `GRANT`/`REVOKE` privileges |
+| `enable-governed-tag-deletion` | no | `'false'` | Permit the engine to delete governed tags present in UC but absent from config. Requires interactive confirmation unless `force: 'true'` — in CI you must set `force` or the run errors out |
+| `force` | no | `'false'` | Skip every interactive confirmation prompt and auto-confirm destructive actions. Required in CI when any destructive gate is set |
 
 **Example workflow in a caller repo** (`.github/workflows/uc-governance.yml`):
 
@@ -774,29 +776,31 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 - **Structured logging** — `Securables` / `Governed tags` / `Tags` / `Policies` / `Privileges` section headers, ordered by securable type then name, with dry-run prefix support and summary counts
 
 #### Infrastructure
-- **CLI** (`python -m uc_abac_governor`) — required: `--config-dir`, `--warehouse-id`. Optional: `--profile` (CLI profile name from `~/.databrickscfg`; omit to use unified auth via env vars / default profile / metadata service — see the [Authentication](#authentication) section), `--dry-run`, `--use-workspace-scim`, and the four opt-in mutation flags (`--enable-tag-management`, `--enable-taggable-management`, `--enable-taggable-creation`, `--enable-privilege-management`) described below.
+- **CLI** (`python -m uc_abac_governor`) — required: `--config-dir`, `--warehouse-id`. Optional: `--profile` (CLI profile name from `~/.databrickscfg`; omit to use unified auth via env vars / default profile / metadata service — see the [Authentication](#authentication) section), `--dry-run`, `--use-workspace-scim`, the five opt-in mutation flags (`--enable-tag-management`, `--enable-taggable-management`, `--enable-taggable-creation`, `--enable-privilege-management`, `--enable-governed-tag-deletion`), and `--force` (skip interactive confirmations) described below.
 - **GitHub Action** — reusable composite action at `govern/action.yml`; caller repos invoke it as `liam-perritt/uc-abac-governor/govern@<ref>` to reconcile their own YAML configs against UC on push / PR / schedule (see the [GitHub Action](#github-action) section)
 - **Hybrid SQL polling** — `wait_timeout=50s` with `on_wait_timeout=CONTINUE` and 10s polling for long-running queries
 - **External links** — fetches SQL results via external link URLs for large result sets
 - **Parallel state fetch** — securables, tags, privileges, policies, governed tags, and principals are fetched concurrently
 - **`information_schema` filtering** — all state queries exclude the `information_schema` schema and its child objects
-- **Privileged-action opt-in flags** — four classes of mutation are gated behind explicit CLI flags. Each defaults to `false`; if unset, the corresponding actions are **skipped in both dry runs and real runs** — no fetch, no diff, no log section, no SQL. Pass the flag to opt in:
+- **Privileged-action opt-in flags** — five classes of mutation are gated behind explicit CLI flags. Each defaults to `false`; if unset, the corresponding actions are **skipped in both dry runs and real runs** — no fetch, no diff, no log section, no SQL. Pass the flag to opt in:
   - `--enable-tag-management` — create/update/remove tag assignments on securables. When off, the privileges compiler still honours grant-policy matches, but it matches against the *actual* on-disk UC tag state rather than the config's desired tags (since the engine is not going to apply the config's tags this run).
   - `--enable-taggable-management` — update attributes (currently `owner`; future: `comment`, `rfa_destination`) on existing taggable securables (catalogs, schemas, tables, volumes). Function attributes are always engine-managed independently of this flag.
   - `--enable-taggable-creation` — create catalogs, schemas, tables, and volumes declared in config but absent from UC. Tables must declare ≥1 column with a `type` string on each (e.g. `type: STRING`); otherwise table creation fails with a `NonexistentSecurableError` explaining the requirement. Creation is managed-only (no `LOCATION` clauses). The securables domain does not fetch columns or attempt to add columns to pre-existing tables in this iteration.
   - `--enable-privilege-management` — grant/revoke privileges via `GRANT`/`REVOKE` SQL.
+  - `--enable-governed-tag-deletion` — delete governed tags (account-level tag policies) that exist in UC but are absent from config. **High blast radius — deleting a tag policy orphans every object assigned that tag key across the account.** The engine logs the list of tags slated for deletion and requires an interactive `y`/`yes` confirmation at the terminal before issuing any `delete_tag_policy` call. UC itself decides what happens to objects that reference the deleted tag (typically: orphans them); the engine does not scan for references. Pair with `--force` in non-interactive contexts (see below).
+
+  **Auxiliary flag:**
+  - `--force` — skip every interactive confirmation prompt and auto-confirm destructive actions. Required in non-interactive CI contexts (GitHub Actions, scripted runs) whenever a destructive gate like `--enable-governed-tag-deletion` is set; if the engine needs to prompt but stdin has no TTY, it aborts with `InteractiveConfirmationRequiredError` directing the user to set this flag. Scope is deliberately broad — future confirmation prompts (e.g. hypothetical securable deletion) will honour it without requiring a new flag.
 
   "Taggables" here means the securable types that support tagging: catalogs, schemas, tables, volumes, and columns. Functions aren't taggable and are managed separately.
 
 ### Not yet implemented
 
-- **Additional `--enable-*` flags for deferred mutation classes:**
-  - `--enable-governed-tag-deletion` — delete governed tags (account-level tag policies) that exist in UC but are absent from config. Without this, account-side governed tags are left alone (matches the current no-delete invariant).
 - **Governed tag assignment ACLs** — `allowed_principals` is parsed but not yet enforced; assigning which users, groups, or service principals may `ASSIGN` a governed tag to UC objects will be wired through `AccountAccessControlProxyAPI` in a future iteration
 - **Object attributes** — `comment`, `rfa_destination` on securables (the `owner` attribute is implemented; adding new attributes requires only a field on `SecurableAttributes` and an executor dispatch branch). Enforcement is already gated by `--enable-taggable-management`.
 - **Direct mask/filter** — `filter` on tables and `mask` on columns (non-ABAC, directly applied functions)
 - **Abstracted privilege names** — `use`, `read`, `edit`, `create` expanding to multiple UC privileges
-- **Nonexistent column validation** — the securables differ raises `NonexistentSecurableError` on dry-run (and real-run) when a catalog, schema, table, or volume declared in config doesn't exist in UC, but **columns are not checked**. A config that references a column that doesn't exist on its parent table will pass dry-run and only fail at execute time (when the `ALTER TABLE ... ALTER COLUMN ... SET TAGS` or `CREATE POLICY ... ON COLUMN` SQL runs). Column-level existence checking would require either extending `fetch_actual_securables` to include columns or querying `information_schema.columns` separately.
+- **Nonexistent column validation** — the securables differ raises `NonexistentSecurableError` on dry-run (and real-run) when a catalog, schema, table, or volume declared in config doesn't exist in UC, but **columns are not checked**. A config that references a column that doesn't exist on its parent table will pass dry-run and only fail at execute time (when the `ALTER TABLE ... ALTER COLUMN ... SET TAGS` SQL runs). Column-level existence checking would require either extending `fetch_actual_securables` to include columns or querying `information_schema.columns` separately.
 
 ---
 

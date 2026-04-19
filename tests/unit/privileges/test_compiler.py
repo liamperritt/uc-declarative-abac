@@ -1644,3 +1644,48 @@ def test_privilege_compiler_cascades_use_catalog_for_each_principal_when_policy_
             principal=Principal(principal_type=PrincipalType.UNKNOWN, name=principal_name),
             privilege_type=PrivilegeType.USE_CATALOG,
         ) in result
+
+
+# ---------------------------------------------------------------------------
+# Columns don't support grants in UC — never emit privileges on COLUMN securables
+# ---------------------------------------------------------------------------
+
+
+def test_privilege_compiler_does_not_emit_privileges_on_columns():
+    """Unity Catalog does not support column-level GRANT/REVOKE. A policy whose
+    tag matches a COLUMN must never produce a SecurablePrivilege with
+    securable_type=COLUMN — such an entry would cause the executor to emit
+    invalid ``GRANT ... ON COLUMN ...`` SQL."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select", "modify"],
+                            "to": ["analysts"],
+                            "has_tags": {"pii": "email"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    # A column (not a table) carries the tag.
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.COLUMN,
+            securable_full_name="cat.sales.orders.email",
+            tag_name="pii",
+            tag_value="email",
+        ),
+    }
+
+    result = compile_desired_privileges(config, desired_tags)
+
+    # No COLUMN-targeted privileges — UC would reject them at execute time.
+    column_privileges = {p for p in result if p.securable_type == SecurableType.COLUMN}
+    assert column_privileges == set(), (
+        f"Expected no COLUMN-targeted privileges, got: {column_privileges}"
+    )

@@ -65,6 +65,22 @@ def main() -> None:
         default=False,
         help="Permit the engine to GRANT/REVOKE privileges via SQL. Off by default.",
     )
+    parser.add_argument(
+        "--enable-governed-tag-deletion",
+        action="store_true",
+        default=False,
+        help="Permit the engine to delete governed tags (account-level tag policies) "
+             "that exist in the account but are absent from config. Off by default. "
+             "Requires interactive confirmation at the terminal unless --force is set.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Skip every interactive confirmation prompt and auto-confirm destructive "
+             "actions. Required in non-interactive CI contexts if any destructive gate "
+             "(e.g. --enable-governed-tag-deletion) is set.",
+    )
 
     args = parser.parse_args()
 
@@ -82,6 +98,8 @@ def main() -> None:
         enable_taggable_management=args.enable_taggable_management,
         enable_taggable_creation=args.enable_taggable_creation,
         enable_privilege_management=args.enable_privilege_management,
+        enable_governed_tag_deletion=args.enable_governed_tag_deletion,
+        force=args.force,
     )
 
 

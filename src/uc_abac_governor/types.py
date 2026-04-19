@@ -76,6 +76,16 @@ class DuplicateServicePrincipalError(GovernorError):
     """Raised when two service principals share the same display name."""
 
 
+class InteractiveConfirmationRequiredError(GovernorError):
+    """Raised when the engine needs an interactive confirmation but no TTY is attached.
+
+    Surfaces as a hard, immediate error (not accumulated via ChangeLogger) because the
+    engine cannot safely proceed with a destructive action (e.g. governed-tag deletion)
+    without an explicit human confirm. The caller must set ``--force`` in non-interactive
+    contexts (CI, scripted runs) to auto-confirm.
+    """
+
+
 class NonexistentSecurableError(GovernorError):
     """Raised when a securable declared in config doesn't exist in UC.
 

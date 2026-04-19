@@ -117,3 +117,119 @@ def test_governed_tag_executor_logs_error_and_continues_on_sdk_exception(ws_help
 
     assert ws_helper.create_tag_policy.call_count == 2
     assert change_logger.has_errors
+
+
+# ---------------------------------------------------------------------------
+# Deletion path + interactive confirmation
+# ---------------------------------------------------------------------------
+
+
+def _diff_with_deletes(*names: str) -> GovernedTagDiff:
+    return GovernedTagDiff(to_delete={_gt(n, "", set()) for n in names})
+
+
+def test_governed_tag_executor_deletes_tag_after_yes_confirmation(ws_helper, change_logger, monkeypatch):
+    """When `input` returns 'yes', the SDK delete is invoked for each tag."""
+    monkeypatch.setattr("builtins.input", lambda *_: "yes")
+    diff = _diff_with_deletes("legacy")
+
+    execute_governed_tag_diff(ws_helper, diff, change_logger, dry_run=False)
+
+    ws_helper.delete_tag_policy.assert_called_once_with("legacy")
+
+
+def test_governed_tag_executor_deletes_tag_after_y_confirmation(ws_helper, change_logger, monkeypatch):
+    """Short form 'y' is also accepted as confirmation."""
+    monkeypatch.setattr("builtins.input", lambda *_: "y")
+    diff = _diff_with_deletes("legacy")
+
+    execute_governed_tag_diff(ws_helper, diff, change_logger, dry_run=False)
+
+    ws_helper.delete_tag_policy.assert_called_once_with("legacy")
+
+
+def test_governed_tag_executor_is_case_insensitive_for_confirmation(ws_helper, change_logger, monkeypatch):
+    """'YES' confirms — confirmation is case-insensitive."""
+    monkeypatch.setattr("builtins.input", lambda *_: "YES")
+    diff = _diff_with_deletes("legacy")
+
+    execute_governed_tag_diff(ws_helper, diff, change_logger, dry_run=False)
+
+    ws_helper.delete_tag_policy.assert_called_once_with("legacy")
+
+
+def test_governed_tag_executor_skips_delete_when_confirmation_not_given(ws_helper, change_logger, monkeypatch):
+    """Any response other than 'y'/'yes' (here: 'no') aborts the delete phase;
+    SDK delete is not invoked."""
+    monkeypatch.setattr("builtins.input", lambda *_: "no")
+    diff = _diff_with_deletes("legacy")
+
+    execute_governed_tag_diff(ws_helper, diff, change_logger, dry_run=False)
+
+    ws_helper.delete_tag_policy.assert_not_called()
+
+
+def test_governed_tag_executor_deletes_without_prompt_when_force_enabled(ws_helper, change_logger, monkeypatch):
+    """`force=True` bypasses the prompt — `input()` is never called."""
+    def _should_not_be_called(*_):
+        raise AssertionError("input() was called even though force=True")
+    monkeypatch.setattr("builtins.input", _should_not_be_called)
+    diff = _diff_with_deletes("legacy")
+
+    execute_governed_tag_diff(ws_helper, diff, change_logger, dry_run=False, force=True)
+
+    ws_helper.delete_tag_policy.assert_called_once_with("legacy")
+
+
+def test_governed_tag_executor_does_not_prompt_or_delete_in_dry_run(ws_helper, change_logger, monkeypatch):
+    """Dry-run logs the would-delete list but never prompts or calls the SDK."""
+    def _should_not_be_called(*_):
+        raise AssertionError("input() was called during dry-run")
+    monkeypatch.setattr("builtins.input", _should_not_be_called)
+    diff = _diff_with_deletes("legacy")
+
+    execute_governed_tag_diff(ws_helper, diff, change_logger, dry_run=True)
+
+    ws_helper.delete_tag_policy.assert_not_called()
+
+
+def test_governed_tag_executor_logs_deletion_per_tag(ws_helper, change_logger, monkeypatch):
+    """Each successful delete produces a log entry via log_governed_tag_delete."""
+    monkeypatch.setattr("builtins.input", lambda *_: "yes")
+    diff = _diff_with_deletes("a", "b", "c")
+
+    execute_governed_tag_diff(ws_helper, diff, change_logger, dry_run=False)
+
+    # Summary reflects the three deletes.
+    assert change_logger._governed_tags_deleted == 3
+
+
+def test_governed_tag_executor_raises_interactive_confirmation_error_on_eof_when_not_forced(
+    ws_helper, change_logger, monkeypatch,
+):
+    """EOFError from `input()` in a non-forced context raises InteractiveConfirmationRequiredError."""
+    from uc_abac_governor.types import InteractiveConfirmationRequiredError
+
+    def _raise_eof(*_):
+        raise EOFError()
+    monkeypatch.setattr("builtins.input", _raise_eof)
+    diff = _diff_with_deletes("legacy")
+
+    with pytest.raises(InteractiveConfirmationRequiredError):
+        execute_governed_tag_diff(ws_helper, diff, change_logger, dry_run=False)
+
+    ws_helper.delete_tag_policy.assert_not_called()
+
+
+def test_governed_tag_executor_logs_error_and_continues_on_sdk_delete_failure(
+    ws_helper, change_logger, monkeypatch,
+):
+    """An SDK exception during one delete does not abort the rest of the batch."""
+    monkeypatch.setattr("builtins.input", lambda *_: "yes")
+    ws_helper.delete_tag_policy.side_effect = [Exception("boom"), None]
+    diff = _diff_with_deletes("fail", "succeed")
+
+    execute_governed_tag_diff(ws_helper, diff, change_logger, dry_run=False)
+
+    assert ws_helper.delete_tag_policy.call_count == 2
+    assert change_logger.has_errors
