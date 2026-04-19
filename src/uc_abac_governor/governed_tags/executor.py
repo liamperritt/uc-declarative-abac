@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from typing import TYPE_CHECKING
 
 from databricks.sdk.service.tags import TagPolicy, Value
@@ -130,8 +131,8 @@ def _execute_deletes(
             change_logger.log_governed_tag_delete(gt)
         return
     if not force and not _prompt_delete_confirmation(tags_sorted):
-        _logger.info("Governed tag deletion cancelled (no confirmation).")
-        return
+        _logger.info("Governed tag deletion cancelled — aborting run.")
+        sys.exit(1)
     for gt in tags_sorted:
         try:
             ws_helper.delete_tag_policy(gt.name)

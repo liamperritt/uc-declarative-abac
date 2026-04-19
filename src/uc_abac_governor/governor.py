@@ -196,7 +196,10 @@ def run(
 
     if tag_diff.to_add or tag_diff.to_update or tag_diff.to_remove:
         change_logger.log_section_header("Tags")
-    execute_tag_diff(uc_helper, tag_diff, change_logger, dry_run=dry_run)
+    execute_tag_diff(
+        uc_helper, tag_diff, change_logger,
+        governed_tag_names=governed_tag_names, dry_run=dry_run, force=force,
+    )
 
     if policy_diff.to_create or policy_diff.to_replace:
         change_logger.log_section_header("Policies")

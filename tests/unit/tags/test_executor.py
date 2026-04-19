@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
 import sqlglot
 
 from uc_abac_governor.logger import ChangeLogger
 from uc_abac_governor.tags.executor import execute_tag_diff
 from uc_abac_governor.tags.state import SecurableTag, TagDiff
-from uc_abac_governor.types import SecurableType
+from uc_abac_governor.types import InteractiveConfirmationRequiredError, SecurableType
 
 
 def _parse_sql(sql: str):
@@ -476,3 +477,163 @@ def test_tag_executor_generates_alter_column_unset_tags_sql():
     _assert_sql_contains(sql, "ALTER TABLE", "ALTER COLUMN", "UNSET TAGS", "email", "pii")
 
     uc_helper.execute_sql.assert_called_once_with(sql)
+
+
+# ---------------------------------------------------------------------------
+# Governed-tag removal confirmation prompt
+# ---------------------------------------------------------------------------
+
+
+def _governed_remove(tag_name: str = "uc_gov_pii") -> SecurableTag:
+    return SecurableTag(
+        securable_type=SecurableType.TABLE,
+        securable_full_name="cat.schema.orders",
+        tag_name=tag_name,
+        tag_value="email",
+    )
+
+
+def _nongoverned_remove() -> SecurableTag:
+    return SecurableTag(
+        securable_type=SecurableType.TABLE,
+        securable_full_name="cat.schema.orders",
+        tag_name="free_form_label",
+        tag_value="stale",
+    )
+
+
+def test_tag_executor_prompts_before_removing_governed_tag(monkeypatch):
+    """A removal whose tag_name is in governed_tag_names triggers an interactive
+    prompt. Accepting (``y``) proceeds with the UNSET TAGS SQL."""
+    uc_helper = MagicMock()
+    calls = {"n": 0}
+
+    def _fake_input(_prompt):
+        calls["n"] += 1
+        return "y"
+
+    monkeypatch.setattr("builtins.input", _fake_input)
+
+    diff = TagDiff(to_remove={_governed_remove()})
+
+    stmts = execute_tag_diff(
+        uc_helper, diff, ChangeLogger(),
+        governed_tag_names={"uc_gov_pii"},
+    )
+
+    assert calls["n"] == 1, "Expected input() to be called exactly once"
+    assert len(stmts) == 1
+    _assert_sql_contains(stmts[0], "UNSET TAGS", "uc_gov_pii")
+
+
+def test_tag_executor_exits_when_prompt_rejected(monkeypatch):
+    """When the prompt is rejected, the whole program aborts via SystemExit;
+    the governed UNSET TAGS SQL is not executed."""
+    uc_helper = MagicMock()
+    monkeypatch.setattr("builtins.input", lambda _p: "n")
+
+    diff = TagDiff(to_remove={_governed_remove()})
+
+    with pytest.raises(SystemExit):
+        execute_tag_diff(
+            uc_helper, diff, ChangeLogger(),
+            governed_tag_names={"uc_gov_pii"},
+        )
+
+    # No SQL for the governed tag should have been executed.
+    executed = [c.args[0] for c in uc_helper.execute_sql.call_args_list]
+    for stmt in executed:
+        assert "uc_gov_pii" not in stmt, (
+            f"Expected SystemExit to fire before governed UNSET SQL ran, got: {stmt}"
+        )
+
+
+def test_tag_executor_does_not_prompt_when_no_governed_tags_in_removes(monkeypatch):
+    """If no removal targets a governed tag key, input() is never called."""
+    uc_helper = MagicMock()
+    called = {"n": 0}
+
+    def _fake_input(_p):
+        called["n"] += 1
+        return "y"
+
+    monkeypatch.setattr("builtins.input", _fake_input)
+
+    diff = TagDiff(to_remove={_nongoverned_remove()})
+
+    execute_tag_diff(
+        uc_helper, diff, ChangeLogger(),
+        governed_tag_names={"uc_gov_pii"},
+    )
+
+    assert called["n"] == 0, "Expected input() never to be called"
+
+
+def test_tag_executor_bypasses_prompt_when_force_true(monkeypatch):
+    """force=True bypasses the prompt and proceeds with governed-tag removal."""
+    uc_helper = MagicMock()
+    called = {"n": 0}
+
+    def _fake_input(_p):
+        called["n"] += 1
+        return "n"  # would reject if called
+
+    monkeypatch.setattr("builtins.input", _fake_input)
+
+    diff = TagDiff(to_remove={_governed_remove()})
+
+    stmts = execute_tag_diff(
+        uc_helper, diff, ChangeLogger(),
+        governed_tag_names={"uc_gov_pii"},
+        force=True,
+    )
+
+    assert called["n"] == 0, "Expected no prompt when force=True"
+    assert len(stmts) == 1
+    _assert_sql_contains(stmts[0], "UNSET TAGS", "uc_gov_pii")
+
+
+def test_tag_executor_skips_prompt_in_dry_run(monkeypatch):
+    """dry_run=True logs the removal without prompting; no SQL is executed."""
+    uc_helper = MagicMock()
+    called = {"n": 0}
+
+    def _fake_input(_p):
+        called["n"] += 1
+        return "n"
+
+    monkeypatch.setattr("builtins.input", _fake_input)
+
+    change_logger = ChangeLogger()
+    diff = TagDiff(to_remove={_governed_remove()})
+
+    stmts = execute_tag_diff(
+        uc_helper, diff, change_logger,
+        governed_tag_names={"uc_gov_pii"},
+        dry_run=True,
+    )
+
+    assert called["n"] == 0, "Expected no prompt in dry-run"
+    assert stmts == []
+    uc_helper.execute_sql.assert_not_called()
+    # Dry-run still logs the removal for visibility.
+    assert change_logger._tags_removed == 1
+
+
+def test_tag_executor_raises_interactive_confirmation_required_on_non_tty(monkeypatch):
+    """In a non-interactive context (input() raises EOFError), a governed-tag
+    removal without force raises InteractiveConfirmationRequiredError."""
+    uc_helper = MagicMock()
+
+    def _raise_eof(_p):
+        raise EOFError()
+
+    monkeypatch.setattr("builtins.input", _raise_eof)
+
+    diff = TagDiff(to_remove={_governed_remove()})
+
+    with pytest.raises(InteractiveConfirmationRequiredError):
+        execute_tag_diff(
+            uc_helper, diff, ChangeLogger(),
+            governed_tag_names={"uc_gov_pii"},
+        )

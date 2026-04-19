@@ -158,13 +158,14 @@ def test_governed_tag_executor_is_case_insensitive_for_confirmation(ws_helper, c
     ws_helper.delete_tag_policy.assert_called_once_with("legacy")
 
 
-def test_governed_tag_executor_skips_delete_when_confirmation_not_given(ws_helper, change_logger, monkeypatch):
-    """Any response other than 'y'/'yes' (here: 'no') aborts the delete phase;
-    SDK delete is not invoked."""
+def test_governed_tag_executor_exits_when_confirmation_not_given(ws_helper, change_logger, monkeypatch):
+    """Any response other than 'y'/'yes' (here: 'no') aborts the whole program
+    via SystemExit; SDK delete is not invoked."""
     monkeypatch.setattr("builtins.input", lambda *_: "no")
     diff = _diff_with_deletes("legacy")
 
-    execute_governed_tag_diff(ws_helper, diff, change_logger, dry_run=False)
+    with pytest.raises(SystemExit):
+        execute_governed_tag_diff(ws_helper, diff, change_logger, dry_run=False)
 
     ws_helper.delete_tag_policy.assert_not_called()
 
