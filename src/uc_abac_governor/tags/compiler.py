@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from uc_abac_governor.configs.models import ResourcesConfig, SecurableConfig
+from uc_abac_governor.configs.models import ResourcesConfig, TaggableConfig
 from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.types import SecurableType
 
@@ -8,7 +8,7 @@ from uc_abac_governor.types import SecurableType
 def _emit_tags(
     securable_type: SecurableType,
     full_name: str,
-    obj: SecurableConfig,
+    obj: TaggableConfig,
 ) -> set[SecurableTag]:
     """Return a SecurableTag for each tag on the object, or an empty set."""
     if not obj.tags:

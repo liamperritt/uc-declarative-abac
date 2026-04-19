@@ -135,6 +135,11 @@ class BaseSecurableConfig(BaseModel, ABC):
             "Subclasses of SecurableConfig must implement the 'full_name' property."
         )
 
+
+class BaseTaggableConfig(BaseSecurableConfig, ABC):
+    """Base model for all UC securable taggable configs. Not intended to be instantiated directly."""
+    tags: dict[str, str] | None = None
+
     @field_validator("tags", mode="before")
     @classmethod
     def _coerce_null_tags(cls, v: dict | None) -> dict | None:
@@ -147,7 +152,6 @@ class FunctionConfig(BaseSecurableConfig):
     parameters: list[ParameterConfig] | None = None
     definition: str = Field(alias="return")
     comment: str | None = None
-    tags: None = None
 
     @computed_field
     @property
@@ -162,7 +166,7 @@ class FunctionConfig(BaseSecurableConfig):
         return data
 
 
-class ColumnConfig(BaseSecurableConfig):
+class ColumnConfig(BaseTaggableConfig):
     catalog_name: str
     schema_name: str
     table_name: str
@@ -181,17 +185,7 @@ class ColumnConfig(BaseSecurableConfig):
         return f"{self.catalog_name}.{self.schema_name}.{self.table_name}.{self.name}"
 
 
-class VolumeConfig(BaseSecurableConfig):
-    catalog_name: str
-    schema_name: str
-
-    @computed_field
-    @property
-    def full_name(self) -> str:
-        return f"{self.catalog_name}.{self.schema_name}.{self.name}"
-
-
-class TableConfig(BaseSecurableConfig):
+class TableConfig(BaseTaggableConfig):
     catalog_name: str
     schema_name: str
     policies: list[PolicyConfig] | None = None
@@ -226,7 +220,17 @@ class TableConfig(BaseSecurableConfig):
         return f"{self.catalog_name}.{self.schema_name}.{self.name}"
 
 
-class SchemaConfig(BaseSecurableConfig):
+class VolumeConfig(BaseTaggableConfig):
+    catalog_name: str
+    schema_name: str
+
+    @computed_field
+    @property
+    def full_name(self) -> str:
+        return f"{self.catalog_name}.{self.schema_name}.{self.name}"
+
+
+class SchemaConfig(BaseTaggableConfig):
     catalog_name: str
     policies: list[PolicyConfig] | None = None
     tables: list[TableConfig] | None = None
@@ -277,7 +281,7 @@ class SchemaConfig(BaseSecurableConfig):
         return f"{self.catalog_name}.{self.name}"
 
 
-class CatalogConfig(BaseSecurableConfig):
+class CatalogConfig(BaseTaggableConfig):
     policies: list[PolicyConfig] | None = None
     schemas: list[SchemaConfig] | None = None
 
@@ -307,7 +311,9 @@ class CatalogConfig(BaseSecurableConfig):
         return self.name
 
 
-SecurableConfig = Union[CatalogConfig, SchemaConfig, TableConfig, VolumeConfig, FunctionConfig, ColumnConfig]
+TaggableConfig = Union[CatalogConfig, SchemaConfig, TableConfig, VolumeConfig, ColumnConfig]
+
+SecurableConfig = Union[TaggableConfig, FunctionConfig]
 
 
 class GovernedTagConfig(BaseModel):
