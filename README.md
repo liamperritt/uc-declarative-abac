@@ -678,7 +678,7 @@ The engine is designed to run in CI/CD. You can use it as a **GitHub Action** on
 
 It is recommended to run the deployment whenever a new version of your YAML files is released, as well as running a scheduled deployment at least once per day (to reduce drift and to ensure features like the grant policy `expiry_date` work as intended).
 
-> **Note:** By default, the engine assumes that securables (catalogs, schemas, tables, volumes) already exist in Unity Catalog and will only manage tags, grants, and policies on them. If you want the engine to create securables that don't exist yet, pass the `--create-taggables` flag.
+> **Note:** By default, the engine assumes that securables (catalogs, schemas, tables, volumes) already exist in Unity Catalog and will only manage tags, grants, and policies on them. If you want the engine to create securables that don't exist yet, pass the `--enable-taggable-creation` flag.
 
 ### Deployment semantics
 
@@ -780,15 +780,13 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 ### Not yet implemented
 
 - **Privileged-action opt-in flags** — several classes of mutation are gated behind explicit CLI flags. Each defaults to `false`; if unset, the corresponding actions are **skipped in both dry runs and real runs** (the engine reports what it would do only if the flag is present). The planned flags are:
-  - `--manage-tags` — create/update/remove tag assignments on securables.
-  - `--manage-taggables` — update attributes (owner, comment, RFA destination) on existing taggable securables (catalogs, schemas, tables, volumes).
-  - `--create-taggables` — create taggable securables (catalogs, schemas, tables, volumes) that are declared in config but don't exist in UC. Supersedes the earlier `--create-if-not-exists` concept.
-  - `--manage-privileges` — grant/revoke privileges via `GRANT`/`REVOKE` SQL. (Note: this flag controls whether the engine is permitted to mutate privilege state; it is unrelated to the UC `MANAGE` privilege type.)
-  - `--delete-governed-tags` — delete governed tags (account-level tag policies) that exist in UC but are absent from config. Without this flag, account-side governed tags are left alone (matches the current no-delete invariant).
-
-  "Taggables" here means the securable types that support tagging: catalogs, schemas, tables, volumes. Functions aren't taggable and are managed separately (they continue to be engine-created as today).
+  - `--enable-tag-management` — create/update/remove tag assignments on securables.
+  - `--enable-taggable-management` — update attributes (owner, comment, RFA destination) on existing taggable securables (catalogs, schemas, tables, volumes).
+  - `--enable-taggable-creation` — create taggable securables (catalogs, schemas, tables, volumes, columns) that are declared in config but don't exist in UC.
+  - `--enable-privilege-management` — grant/revoke privileges via `GRANT`/`REVOKE` SQL.
+  - `--enable-governed-tag-deletion` — delete governed tags (account-level tag policies) that exist in UC but are absent from config. Without this flag, account-side governed tags are left alone (matches the current no-delete invariant). NOTE: "Taggables" here means the securable types that support tagging: catalogs, schemas, tables, volumes, and columns. Functions aren't taggable and are managed separately (they continue to be engine-created as today).
 - **Governed tag assignment ACLs** — `allowed_principals` is parsed but not yet enforced; assigning which users, groups, or service principals may `ASSIGN` a governed tag to UC objects will be wired through `AccountAccessControlProxyAPI` in a future iteration
-- **Object attributes** — `comment`, `rfa_destination` on securables (the `owner` attribute is implemented; adding new attributes requires only a field on `SecurableAttributes` and an executor dispatch branch). Enforcement will also depend on `--manage-taggables`.
+- **Object attributes** — `comment`, `rfa_destination` on securables (the `owner` attribute is implemented; adding new attributes requires only a field on `SecurableAttributes` and an executor dispatch branch). Enforcement will also depend on `--enable-taggable-management`.
 - **Direct mask/filter** — `filter` on tables and `mask` on columns (non-ABAC, directly applied functions)
 - **Abstracted privilege names** — `use`, `read`, `edit`, `create` expanding to multiple UC privileges
 - **Nonexistent column validation** — the securables differ raises `NonexistentSecurableError` on dry-run (and real-run) when a catalog, schema, table, or volume declared in config doesn't exist in UC, but **columns are not checked**. A config that references a column that doesn't exist on its parent table will pass dry-run and only fail at execute time (when the `ALTER TABLE ... ALTER COLUMN ... SET TAGS` or `CREATE POLICY ... ON COLUMN` SQL runs). Column-level existence checking would require either extending `fetch_actual_securables` to include columns or querying `information_schema.columns` separately.
