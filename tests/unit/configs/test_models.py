@@ -530,6 +530,31 @@ def test_column_config_has_full_name():
 # ---------------------------------------------------------------------------
 
 
+def test_resources_config_rejects_duplicate_catalog_names():
+    """Two catalog entries keyed under different dict keys but sharing the same
+    explicit ``name`` raise DuplicateResourceError."""
+    with pytest.raises(DuplicateResourceError):
+        ResourcesConfig.model_validate({
+            "catalogs": {
+                "entry_one": {"name": "same_catalog"},
+                "entry_two": {"name": "same_catalog"},
+            }
+        })
+
+
+def test_resources_config_rejects_duplicate_governed_tag_names():
+    """Two governed tag entries sharing the same explicit ``name`` raise
+    DuplicateResourceError."""
+    with pytest.raises(DuplicateResourceError):
+        ResourcesConfig.model_validate({
+            "catalogs": {"cat": {}},
+            "governed_tags": {
+                "entry_one": {"name": "shared_tag"},
+                "entry_two": {"name": "shared_tag"},
+            },
+        })
+
+
 def test_catalog_config_rejects_duplicate_schema_names():
     """Two schemas with the same name under one catalog raise DuplicateResourceError."""
     with pytest.raises(DuplicateResourceError):

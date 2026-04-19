@@ -4,10 +4,17 @@ from collections import defaultdict
 from datetime import date
 
 from uc_abac_governor.configs.models import ResourcesConfig, GrantPolicyConfig
+from uc_abac_governor.logger import ChangeLogger
 from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.privileges.state import SecurablePrivilege
-from uc_abac_governor.types import PrincipalType, PrivilegeType, SecurableType
+from uc_abac_governor.types import (
+    ExecutionError,
+    PrincipalType,
+    PrivilegeType,
+    SecurableType,
+    UngovernedTagError,
+)
 
 # Privileges valid for each securable type. Higher-level securables inherit
 # all privileges from lower levels. Unknown privileges are allowed on all types.
@@ -53,6 +60,8 @@ SECURABLE_TYPE_PRIVILEGE_MAP: dict[SecurableType, set[PrivilegeType]] = {
 def compile_desired_privileges(
     config: ResourcesConfig,
     desired_tags: set[SecurableTag],
+    governed_tag_names: set[str],
+    change_logger: ChangeLogger,
     run_date: date | None = None,
 ) -> set[SecurablePrivilege]:
     """Compute desired privileges by matching grant policies against desired tags.
@@ -60,6 +69,12 @@ def compile_desired_privileges(
     For each grant policy, finds objects whose tags are a superset of the
     policy's tags (AND semantics, exact value match). Emits a SecurablePrivilege
     (with unresolved Principal) for each (matching_object, principal, privilege_type).
+
+    Every tag key referenced by a grant policy's ``has_tags`` must appear in
+    ``governed_tag_names`` (the union of desired + actual governed tag names).
+    Policies that reference an ungoverned key are skipped (no privileges
+    emitted) and an ``UngovernedTagError`` is logged on ``change_logger`` for
+    every offender.
     """
     if run_date is None:
         run_date = date.today()
@@ -69,7 +84,39 @@ def compile_desired_privileges(
         p for p in policies
         if p.expiry_date is None or p.expiry_date > run_date
     ]
-    return _match_policies(active_policies, tag_index)
+    valid_policies = _drop_policies_with_ungoverned_tags(
+        active_policies, governed_tag_names, change_logger,
+    )
+    return _match_policies(valid_policies, tag_index)
+
+
+def _drop_policies_with_ungoverned_tags(
+    policies: list[GrantPolicyConfig],
+    governed_tag_names: set[str],
+    change_logger: ChangeLogger,
+) -> list[GrantPolicyConfig]:
+    """Return only the policies whose ``has_tags`` keys are all governed.
+    For each dropped policy, log one error per ungoverned key."""
+    kept: list[GrantPolicyConfig] = []
+    for policy in policies:
+        ungoverned = sorted(set(policy.has_tags or {}) - governed_tag_names)
+        if not ungoverned:
+            kept.append(policy)
+            continue
+        context = (
+            f"Grant policy on {_policy_securable_type(policy).value} "
+            f"{policy.parent_full_name}"
+        )
+        for key in ungoverned:
+            change_logger.log_error(
+                ExecutionError(
+                    context=context,
+                    exception=UngovernedTagError(
+                        f"{context} references ungoverned tag '{key}'"
+                    ),
+                )
+            )
+    return kept
 
 
 def _build_tag_index(

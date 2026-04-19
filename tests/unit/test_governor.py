@@ -9,7 +9,13 @@ from uc_abac_governor.governor import run
 from uc_abac_governor.policies.state import Policy, PolicyDiff
 from uc_abac_governor.privileges.state import PrivilegeDiff
 from uc_abac_governor.tags.state import TagDiff
-from uc_abac_governor.types import ExecutionBatchError, PolicyType, PrincipalValidationError, SecurableType
+from uc_abac_governor.types import (
+    ExecutionBatchError,
+    PolicyType,
+    PrincipalValidationError,
+    SecurableType,
+    UngovernedTagError,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -44,6 +50,10 @@ def _catalog_with_grant_policy_config() -> dict:
     """A YAML dict with a grant policy that matches on a tag."""
     return {
         "resources": {
+            "governed_tags": {
+                "team": {"allowed_values": ["data"]},
+                "env": {"allowed_values": ["prod"]},
+            },
             "catalogs": {
                 "my_catalog": {
                     "tags": {"env": "prod"},
@@ -68,6 +78,10 @@ def _catalog_with_tags_and_grants_config() -> dict:
     """A YAML dict that exercises both tags and privilege workflows."""
     return {
         "resources": {
+            "governed_tags": {
+                "team": {"allowed_values": ["data"]},
+                "env": {"allowed_values": ["prod"]},
+            },
             "catalogs": {
                 "my_catalog": {
                     "tags": {"env": "prod"},
@@ -580,6 +594,10 @@ def test_governor_raises_execution_batch_error_when_sql_fails(
 def _catalog_with_two_grant_policies_config() -> dict:
     return {
         "resources": {
+            "governed_tags": {
+                "team": {"allowed_values": ["data"]},
+                "env": {"allowed_values": ["prod"]},
+            },
             "catalogs": {
                 "my_catalog": {
                     "tags": {"env": "prod"},
@@ -610,6 +628,9 @@ def _catalog_with_mask_policy_config() -> dict:
     """A YAML dict with a catalog-level MASK policy targeting a tagged column."""
     return {
         "resources": {
+            "governed_tags": {
+                "pii": {"allowed_values": ["email"]},
+            },
             "catalogs": {
                 "my_catalog": {
                     "policies": [
@@ -733,6 +754,10 @@ def test_governor_is_idempotent_for_service_principal_across_display_name_and_ap
     # YAML: one grant policy + one mask policy, both referencing the SP by display name
     config = {
         "resources": {
+            "governed_tags": {
+                "team": {"allowed_values": ["sales"]},
+                "pii": {"allowed_values": ["email"]},
+            },
             "catalogs": {
                 "my_catalog": {
                     "tags": {"team": "sales"},
@@ -1071,6 +1096,9 @@ def test_governor_privileges_use_actual_tags_when_tag_management_disabled(
     match against the on-disk tags, emitting the grant."""
     config = {
         "resources": {
+            "governed_tags": {
+                "env": {"allowed_values": ["prod"]},
+            },
             "catalogs": {
                 "my_catalog": {
                     "policies": [
@@ -1115,6 +1143,9 @@ def test_governor_privileges_use_config_tags_when_tag_management_enabled(
     (which will be applied this run) and emits the grant."""
     config = {
         "resources": {
+            "governed_tags": {
+                "env": {"allowed_values": ["prod"]},
+            },
             "catalogs": {
                 "my_catalog": {
                     "tags": {"env": "prod"},
@@ -1357,3 +1388,52 @@ def test_governor_does_not_delete_governed_tag_when_flag_disabled(
     )
 
     mock_workspace_client.tag_policies.delete_tag_policy.assert_not_called()
+
+
+def test_governor_raises_ungoverned_tag_error_when_grant_policy_references_ungoverned_tag(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """A grant policy whose has_tags key is not declared as a governed tag
+    (neither in config nor in UC) surfaces as an UngovernedTagError inside the
+    final ExecutionBatchError. The run does not crash during compilation; the
+    offending policy is simply dropped and its validation failure is surfaced
+    at the end via the batch-error pattern."""
+    # Config: one grant policy referencing the tag key 'ungoverned_key', and
+    # no governed_tags block declaring it.
+    config = {
+        "resources": {
+            "catalogs": {
+                "my_catalog": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["data_engineers"],
+                            "has_tags": {"ungoverned_key": "*"},
+                        },
+                    ],
+                }
+            }
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+    # UC has no governed tags either — union of desired+actual is empty.
+    mock_workspace_client.tag_policies.list_tag_policies.return_value = iter([])
+
+    with pytest.raises(ExecutionBatchError) as exc_info:
+        _run_all_enabled(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+        )
+
+    ungoverned_errors = [
+        e for e in exc_info.value.errors
+        if isinstance(e.exception, UngovernedTagError)
+    ]
+    assert len(ungoverned_errors) >= 1, (
+        f"Expected at least one UngovernedTagError, got: {exc_info.value.errors}"
+    )
+    assert any("ungoverned_key" in str(e.exception) for e in ungoverned_errors)

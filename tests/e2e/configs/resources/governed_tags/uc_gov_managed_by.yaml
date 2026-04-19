@@ -1,0 +1,5 @@
+resources:
+  governed_tags:
+    uc_gov_managed_by:
+      name: uc_gov_managed_by
+      description: Team or system responsible for managing the tagged securable

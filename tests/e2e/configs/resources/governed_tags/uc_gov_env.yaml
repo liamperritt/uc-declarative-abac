@@ -1,0 +1,9 @@
+resources:
+  governed_tags:
+    uc_gov_env:
+      name: uc_gov_env
+      description: Deployment environment
+      allowed_values:
+        - dev
+        - test
+        - prod

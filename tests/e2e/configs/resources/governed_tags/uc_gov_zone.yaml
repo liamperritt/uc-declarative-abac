@@ -1,0 +1,10 @@
+resources:
+  governed_tags:
+    uc_gov_zone:
+      name: uc_gov_zone
+      description: Medallion zone of the tagged securable
+      allowed_values:
+        - landing
+        - bronze
+        - silver
+        - gold

@@ -1,11 +1,45 @@
 from __future__ import annotations
 
+from datetime import date
+
 from uc_abac_governor.configs.models import ResourcesConfig
+from uc_abac_governor.logger import ChangeLogger
 from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.privileges.compiler import compile_desired_privileges
 from uc_abac_governor.privileges.state import SecurablePrivilege
 from uc_abac_governor.tags.state import SecurableTag
-from uc_abac_governor.types import PrincipalType, PrivilegeType, SecurableType
+from uc_abac_governor.types import (
+    PrincipalType,
+    PrivilegeType,
+    SecurableType,
+    UngovernedTagError,
+)
+
+
+# Permissive superset of every tag key used across the fixtures in this file.
+# Tests that target the "ungoverned tag" validation pass a narrower set explicitly.
+_GOVERNED_TAGS_IN_FIXTURES = {
+    "sales", "a", "b", "env", "public", "writable", "pii",
+    "team", "dept", "zone", "domain", "other", "level",
+}
+
+
+def _change_logger() -> ChangeLogger:
+    return ChangeLogger()
+
+
+def _compile(
+    config: ResourcesConfig,
+    desired_tags: set[SecurableTag],
+    governed_tag_names: set[str] | None = None,
+    change_logger: ChangeLogger | None = None,
+    run_date: date | None = None,
+) -> set[SecurablePrivilege]:
+    names = _GOVERNED_TAGS_IN_FIXTURES if governed_tag_names is None else governed_tag_names
+    logger = change_logger if change_logger is not None else _change_logger()
+    return compile_desired_privileges(
+        config, desired_tags, names, logger, run_date=run_date,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -48,7 +82,7 @@ def test_privilege_compiler_computes_privileges_from_policy():
         ),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     assert result == {
         SecurablePrivilege(
@@ -120,7 +154,7 @@ def test_privilege_compiler_policy_uses_and_semantics_for_multiple_tags():
         ),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     assert result == {
         SecurablePrivilege(
@@ -160,7 +194,7 @@ def test_privilege_compiler_policy_skips_objects_without_matching_tags():
         ),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     assert result == set()
 
@@ -205,7 +239,7 @@ def test_privilege_compiler_handles_multiple_policies_per_catalog():
         ),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     assert result == {
         SecurablePrivilege(
@@ -249,7 +283,7 @@ def test_privilege_compiler_handles_catalog_with_no_policies():
         ),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     assert result == set()
 
@@ -288,7 +322,7 @@ def test_privilege_compiler_matches_schema_level_policy():
         ),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     assert SecurablePrivilege(
         securable_type=SecurableType.SCHEMA,
@@ -337,7 +371,7 @@ def test_privilege_compiler_matches_table_level_policy():
         ),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     assert SecurablePrivilege(
         securable_type=SecurableType.TABLE,
@@ -413,7 +447,7 @@ def test_privilege_compiler_collects_policies_from_all_levels():
         ),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     assert len(result) >= 3
     assert SecurablePrivilege(
@@ -474,7 +508,7 @@ def test_privilege_compiler_matches_against_desired_tags():
 
     # Even though the config defines tags, passing an empty desired_tags set
     # means no securables can match the policy.
-    result = compile_desired_privileges(config, desired_tags=set())
+    result = _compile(config, desired_tags=set())
 
     assert result == set()
 
@@ -512,7 +546,7 @@ def test_privilege_compiler_emits_securable_privileges_with_unresolved_principal
         ),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     assert isinstance(result, set)
     for elem in result:
@@ -556,7 +590,7 @@ def test_privilege_compiler_filters_incompatible_privilege_for_volume():
         ),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     assert SecurablePrivilege(
         securable_type=SecurableType.VOLUME,
@@ -598,7 +632,7 @@ def test_privilege_compiler_allows_select_on_table():
         ),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     assert SecurablePrivilege(
         securable_type=SecurableType.TABLE,
@@ -640,7 +674,7 @@ def test_privilege_compiler_allows_all_privileges_on_any_securable():
         ),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     assert SecurablePrivilege(
         securable_type=SecurableType.VOLUME,
@@ -686,7 +720,7 @@ def test_privilege_compiler_excludes_expired_policy():
         ),
     }
 
-    result = compile_desired_privileges(config, desired_tags, run_date=date(2025, 1, 1))
+    result = _compile(config, desired_tags, run_date=date(2025, 1, 1))
 
     assert result == set()
 
@@ -722,7 +756,7 @@ def test_privilege_compiler_includes_active_policy():
         ),
     }
 
-    result = compile_desired_privileges(config, desired_tags, run_date=date(2025, 6, 1))
+    result = _compile(config, desired_tags, run_date=date(2025, 6, 1))
 
     assert len(result) > 0
 
@@ -757,7 +791,7 @@ def test_privilege_compiler_includes_policy_with_no_expiry():
         ),
     }
 
-    result = compile_desired_privileges(config, desired_tags, run_date=date(2099, 12, 31))
+    result = _compile(config, desired_tags, run_date=date(2099, 12, 31))
 
     assert len(result) > 0
 
@@ -786,7 +820,7 @@ def test_privilege_compiler_grants_directly_when_policy_has_no_tags():
         }
     )
 
-    result = compile_desired_privileges(config, set())
+    result = _compile(config, set())
 
     assert SecurablePrivilege(
         securable_type=SecurableType.CATALOG,
@@ -820,7 +854,7 @@ def test_privilege_compiler_grants_directly_to_schema_when_policy_has_no_tags():
         }
     )
 
-    result = compile_desired_privileges(config, set())
+    result = _compile(config, set())
 
     assert SecurablePrivilege(
         securable_type=SecurableType.SCHEMA,
@@ -881,7 +915,7 @@ def test_privilege_compiler_scopes_policy_to_attached_securable():
         ),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     # Policy is on schema 'sales' — should match its child table only
     assert SecurablePrivilege(
@@ -945,7 +979,7 @@ def test_privilege_compiler_scopes_catalog_policy_to_all_children():
         ),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     # Catalog-level policy should match tables in BOTH schemas
     assert SecurablePrivilege(
@@ -1015,7 +1049,7 @@ def test_privilege_compiler_and_semantics_with_scoped_policy():
         ),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     # orders should match — has both tags
     assert SecurablePrivilege(
@@ -1078,7 +1112,7 @@ def test_privilege_compiler_wildcard_matches_any_tag_value():
         ),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     matched_names = {p.securable_full_name for p in result}
     # Both tagged objects match regardless of value
@@ -1118,7 +1152,7 @@ def test_privilege_compiler_wildcard_combines_with_concrete_tags():
         SecurableTag(SecurableType.TABLE, "my_cat.s.untagged", "domain", "sales"),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     matched_names = {p.securable_full_name for p in result}
     assert matched_names == {"my_cat.s.orders"}
@@ -1151,7 +1185,7 @@ def test_privilege_compiler_cascades_use_catalog_up_to_parent_when_match_is_sche
         SecurableTag(SecurableType.SCHEMA, "cat.sales", "env", "prod"),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     assert SecurablePrivilege(
         securable_type=SecurableType.CATALOG,
@@ -1188,7 +1222,7 @@ def test_privilege_compiler_cascades_use_catalog_up_to_parent_when_match_is_tabl
         SecurableTag(SecurableType.TABLE, "cat.sales.orders", "env", "prod"),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     assert SecurablePrivilege(
         securable_type=SecurableType.CATALOG,
@@ -1225,7 +1259,7 @@ def test_privilege_compiler_cascades_use_catalog_up_to_parent_when_match_is_volu
         SecurableTag(SecurableType.VOLUME, "cat.raw.events", "zone", "landing"),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     assert SecurablePrivilege(
         securable_type=SecurableType.CATALOG,
@@ -1261,7 +1295,7 @@ def test_privilege_compiler_cascades_use_schema_up_to_parent_when_match_is_table
         SecurableTag(SecurableType.TABLE, "cat.sales.orders", "env", "prod"),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     assert SecurablePrivilege(
         securable_type=SecurableType.SCHEMA,
@@ -1297,7 +1331,7 @@ def test_privilege_compiler_cascades_use_schema_up_to_parent_when_match_is_volum
         SecurableTag(SecurableType.VOLUME, "cat.raw.events", "zone", "landing"),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     assert SecurablePrivilege(
         securable_type=SecurableType.SCHEMA,
@@ -1333,7 +1367,7 @@ def test_privilege_compiler_emits_use_catalog_on_catalog_when_match_is_catalog()
         SecurableTag(SecurableType.CATALOG, "cat", "env", "prod"),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     assert SecurablePrivilege(
         securable_type=SecurableType.CATALOG,
@@ -1365,7 +1399,7 @@ def test_privilege_compiler_emits_use_schema_on_schema_when_match_is_schema():
         SecurableTag(SecurableType.SCHEMA, "cat.sales", "env", "prod"),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     assert SecurablePrivilege(
         securable_type=SecurableType.SCHEMA,
@@ -1398,7 +1432,7 @@ def test_privilege_compiler_emits_use_schema_on_catalog_when_match_is_catalog():
         SecurableTag(SecurableType.CATALOG, "cat", "env", "prod"),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     assert SecurablePrivilege(
         securable_type=SecurableType.CATALOG,
@@ -1433,7 +1467,7 @@ def test_privilege_compiler_deduplicates_cascaded_use_catalog_when_many_children
         SecurableTag(SecurableType.VOLUME, "cat.raw.events", "env", "prod"),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     use_catalog_entries = [
         p for p in result if p.privilege_type == PrivilegeType.USE_CATALOG
@@ -1467,7 +1501,7 @@ def test_privilege_compiler_deduplicates_cascaded_use_schema_when_many_tables_ma
         SecurableTag(SecurableType.TABLE, "cat.sales.invoices", "env", "prod"),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     use_schema_entries = [
         p for p in result if p.privilege_type == PrivilegeType.USE_SCHEMA
@@ -1500,7 +1534,7 @@ def test_privilege_compiler_emits_select_on_table_and_cascades_use_catalog_and_u
         SecurableTag(SecurableType.TABLE, "cat.sales.orders", "env", "prod"),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     assert SecurablePrivilege(
         securable_type=SecurableType.TABLE,
@@ -1553,7 +1587,7 @@ def test_privilege_compiler_drops_use_catalog_when_policy_attached_at_table_leve
         }
     )
 
-    result = compile_desired_privileges(config, set())
+    result = _compile(config, set())
 
     assert SecurablePrivilege(
         securable_type=SecurableType.TABLE,
@@ -1595,7 +1629,7 @@ def test_privilege_compiler_drops_use_catalog_when_policy_attached_at_schema_lev
         SecurableTag(SecurableType.TABLE, "cat.sales.orders", "env", "prod"),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     assert SecurablePrivilege(
         securable_type=SecurableType.TABLE,
@@ -1635,7 +1669,7 @@ def test_privilege_compiler_cascades_use_catalog_for_each_principal_when_policy_
         SecurableTag(SecurableType.TABLE, "cat.sales.orders", "env", "prod"),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     for principal_name in ("analysts", "engineers", "auditors"):
         assert SecurablePrivilege(
@@ -1682,10 +1716,128 @@ def test_privilege_compiler_does_not_emit_privileges_on_columns():
         ),
     }
 
-    result = compile_desired_privileges(config, desired_tags)
+    result = _compile(config, desired_tags)
 
     # No COLUMN-targeted privileges — UC would reject them at execute time.
     column_privileges = {p for p in result if p.securable_type == SecurableType.COLUMN}
     assert column_privileges == set(), (
         f"Expected no COLUMN-targeted privileges, got: {column_privileges}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Governed-tag validation
+# ---------------------------------------------------------------------------
+
+
+def test_privilege_compiler_logs_error_when_grant_policy_tag_is_ungoverned():
+    """A grant policy whose has_tags references an ungoverned tag key logs
+    an error identifying the offending key."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["team"],
+                            "has_tags": {"ungoverned_key": "*"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    change_logger = _change_logger()
+
+    _compile(
+        config,
+        desired_tags=set(),
+        governed_tag_names={"env"},
+        change_logger=change_logger,
+    )
+
+    assert change_logger.has_errors
+    exceptions = [e.exception for e in change_logger.errors]
+    assert any(isinstance(e, UngovernedTagError) for e in exceptions)
+    combined = " ".join(str(e) for e in exceptions) + " ".join(
+        e.context for e in change_logger.errors
+    )
+    assert "ungoverned_key" in combined
+
+
+def test_privilege_compiler_skips_grant_policy_with_ungoverned_tag():
+    """A grant policy referencing an ungoverned tag emits no privileges, while
+    other grant policies in the same config compile normally."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["bad_team"],
+                            "has_tags": {"ungoverned_key": "*"},
+                        },
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["good_team"],
+                            "has_tags": {"env": "prod"},
+                        },
+                    ],
+                }
+            }
+        }
+    )
+    desired_tags = {
+        SecurableTag(SecurableType.TABLE, "cat.s.t", "env", "prod"),
+        SecurableTag(SecurableType.TABLE, "cat.s.t", "ungoverned_key", "whatever"),
+    }
+
+    result = _compile(
+        config,
+        desired_tags,
+        governed_tag_names={"env"},
+    )
+
+    principals_in_result = {p.principal.name for p in result}
+    assert "good_team" in principals_in_result
+    assert "bad_team" not in principals_in_result
+
+
+def test_privilege_compiler_accepts_tag_in_union_of_desired_and_actual_governed_tags():
+    """A grant policy whose tag key is declared as a governed tag (via the
+    desired+actual union) compiles without errors."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["team"],
+                            "has_tags": {"only_actual_tag": "*"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    desired_tags = {
+        SecurableTag(SecurableType.TABLE, "cat.s.t", "only_actual_tag", "v"),
+    }
+    change_logger = _change_logger()
+
+    result = _compile(
+        config,
+        desired_tags,
+        governed_tag_names={"only_actual_tag"},
+        change_logger=change_logger,
+    )
+
+    assert not change_logger.has_errors
+    assert any(p.principal.name == "team" for p in result)

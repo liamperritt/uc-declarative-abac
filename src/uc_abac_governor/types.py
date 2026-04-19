@@ -72,6 +72,13 @@ class PrincipalValidationError(GovernorError):
     """Raised when one or more principal names cannot be found in the account."""
 
 
+class UngovernedTagError(GovernorError):
+    """Raised when a policy references an ungoverned tag key — i.e. a key
+    that is not declared as a governed tag in the config's desired governed
+    tags nor present in UC's actual governed tags. Only the tag key is
+    checked — values are not validated."""
+
+
 class DuplicateServicePrincipalError(GovernorError):
     """Raised when two service principals share the same display name."""
 

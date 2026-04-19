@@ -337,16 +337,28 @@ class ResourcesConfig(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _inject_names_from_keys(cls, data: dict) -> dict:
-        """Set each catalog's and governed tag's name from its dict key when not provided."""
+    def _inject_names_and_reject_duplicates(cls, data: dict) -> dict:
+        """Set each catalog's and governed tag's name from its dict key when
+        not provided, then reject any two entries that share the same
+        ``name`` (dict keys are unique by construction, but two entries can
+        still explicitly set the same ``name`` field — both would target the
+        same UC object)."""
+        if not isinstance(data, dict):
+            return data
         catalogs = data.get("catalogs")
         if isinstance(catalogs, dict):
             for key, catalog in catalogs.items():
                 if isinstance(catalog, dict):
                     catalog.setdefault("name", key)
+            _check_duplicate_names(
+                list(catalogs.values()), "catalog", "resources",
+            )
         governed_tags = data.get("governed_tags")
         if isinstance(governed_tags, dict):
             for key, gt in governed_tags.items():
                 if isinstance(gt, dict):
                     gt.setdefault("name", key)
+            _check_duplicate_names(
+                list(governed_tags.values()), "governed tag", "resources",
+            )
         return data

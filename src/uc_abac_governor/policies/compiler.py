@@ -5,33 +5,105 @@ from uc_abac_governor.configs.models import (
     PolicyColumnConfig,
     ResourcesConfig,
 )
+from uc_abac_governor.logger import ChangeLogger
 from uc_abac_governor.policies.state import Policy
 from uc_abac_governor.principals.state import Principal
-from uc_abac_governor.types import PolicyType, PrincipalType, SecurableType
+from uc_abac_governor.types import (
+    ExecutionError,
+    PolicyType,
+    PrincipalType,
+    SecurableType,
+    UngovernedTagError,
+)
 
 
 _WILDCARD = "*"
 
 
-def compile_desired_policies(config: ResourcesConfig) -> set[Policy]:
+def compile_desired_policies(
+    config: ResourcesConfig,
+    governed_tag_names: set[str],
+    change_logger: ChangeLogger,
+) -> set[Policy]:
     """Walk the resolved config and emit Policy entries for all mask and filter policies.
 
     Grant policies are handled by the privileges domain and are ignored here.
+
+    Every tag key referenced by a policy (at the policy level or in per-column
+    ``has_tags``) must appear in ``governed_tag_names`` (the union of desired +
+    actual governed tag names). Policies that reference an ungoverned key are
+    dropped from the returned set and an ``UngovernedTagError`` is logged on
+    ``change_logger`` for every offender.
     """
     policies: set[Policy] = set()
     for catalog in config.catalogs.values():
         for p in catalog.policies or []:
             if isinstance(p, BaseFgacPolicyConfig):
-                policies.add(_build_policy(SecurableType.CATALOG, catalog.full_name, p))
+                built = _build_policy_if_valid(
+                    SecurableType.CATALOG, catalog.full_name, p,
+                    governed_tag_names, change_logger,
+                )
+                if built is not None:
+                    policies.add(built)
         for schema in catalog.schemas or []:
             for p in schema.policies or []:
                 if isinstance(p, BaseFgacPolicyConfig):
-                    policies.add(_build_policy(SecurableType.SCHEMA, schema.full_name, p))
+                    built = _build_policy_if_valid(
+                        SecurableType.SCHEMA, schema.full_name, p,
+                        governed_tag_names, change_logger,
+                    )
+                    if built is not None:
+                        policies.add(built)
             for table in schema.tables or []:
                 for p in table.policies or []:
                     if isinstance(p, BaseFgacPolicyConfig):
-                        policies.add(_build_policy(SecurableType.TABLE, table.full_name, p))
+                        built = _build_policy_if_valid(
+                            SecurableType.TABLE, table.full_name, p,
+                            governed_tag_names, change_logger,
+                        )
+                        if built is not None:
+                            policies.add(built)
     return policies
+
+
+def _build_policy_if_valid(
+    securable_type: SecurableType,
+    securable_full_name: str,
+    policy: BaseFgacPolicyConfig,
+    governed_tag_names: set[str],
+    change_logger: ChangeLogger,
+) -> Policy | None:
+    """Validate every tag key referenced by the policy, logging errors for
+    ungoverned keys and returning None if any were found."""
+    ungoverned = _ungoverned_tag_keys(policy, governed_tag_names)
+    if ungoverned:
+        context = f"Policy '{policy.name}' on {securable_type.value} {securable_full_name}"
+        for key in sorted(ungoverned):
+            change_logger.log_error(
+                ExecutionError(
+                    context=context,
+                    exception=UngovernedTagError(
+                        f"{context} references ungoverned tag '{key}'"
+                    ),
+                )
+            )
+        return None
+    return _build_policy(securable_type, securable_full_name, policy)
+
+
+def _ungoverned_tag_keys(
+    policy: BaseFgacPolicyConfig,
+    governed_tag_names: set[str],
+) -> set[str]:
+    """Collect every tag key the policy references (policy-level + per-column)
+    that is not in ``governed_tag_names``."""
+    referenced: set[str] = set()
+    if policy.has_tags:
+        referenced |= set(policy.has_tags.keys())
+    for col in policy.columns or []:
+        if col.has_tags:
+            referenced |= set(col.has_tags.keys())
+    return referenced - governed_tag_names
 
 
 def _build_policy(

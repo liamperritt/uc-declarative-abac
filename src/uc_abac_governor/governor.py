@@ -147,6 +147,13 @@ def run(
         desired_governed_tags, actual_governed_tags,
         enable_deletion=enable_governed_tag_deletion,
     )
+    # Union of declared governed tag names (desired from config + actual on UC).
+    # Used by the policies/privileges compilers to reject references to tag keys
+    # that aren't governed — desired-only covers in-flight creations, actual-only
+    # covers already-deployed tags the config doesn't redeclare.
+    governed_tag_names = {
+        t.name for t in desired_governed_tags | actual_governed_tags
+    }
 
     # 5. Tags workflow
     if enable_tag_management:
@@ -161,7 +168,9 @@ def run(
         tags_for_privilege_matching = actual_tags
 
     # 6. Policies workflow (mask/filter)
-    desired_policies = compile_desired_policies(config)
+    desired_policies = compile_desired_policies(
+        config, governed_tag_names, change_logger,
+    )
     policy_diff = compute_policy_diff(
         desired_policies, actual_policies, resolver, change_logger,
     )
@@ -169,7 +178,8 @@ def run(
     # 7. Privileges workflow
     if enable_privilege_management:
         compiled_privileges = compile_desired_privileges(
-            config, tags_for_privilege_matching, run_date=date.today(),
+            config, tags_for_privilege_matching, governed_tag_names, change_logger,
+            run_date=date.today(),
         )
         privilege_diff = compute_privilege_diff(
             compiled_privileges, actual_privileges, resolver, change_logger,

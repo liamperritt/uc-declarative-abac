@@ -1,9 +1,31 @@
 from __future__ import annotations
 
 from uc_abac_governor.configs.models import ResourcesConfig
+from uc_abac_governor.logger import ChangeLogger
 from uc_abac_governor.policies.compiler import compile_desired_policies
 from uc_abac_governor.policies.state import Policy
-from uc_abac_governor.types import PolicyType, SecurableType
+from uc_abac_governor.types import PolicyType, SecurableType, UngovernedTagError
+
+
+# Permissive superset of every tag key used across the fixtures in this file.
+# Tests that target the "ungoverned tag" validation pass a narrower set explicitly.
+_GOVERNED_TAGS_IN_FIXTURES = {
+    "pii", "domain", "a_tag", "b_tag", "a", "b", "geo", "lvl",
+}
+
+
+def _change_logger() -> ChangeLogger:
+    return ChangeLogger()
+
+
+def _compile(
+    config: ResourcesConfig,
+    governed_tag_names: set[str] | None = None,
+    change_logger: ChangeLogger | None = None,
+) -> set[Policy]:
+    names = _GOVERNED_TAGS_IN_FIXTURES if governed_tag_names is None else governed_tag_names
+    logger = change_logger if change_logger is not None else _change_logger()
+    return compile_desired_policies(config, names, logger)
 
 
 def _fgac_policy(**overrides) -> dict:
@@ -67,7 +89,7 @@ def test_policy_compiler_emits_catalog_level_mask_policy():
         _catalog_with_policy(_fgac_policy(), level="catalog")
     )
 
-    result = compile_desired_policies(config)
+    result = _compile(config)
     (policy,) = result
     assert policy.securable_type == SecurableType.CATALOG
     assert policy.securable_full_name == "cat"
@@ -82,7 +104,7 @@ def test_policy_compiler_emits_schema_level_filter_policy():
         _catalog_with_policy(filter_policy, level="schema")
     )
 
-    result = compile_desired_policies(config)
+    result = _compile(config)
     (policy,) = result
     assert policy.securable_type == SecurableType.SCHEMA
     assert policy.securable_full_name == "cat.s"
@@ -95,7 +117,7 @@ def test_policy_compiler_emits_table_level_mask_policy():
         _catalog_with_policy(_fgac_policy(), level="table")
     )
 
-    result = compile_desired_policies(config)
+    result = _compile(config)
     (policy,) = result
     assert policy.securable_type == SecurableType.TABLE
     assert policy.securable_full_name == "cat.s.t"
@@ -117,7 +139,7 @@ def test_policy_compiler_emits_principals_as_unresolved():
         _catalog_with_policy(policy_dict, level="table")
     )
 
-    (policy,) = compile_desired_policies(config)
+    (policy,) = _compile(config)
     to_names = [p.name for p in policy.to_principals]
     except_names = [p.name for p in policy.except_principals]
     assert set(to_names) == {"z_group", "a_group"}
@@ -135,7 +157,7 @@ def test_policy_compiler_handles_missing_except_principals():
         _catalog_with_policy(policy_dict, level="table")
     )
 
-    (policy,) = compile_desired_policies(config)
+    (policy,) = _compile(config)
     assert policy.except_principals == ()
 
 
@@ -151,7 +173,7 @@ def test_policy_compiler_renders_when_from_has_tags():
         _catalog_with_policy(policy_dict, level="table")
     )
 
-    (policy,) = compile_desired_policies(config)
+    (policy,) = _compile(config)
     assert policy.when_condition == "has_tag_value('domain', 'sales')"
 
 
@@ -162,7 +184,7 @@ def test_policy_compiler_renders_when_with_wildcard():
         _catalog_with_policy(policy_dict, level="table")
     )
 
-    (policy,) = compile_desired_policies(config)
+    (policy,) = _compile(config)
     assert policy.when_condition == "has_tag('domain')"
 
 
@@ -173,7 +195,7 @@ def test_policy_compiler_renders_when_with_empty_string():
         _catalog_with_policy(policy_dict, level="table")
     )
 
-    (policy,) = compile_desired_policies(config)
+    (policy,) = _compile(config)
     assert policy.when_condition == "has_tag_value('domain', '')"
 
 
@@ -184,7 +206,7 @@ def test_policy_compiler_renders_when_with_null_value():
         _catalog_with_policy(policy_dict, level="table")
     )
 
-    (policy,) = compile_desired_policies(config)
+    (policy,) = _compile(config)
     assert policy.when_condition == "has_tag_value('domain', '')"
 
 
@@ -195,7 +217,7 @@ def test_policy_compiler_joins_multiple_has_tags_with_and():
         _catalog_with_policy(policy_dict, level="table")
     )
 
-    (policy,) = compile_desired_policies(config)
+    (policy,) = _compile(config)
     assert policy.when_condition == (
         "has_tag_value('a_tag', 'v1') AND has_tag_value('b_tag', 'v2')"
     )
@@ -208,7 +230,7 @@ def test_policy_compiler_when_is_none_when_has_tags_empty():
         _catalog_with_policy(policy_dict, level="table")
     )
 
-    (policy,) = compile_desired_policies(config)
+    (policy,) = _compile(config)
     assert policy.when_condition is None
 
 
@@ -229,7 +251,7 @@ def test_policy_compiler_mask_first_column_is_on_column():
         _catalog_with_policy(policy_dict, level="table")
     )
 
-    (policy,) = compile_desired_policies(config)
+    (policy,) = _compile(config)
     assert policy.on_column == "c_ssn"
     assert policy.using_columns == ("c_region",)
     assert policy.match_columns == (
@@ -252,7 +274,7 @@ def test_policy_compiler_filter_has_no_on_column():
         _catalog_with_policy(policy_dict, level="table")
     )
 
-    (policy,) = compile_desired_policies(config)
+    (policy,) = _compile(config)
     assert policy.on_column is None
     assert policy.using_columns == ("c_region", "c_sensitivity")
     assert policy.match_columns == (
@@ -269,7 +291,7 @@ def test_policy_compiler_filter_without_columns_has_empty_tuples():
         _catalog_with_policy(policy_dict, level="table")
     )
 
-    (policy,) = compile_desired_policies(config)
+    (policy,) = _compile(config)
     assert policy.match_columns == ()
     assert policy.using_columns == ()
     assert policy.on_column is None
@@ -286,7 +308,7 @@ def test_policy_compiler_columns_match_uses_and_joined_when_multiple_has_tags():
         _catalog_with_policy(policy_dict, level="table")
     )
 
-    (policy,) = compile_desired_policies(config)
+    (policy,) = _compile(config)
     assert policy.match_columns == (
         ("c", "has_tag_value('a', 'v1') AND has_tag_value('b', 'v2')"),
     )
@@ -310,7 +332,7 @@ def test_policy_compiler_ignores_grant_policies():
         _catalog_with_policy(grant, level="catalog")
     )
 
-    assert compile_desired_policies(config) == set()
+    assert _compile(config) == set()
 
 
 # ---------------------------------------------------------------------------
@@ -343,7 +365,7 @@ def test_policy_compiler_walks_full_tree():
         }
     )
 
-    result = compile_desired_policies(config)
+    result = _compile(config)
     names = {p.name for p in result}
     assert names == {"cat_p", "sch_p", "tab_p"}
     by_name = {p.name: p for p in result}
@@ -357,7 +379,7 @@ def test_policy_compiler_returns_empty_when_no_policies():
     config = ResourcesConfig.model_validate(
         {"catalogs": {"cat": {"name": "cat"}}}
     )
-    assert compile_desired_policies(config) == set()
+    assert _compile(config) == set()
 
 
 def test_policy_compiler_returns_frozen_hashable_policies():
@@ -365,7 +387,7 @@ def test_policy_compiler_returns_frozen_hashable_policies():
     config = ResourcesConfig.model_validate(
         _catalog_with_policy(_fgac_policy(), level="table")
     )
-    result = compile_desired_policies(config)
+    result = _compile(config)
     assert isinstance(result, set)
     assert len(result) == 1
     (policy,) = result
@@ -383,7 +405,7 @@ def test_policy_compiler_emits_policy_comment_when_provided():
         _catalog_with_policy(policy_dict, level="table")
     )
 
-    (policy,) = compile_desired_policies(config)
+    (policy,) = _compile(config)
     assert policy.comment == "Mask email PII"
 
 
@@ -393,5 +415,121 @@ def test_policy_compiler_policy_comment_defaults_to_none():
         _catalog_with_policy(policy_dict, level="table")
     )
 
-    (policy,) = compile_desired_policies(config)
+    (policy,) = _compile(config)
     assert policy.comment is None
+
+
+# ---------------------------------------------------------------------------
+# Governed-tag validation
+# ---------------------------------------------------------------------------
+
+
+def test_policy_compiler_logs_error_when_policy_level_tag_is_ungoverned():
+    """A policy whose has_tags references an ungoverned tag key logs an error
+    identifying the policy and the offending key."""
+    policy_dict = _fgac_policy(has_tags={"ungoverned_key": "x"})
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+    change_logger = _change_logger()
+
+    _compile(config, governed_tag_names={"pii"}, change_logger=change_logger)
+
+    assert change_logger.has_errors
+    exceptions = [e.exception for e in change_logger.errors]
+    assert any(isinstance(e, UngovernedTagError) for e in exceptions)
+    combined = " ".join(str(e) for e in exceptions) + " ".join(
+        e.context for e in change_logger.errors
+    )
+    assert "ungoverned_key" in combined
+
+
+def test_policy_compiler_logs_error_when_column_level_tag_is_ungoverned():
+    """A policy whose per-column has_tags references an ungoverned tag key
+    logs an error (column-level tags are validated too)."""
+    policy_dict = _fgac_policy(
+        has_tags={"pii": "*"},
+        columns=[{"alias": "c", "has_tags": {"ungoverned_col_key": "v"}}],
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+    change_logger = _change_logger()
+
+    _compile(config, governed_tag_names={"pii"}, change_logger=change_logger)
+
+    assert change_logger.has_errors
+    exceptions = [e.exception for e in change_logger.errors]
+    assert any(isinstance(e, UngovernedTagError) for e in exceptions)
+    combined = " ".join(str(e) for e in exceptions) + " ".join(
+        e.context for e in change_logger.errors
+    )
+    assert "ungoverned_col_key" in combined
+
+
+def test_policy_compiler_skips_policy_with_ungoverned_tag():
+    """A policy referencing an ungoverned tag is omitted from the compiled set."""
+    bad_policy = _fgac_policy(name="bad", has_tags={"ungoverned_key": "x"})
+    good_policy = _fgac_policy(name="good", has_tags={"pii": "*"})
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "name": "cat",
+                    "schemas": [
+                        {
+                            "name": "s",
+                            "tables": [
+                                {"name": "t", "policies": [bad_policy, good_policy]},
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    result = _compile(config, governed_tag_names={"pii"})
+    names = {p.name for p in result}
+    assert names == {"good"}
+
+
+def test_policy_compiler_accepts_tag_declared_only_in_actual_governed_tags():
+    """A tag key that exists in UC (actual) but not redeclared in config (desired)
+    is still valid — the union drives validation."""
+    policy_dict = _fgac_policy(
+        has_tags={"only_actual": "*"},
+        columns=[{"alias": "c", "has_tags": {"only_actual": "*"}}],
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+    change_logger = _change_logger()
+
+    result = _compile(
+        config, governed_tag_names={"only_actual"}, change_logger=change_logger
+    )
+
+    assert not change_logger.has_errors
+    (policy,) = result
+    assert policy.when_condition == "has_tag('only_actual')"
+
+
+def test_policy_compiler_accepts_tag_declared_only_in_desired_governed_tags():
+    """A tag key that is being created this run (desired-only) is valid."""
+    policy_dict = _fgac_policy(
+        has_tags={"only_desired": "*"},
+        columns=[{"alias": "c", "has_tags": {"only_desired": "*"}}],
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+    change_logger = _change_logger()
+
+    result = _compile(
+        config, governed_tag_names={"only_desired"}, change_logger=change_logger
+    )
+
+    assert not change_logger.has_errors
+    (policy,) = result
+    assert policy.when_condition == "has_tag('only_desired')"
