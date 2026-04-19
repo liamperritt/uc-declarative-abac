@@ -71,10 +71,10 @@ The repo ships a composite GitHub Action at `govern/action.yml` so any other rep
 | `enable-governed-tag-deletion` | no | `'false'` | Permit the engine to delete governed tags present in the account but absent from config. Requires interactive confirmation unless `force: 'true'` — in CI you must set `force` or the run errors out |
 | `force` | no | `'false'` | Skip every interactive confirmation prompt and auto-confirm destructive actions. Required in CI when any destructive gate is set |
 
-**Example workflow in a caller repo** (`.github/workflows/uc-governance.yml`):
+**Example workflow in a caller repo** (`.github/workflows/deploy-uc-governance.yml`):
 
 ```yaml
-name: UC governance
+name: Deploy UC governance
 on:
   pull_request:
     paths: ['configs/**']
