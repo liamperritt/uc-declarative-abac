@@ -343,8 +343,6 @@ class ResourcesConfig(BaseModel):
         ``name`` (dict keys are unique by construction, but two entries can
         still explicitly set the same ``name`` field — both would target the
         same UC object)."""
-        if not isinstance(data, dict):
-            return data
         catalogs = data.get("catalogs")
         if isinstance(catalogs, dict):
             for key, catalog in catalogs.items():
