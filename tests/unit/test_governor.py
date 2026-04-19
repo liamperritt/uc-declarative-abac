@@ -234,15 +234,15 @@ def test_governor_runs_tags_workflow_end_to_end(
     _install_fetch_router(monkeypatch, config)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    _, _, tag_diff, _, _ = run(
+    result = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
         warehouse_id="test-warehouse-id",
     )
 
-    assert isinstance(tag_diff, TagDiff)
-    assert len(tag_diff.to_add) > 0, "Expected tags to be added for the tagged catalog"
+    assert isinstance(result.tag_diff, TagDiff)
+    assert len(result.tag_diff.to_add) > 0, "Expected tags to be added for the tagged catalog"
 
     executed = mock_workspace_client.executed_sql
     set_tags_stmts = [s for s in executed if "SET TAGS" in s.upper()]
@@ -260,15 +260,15 @@ def test_governor_runs_privileges_workflow_end_to_end(
     _install_fetch_router(monkeypatch, config)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    _, _, _, _, privilege_diff = run(
+    result = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
         warehouse_id="test-warehouse-id",
     )
 
-    assert isinstance(privilege_diff, PrivilegeDiff)
-    assert len(privilege_diff.to_grant) > 0, (
+    assert isinstance(result.privilege_diff, PrivilegeDiff)
+    assert len(result.privilege_diff.to_grant) > 0, (
         "Expected privileges to be granted for the grant policy"
     )
 
@@ -288,19 +288,19 @@ def test_governor_runs_both_domains_independently(
     _install_fetch_router(monkeypatch, config)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    _, _, tag_diff, _, privilege_diff = run(
+    result = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
         warehouse_id="test-warehouse-id",
     )
 
-    assert len(tag_diff.to_add) >= 2, (
-        f"Expected at least 2 tags to add, got {len(tag_diff.to_add)}: {tag_diff.to_add}"
+    assert len(result.tag_diff.to_add) >= 2, (
+        f"Expected at least 2 tags to add, got {len(result.tag_diff.to_add)}: {result.tag_diff.to_add}"
     )
-    assert len(privilege_diff.to_grant) >= 1, (
-        f"Expected at least 1 privilege to grant, got {len(privilege_diff.to_grant)}: "
-        f"{privilege_diff.to_grant}"
+    assert len(result.privilege_diff.to_grant) >= 1, (
+        f"Expected at least 1 privilege to grant, got {len(result.privilege_diff.to_grant)}: "
+        f"{result.privilege_diff.to_grant}"
     )
 
     executed = mock_workspace_client.executed_sql
@@ -363,18 +363,18 @@ def test_governor_produces_empty_diffs_when_in_sync(
     )
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    _, _, tag_diff, _, privilege_diff = run(
+    result = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
         warehouse_id="test-warehouse-id",
     )
 
-    assert tag_diff.to_add == set()
-    assert tag_diff.to_update == set()
-    assert tag_diff.to_remove == set()
-    assert privilege_diff.to_grant == set()
-    assert privilege_diff.to_revoke == set()
+    assert result.tag_diff.to_add == set()
+    assert result.tag_diff.to_update == set()
+    assert result.tag_diff.to_remove == set()
+    assert result.privilege_diff.to_grant == set()
+    assert result.privilege_diff.to_revoke == set()
 
     mutation_stmts = [
         s
@@ -427,7 +427,7 @@ def test_governor_dry_run_does_not_execute_sql(
     _install_fetch_router(monkeypatch, config)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    _, _, tag_diff, _, privilege_diff = run(
+    result = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
@@ -435,8 +435,8 @@ def test_governor_dry_run_does_not_execute_sql(
         dry_run=True,
     )
 
-    assert isinstance(tag_diff, TagDiff)
-    assert isinstance(privilege_diff, PrivilegeDiff)
+    assert isinstance(result.tag_diff, TagDiff)
+    assert isinstance(result.privilege_diff, PrivilegeDiff)
 
     mutation_stmts = [
         s
@@ -627,14 +627,14 @@ def test_governor_runs_policies_workflow_end_to_end(
     _install_fetch_router(monkeypatch, config)
     _setup_mock_principals_with_groups(mock_workspace_client, ["analysts", "admins"])
 
-    _, _, _, policy_diff, _ = run(
+    result = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
         warehouse_id="test-warehouse-id",
     )
 
-    assert isinstance(policy_diff, PolicyDiff)
-    assert len(policy_diff.to_create) == 1
+    assert isinstance(result.policy_diff, PolicyDiff)
+    assert len(result.policy_diff.to_create) == 1
     create_stmts = [s for s in mock_workspace_client.executed_sql if "CREATE POLICY" in s.upper()]
     assert len(create_stmts) == 1, f"Expected CREATE POLICY SQL, got: {mock_workspace_client.executed_sql}"
 
@@ -668,14 +668,14 @@ def test_governor_policies_workflow_is_idempotent(
     fake_policy.comment = None
     mock_workspace_client.policies.list_policies.return_value = iter([fake_policy])
 
-    _, _, _, policy_diff, _ = run(
+    result = run(
         config_dir=root,
         workspace_client=mock_workspace_client,
         warehouse_id="test-warehouse-id",
     )
 
-    assert policy_diff.to_create == set()
-    assert policy_diff.to_replace == set()
+    assert result.policy_diff.to_create == set()
+    assert result.policy_diff.to_replace == set()
     create_stmts = [s for s in mock_workspace_client.executed_sql if "CREATE POLICY" in s.upper()]
     assert create_stmts == []
 
@@ -753,19 +753,19 @@ def test_governor_is_idempotent_for_service_principal_across_display_name_and_ap
     _seed_actual_state_for_sp_idempotency(mock_workspace_client, sp_app_id)
 
     # Run and assert empty diffs
-    _, _, tag_diff, policy_diff, privilege_diff = run(
+    result = run(
         config_dir=tmp_root,
         workspace_client=mock_workspace_client,
         warehouse_id="test-warehouse-id",
     )
 
-    assert tag_diff.to_add == set(), f"Expected no tag changes, got to_add: {tag_diff.to_add}"
-    assert tag_diff.to_update == set()
-    assert tag_diff.to_remove == set()
-    assert privilege_diff.to_grant == set(), f"Expected no grants, got: {privilege_diff.to_grant}"
-    assert privilege_diff.to_revoke == set(), f"Expected no revokes, got: {privilege_diff.to_revoke}"
-    assert policy_diff.to_create == set(), f"Expected no policy creates, got: {policy_diff.to_create}"
-    assert policy_diff.to_replace == set(), f"Expected no policy replaces, got: {policy_diff.to_replace}"
+    assert result.tag_diff.to_add == set(), f"Expected no tag changes, got to_add: {result.tag_diff.to_add}"
+    assert result.tag_diff.to_update == set()
+    assert result.tag_diff.to_remove == set()
+    assert result.privilege_diff.to_grant == set(), f"Expected no grants, got: {result.privilege_diff.to_grant}"
+    assert result.privilege_diff.to_revoke == set(), f"Expected no revokes, got: {result.privilege_diff.to_revoke}"
+    assert result.policy_diff.to_create == set(), f"Expected no policy creates, got: {result.policy_diff.to_create}"
+    assert result.policy_diff.to_replace == set(), f"Expected no policy replaces, got: {result.policy_diff.to_replace}"
 
     # No mutation SQL executed
     mutation_stmts = [

@@ -39,7 +39,9 @@ def compute_securable_diff(
     securables_to_create, securables_to_replace = _diff_securables(
         desired_securables, actual_securables
     )
-    _fail_if_non_function_securables_are_nonexistent(securables_to_create)
+    securables_to_create = _log_nonexistent_non_function_securables(
+        securables_to_create, change_logger,
+    )
 
     created_full_names = {s.full_name for s in securables_to_create}
 
@@ -110,21 +112,31 @@ def _diff_securables(
     return to_create, to_replace
 
 
-def _fail_if_non_function_securables_are_nonexistent(to_create: list[Securable]) -> None:
-    """Raise NonexistentSecurableError if any non-function securable is in to_create.
+def _log_nonexistent_non_function_securables(
+    to_create: list[Securable],
+    change_logger: ChangeLogger,
+) -> list[Securable]:
+    """Log one ``NonexistentSecurableError`` per non-function securable in ``to_create``
+    and return the list filtered down to Functions only.
 
-    Functions are engine-created, so nonexistent functions legitimately flow through
-    to_create for the executor to CREATE FUNCTION. Any other securable type in
-    to_create means the config references a UC object that does not exist; the
-    engine does not yet support creating those, so we fail fast and list every
-    offender.
+    Functions are engine-created, so they legitimately flow through ``to_create`` for
+    the executor to ``CREATE FUNCTION``. Any other type in ``to_create`` means the
+    config references a UC object that does not yet exist; the engine does not
+    support creating those today. We log each offender via ``ChangeLogger.log_error``
+    (so the governor's final ``ExecutionBatchError`` gate surfaces them alongside
+    any other accumulated errors) and drop them from the diff to prevent downstream
+    executors from attempting to touch them.
     """
     nonexistent = sorted(
-        [(s.securable_type, s.full_name) for s in to_create if not isinstance(s, Function)],
-        key=lambda n: (n[0].value, n[1]),
+        [s for s in to_create if not isinstance(s, Function)],
+        key=lambda s: (s.securable_type.value, s.full_name),
     )
-    if nonexistent:
-        raise NonexistentSecurableError(nonexistent)
+    for sec in nonexistent:
+        change_logger.log_error(ExecutionError(
+            context=f"Existence check: {sec.securable_type.value} {sec.full_name}",
+            exception=NonexistentSecurableError(sec.securable_type, sec.full_name),
+        ))
+    return [s for s in to_create if isinstance(s, Function)]
 
 
 def _diff_attributes(

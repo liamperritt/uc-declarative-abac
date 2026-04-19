@@ -8,5 +8,4 @@ resources:
         - email
         - phone
         - address
-        - ssn
         - drivers_licence

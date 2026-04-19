@@ -77,25 +77,22 @@ class DuplicateServicePrincipalError(GovernorError):
 
 
 class NonexistentSecurableError(GovernorError):
-    """Raised when one or more securables declared in config don't exist in UC.
+    """Raised when a securable declared in config doesn't exist in UC.
 
     Functions are created by the engine and are excluded from this check; only
-    catalogs, schemas, tables, and volumes can trigger this error.
+    catalogs, schemas, tables, and volumes can trigger this error. One instance
+    carries a single (type, full_name) pair — the engine logs one per offender
+    via ``ChangeLogger.log_error`` and the governor surfaces them together via
+    ``ExecutionBatchError`` at the end of the run.
     """
 
-    def __init__(self, nonexistent: list[tuple[SecurableType, str]]) -> None:
-        self.nonexistent = nonexistent
-        super().__init__(self._build_message())
-
-    def _build_message(self) -> str:
-        lines = [
-            f"{len(self.nonexistent)} nonexistent securable(s) declared in config but "
-            f"not found in Unity Catalog. Either create them in UC, or remove them "
-            f"from config:",
-        ]
-        for sec_type, full_name in self.nonexistent:
-            lines.append(f"  - {sec_type.value} {full_name}")
-        return "\n".join(lines)
+    def __init__(self, securable_type: SecurableType, full_name: str) -> None:
+        self.securable_type = securable_type
+        self.full_name = full_name
+        super().__init__(
+            f"Nonexistent {securable_type.value} {full_name!r} declared in config but "
+            f"not found in Unity Catalog. Either create it in UC, or remove it from config."
+        )
 
 
 @dataclass(frozen=True)

@@ -30,9 +30,9 @@ from uc_abac_governor.types import GovernorError, PolicyType, PrincipalType, Pri
 
 _logger = logging.getLogger("uc_abac_governor")
 
-_POLL_INTERVAL_SECONDS = 10
+_POLL_INTERVAL_SECONDS = 5
 
-_MAX_POLICY_LIST_WORKERS = 32
+_MAX_POLICY_LIST_WORKERS = 16
 
 
 def _build_catalog_in_clause(catalog_names: list[str]) -> str:
@@ -483,7 +483,7 @@ class UnityCatalogHelper:
 
         Walks the config to find every catalog/schema/table that declares at
         least one mask or filter policy, then fans out one list_policies SDK
-        call per securable via a thread pool (max 32 concurrent). Results
+        call per securable via a thread pool (max 16 concurrent). Results
         from the SDK are normalised into Policy instances. Policies of
         non-mask/filter types are skipped.
 

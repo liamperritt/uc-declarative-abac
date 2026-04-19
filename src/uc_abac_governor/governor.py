@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
@@ -40,13 +41,24 @@ from uc_abac_governor.types import ExecutionBatchError
 _logger = logging.getLogger("uc_abac_governor")
 
 
+@dataclass(frozen=True)
+class GovernorDiffsResult:
+    """Computed diffs from one ``governor.run()`` invocation, one per domain."""
+
+    securable_diff: SecurableDiff
+    governed_tag_diff: GovernedTagDiff
+    tag_diff: TagDiff
+    policy_diff: PolicyDiff
+    privilege_diff: PrivilegeDiff
+
+
 def run(
     config_dir: Path,
     workspace_client: WorkspaceClient,
     warehouse_id: str,
     dry_run: bool = False,
     use_workspace_scim: bool = False,
-) -> tuple[SecurableDiff, GovernedTagDiff, TagDiff, PolicyDiff, PrivilegeDiff]:
+) -> GovernorDiffsResult:
     """Run the full governance pipeline: discover, resolve, compile, diff, apply.
 
     Returns the computed diffs for every domain in execution order.
@@ -140,4 +152,10 @@ def run(
     if change_logger.has_errors:
         raise ExecutionBatchError(change_logger.errors)
 
-    return securable_diff, governed_tag_diff, tag_diff, policy_diff, privilege_diff
+    return GovernorDiffsResult(
+        securable_diff=securable_diff,
+        governed_tag_diff=governed_tag_diff,
+        tag_diff=tag_diff,
+        policy_diff=policy_diff,
+        privilege_diff=privilege_diff,
+    )

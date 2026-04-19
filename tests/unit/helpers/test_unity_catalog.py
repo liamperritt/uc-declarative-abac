@@ -7,7 +7,11 @@ import sqlglot
 from databricks.sdk.service.sql import Disposition, StatementState
 
 from uc_abac_governor.configs.models import ResourcesConfig
-from uc_abac_governor.helpers.unity_catalog import UnityCatalogHelper
+from uc_abac_governor.helpers.unity_catalog import (
+    UnityCatalogHelper,
+    _POLL_INTERVAL_SECONDS,  # exception to the "no private imports" rule: needed to
+                             # anchor the polling-cadence test to the production constant
+)
 from uc_abac_governor.policies.state import Policy
 from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.principals.state import Principal
@@ -483,8 +487,8 @@ def test_uc_helper_polls_for_results_when_query_exceeds_timeout(mock_fetch, mock
     assert client.statement_execution.get_statement.call_count == 2
     client.statement_execution.get_statement.assert_any_call("stmt-123")
 
-    # Should have slept with the polling interval (10s)
-    mock_sleep.assert_called_with(10)
+    # Should have slept with the production polling interval
+    mock_sleep.assert_called_with(_POLL_INTERVAL_SECONDS)
 
     # Should return parsed results
     assert len(result) == 1

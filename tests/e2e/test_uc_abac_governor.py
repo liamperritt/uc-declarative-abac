@@ -130,7 +130,7 @@ def test_uc_abac_governor_dry_run(
     warehouse_id: str,
 ):
     """Dry run computes correct tag, privilege, and securable diffs without applying changes."""
-    securable_diff, governed_tag_diff, tag_diff, _policy_diff, privilege_diff = run(
+    result = run(
         config_dir=config_dir,
         workspace_client=workspace_client,
 
@@ -140,7 +140,7 @@ def test_uc_abac_governor_dry_run(
     )
 
     # All expected governed tags should be pending create/update or already in sync
-    pending_governed_tags = governed_tag_diff.to_create | governed_tag_diff.to_update
+    pending_governed_tags = result.governed_tag_diff.to_create | result.governed_tag_diff.to_update
     for gt in EXPECTED_GOVERNED_TAGS:
         in_diff = gt in pending_governed_tags
         already_in_sync = gt not in pending_governed_tags
@@ -149,7 +149,7 @@ def test_uc_abac_governor_dry_run(
         )
 
     # All expected functions should be pending create/replace or already in sync
-    pending_securables = set(securable_diff.securables_to_create) | set(securable_diff.securables_to_replace)
+    pending_securables = set(result.securable_diff.securables_to_create) | set(result.securable_diff.securables_to_replace)
     for func in EXPECTED_FUNCTIONS:
         in_diff = func in pending_securables
         assert in_diff or func not in pending_securables, (
@@ -157,7 +157,7 @@ def test_uc_abac_governor_dry_run(
         )
 
     # All expected attribute updates should be pending
-    pending_attrs = {(u.securable_type, u.full_name, u.attribute) for u in securable_diff.attributes_to_update}
+    pending_attrs = {(u.securable_type, u.full_name, u.attribute) for u in result.securable_diff.attributes_to_update}
     for attr in EXPECTED_ATTRIBUTES:
         if attr.owner:
             key = (attr.securable_type, attr.full_name, "owner")
@@ -166,10 +166,10 @@ def test_uc_abac_governor_dry_run(
             )
 
     # All expected tags should be pending add/update or already in sync
-    pending_tags = tag_diff.to_add | tag_diff.to_update
+    pending_tags = result.tag_diff.to_add | result.tag_diff.to_update
     for tag in EXPECTED_TAGS:
         in_diff = tag in pending_tags
-        not_being_removed = tag not in tag_diff.to_remove
+        not_being_removed = tag not in result.tag_diff.to_remove
         assert in_diff or not_being_removed, (
             f"Expected tag not found in diff and not in sync: {tag}"
         )
@@ -181,14 +181,14 @@ def test_uc_abac_governor_dry_run(
 
     # All expected privileges should be pending grant or already in sync
     for priv in EXPECTED_PRIVILEGES:
-        in_diff = priv in privilege_diff.to_grant
-        not_being_revoked = priv not in privilege_diff.to_revoke
+        in_diff = priv in result.privilege_diff.to_grant
+        not_being_revoked = priv not in result.privilege_diff.to_revoke
         assert in_diff or not_being_revoked, (
             f"Expected privilege not found in diff and not in sync: {priv}"
         )
 
     # No unexpected principals should appear in the grants
-    actual_principals = {p.principal for p in privilege_diff.to_grant}
+    actual_principals = {p.principal for p in result.privilege_diff.to_grant}
     expected_principals = {p.principal for p in EXPECTED_PRIVILEGES}
     assert actual_principals <= expected_principals, (
         f"Unexpected principals in grants: {actual_principals - expected_principals}"
@@ -202,7 +202,7 @@ def test_uc_abac_governor_deploy(
 ):
     """First run applies all changes; second run confirms idempotency."""
     # First run — apply changes
-    sec_diff_1, gt_diff_1, tag_diff_1, _policy_diff_1, priv_diff_1 = run(
+    result = run(
         config_dir=config_dir,
         workspace_client=workspace_client,
 
@@ -212,7 +212,7 @@ def test_uc_abac_governor_deploy(
     )
 
     # All expected governed tags should have been created/updated (or already in sync)
-    applied_governed_tags = gt_diff_1.to_create | gt_diff_1.to_update
+    applied_governed_tags = result.governed_tag_diff.to_create | result.governed_tag_diff.to_update
     for gt in EXPECTED_GOVERNED_TAGS:
         in_applied = gt in applied_governed_tags
         already_in_sync = gt not in applied_governed_tags
@@ -221,7 +221,7 @@ def test_uc_abac_governor_deploy(
         )
 
     # All expected functions should have been created/replaced (or already in sync)
-    applied_securables = set(sec_diff_1.securables_to_create) | set(sec_diff_1.securables_to_replace)
+    applied_securables = set(result.securable_diff.securables_to_create) | set(result.securable_diff.securables_to_replace)
     for func in EXPECTED_FUNCTIONS:
         in_applied = func in applied_securables
         already_in_sync = func not in applied_securables
@@ -230,18 +230,18 @@ def test_uc_abac_governor_deploy(
         )
 
     # All expected tags should have been added or updated (or already in sync)
-    applied_tags = tag_diff_1.to_add | tag_diff_1.to_update
+    applied_tags = result.tag_diff.to_add | result.tag_diff.to_update
     for tag in EXPECTED_TAGS:
         in_applied = tag in applied_tags
-        already_in_sync = tag not in applied_tags and tag not in tag_diff_1.to_remove
+        already_in_sync = tag not in applied_tags and tag not in result.tag_diff.to_remove
         assert in_applied or already_in_sync, (
             f"Expected tag was not applied and not already in sync: {tag}"
         )
 
     # All expected privileges should have been granted (or already in sync)
     for priv in EXPECTED_PRIVILEGES:
-        in_granted = priv in priv_diff_1.to_grant
-        already_in_sync = priv not in priv_diff_1.to_revoke
+        in_granted = priv in result.privilege_diff.to_grant
+        already_in_sync = priv not in result.privilege_diff.to_revoke
         assert in_granted or already_in_sync, (
             f"Expected privilege was not granted and not already in sync: {priv}"
         )
