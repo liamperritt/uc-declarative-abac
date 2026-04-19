@@ -65,9 +65,9 @@ The repo ships a composite GitHub Action at `govern/action.yml` so any other rep
 | `dry-run` | no | `'false'` | Print planned changes without executing when `'true'` |
 | `use-workspace-scim` | no | `'false'` | Fetch principals from the workspace SCIM API instead of the account SCIM proxy when `'true'` |
 | `enable-tag-management` | no | `'false'` | Permit the engine to create/update/remove tag assignments on securables |
+| `enable-privilege-management` | no | `'false'` | Permit the engine to `GRANT`/`REVOKE` privileges |
 | `enable-taggable-management` | no | `'false'` | Permit the engine to update attributes (owner, etc.) on existing catalogs/schemas/tables/volumes |
 | `enable-taggable-creation` | no | `'false'` | Permit the engine to create catalogs/schemas/tables/volumes declared in config but absent from UC |
-| `enable-privilege-management` | no | `'false'` | Permit the engine to `GRANT`/`REVOKE` privileges |
 | `enable-governed-tag-deletion` | no | `'false'` | Permit the engine to delete governed tags present in UC but absent from config. Requires interactive confirmation unless `force: 'true'` — in CI you must set `force` or the run errors out |
 | `force` | no | `'false'` | Skip every interactive confirmation prompt and auto-confirm destructive actions. Required in CI when any destructive gate is set |
 
