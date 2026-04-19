@@ -100,6 +100,7 @@ jobs:
           enable-tag-management: 'true'
           enable-privilege-management: 'true'
           dry-run: ${{ github.event_name == 'pull_request' }}
+          force: 'true'
         env:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
@@ -694,6 +695,7 @@ Not all object types are managed the same way:
 
 | Category | Behaviour | Examples |
 |----------|-----------|----------|
+| **Governed tags** | Additive + deletes | Unconfigured governed tags are deleted from the account only if the "--enable-governed-tag-deletion" flag is set. |
 | **UC objects & attributes** | Additive only (create/update, never deletes) | Catalogs, schemas, tables, volumes, functions, comments |
 | **Tags & grant policies** | Additive + removals/revokes | Tag assignments on objects, `GRANT` statements |
 | **Mask & filter policies** | Additive only (create/update) | Column masking policies, row filter policies |
