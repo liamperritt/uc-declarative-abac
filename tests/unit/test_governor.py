@@ -88,6 +88,20 @@ def _catalog_with_tags_and_grants_config() -> dict:
     }
 
 
+def _run_all_enabled(**kwargs):
+    """Shorthand for ``run(..., enable_tag_management=True, enable_privilege_management=True,
+    enable_taggable_management=True)`` — preserves pre-flag test intent for tests that
+    exercise the full reconciliation pipeline. New skip-path tests call ``run(...)``
+    directly to verify default-off behaviour."""
+    defaults = {
+        "enable_tag_management": True,
+        "enable_taggable_management": True,
+        "enable_privilege_management": True,
+    }
+    defaults.update(kwargs)
+    return run(**defaults)
+
+
 def _setup_mock_workspace_empty_state(mock_workspace_client: MagicMock) -> None:
     """Configure the mock workspace client to return empty actual state.
 
@@ -234,7 +248,7 @@ def test_governor_runs_tags_workflow_end_to_end(
     _install_fetch_router(monkeypatch, config)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    result = run(
+    result = _run_all_enabled(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
@@ -260,7 +274,7 @@ def test_governor_runs_privileges_workflow_end_to_end(
     _install_fetch_router(monkeypatch, config)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    result = run(
+    result = _run_all_enabled(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
@@ -288,7 +302,7 @@ def test_governor_runs_both_domains_independently(
     _install_fetch_router(monkeypatch, config)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    result = run(
+    result = _run_all_enabled(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
@@ -363,7 +377,7 @@ def test_governor_produces_empty_diffs_when_in_sync(
     )
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    result = run(
+    result = _run_all_enabled(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
@@ -401,10 +415,10 @@ def test_governor_validates_principals_before_applying(
     _setup_mock_empty_principals(mock_workspace_client)
 
     with pytest.raises(ExecutionBatchError):
-        run(
+        _run_all_enabled(
             config_dir=root,
             workspace_client=mock_workspace_client,
-    
+
             warehouse_id="test-warehouse-id",
         )
 
@@ -427,7 +441,7 @@ def test_governor_dry_run_does_not_execute_sql(
     _install_fetch_router(monkeypatch, config)
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
-    result = run(
+    result = _run_all_enabled(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
@@ -491,7 +505,7 @@ def test_governor_fetches_tags_privileges_and_principals_in_parallel(
     mock_workspace_client.api_client.do.side_effect = _slow_scim_do
 
     start = time.monotonic()
-    run(
+    _run_all_enabled(
         config_dir=root,
         workspace_client=mock_workspace_client,
 
@@ -543,10 +557,10 @@ def test_governor_raises_execution_batch_error_when_sql_fails(
     _setup_mock_principals(mock_workspace_client, "data_engineers")
 
     with pytest.raises(ExecutionBatchError) as exc_info:
-        run(
+        _run_all_enabled(
             config_dir=root,
             workspace_client=mock_workspace_client,
-    
+
             warehouse_id="test-warehouse-id",
         )
 
@@ -627,7 +641,7 @@ def test_governor_runs_policies_workflow_end_to_end(
     _install_fetch_router(monkeypatch, config)
     _setup_mock_principals_with_groups(mock_workspace_client, ["analysts", "admins"])
 
-    result = run(
+    result = _run_all_enabled(
         config_dir=root,
         workspace_client=mock_workspace_client,
         warehouse_id="test-warehouse-id",
@@ -668,7 +682,7 @@ def test_governor_policies_workflow_is_idempotent(
     fake_policy.comment = None
     mock_workspace_client.policies.list_policies.return_value = iter([fake_policy])
 
-    result = run(
+    result = _run_all_enabled(
         config_dir=root,
         workspace_client=mock_workspace_client,
         warehouse_id="test-warehouse-id",
@@ -753,7 +767,7 @@ def test_governor_is_idempotent_for_service_principal_across_display_name_and_ap
     _seed_actual_state_for_sp_idempotency(mock_workspace_client, sp_app_id)
 
     # Run and assert empty diffs
-    result = run(
+    result = _run_all_enabled(
         config_dir=tmp_root,
         workspace_client=mock_workspace_client,
         warehouse_id="test-warehouse-id",
@@ -883,10 +897,10 @@ def test_governor_collects_unknown_principal_errors(
     _setup_mock_empty_principals(mock_workspace_client)
 
     with pytest.raises(ExecutionBatchError) as exc_info:
-        run(
+        _run_all_enabled(
             config_dir=root,
             workspace_client=mock_workspace_client,
-    
+
             warehouse_id="test-warehouse-id",
         )
 
@@ -912,10 +926,10 @@ def test_governor_continues_with_valid_principals_when_some_are_unknown(
     _setup_mock_principals_with_groups(mock_workspace_client, ["data_engineers"])
 
     with pytest.raises(ExecutionBatchError) as exc_info:
-        run(
+        _run_all_enabled(
             config_dir=root,
             workspace_client=mock_workspace_client,
-    
+
             warehouse_id="test-warehouse-id",
         )
 
@@ -935,4 +949,274 @@ def test_governor_continues_with_valid_principals_when_some_are_unknown(
     ]
     assert len(principal_errors) > 0, (
         f"Expected PrincipalValidationError for ghost_team in errors, got: {exc_info.value.errors}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# --enable-* flag gating (skip-path tests)
+# ---------------------------------------------------------------------------
+
+
+def test_governor_skips_tags_workflow_when_tag_management_disabled(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """With enable_tag_management=False, no tag diff is computed and no ALTER SET TAGS SQL runs."""
+    config = _catalog_with_tags_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_tag_management=False,
+        enable_taggable_management=True,
+        enable_privilege_management=True,
+    )
+
+    assert result.tag_diff == TagDiff()
+    alter_stmts = [s for s in mock_workspace_client.executed_sql if "SET TAGS" in s.upper()]
+    assert alter_stmts == [], (
+        f"Expected no ALTER ... SET TAGS SQL when tag management is off, got: {alter_stmts}"
+    )
+
+
+def test_governor_does_not_fetch_actual_tags_when_both_tag_and_privilege_management_disabled(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """When neither tag nor privilege management is enabled, the engine skips the
+    actual_tags fetch entirely — no SELECT against any *_tags system table."""
+    config = _catalog_with_tags_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_tag_management=False,
+        enable_privilege_management=False,
+        enable_taggable_management=False,
+    )
+
+    tag_queries = [s for s in mock_workspace_client.executed_sql if "_tags" in s.lower()]
+    assert tag_queries == [], (
+        f"Expected no tag-table queries when both flags off, got: {tag_queries}"
+    )
+
+
+def test_governor_skips_privileges_workflow_when_privilege_management_disabled(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """With enable_privilege_management=False, no privilege diff is computed and no
+    GRANT/REVOKE SQL runs."""
+    config = _catalog_with_grant_policy_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_tag_management=True,
+        enable_taggable_management=True,
+        enable_privilege_management=False,
+    )
+
+    assert result.privilege_diff == PrivilegeDiff()
+    grant_stmts = [
+        s for s in mock_workspace_client.executed_sql
+        if s.upper().startswith("GRANT") or s.upper().startswith("REVOKE")
+    ]
+    assert grant_stmts == [], (
+        f"Expected no GRANT/REVOKE SQL when privilege management is off, got: {grant_stmts}"
+    )
+
+
+def test_governor_does_not_fetch_actual_privileges_when_privilege_management_disabled(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """When privilege management is off, no SELECT against any *_privileges system table runs."""
+    config = _catalog_with_grant_policy_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_tag_management=True,
+        enable_taggable_management=True,
+        enable_privilege_management=False,
+    )
+
+    privilege_queries = [s for s in mock_workspace_client.executed_sql if "_privileges" in s.lower()]
+    assert privilege_queries == [], (
+        f"Expected no privilege-table queries when privilege management off, got: {privilege_queries}"
+    )
+
+
+def test_governor_privileges_use_actual_tags_when_tag_management_disabled(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """Config declares a grant policy with has_tags {env: prod} but does NOT declare
+    the env tag on the catalog. UC's actual_tags fetch returns that tag on the catalog.
+    With tag management off + privilege management on, the privileges compiler must
+    match against the on-disk tags, emitting the grant."""
+    config = {
+        "resources": {
+            "catalogs": {
+                "my_catalog": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["data_engineers"],
+                            "has_tags": {"env": "prod"},
+                        },
+                    ],
+                }
+            }
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    # actual_tags: env=prod is set on the catalog in UC, even though config doesn't declare it.
+    actual_tag_rows = [
+        ["CATALOG", "my_catalog", '[{"tag_name":"env","tag_value":"prod"}]'],
+    ]
+    _install_fetch_router(monkeypatch, config, tag_rows=actual_tag_rows)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_tag_management=False,
+        enable_taggable_management=True,
+        enable_privilege_management=True,
+    )
+
+    assert len(result.privilege_diff.to_grant) >= 1, (
+        f"Expected grant emitted from UC's actual env=prod tag, got to_grant={result.privilege_diff.to_grant}"
+    )
+
+
+def test_governor_privileges_use_config_tags_when_tag_management_enabled(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """Opposite pattern: config DOES declare the env=prod tag on the catalog, but UC
+    does not. With tag management on, the privileges compiler uses the config tags
+    (which will be applied this run) and emits the grant."""
+    config = {
+        "resources": {
+            "catalogs": {
+                "my_catalog": {
+                    "tags": {"env": "prod"},
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["data_engineers"],
+                            "has_tags": {"env": "prod"},
+                        },
+                    ],
+                }
+            }
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    # UC has no tags on the catalog — only config declares env=prod.
+    _install_fetch_router(monkeypatch, config, tag_rows=[])
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    result = _run_all_enabled(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+    )
+
+    assert len(result.privilege_diff.to_grant) >= 1, (
+        f"Expected grant emitted from config's env=prod tag, got to_grant={result.privilege_diff.to_grant}"
+    )
+
+
+def test_governor_skips_non_function_attribute_updates_when_taggable_management_disabled(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """Config declares a catalog owner; with taggable management off, the resulting
+    diff contains no CATALOG attribute updates."""
+    config = {
+        "resources": {
+            "catalogs": {
+                "my_catalog": {
+                    "owner": "data_engineers",
+                }
+            }
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_tag_management=False,
+        enable_privilege_management=False,
+        enable_taggable_management=False,
+    )
+
+    catalog_updates = [
+        u for u in result.securable_diff.attributes_to_update
+        if u.securable_type == SecurableType.CATALOG
+    ]
+    assert catalog_updates == [], (
+        f"Expected no CATALOG attribute updates with taggable management off, got: {catalog_updates}"
+    )
+
+
+def test_governor_still_checks_nonexistent_securables_when_taggable_management_disabled(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """A catalog declared in config but absent from UC still produces a
+    NonexistentSecurableError even when taggable management is off — the validation
+    is independent of the attribute-management flag."""
+    from uc_abac_governor.types import ExecutionBatchError, NonexistentSecurableError
+
+    config = {
+        "resources": {
+            "catalogs": {
+                "ghost_catalog": {},
+            }
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    # Route EVERY query to empty rows — ghost_catalog absent from actual securables.
+    monkeypatch.setattr(
+        "uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows",
+        lambda response: [],
+    )
+    _setup_mock_empty_principals(mock_workspace_client)
+
+    with pytest.raises(ExecutionBatchError) as exc_info:
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            enable_tag_management=False,
+            enable_privilege_management=False,
+            enable_taggable_management=False,
+        )
+
+    nonexistent_errors = [
+        e for e in exc_info.value.errors
+        if isinstance(e.exception, NonexistentSecurableError)
+    ]
+    assert len(nonexistent_errors) >= 1, (
+        f"Expected a NonexistentSecurableError for ghost_catalog, got: {exc_info.value.errors}"
     )

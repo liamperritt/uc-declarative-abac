@@ -137,6 +137,9 @@ def test_uc_abac_governor_dry_run(
         warehouse_id=warehouse_id,
         dry_run=True,
         use_workspace_scim=True,
+        enable_tag_management=True,
+        enable_taggable_management=True,
+        enable_privilege_management=True,
     )
 
     # All expected governed tags should be pending create/update or already in sync
@@ -209,6 +212,9 @@ def test_uc_abac_governor_deploy(
         warehouse_id=warehouse_id,
         dry_run=False,
         use_workspace_scim=True,
+        enable_tag_management=True,
+        enable_taggable_management=True,
+        enable_privilege_management=True,
     )
 
     # All expected governed tags should have been created/updated (or already in sync)

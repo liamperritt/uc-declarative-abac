@@ -30,13 +30,13 @@ from uc_abac_governor.privileges.state import PrivilegeDiff
 from uc_abac_governor.securables.compiler import compile_desired_attributes, compile_desired_securables
 from uc_abac_governor.securables.differ import compute_securable_diff
 from uc_abac_governor.securables.executor import execute_securable_diff
-from uc_abac_governor.securables.state import SecurableDiff
+from uc_abac_governor.securables.state import SecurableAttributes, SecurableDiff
 from uc_abac_governor.logger import ChangeLogger
 from uc_abac_governor.tags.compiler import compile_desired_tags
 from uc_abac_governor.tags.differ import compute_tag_diff
 from uc_abac_governor.tags.executor import execute_tag_diff
 from uc_abac_governor.tags.state import TagDiff
-from uc_abac_governor.types import ExecutionBatchError
+from uc_abac_governor.types import ExecutionBatchError, SecurableType
 
 _logger = logging.getLogger("uc_abac_governor")
 
@@ -52,17 +52,34 @@ class GovernorDiffsResult:
     privilege_diff: PrivilegeDiff
 
 
+def _function_attributes_only(attrs: set[SecurableAttributes]) -> set[SecurableAttributes]:
+    """Drop non-function attributes — used when --enable-taggable-management is off,
+    so the attribute differ only sees FUNCTION owners (functions are engine-managed
+    independently of the taggable-management gate)."""
+    return {a for a in attrs if a.securable_type == SecurableType.FUNCTION}
+
+
 def run(
     config_dir: Path,
     workspace_client: WorkspaceClient,
     warehouse_id: str,
     dry_run: bool = False,
     use_workspace_scim: bool = False,
+    enable_tag_management: bool = False,
+    enable_taggable_management: bool = False,
+    enable_privilege_management: bool = False,
 ) -> GovernorDiffsResult:
     """Run the full governance pipeline: discover, resolve, compile, diff, apply.
 
     Returns the computed diffs for every domain in execution order.
     In dry-run mode, diffs are computed but no SQL is executed.
+
+    The three ``enable_*`` flags gate mutation classes. Each defaults to False;
+    when unset the corresponding domain is skipped in both dry-run and real-run
+    (no fetch, no diff, no log, no execute). ``enable_privilege_management=True``
+    with ``enable_tag_management=False`` makes the privileges compiler match its
+    grant policies against the on-disk (``actual``) tag state instead of the
+    config's desired tags.
     """
     # 1. Discover + load + resolve YAML
     paths = discover_yaml_files(config_dir)
@@ -78,19 +95,23 @@ def run(
     change_logger = ChangeLogger(dry_run=dry_run, logger=_logger)
     change_logger.log_banner()
     _logger.info("  Fetching current state from workspace (this can take several minutes)...")
+    # actual_tags is needed by either the tags domain (for the diff) or the privileges
+    # domain (for policy matching against on-disk tag state when tag management is off).
+    need_actual_tags = enable_tag_management or enable_privilege_management
     with ThreadPoolExecutor() as pool:
         actual_securables_f = pool.submit(uc_helper.fetch_actual_securables, catalog_names)
-        actual_tags_f = pool.submit(uc_helper.fetch_actual_tags, catalog_names)
-        actual_privs_f = pool.submit(uc_helper.fetch_actual_privileges, catalog_names)
         actual_policies_f = pool.submit(uc_helper.fetch_actual_policies, config)
         actual_governed_tags_f = pool.submit(ws_helper.fetch_actual_governed_tags)
         principals_f = pool.submit(ws_helper.fetch_principals)
+        actual_tags_f = pool.submit(uc_helper.fetch_actual_tags, catalog_names) if need_actual_tags else None
+        actual_privs_f = pool.submit(uc_helper.fetch_actual_privileges, catalog_names) if enable_privilege_management else None
+
         actual_securables, actual_attributes = actual_securables_f.result()
-        actual_tags = actual_tags_f.result()
-        actual_privileges = actual_privs_f.result()
         actual_policies = actual_policies_f.result()
         actual_governed_tags = actual_governed_tags_f.result()
         principals_f.result()
+        actual_tags = actual_tags_f.result() if actual_tags_f is not None else set()
+        actual_privileges = actual_privs_f.result() if actual_privs_f is not None else set()
     _logger.info("  Successfully fetched current state")
 
     # 3. Construct the shared PrincipalResolver now that ws_helper cache is populated.
@@ -99,6 +120,13 @@ def run(
     # 4. Securables workflow (before tags and privileges)
     desired_attributes = compile_desired_attributes(config)
     desired_securables = compile_desired_securables(config)
+    if not enable_taggable_management:
+        # Drop non-function attribute updates on both sides — the engine must not
+        # touch catalog/schema/table/volume owners without the taggable-management
+        # opt-in. Function attributes flow through because FUNCTION creation /
+        # replacement is always engine-managed.
+        desired_attributes = _function_attributes_only(desired_attributes)
+        actual_attributes = _function_attributes_only(actual_attributes)
     securable_diff = compute_securable_diff(
         desired_attributes, actual_attributes, desired_securables, actual_securables,
         resolver, change_logger,
@@ -114,8 +142,16 @@ def run(
     governed_tag_diff = compute_governed_tag_diff(desired_governed_tags, actual_governed_tags)
 
     # 5. Tags workflow
-    desired_tags = compile_desired_tags(config)
-    tag_diff = compute_tag_diff(desired_tags, actual_tags)
+    if enable_tag_management:
+        desired_tags = compile_desired_tags(config)
+        tag_diff = compute_tag_diff(desired_tags, actual_tags)
+        tags_for_privilege_matching = desired_tags
+    else:
+        tag_diff = TagDiff()
+        # When tag management is off the engine will not reconcile the config's
+        # desired tags onto UC this run, so the privileges compiler must match
+        # its policies against the on-disk tag state to stay honest.
+        tags_for_privilege_matching = actual_tags
 
     # 6. Policies workflow (mask/filter)
     desired_policies = compile_desired_policies(config)
@@ -124,10 +160,15 @@ def run(
     )
 
     # 7. Privileges workflow
-    compiled_privileges = compile_desired_privileges(config, desired_tags, run_date=date.today())
-    privilege_diff = compute_privilege_diff(
-        compiled_privileges, actual_privileges, resolver, change_logger,
-    )
+    if enable_privilege_management:
+        compiled_privileges = compile_desired_privileges(
+            config, tags_for_privilege_matching, run_date=date.today(),
+        )
+        privilege_diff = compute_privilege_diff(
+            compiled_privileges, actual_privileges, resolver, change_logger,
+        )
+    else:
+        privilege_diff = PrivilegeDiff()
 
     # 8. Log and execute (or dry-run)
     if governed_tag_diff.to_create or governed_tag_diff.to_update:

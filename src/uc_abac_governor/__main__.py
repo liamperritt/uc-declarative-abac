@@ -41,6 +41,24 @@ def main() -> None:
         action="store_true",
         help="Fetch principals from the workspace SCIM API instead of the account SCIM proxy (default: account)",
     )
+    parser.add_argument(
+        "--enable-tag-management",
+        action="store_true",
+        default=False,
+        help="Permit the engine to create/update/remove tag assignments on securables. Off by default.",
+    )
+    parser.add_argument(
+        "--enable-taggable-management",
+        action="store_true",
+        default=False,
+        help="Permit the engine to update attributes (e.g. owner) on existing catalogs, schemas, tables, and volumes. Off by default.",
+    )
+    parser.add_argument(
+        "--enable-privilege-management",
+        action="store_true",
+        default=False,
+        help="Permit the engine to GRANT/REVOKE privileges via SQL. Off by default.",
+    )
 
     args = parser.parse_args()
 
@@ -54,6 +72,9 @@ def main() -> None:
         warehouse_id=args.warehouse_id,
         dry_run=args.dry_run,
         use_workspace_scim=args.use_workspace_scim,
+        enable_tag_management=args.enable_tag_management,
+        enable_taggable_management=args.enable_taggable_management,
+        enable_privilege_management=args.enable_privilege_management,
     )
 
 
