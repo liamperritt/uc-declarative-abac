@@ -87,7 +87,7 @@ on:
     - cron: '0 7 * * *'   # ~5–6pm Sydney time — re-sync to catch any drift introduced during the day
 
 jobs:
-  sync:
+  deploy:
     runs-on: ubuntu-latest
     permissions:
       contents: read
