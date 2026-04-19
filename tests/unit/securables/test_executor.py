@@ -6,8 +6,11 @@ from uc_abac_governor.logger import ChangeLogger
 from uc_abac_governor.securables.executor import execute_securable_diff
 from uc_abac_governor.securables.state import (
     AttributeUpdate,
+    Column,
     Function,
+    Securable,
     SecurableDiff,
+    Table,
 )
 from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.types import PrincipalType, SecurableType
@@ -351,3 +354,97 @@ def test_securable_executor_escapes_single_quotes_in_comment():
 
     (sql,) = execute_securable_diff(uc_helper, diff, ChangeLogger())
     assert "COMMENT 'It\\'s a comment'" in sql
+
+
+# ---------------------------------------------------------------------------
+# Taggable creation: catalog / schema / table / volume
+# ---------------------------------------------------------------------------
+
+
+def test_securable_executor_builds_create_catalog_sql():
+    """A base Securable(CATALOG, ...) in to_create produces CREATE CATALOG SQL."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        securables_to_create=[Securable(securable_type=SecurableType.CATALOG, full_name="new_cat")],
+    )
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    _assert_sql_contains(stmts[0], "CREATE CATALOG", "IF NOT EXISTS", "new_cat")
+
+
+def test_securable_executor_builds_create_schema_sql_with_full_name():
+    """A base Securable(SCHEMA, ...) in to_create produces CREATE SCHEMA <full_name> SQL."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        securables_to_create=[Securable(securable_type=SecurableType.SCHEMA, full_name="cat.new_sch")],
+    )
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    _assert_sql_contains(stmts[0], "CREATE SCHEMA", "IF NOT EXISTS", "cat.new_sch")
+
+
+def test_securable_executor_builds_create_volume_sql():
+    """A base Securable(VOLUME, ...) in to_create produces a managed CREATE VOLUME statement."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        securables_to_create=[Securable(securable_type=SecurableType.VOLUME, full_name="cat.sch.vol")],
+    )
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    _assert_sql_contains(stmts[0], "CREATE VOLUME", "IF NOT EXISTS", "cat.sch.vol")
+    # Managed-only: no LOCATION clause.
+    assert "LOCATION" not in stmts[0].upper()
+
+
+def test_securable_executor_builds_create_table_sql_with_columns():
+    """A Table in to_create produces CREATE TABLE SQL with typed columns in declaration order."""
+    uc_helper = MagicMock()
+    table = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sch.orders",
+        columns=(
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.email", type="STRING"),
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.amount", type="DECIMAL(18,2)"),
+        ),
+    )
+    diff = SecurableDiff(securables_to_create=[table])
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    sql = stmts[0]
+    _assert_sql_contains(sql, "CREATE TABLE", "IF NOT EXISTS", "cat.sch.orders")
+    # Columns appear with their types, in declaration order.
+    assert "email" in sql and "STRING" in sql
+    assert "amount" in sql and "DECIMAL(18,2)" in sql
+    assert sql.index("email") < sql.index("amount")
+
+
+def test_securable_executor_orders_creations_parent_first():
+    """Catalogs come before schemas before tables/volumes/functions in the SQL order."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        securables_to_create=[
+            # Deliberately out of order.
+            Table(securable_type=SecurableType.TABLE, full_name="cat.sch.tbl",
+                  columns=(Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.tbl.a", type="STRING"),)),
+            Securable(securable_type=SecurableType.SCHEMA, full_name="cat.sch"),
+            Securable(securable_type=SecurableType.VOLUME, full_name="cat.sch.vol"),
+            Securable(securable_type=SecurableType.CATALOG, full_name="cat"),
+        ],
+    )
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    idx_catalog = next(i for i, s in enumerate(stmts) if "CREATE CATALOG" in s.upper())
+    idx_schema = next(i for i, s in enumerate(stmts) if "CREATE SCHEMA" in s.upper())
+    idx_table = next(i for i, s in enumerate(stmts) if "CREATE TABLE" in s.upper())
+    idx_volume = next(i for i, s in enumerate(stmts) if "CREATE VOLUME" in s.upper())
+    assert idx_catalog < idx_schema < idx_table, f"expected catalog < schema < table, got {[idx_catalog, idx_schema, idx_table]}"
+    assert idx_schema < idx_volume, f"expected schema < volume, got schema={idx_schema}, volume={idx_volume}"

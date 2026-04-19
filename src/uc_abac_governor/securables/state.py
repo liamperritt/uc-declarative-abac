@@ -48,6 +48,30 @@ class Securable:
 
 
 @dataclass(frozen=True)
+class Column(Securable):
+    """Column state: name (in full_name) + optional UC datatype string.
+
+    Columns ride along inside Table.columns rather than being standalone securables
+    in the diff — they're used by the executor to build CREATE TABLE SQL. ``type``
+    may be None for columns declared purely for tagging on existing tables; table
+    creation requires every column to have a non-None type.
+    """
+
+    type: str | None = None
+
+
+@dataclass(frozen=True)
+class Table(Securable):
+    """Table state with its declared columns (ordered).
+
+    Column order is significant because CREATE TABLE SQL emits columns in tuple
+    order; authors' YAML ordering is preserved.
+    """
+
+    columns: tuple[Column, ...] = ()
+
+
+@dataclass(frozen=True)
 class Function(Securable):
     """Function-specific state: parameters, body, and comment.
 

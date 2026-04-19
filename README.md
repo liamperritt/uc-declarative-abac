@@ -66,6 +66,7 @@ The repo ships a composite GitHub Action at `govern/action.yml` so any other rep
 | `use-workspace-scim` | no | `'false'` | Fetch principals from the workspace SCIM API instead of the account SCIM proxy when `'true'` |
 | `enable-tag-management` | no | `'false'` | Permit the engine to create/update/remove tag assignments on securables |
 | `enable-taggable-management` | no | `'false'` | Permit the engine to update attributes (owner, etc.) on existing catalogs/schemas/tables/volumes |
+| `enable-taggable-creation` | no | `'false'` | Permit the engine to create catalogs/schemas/tables/volumes declared in config but absent from UC |
 | `enable-privilege-management` | no | `'false'` | Permit the engine to `GRANT`/`REVOKE` privileges |
 
 **Example workflow in a caller repo** (`.github/workflows/uc-governance.yml`):
@@ -773,15 +774,16 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 - **Structured logging** — `Securables` / `Governed tags` / `Tags` / `Policies` / `Privileges` section headers, ordered by securable type then name, with dry-run prefix support and summary counts
 
 #### Infrastructure
-- **CLI** (`python -m uc_abac_governor`) — required: `--config-dir`, `--warehouse-id`. Optional: `--profile` (CLI profile name from `~/.databrickscfg`; omit to use unified auth via env vars / default profile / metadata service — see the [Authentication](#authentication) section), `--dry-run`, `--use-workspace-scim`, and the three opt-in mutation flags (`--enable-tag-management`, `--enable-taggable-management`, `--enable-privilege-management`) described below.
+- **CLI** (`python -m uc_abac_governor`) — required: `--config-dir`, `--warehouse-id`. Optional: `--profile` (CLI profile name from `~/.databrickscfg`; omit to use unified auth via env vars / default profile / metadata service — see the [Authentication](#authentication) section), `--dry-run`, `--use-workspace-scim`, and the four opt-in mutation flags (`--enable-tag-management`, `--enable-taggable-management`, `--enable-taggable-creation`, `--enable-privilege-management`) described below.
 - **GitHub Action** — reusable composite action at `govern/action.yml`; caller repos invoke it as `liam-perritt/uc-abac-governor/govern@<ref>` to reconcile their own YAML configs against UC on push / PR / schedule (see the [GitHub Action](#github-action) section)
 - **Hybrid SQL polling** — `wait_timeout=50s` with `on_wait_timeout=CONTINUE` and 10s polling for long-running queries
 - **External links** — fetches SQL results via external link URLs for large result sets
 - **Parallel state fetch** — securables, tags, privileges, policies, governed tags, and principals are fetched concurrently
 - **`information_schema` filtering** — all state queries exclude the `information_schema` schema and its child objects
-- **Privileged-action opt-in flags** — three classes of mutation are gated behind explicit CLI flags. Each defaults to `false`; if unset, the corresponding actions are **skipped in both dry runs and real runs** — no fetch, no diff, no log section, no SQL. Pass the flag to opt in:
+- **Privileged-action opt-in flags** — four classes of mutation are gated behind explicit CLI flags. Each defaults to `false`; if unset, the corresponding actions are **skipped in both dry runs and real runs** — no fetch, no diff, no log section, no SQL. Pass the flag to opt in:
   - `--enable-tag-management` — create/update/remove tag assignments on securables. When off, the privileges compiler still honours grant-policy matches, but it matches against the *actual* on-disk UC tag state rather than the config's desired tags (since the engine is not going to apply the config's tags this run).
   - `--enable-taggable-management` — update attributes (currently `owner`; future: `comment`, `rfa_destination`) on existing taggable securables (catalogs, schemas, tables, volumes). Function attributes are always engine-managed independently of this flag.
+  - `--enable-taggable-creation` — create catalogs, schemas, tables, and volumes declared in config but absent from UC. Tables must declare ≥1 column with a `type` string on each (e.g. `type: STRING`); otherwise table creation fails with a `NonexistentSecurableError` explaining the requirement. Creation is managed-only (no `LOCATION` clauses). The securables domain does not fetch columns or attempt to add columns to pre-existing tables in this iteration.
   - `--enable-privilege-management` — grant/revoke privileges via `GRANT`/`REVOKE` SQL.
 
   "Taggables" here means the securable types that support tagging: catalogs, schemas, tables, volumes, and columns. Functions aren't taggable and are managed separately.
@@ -789,7 +791,6 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 ### Not yet implemented
 
 - **Additional `--enable-*` flags for deferred mutation classes:**
-  - `--enable-taggable-creation` — create taggable securables (catalogs, schemas, tables, volumes) that are declared in config but don't exist in UC. Today, missing non-function securables are surfaced as `NonexistentSecurableError` and the run fails fast rather than creating them.
   - `--enable-governed-tag-deletion` — delete governed tags (account-level tag policies) that exist in UC but are absent from config. Without this, account-side governed tags are left alone (matches the current no-delete invariant).
 - **Governed tag assignment ACLs** — `allowed_principals` is parsed but not yet enforced; assigning which users, groups, or service principals may `ASSIGN` a governed tag to UC objects will be wired through `AccountAccessControlProxyAPI` in a future iteration
 - **Object attributes** — `comment`, `rfa_destination` on securables (the `owner` attribute is implemented; adding new attributes requires only a field on `SecurableAttributes` and an executor dispatch branch). Enforcement is already gated by `--enable-taggable-management`.

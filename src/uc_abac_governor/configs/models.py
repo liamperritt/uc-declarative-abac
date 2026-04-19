@@ -170,6 +170,7 @@ class ColumnConfig(BaseTaggableConfig):
     catalog_name: str
     schema_name: str
     table_name: str
+    type: str | None = None
 
     @field_validator("owner", mode="before")
     @classmethod

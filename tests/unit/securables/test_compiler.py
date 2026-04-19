@@ -3,7 +3,7 @@ from __future__ import annotations
 from uc_abac_governor.configs.models import ResourcesConfig
 from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.securables.compiler import compile_desired_attributes, compile_desired_securables
-from uc_abac_governor.securables.state import Function, Securable, SecurableAttributes
+from uc_abac_governor.securables.state import Column, Function, Securable, SecurableAttributes, Table
 from uc_abac_governor.types import PrincipalType, SecurableType
 
 
@@ -341,8 +341,9 @@ def test_securables_compiler_emits_securable_for_each_declared_schema():
     assert Securable(securable_type=SecurableType.SCHEMA, full_name="cat.hr") in result
 
 
-def test_securables_compiler_emits_securable_for_each_declared_table():
-    """Every declared table appears in the desired-securables set as a base Securable."""
+def test_securables_compiler_emits_table_subclass_for_each_declared_table():
+    """Every declared table appears in the desired-securables set as a Table instance
+    (not a base Securable) so the executor can reach columns for CREATE TABLE SQL."""
     config = ResourcesConfig.model_validate(
         {
             "catalogs": {
@@ -363,8 +364,109 @@ def test_securables_compiler_emits_securable_for_each_declared_table():
 
     result = compile_desired_securables(config)
 
-    assert Securable(securable_type=SecurableType.TABLE, full_name="cat.sales.orders") in result
-    assert Securable(securable_type=SecurableType.TABLE, full_name="cat.sales.customers") in result
+    assert Table(securable_type=SecurableType.TABLE, full_name="cat.sales.orders", columns=()) in result
+    assert Table(securable_type=SecurableType.TABLE, full_name="cat.sales.customers", columns=()) in result
+
+
+def test_securables_compiler_emits_column_with_type_when_specified():
+    """A declared column with a 'type' produces a Column with that type string."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "columns": [
+                                        {"name": "email", "type": "STRING"},
+                                        {"name": "amount", "type": "DECIMAL(18,2)"},
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    result = compile_desired_securables(config)
+
+    orders = next(s for s in result if isinstance(s, Table) and s.full_name == "cat.sales.orders")
+    assert Column(
+        securable_type=SecurableType.COLUMN,
+        full_name="cat.sales.orders.email",
+        type="STRING",
+    ) in orders.columns
+    assert Column(
+        securable_type=SecurableType.COLUMN,
+        full_name="cat.sales.orders.amount",
+        type="DECIMAL(18,2)",
+    ) in orders.columns
+
+
+def test_securables_compiler_emits_column_with_type_none_when_unspecified():
+    """A declared column without a 'type' produces Column(type=None)."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "columns": [{"name": "email"}],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    result = compile_desired_securables(config)
+
+    orders = next(s for s in result if isinstance(s, Table) and s.full_name == "cat.sales.orders")
+    (email_col,) = orders.columns
+    assert email_col.type is None
+
+
+def test_securables_compiler_preserves_column_declaration_order():
+    """The order of columns in the YAML list is preserved in Table.columns (tuple)."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "columns": [
+                                        {"name": "c_zebra", "type": "STRING"},
+                                        {"name": "a_apple", "type": "INT"},
+                                        {"name": "m_mango", "type": "DATE"},
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    result = compile_desired_securables(config)
+
+    orders = next(s for s in result if isinstance(s, Table) and s.full_name == "cat.sales.orders")
+    assert [c.full_name.rsplit(".", 1)[-1] for c in orders.columns] == ["c_zebra", "a_apple", "m_mango"]
 
 
 def test_securables_compiler_emits_securable_for_each_declared_volume():

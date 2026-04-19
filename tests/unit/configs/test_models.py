@@ -686,6 +686,52 @@ def test_column_config_allows_omitted_owner():
     assert column.owner is None
 
 
+def test_column_config_accepts_optional_type():
+    """ColumnConfig carries a 'type' string when declared (used for table creation)."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_catalog": {
+                "schemas": [
+                    {
+                        "name": "sales",
+                        "tables": [
+                            {
+                                "name": "orders",
+                                "columns": [{"name": "email", "type": "STRING"}],
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+    })
+    column = config.catalogs["my_catalog"].schemas[0].tables[0].columns[0]
+    assert column.type == "STRING"
+
+
+def test_column_config_type_defaults_to_none():
+    """ColumnConfig.type is None when not declared."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_catalog": {
+                "schemas": [
+                    {
+                        "name": "sales",
+                        "tables": [
+                            {
+                                "name": "orders",
+                                "columns": [{"name": "email"}],
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+    })
+    column = config.catalogs["my_catalog"].schemas[0].tables[0].columns[0]
+    assert column.type is None
+
+
 # ---------------------------------------------------------------------------
 # ParameterConfig.type coercion
 # ---------------------------------------------------------------------------

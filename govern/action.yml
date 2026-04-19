@@ -43,6 +43,13 @@ inputs:
       attribute updates are skipped.
     required: false
     default: 'false'
+  enable-taggable-creation:
+    description: >-
+      If "true", permit the engine to create catalogs, schemas, tables, and volumes
+      declared in config but absent from Unity Catalog. Off by default — when unset,
+      missing non-function securables raise NonexistentSecurableError.
+    required: false
+    default: 'false'
   enable-privilege-management:
     description: >-
       If "true", permit the engine to GRANT/REVOKE privileges via SQL. Off by default —
@@ -76,6 +83,7 @@ runs:
         USE_WORKSPACE_SCIM: ${{ inputs.use-workspace-scim }}
         ENABLE_TAG_MANAGEMENT: ${{ inputs.enable-tag-management }}
         ENABLE_TAGGABLE_MANAGEMENT: ${{ inputs.enable-taggable-management }}
+        ENABLE_TAGGABLE_CREATION: ${{ inputs.enable-taggable-creation }}
         ENABLE_PRIVILEGE_MANAGEMENT: ${{ inputs.enable-privilege-management }}
       run: |
         args=(
@@ -96,6 +104,9 @@ runs:
         fi
         if [[ "$ENABLE_TAGGABLE_MANAGEMENT" == "true" ]]; then
           args+=(--enable-taggable-management)
+        fi
+        if [[ "$ENABLE_TAGGABLE_CREATION" == "true" ]]; then
+          args+=(--enable-taggable-creation)
         fi
         if [[ "$ENABLE_PRIVILEGE_MANAGEMENT" == "true" ]]; then
           args+=(--enable-privilege-management)

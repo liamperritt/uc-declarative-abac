@@ -139,6 +139,7 @@ def test_uc_abac_governor_dry_run(
         use_workspace_scim=True,
         enable_tag_management=True,
         enable_taggable_management=True,
+        enable_taggable_creation=True,
         enable_privilege_management=True,
     )
 
@@ -214,6 +215,7 @@ def test_uc_abac_governor_deploy(
         use_workspace_scim=True,
         enable_tag_management=True,
         enable_taggable_management=True,
+        enable_taggable_creation=True,
         enable_privilege_management=True,
     )
 

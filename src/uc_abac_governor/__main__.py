@@ -54,6 +54,12 @@ def main() -> None:
         help="Permit the engine to update attributes (e.g. owner) on existing catalogs, schemas, tables, and volumes. Off by default.",
     )
     parser.add_argument(
+        "--enable-taggable-creation",
+        action="store_true",
+        default=False,
+        help="Permit the engine to create catalogs, schemas, tables, and volumes declared in config but absent from UC. Off by default.",
+    )
+    parser.add_argument(
         "--enable-privilege-management",
         action="store_true",
         default=False,
@@ -74,6 +80,7 @@ def main() -> None:
         use_workspace_scim=args.use_workspace_scim,
         enable_tag_management=args.enable_tag_management,
         enable_taggable_management=args.enable_taggable_management,
+        enable_taggable_creation=args.enable_taggable_creation,
         enable_privilege_management=args.enable_privilege_management,
     )
 

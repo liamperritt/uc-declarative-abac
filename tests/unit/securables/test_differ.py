@@ -8,10 +8,12 @@ from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.securables.differ import compute_securable_diff
 from uc_abac_governor.securables.state import (
     AttributeUpdate,
+    Column,
     Function,
     Securable,
     SecurableAttributes,
     SecurableDiff,
+    Table,
 )
 from uc_abac_governor.types import NonexistentSecurableError, PrincipalType, SecurableType
 
@@ -462,6 +464,138 @@ def test_securable_differ_returns_diff_normally_when_every_declared_securable_is
     change_logger = _change_logger()
 
     diff = compute_securable_diff(set(), set(), desired, actual, _resolver(), change_logger)
+
+    assert diff.securables_to_create == []
+    assert diff.securables_to_replace == []
+    assert _nonexistent_errors(change_logger) == []
+
+
+# ---------------------------------------------------------------------------
+# --enable-taggable-creation gating
+# ---------------------------------------------------------------------------
+
+
+def _typed_table(full_name: str, *col_names: str) -> Table:
+    """Shorthand: build a Table with typed columns (STRING) for each declared name."""
+    return Table(
+        securable_type=SecurableType.TABLE,
+        full_name=full_name,
+        columns=tuple(
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name=f"{full_name}.{col_name}",
+                type="STRING",
+            )
+            for col_name in col_names
+        ),
+    )
+
+
+def test_securable_differ_emits_catalog_schema_volume_in_to_create_when_taggable_creation_enabled():
+    """With creation enabled, missing non-function Securables flow into to_create."""
+    desired = {
+        _sec(SecurableType.CATALOG, "new_cat"),
+        _sec(SecurableType.SCHEMA, "new_cat.sch"),
+        _sec(SecurableType.VOLUME, "new_cat.sch.vol"),
+    }
+    change_logger = _change_logger()
+
+    diff = compute_securable_diff(
+        set(), set(), desired, set(), _resolver(), change_logger,
+        enable_taggable_creation=True,
+    )
+
+    assert _sec(SecurableType.CATALOG, "new_cat") in diff.securables_to_create
+    assert _sec(SecurableType.SCHEMA, "new_cat.sch") in diff.securables_to_create
+    assert _sec(SecurableType.VOLUME, "new_cat.sch.vol") in diff.securables_to_create
+    assert _nonexistent_errors(change_logger) == []
+
+
+def test_securable_differ_emits_table_in_to_create_when_columns_valid_and_taggable_creation_enabled():
+    """A missing Table with ≥1 typed column flows into to_create, no errors logged."""
+    table = _typed_table("cat.sch.orders", "email", "amount")
+    change_logger = _change_logger()
+
+    diff = compute_securable_diff(
+        set(), set(), {table}, set(), _resolver(), change_logger,
+        enable_taggable_creation=True,
+    )
+
+    assert table in diff.securables_to_create
+    assert _nonexistent_errors(change_logger) == []
+
+
+def test_securable_differ_logs_error_when_table_has_no_columns_and_taggable_creation_enabled():
+    """A missing Table with no columns fails validation — logged as a NonexistentSecurableError
+    (aggregated later by ExecutionBatchError) and dropped from to_create."""
+    empty_table = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sch.empty",
+        columns=(),
+    )
+    change_logger = _change_logger()
+
+    diff = compute_securable_diff(
+        set(), set(), {empty_table}, set(), _resolver(), change_logger,
+        enable_taggable_creation=True,
+    )
+
+    assert empty_table not in diff.securables_to_create
+    errors = _nonexistent_errors(change_logger)
+    assert len(errors) == 1
+    assert errors[0].securable_type == SecurableType.TABLE
+    assert errors[0].full_name == "cat.sch.empty"
+
+
+def test_securable_differ_logs_error_when_any_column_missing_type_and_taggable_creation_enabled():
+    """A missing Table with any column lacking a 'type' fails validation."""
+    table = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sch.partly_typed",
+        columns=(
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.partly_typed.a", type="STRING"),
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.partly_typed.b", type=None),
+        ),
+    )
+    change_logger = _change_logger()
+
+    diff = compute_securable_diff(
+        set(), set(), {table}, set(), _resolver(), change_logger,
+        enable_taggable_creation=True,
+    )
+
+    assert table not in diff.securables_to_create
+    errors = _nonexistent_errors(change_logger)
+    assert len(errors) == 1
+    assert errors[0].securable_type == SecurableType.TABLE
+    assert errors[0].full_name == "cat.sch.partly_typed"
+
+
+def test_securable_differ_still_logs_error_when_taggable_creation_disabled():
+    """Default behaviour: missing non-function securables are logged (old path)."""
+    desired = {_sec(SecurableType.CATALOG, "ghost")}
+    change_logger = _change_logger()
+
+    diff = compute_securable_diff(
+        set(), set(), desired, set(), _resolver(), change_logger,
+    )
+
+    assert diff.securables_to_create == []
+    offenders = {(e.securable_type, e.full_name) for e in _nonexistent_errors(change_logger)}
+    assert (SecurableType.CATALOG, "ghost") in offenders
+
+
+def test_securable_differ_does_not_add_table_to_replace_when_desired_columns_differ_from_actual():
+    """An existing TABLE (base Securable on actual side) plus a desired Table with
+    columns must not be marked for replacement — only Functions are replaceable."""
+    desired_table = _typed_table("cat.sch.orders", "email")
+    actual_table = _sec(SecurableType.TABLE, "cat.sch.orders")
+    change_logger = _change_logger()
+
+    diff = compute_securable_diff(
+        set(), set(), {desired_table}, {actual_table}, _resolver(), change_logger,
+        enable_taggable_creation=True,
+    )
 
     assert diff.securables_to_create == []
     assert diff.securables_to_replace == []

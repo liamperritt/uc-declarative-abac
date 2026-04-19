@@ -84,15 +84,28 @@ class NonexistentSecurableError(GovernorError):
     carries a single (type, full_name) pair — the engine logs one per offender
     via ``ChangeLogger.log_error`` and the governor surfaces them together via
     ``ExecutionBatchError`` at the end of the run.
+
+    An optional ``hint`` string is appended to the stock message — used by the
+    table-creation validator to explain why an otherwise-createable table can't
+    be created (e.g. missing columns or missing column types).
     """
 
-    def __init__(self, securable_type: SecurableType, full_name: str) -> None:
+    def __init__(
+        self,
+        securable_type: SecurableType,
+        full_name: str,
+        hint: str | None = None,
+    ) -> None:
         self.securable_type = securable_type
         self.full_name = full_name
-        super().__init__(
+        self.hint = hint
+        message = (
             f"Nonexistent {securable_type.value} {full_name!r} declared in config but "
             f"not found in Unity Catalog. Either create it in UC, or remove it from config."
         )
+        if hint:
+            message = f"{message} {hint}"
+        super().__init__(message)
 
 
 @dataclass(frozen=True)

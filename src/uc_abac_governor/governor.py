@@ -67,6 +67,7 @@ def run(
     use_workspace_scim: bool = False,
     enable_tag_management: bool = False,
     enable_taggable_management: bool = False,
+    enable_taggable_creation: bool = False,
     enable_privilege_management: bool = False,
 ) -> GovernorDiffsResult:
     """Run the full governance pipeline: discover, resolve, compile, diff, apply.
@@ -130,6 +131,7 @@ def run(
     securable_diff = compute_securable_diff(
         desired_attributes, actual_attributes, desired_securables, actual_securables,
         resolver, change_logger,
+        enable_taggable_creation=enable_taggable_creation,
     )
 
     if securable_diff.securables_to_create or securable_diff.securables_to_replace or securable_diff.attributes_to_update:

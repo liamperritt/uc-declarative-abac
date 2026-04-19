@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from uc_abac_governor.configs.models import FunctionConfig, ResourcesConfig, SecurableConfig
+from uc_abac_governor.configs.models import ColumnConfig, FunctionConfig, ResourcesConfig, SecurableConfig, TableConfig
 from uc_abac_governor.principals.state import Principal
-from uc_abac_governor.securables.state import Function, SecurableAttributes, Securable
+from uc_abac_governor.securables.state import Column, Function, SecurableAttributes, Securable, Table
 from uc_abac_governor.types import PrincipalType, SecurableType
 
 
@@ -65,13 +65,33 @@ def _compile_function(func: FunctionConfig) -> Function:
     )
 
 
+def _compile_column(col: ColumnConfig) -> Column:
+    """Build a Column from a ColumnConfig, preserving the optional UC datatype."""
+    return Column(
+        securable_type=SecurableType.COLUMN,
+        full_name=col.full_name,
+        type=col.type,
+    )
+
+
+def _compile_table(table: TableConfig) -> Table:
+    """Build a Table with its declared columns in YAML declaration order."""
+    return Table(
+        securable_type=SecurableType.TABLE,
+        full_name=table.full_name,
+        columns=tuple(_compile_column(c) for c in (table.columns or [])),
+    )
+
+
 def compile_desired_securables(config: ResourcesConfig) -> set[Securable]:
     """Walk the config tree and emit a Securable for every declared securable.
 
-    Catalogs, schemas, tables, and volumes are emitted as base ``Securable``
-    (type + full_name only). Functions are emitted as ``Function`` instances
-    carrying their parameters, definition, and optional comment so the differ
-    can detect replacement-worthy changes.
+    Catalogs, schemas, and volumes are emitted as base ``Securable`` (type +
+    full_name only). Tables are emitted as ``Table`` subclass instances carrying
+    their declared columns (each column as a ``Column`` with an optional UC
+    datatype) — the executor reads these when building ``CREATE TABLE`` SQL.
+    Functions are emitted as ``Function`` instances carrying their parameters,
+    definition, and optional comment so the differ can detect replacement.
     """
     securables: set[Securable] = set()
 
@@ -86,10 +106,7 @@ def compile_desired_securables(config: ResourcesConfig) -> set[Securable]:
                 full_name=schema.full_name,
             ))
             for table in schema.tables or []:
-                securables.add(Securable(
-                    securable_type=SecurableType.TABLE,
-                    full_name=table.full_name,
-                ))
+                securables.add(_compile_table(table))
             for volume in schema.volumes or []:
                 securables.add(Securable(
                     securable_type=SecurableType.VOLUME,

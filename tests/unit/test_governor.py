@@ -89,13 +89,14 @@ def _catalog_with_tags_and_grants_config() -> dict:
 
 
 def _run_all_enabled(**kwargs):
-    """Shorthand for ``run(..., enable_tag_management=True, enable_privilege_management=True,
-    enable_taggable_management=True)`` — preserves pre-flag test intent for tests that
-    exercise the full reconciliation pipeline. New skip-path tests call ``run(...)``
-    directly to verify default-off behaviour."""
+    """Shorthand for ``run(..., enable_tag_management=True, enable_taggable_management=True,
+    enable_taggable_creation=True, enable_privilege_management=True)`` — preserves pre-flag
+    test intent for tests that exercise the full reconciliation pipeline. New skip-path
+    tests call ``run(...)`` directly to verify default-off behaviour."""
     defaults = {
         "enable_tag_management": True,
         "enable_taggable_management": True,
+        "enable_taggable_creation": True,
         "enable_privilege_management": True,
     }
     defaults.update(kwargs)
@@ -1178,6 +1179,76 @@ def test_governor_skips_non_function_attribute_updates_when_taggable_management_
     assert catalog_updates == [], (
         f"Expected no CATALOG attribute updates with taggable management off, got: {catalog_updates}"
     )
+
+
+def test_governor_creates_missing_taggables_when_taggable_creation_enabled(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """With --enable-taggable-creation on, a catalog declared in config but absent
+    from UC produces a CREATE CATALOG statement in executed SQL."""
+    config = {
+        "resources": {
+            "catalogs": {
+                "brand_new_cat": {},
+            }
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    # Route every fetch to empty rows — the catalog doesn't exist in UC.
+    monkeypatch.setattr(
+        "uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows",
+        lambda response: [],
+    )
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_taggable_creation=True,
+    )
+
+    create_catalog_stmts = [s for s in mock_workspace_client.executed_sql if "CREATE CATALOG" in s.upper()]
+    assert len(create_catalog_stmts) == 1
+    assert "brand_new_cat" in create_catalog_stmts[0]
+
+
+def test_governor_does_not_create_missing_taggables_when_taggable_creation_disabled(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """Without --enable-taggable-creation, a missing catalog raises ExecutionBatchError
+    with a NonexistentSecurableError (the pre-flag behaviour)."""
+    from uc_abac_governor.types import ExecutionBatchError, NonexistentSecurableError
+
+    config = {
+        "resources": {
+            "catalogs": {
+                "ghost_cat": {},
+            }
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    monkeypatch.setattr(
+        "uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows",
+        lambda response: [],
+    )
+    _setup_mock_empty_principals(mock_workspace_client)
+
+    with pytest.raises(ExecutionBatchError) as exc_info:
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            enable_taggable_creation=False,
+        )
+
+    nonexistent_errors = [
+        e for e in exc_info.value.errors
+        if isinstance(e.exception, NonexistentSecurableError)
+    ]
+    assert len(nonexistent_errors) >= 1
+    create_stmts = [s for s in mock_workspace_client.executed_sql if "CREATE CATALOG" in s.upper()]
+    assert create_stmts == []
 
 
 def test_governor_still_checks_nonexistent_securables_when_taggable_management_disabled(

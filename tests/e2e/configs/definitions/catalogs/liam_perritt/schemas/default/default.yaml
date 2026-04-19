@@ -9,5 +9,10 @@ definitions:
         - name: batch_table
           tags:
             uc_gov_classification: internal
+      volumes:
+        - name: test_volume
+          owner: uc_governor_test_team
+          tags:
+            uc_gov_classification: internal
       functions:
         - $defs/functions/abac|format_phone

@@ -12,6 +12,7 @@ from uc_abac_governor.securables.state import (
     SecurableAttributes,
     SecurableDiff,
     Securable,
+    Table,
 )
 from uc_abac_governor.types import ExecutionError, NonexistentSecurableError, PrincipalValidationError
 
@@ -25,6 +26,7 @@ def compute_securable_diff(
     actual_securables: set[Securable],
     resolver: PrincipalResolver,
     change_logger: ChangeLogger,
+    enable_taggable_creation: bool = False,
 ) -> SecurableDiff:
     """Compute the diff between desired and actual securable state.
 
@@ -32,6 +34,14 @@ def compute_securable_diff(
     failures are logged via change_logger and clear the owner field on the
     affected row (the SecurableAttributes itself is retained so the securable's
     create/replace info isn't lost).
+
+    When ``enable_taggable_creation`` is False (default), non-function securables
+    declared in config but absent from UC are logged as ``NonexistentSecurableError``
+    and dropped from ``securables_to_create``. When True, they flow through for
+    the executor to create, with one exception: Tables require ≥1 column and
+    every column must have a non-None ``type``. Tables that fail this check are
+    logged as errors (with a hint explaining the requirement) and dropped,
+    surfacing later via ``ExecutionBatchError``.
     """
     desired_attrs = _resolve_attribute_owners(desired_attrs, resolver, change_logger)
     actual_attrs = _resolve_attribute_owners(actual_attrs, resolver, change_logger)
@@ -39,9 +49,12 @@ def compute_securable_diff(
     securables_to_create, securables_to_replace = _diff_securables(
         desired_securables, actual_securables
     )
-    securables_to_create = _log_nonexistent_non_function_securables(
-        securables_to_create, change_logger,
-    )
+    if enable_taggable_creation:
+        securables_to_create = _validate_tables_for_creation(securables_to_create, change_logger)
+    else:
+        securables_to_create = _log_nonexistent_non_function_securables(
+            securables_to_create, change_logger,
+        )
 
     created_full_names = {s.full_name for s in securables_to_create}
 
@@ -96,7 +109,13 @@ def _diff_securables(
     desired: set[Securable],
     actual: set[Securable],
 ) -> tuple[list[Securable], list[Securable]]:
-    """Return (to_create, to_replace) lists by keying on (securable_type, full_name)."""
+    """Return (to_create, to_replace) lists by keying on (securable_type, full_name).
+
+    Replacement is function-only: tables, volumes, catalogs, and schemas don't support
+    in-place redefinition today, and a Table with declared columns can't be meaningfully
+    compared to a base ``Securable`` fetched from UC (which lacks column info). Only
+    ``Function`` enters ``to_replace`` when its definition or parameters change.
+    """
     actual_by_key = {(s.securable_type, s.full_name): s for s in actual}
 
     to_create: list[Securable] = []
@@ -106,10 +125,55 @@ def _diff_securables(
         actual_sec = actual_by_key.get((desired_sec.securable_type, desired_sec.full_name))
         if actual_sec is None:
             to_create.append(desired_sec)
-        elif desired_sec != actual_sec:
+        elif isinstance(desired_sec, Function) and desired_sec != actual_sec:
             to_replace.append(desired_sec)
 
     return to_create, to_replace
+
+
+def _table_creation_blocker(table: Table) -> str | None:
+    """Return a reason string if ``table`` cannot be validly created, else None.
+
+    A creatable Table must have at least one column and every column must declare
+    its UC datatype via the ``type`` field.
+    """
+    if not table.columns:
+        return "Configure at least one column with a 'type' to enable table creation."
+    untyped = [c.full_name for c in table.columns if not c.type]
+    if untyped:
+        return (
+            f"Column(s) {', '.join(repr(n) for n in untyped)} declared without a 'type' — "
+            "every column must specify its UC datatype to enable table creation."
+        )
+    return None
+
+
+def _validate_tables_for_creation(
+    to_create: list[Securable],
+    change_logger: ChangeLogger,
+) -> list[Securable]:
+    """Validate each Table in ``to_create`` and log errors for invalid ones.
+
+    Non-Table securables pass through unchanged — with ``--enable-taggable-creation``
+    on, catalogs, schemas, volumes, and valid tables all flow to the executor.
+    Tables missing columns or column types are logged as ``NonexistentSecurableError``
+    (with a hint explaining the requirement) so the governor's end-of-run
+    ``ExecutionBatchError`` gate picks them up alongside any other errors.
+    """
+    kept: list[Securable] = []
+    for sec in to_create:
+        if isinstance(sec, Table):
+            reason = _table_creation_blocker(sec)
+            if reason is not None:
+                change_logger.log_error(ExecutionError(
+                    context=f"Validate CREATE TABLE {sec.full_name}",
+                    exception=NonexistentSecurableError(
+                        sec.securable_type, sec.full_name, hint=reason,
+                    ),
+                ))
+                continue
+        kept.append(sec)
+    return kept
 
 
 def _log_nonexistent_non_function_securables(

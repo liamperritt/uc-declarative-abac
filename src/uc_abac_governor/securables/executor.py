@@ -11,10 +11,29 @@ from uc_abac_governor.securables.state import (
     Function,
     Securable,
     SecurableDiff,
+    Table,
 )
 from uc_abac_governor.principals.resolver import ensure_resolved
 from uc_abac_governor.principals.state import Principal
-from uc_abac_governor.types import ExecutionError
+from uc_abac_governor.types import ExecutionError, SecurableType
+
+
+# Creation order: a parent must exist before any of its children can be created.
+# Catalogs first, then schemas, then leaf types (tables/volumes/functions).
+_CREATION_DEPTH: dict[SecurableType, int] = {
+    SecurableType.CATALOG: 0,
+    SecurableType.SCHEMA: 1,
+    SecurableType.TABLE: 2,
+    SecurableType.VOLUME: 2,
+    SecurableType.FUNCTION: 2,
+    SecurableType.COLUMN: 3,
+}
+
+
+def _creation_sort_key(info: Securable) -> tuple[int, str]:
+    """Sort creates parent-first (by depth), then alphabetically by full_name."""
+    depth = _CREATION_DEPTH.get(info.securable_type, 99)
+    return (depth, info.full_name)
 
 
 def _build_create_sql(info: Securable) -> str:
@@ -22,8 +41,43 @@ def _build_create_sql(info: Securable) -> str:
     match info:
         case Function():
             return _build_create_function_sql(info)
+        case Table():
+            return _build_create_table_sql(info)
+        case Securable(securable_type=SecurableType.CATALOG):
+            return _build_create_catalog_sql(info)
+        case Securable(securable_type=SecurableType.SCHEMA):
+            return _build_create_schema_sql(info)
+        case Securable(securable_type=SecurableType.VOLUME):
+            return _build_create_volume_sql(info)
         case _:
             raise NotImplementedError(f"Create not supported for {type(info).__name__}")
+
+
+def _build_create_catalog_sql(info: Securable) -> str:
+    """``CREATE CATALOG IF NOT EXISTS <name>`` — managed only."""
+    return f"CREATE CATALOG IF NOT EXISTS {quote_securable(info.full_name)}"
+
+
+def _build_create_schema_sql(info: Securable) -> str:
+    """``CREATE SCHEMA IF NOT EXISTS <catalog>.<schema>`` — managed only."""
+    return f"CREATE SCHEMA IF NOT EXISTS {quote_securable(info.full_name)}"
+
+
+def _build_create_volume_sql(info: Securable) -> str:
+    """``CREATE VOLUME IF NOT EXISTS <catalog>.<schema>.<volume>`` — managed only (no LOCATION)."""
+    return f"CREATE VOLUME IF NOT EXISTS {quote_securable(info.full_name)}"
+
+
+def _build_create_table_sql(info: Table) -> str:
+    """``CREATE TABLE IF NOT EXISTS <full_name> (col1 TYPE, col2 TYPE, ...)`` — managed only.
+
+    The differ has already validated that every column has a non-None ``type`` before
+    a Table reaches this builder, so it's safe to assume types are present.
+    """
+    column_defs = ", ".join(
+        f"`{c.full_name.rsplit('.', 1)[-1]}` {c.type}" for c in info.columns
+    )
+    return f"CREATE TABLE IF NOT EXISTS {quote_securable(info.full_name)} ({column_defs})"
 
 
 def _build_replace_sql(info: Securable) -> str:
@@ -80,8 +134,8 @@ def execute_securable_diff(
     """
     statements: list[str] = []
 
-    # Creates
-    for info in diff.securables_to_create:
+    # Creates — sorted parent-first (catalogs before schemas before tables/volumes/functions)
+    for info in sorted(diff.securables_to_create, key=_creation_sort_key):
         stmt = _build_create_sql(info)
         if not dry_run:
             try:
