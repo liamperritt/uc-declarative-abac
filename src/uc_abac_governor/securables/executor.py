@@ -75,7 +75,7 @@ def _build_create_table_sql(info: Table) -> str:
     a Table reaches this builder, so it's safe to assume types are present.
     """
     column_defs = ", ".join(
-        f"`{c.full_name.rsplit('.', 1)[-1]}` {c.type}" for c in info.columns
+        f"`{c.full_name.rsplit('.', 1)[-1]}` {c.data_type}" for c in info.columns
     )
     return f"CREATE TABLE IF NOT EXISTS {quote_securable(info.full_name)} ({column_defs})"
 

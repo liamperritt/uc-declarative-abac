@@ -409,8 +409,8 @@ def test_securable_executor_builds_create_table_sql_with_columns():
         securable_type=SecurableType.TABLE,
         full_name="cat.sch.orders",
         columns=(
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.email", type="STRING"),
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.amount", type="DECIMAL(18,2)"),
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.email", data_type="STRING"),
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.amount", data_type="DECIMAL(18,2)"),
         ),
     )
     diff = SecurableDiff(securables_to_create=[table])
@@ -433,7 +433,7 @@ def test_securable_executor_orders_creations_parent_first():
         securables_to_create=[
             # Deliberately out of order.
             Table(securable_type=SecurableType.TABLE, full_name="cat.sch.tbl",
-                  columns=(Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.tbl.a", type="STRING"),)),
+                  columns=(Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.tbl.a", data_type="STRING"),)),
             Securable(securable_type=SecurableType.SCHEMA, full_name="cat.sch"),
             Securable(securable_type=SecurableType.VOLUME, full_name="cat.sch.vol"),
             Securable(securable_type=SecurableType.CATALOG, full_name="cat"),

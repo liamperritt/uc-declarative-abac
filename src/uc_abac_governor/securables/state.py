@@ -55,11 +55,11 @@ class Column(Securable):
     Columns ride along inside Table.columns rather than being standalone securables
     in the diff — they're used by the executor to build CREATE TABLE SQL. ``data_type``
     may be None for columns declared purely for tagging on existing tables; table
-    creation requires every column to have a non-None type.
+    creation requires every column to have a non-None data_type.
     """
 
     securable_type: Literal[SecurableType.COLUMN]
-    type: str | None = None
+    data_type: str | None = None
 
 
 @dataclass(frozen=True)

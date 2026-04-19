@@ -484,7 +484,7 @@ def _typed_table(full_name: str, *col_names: str) -> Table:
             Column(
                 securable_type=SecurableType.COLUMN,
                 full_name=f"{full_name}.{col_name}",
-                type="STRING",
+                data_type="STRING",
             )
             for col_name in col_names
         ),
@@ -547,14 +547,14 @@ def test_securable_differ_logs_error_when_table_has_no_columns_and_taggable_crea
     assert errors[0].full_name == "cat.sch.empty"
 
 
-def test_securable_differ_logs_error_when_any_column_missing_type_and_taggable_creation_enabled():
-    """A missing Table with any column lacking a 'type' fails validation."""
+def test_securable_differ_logs_error_when_any_column_missing_data_type_and_taggable_creation_enabled():
+    """A missing Table with any column lacking a 'data_type' fails validation."""
     table = Table(
         securable_type=SecurableType.TABLE,
         full_name="cat.sch.partly_typed",
         columns=(
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.partly_typed.a", type="STRING"),
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.partly_typed.b", type=None),
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.partly_typed.a", data_type="STRING"),
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.partly_typed.b", data_type=None),
         ),
     )
     change_logger = _change_logger()

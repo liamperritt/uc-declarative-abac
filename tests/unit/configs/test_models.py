@@ -686,8 +686,31 @@ def test_column_config_allows_omitted_owner():
     assert column.owner is None
 
 
-def test_column_config_accepts_optional_type():
-    """ColumnConfig carries a 'type' string when declared (used for table creation)."""
+def test_column_config_accepts_optional_data_type():
+    """ColumnConfig carries a 'data_type' string when declared (used for table creation)."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_catalog": {
+                "schemas": [
+                    {
+                        "name": "sales",
+                        "tables": [
+                            {
+                                "name": "orders",
+                                "columns": [{"name": "email", "data_type": "STRING"}],
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+    })
+    column = config.catalogs["my_catalog"].schemas[0].tables[0].columns[0]
+    assert column.data_type == "STRING"
+
+
+def test_column_config_accepts_type_as_alias_for_data_type():
+    """'type' is accepted on input as a backward-compatible alias of 'data_type'."""
     config = ResourcesConfig.model_validate({
         "catalogs": {
             "my_catalog": {
@@ -706,11 +729,11 @@ def test_column_config_accepts_optional_type():
         }
     })
     column = config.catalogs["my_catalog"].schemas[0].tables[0].columns[0]
-    assert column.type == "STRING"
+    assert column.data_type == "STRING"
 
 
-def test_column_config_type_defaults_to_none():
-    """ColumnConfig.type is None when not declared."""
+def test_column_config_data_type_defaults_to_none():
+    """ColumnConfig.data_type is None when not declared."""
     config = ResourcesConfig.model_validate({
         "catalogs": {
             "my_catalog": {
@@ -729,7 +752,7 @@ def test_column_config_type_defaults_to_none():
         }
     })
     column = config.catalogs["my_catalog"].schemas[0].tables[0].columns[0]
-    assert column.type is None
+    assert column.data_type is None
 
 
 # ---------------------------------------------------------------------------

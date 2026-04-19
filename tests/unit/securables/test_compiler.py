@@ -368,8 +368,8 @@ def test_securables_compiler_emits_table_subclass_for_each_declared_table():
     assert Table(securable_type=SecurableType.TABLE, full_name="cat.sales.customers", columns=()) in result
 
 
-def test_securables_compiler_emits_column_with_type_when_specified():
-    """A declared column with a 'type' produces a Column with that type string."""
+def test_securables_compiler_emits_column_with_data_type_when_specified():
+    """A declared column with a 'data_type' produces a Column with that data_type string."""
     config = ResourcesConfig.model_validate(
         {
             "catalogs": {
@@ -381,8 +381,8 @@ def test_securables_compiler_emits_column_with_type_when_specified():
                                 {
                                     "name": "orders",
                                     "columns": [
-                                        {"name": "email", "type": "STRING"},
-                                        {"name": "amount", "type": "DECIMAL(18,2)"},
+                                        {"name": "email", "data_type": "STRING"},
+                                        {"name": "amount", "data_type": "DECIMAL(18,2)"},
                                     ],
                                 }
                             ],
@@ -399,17 +399,17 @@ def test_securables_compiler_emits_column_with_type_when_specified():
     assert Column(
         securable_type=SecurableType.COLUMN,
         full_name="cat.sales.orders.email",
-        type="STRING",
+        data_type="STRING",
     ) in orders.columns
     assert Column(
         securable_type=SecurableType.COLUMN,
         full_name="cat.sales.orders.amount",
-        type="DECIMAL(18,2)",
+        data_type="DECIMAL(18,2)",
     ) in orders.columns
 
 
-def test_securables_compiler_emits_column_with_type_none_when_unspecified():
-    """A declared column without a 'type' produces Column(type=None)."""
+def test_securables_compiler_emits_column_with_data_type_none_when_unspecified():
+    """A declared column without a 'data_type' produces Column(data_type=None)."""
     config = ResourcesConfig.model_validate(
         {
             "catalogs": {
@@ -434,7 +434,7 @@ def test_securables_compiler_emits_column_with_type_none_when_unspecified():
 
     orders = next(s for s in result if isinstance(s, Table) and s.full_name == "cat.sales.orders")
     (email_col,) = orders.columns
-    assert email_col.type is None
+    assert email_col.data_type is None
 
 
 def test_securables_compiler_preserves_column_declaration_order():

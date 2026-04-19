@@ -70,7 +70,7 @@ def _compile_column(col: ColumnConfig) -> Column:
     return Column(
         securable_type=SecurableType.COLUMN,
         full_name=col.full_name,
-        type=col.type,
+        data_type=col.data_type,
     )
 
 

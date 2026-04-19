@@ -135,11 +135,11 @@ def _table_creation_blocker(table: Table) -> str | None:
     """Return a reason string if ``table`` cannot be validly created, else None.
 
     A creatable Table must have at least one column and every column must declare
-    its UC datatype via the ``type`` field.
+    its UC datatype via the ``data_type`` field.
     """
     if not table.columns:
         return "Configure at least one column with a 'type' to enable table creation."
-    untyped = [c.full_name for c in table.columns if not c.type]
+    untyped = [c.full_name for c in table.columns if not c.data_type]
     if untyped:
         return (
             f"Column(s) {', '.join(repr(n) for n in untyped)} declared without a 'type' — "
