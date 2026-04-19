@@ -97,6 +97,8 @@ jobs:
         with:
           config-dir: configs/
           warehouse-id: ${{ vars.DATABRICKS_WAREHOUSE_ID }}
+          enable-tag-management: 'true'
+          enable-privilege-management: 'true'
           dry-run: ${{ github.event_name == 'pull_request' }}
         env:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
