@@ -48,6 +48,12 @@ def main() -> None:
         help="Permit the engine to create/update/remove tag assignments on securables. Off by default.",
     )
     parser.add_argument(
+        "--enable-privilege-management",
+        action="store_true",
+        default=False,
+        help="Permit the engine to GRANT/REVOKE privileges via SQL. Off by default.",
+    )
+    parser.add_argument(
         "--enable-taggable-management",
         action="store_true",
         default=False,
@@ -58,12 +64,6 @@ def main() -> None:
         action="store_true",
         default=False,
         help="Permit the engine to create catalogs, schemas, tables, and volumes declared in config but absent from UC. Off by default.",
-    )
-    parser.add_argument(
-        "--enable-privilege-management",
-        action="store_true",
-        default=False,
-        help="Permit the engine to GRANT/REVOKE privileges via SQL. Off by default.",
     )
     parser.add_argument(
         "--enable-governed-tag-deletion",
