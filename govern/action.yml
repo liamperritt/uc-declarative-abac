@@ -59,7 +59,7 @@ inputs:
   enable-governed-tag-deletion:
     description: >-
       If "true", permit the engine to delete governed tags (account-level tag
-      policies) that exist in UC but are absent from config. Off by default.
+      policies) that exist in the account but are absent from config. Off by default.
       Requires interactive confirmation unless ``force`` is also "true"; in a
       non-interactive GitHub Actions runner, ``force`` MUST be set or the run
       will error out.

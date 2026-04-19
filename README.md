@@ -68,7 +68,7 @@ The repo ships a composite GitHub Action at `govern/action.yml` so any other rep
 | `enable-privilege-management` | no | `'false'` | Permit the engine to `GRANT`/`REVOKE` privileges |
 | `enable-taggable-management` | no | `'false'` | Permit the engine to update attributes (owner, etc.) on existing catalogs/schemas/tables/volumes |
 | `enable-taggable-creation` | no | `'false'` | Permit the engine to create catalogs/schemas/tables/volumes declared in config but absent from UC |
-| `enable-governed-tag-deletion` | no | `'false'` | Permit the engine to delete governed tags present in UC but absent from config. Requires interactive confirmation unless `force: 'true'` — in CI you must set `force` or the run errors out |
+| `enable-governed-tag-deletion` | no | `'false'` | Permit the engine to delete governed tags present in the account but absent from config. Requires interactive confirmation unless `force: 'true'` — in CI you must set `force` or the run errors out |
 | `force` | no | `'false'` | Skip every interactive confirmation prompt and auto-confirm destructive actions. Required in CI when any destructive gate is set |
 
 **Example workflow in a caller repo** (`.github/workflows/uc-governance.yml`):
