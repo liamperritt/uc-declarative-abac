@@ -1059,19 +1059,19 @@ def test_governed_tag_config_defaults_empty_allowed_values():
     assert config.governed_tags["bare"].allowed_values == []
 
 
-def test_governed_tag_config_accepts_allowed_principals_without_failing():
-    """allowed_principals is accepted for forward compatibility — no validation error."""
+def test_governed_tag_config_accepts_assigners():
+    """assigners is parsed as a list of principal display names."""
     data = {
         "catalogs": {"cat": {"name": "cat"}},
         "governed_tags": {
             "pii": {
                 "name": "pii",
                 "allowed_values": ["name"],
-                "allowed_principals": ["data_governance_team", "user@company.com"],
+                "assigners": ["data_governance_team", "user@company.com"],
             }
         },
     }
     config = ResourcesConfig.model_validate(data)
 
     gt = config.governed_tags["pii"]
-    assert gt.allowed_principals == ["data_governance_team", "user@company.com"]
+    assert gt.assigners == ["data_governance_team", "user@company.com"]

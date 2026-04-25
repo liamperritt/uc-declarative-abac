@@ -92,7 +92,13 @@ def run(
     config = ResourcesConfig.model_validate(consolidated)
     catalog_names = list(config.catalogs.keys())
 
-    # 2. Parallel initial fetch (securables, tags, privileges, and principals concurrently)
+    # 2. Compile desired governed tags up-front so we can scope the rule-set
+    #    fetches inside the parallel block to (actual ∩ desired) — keeps the
+    #    per-tag get_rule_set traffic bounded.
+    desired_governed_tags = compile_desired_governed_tags(config)
+    desired_governed_tag_names = {gt.name for gt in desired_governed_tags}
+
+    # 3. Parallel initial fetch (securables, tags, privileges, and principals concurrently)
     uc_helper = UnityCatalogHelper(workspace_client, warehouse_id)
     ws_helper = WorkspaceHelper(workspace_client, use_workspace_scim=use_workspace_scim)
     change_logger = ChangeLogger(dry_run=dry_run, logger=_logger)
@@ -104,7 +110,9 @@ def run(
     with ThreadPoolExecutor() as pool:
         actual_securables_f = pool.submit(uc_helper.fetch_actual_securables, catalog_names)
         actual_policies_f = pool.submit(uc_helper.fetch_actual_policies, config)
-        actual_governed_tags_f = pool.submit(ws_helper.fetch_actual_governed_tags)
+        actual_governed_tags_f = pool.submit(
+            ws_helper.fetch_actual_governed_tags, desired_governed_tag_names,
+        )
         principals_f = pool.submit(ws_helper.fetch_principals)
         actual_tags_f = pool.submit(uc_helper.fetch_actual_tags, catalog_names) if need_actual_tags else None
         actual_privs_f = pool.submit(uc_helper.fetch_actual_privileges, catalog_names) if enable_privilege_management else None
@@ -142,9 +150,10 @@ def run(
 
     # 4. Governed tags workflow (account-level tag policies — must run before
     # catalog-scoped tag assignments, so new tag keys exist before SET TAGS).
-    desired_governed_tags = compile_desired_governed_tags(config)
+    # desired_governed_tags was compiled at the start to scope the rule-set fetch.
     governed_tag_diff = compute_governed_tag_diff(
         desired_governed_tags, actual_governed_tags,
+        resolver, change_logger,
         enable_deletion=enable_governed_tag_deletion,
     )
     # Union of declared governed tag names (desired from config + actual on UC).

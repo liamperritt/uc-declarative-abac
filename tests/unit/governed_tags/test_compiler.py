@@ -3,6 +3,8 @@ from __future__ import annotations
 from uc_abac_governor.configs.models import ResourcesConfig
 from uc_abac_governor.governed_tags.compiler import compile_desired_governed_tags
 from uc_abac_governor.governed_tags.state import GovernedTag
+from uc_abac_governor.principals.state import Principal
+from uc_abac_governor.types import PrincipalType
 
 
 def test_governed_tag_compiler_emits_empty_set_when_no_governed_tags():
@@ -79,3 +81,62 @@ def test_governed_tag_compiler_deduplicates_allowed_values_via_frozenset():
 
     pii = next(gt for gt in result if gt.name == "pii")
     assert pii.allowed_values == frozenset({"name", "email"})
+
+
+# ---------------------------------------------------------------------------
+# assigners
+# ---------------------------------------------------------------------------
+
+
+def test_governed_tag_compiler_emits_empty_assigners_when_field_missing():
+    """A governed tag without assigners compiles to an empty frozenset."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {"cat": {"name": "cat"}},
+        "governed_tags": {"pii": {"name": "pii"}},
+    })
+
+    result = compile_desired_governed_tags(config)
+
+    pii = next(gt for gt in result if gt.name == "pii")
+    assert pii.assigners == frozenset()
+
+
+def test_governed_tag_compiler_emits_unresolved_principal_per_assigner_entry():
+    """Each name in assigners becomes an unresolved Principal carrying that name."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {"cat": {"name": "cat"}},
+        "governed_tags": {
+            "pii": {
+                "name": "pii",
+                "assigners": ["data_engineers", "alice@example.com"],
+            },
+        },
+    })
+
+    result = compile_desired_governed_tags(config)
+
+    pii = next(gt for gt in result if gt.name == "pii")
+    assert pii.assigners == frozenset({
+        Principal(PrincipalType.UNKNOWN, name="data_engineers"),
+        Principal(PrincipalType.UNKNOWN, name="alice@example.com"),
+    })
+
+
+def test_governed_tag_compiler_deduplicates_assigners():
+    """Duplicate assigner names collapse to one frozenset entry."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {"cat": {"name": "cat"}},
+        "governed_tags": {
+            "pii": {
+                "name": "pii",
+                "assigners": ["data_engineers", "data_engineers"],
+            },
+        },
+    })
+
+    result = compile_desired_governed_tags(config)
+
+    pii = next(gt for gt in result if gt.name == "pii")
+    assert pii.assigners == frozenset({
+        Principal(PrincipalType.UNKNOWN, name="data_engineers"),
+    })

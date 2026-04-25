@@ -506,3 +506,204 @@ def test_logger_includes_policies_in_summary() -> None:
     assert "Policies:" in summary
     assert "1 created" in summary
     assert "1 replaced" in summary
+
+
+# ---------------------------------------------------------------------------
+# Governed tag logging
+# ---------------------------------------------------------------------------
+
+
+def _resolved_user(name: str) -> Principal:
+    return Principal(PrincipalType.USER, identifier=name, name=name)
+
+
+def _gt(
+    name: str = "pii",
+    description: str = "",
+    values: set[str] | None = None,
+    assigners: set[Principal] | None = None,
+):
+    from uc_abac_governor.governed_tags.state import GovernedTag
+    return GovernedTag(
+        name=name,
+        description=description,
+        allowed_values=frozenset(values or set()),
+        assigners=frozenset(assigners or set()),
+    )
+
+
+# log_governed_tag_create — show actual values being deployed
+
+
+def test_logger_governed_tag_create_shows_description_values_and_assigners() -> None:
+    cl, mock_logger = _make_change_logger()
+    cl.log_governed_tag_create(_gt(
+        description="PII data",
+        values={"name", "email"},
+        assigners={_resolved_user("alice@co.com")},
+    ))
+    msg = _info_messages(mock_logger)[0]
+    assert "PII data" in msg
+    assert "name" in msg and "email" in msg
+    assert "alice@co.com" in msg
+
+
+def test_logger_governed_tag_create_omits_empty_fields() -> None:
+    cl, mock_logger = _make_change_logger()
+    cl.log_governed_tag_create(_gt(values={"x"}))
+    msg = _info_messages(mock_logger)[0]
+    assert "description" not in msg
+    assert "assigners" not in msg
+    assert "allowed_values" in msg
+
+
+def test_logger_governed_tag_create_increments_created_counter() -> None:
+    cl, _ = _make_change_logger()
+    cl.log_governed_tag_create(_gt())
+    assert cl._governed_tags_created == 1
+
+
+def test_logger_governed_tag_create_counts_assigners_as_grants() -> None:
+    """Creating a tag with assigners counts each one as a grant for the summary."""
+    cl, _ = _make_change_logger()
+    cl.log_governed_tag_create(_gt(assigners={
+        _resolved_user("alice@co.com"), _resolved_user("bob@co.com"),
+    }))
+    assert cl._governed_tag_assigners_granted == 2
+
+
+# log_governed_tag_update — show specific deltas
+
+
+def test_logger_governed_tag_update_shows_description_old_to_new() -> None:
+    cl, mock_logger = _make_change_logger()
+    cl.log_governed_tag_update(
+        _gt(description="new desc", values={"x"}),
+        _gt(description="old desc", values={"x"}),
+    )
+    msg = _info_messages(mock_logger)[0]
+    assert "old desc" in msg
+    assert "new desc" in msg
+    assert "->" in msg
+
+
+def test_logger_governed_tag_update_shows_added_and_removed_values() -> None:
+    cl, mock_logger = _make_change_logger()
+    cl.log_governed_tag_update(
+        _gt(values={"name", "phone"}),
+        _gt(values={"name", "email"}),
+    )
+    msg = _info_messages(mock_logger)[0]
+    assert "+phone" in msg
+    assert "-email" in msg
+    # unchanged values aren't repeated
+    assert "+name" not in msg
+    assert "-name" not in msg
+
+
+def test_logger_governed_tag_update_shows_added_and_removed_assigners() -> None:
+    cl, mock_logger = _make_change_logger()
+    cl.log_governed_tag_update(
+        _gt(assigners={_resolved_user("alice@co.com")}),
+        _gt(assigners={_resolved_user("bob@co.com")}),
+    )
+    msg = _info_messages(mock_logger)[0]
+    assert "+alice@co.com" in msg
+    assert "-bob@co.com" in msg
+
+
+def test_logger_governed_tag_update_increments_updated_counter() -> None:
+    cl, _ = _make_change_logger()
+    cl.log_governed_tag_update(
+        _gt(description="new"), _gt(description="old"),
+    )
+    assert cl._governed_tags_updated == 1
+
+
+def test_logger_governed_tag_update_increments_assigner_counters_from_delta() -> None:
+    """Adding 2 assigners and removing 1 yields 2 granted / 1 revoked in the summary."""
+    cl, _ = _make_change_logger()
+    cl.log_governed_tag_update(
+        _gt(assigners={_resolved_user("a@co.com"), _resolved_user("b@co.com")}),
+        _gt(assigners={_resolved_user("c@co.com")}),
+    )
+    assert cl._governed_tag_assigners_granted == 2
+    assert cl._governed_tag_assigners_revoked == 1
+
+
+def test_logger_governed_tag_update_omits_unchanged_fields() -> None:
+    cl, mock_logger = _make_change_logger()
+    cl.log_governed_tag_update(
+        _gt(description="d", values={"x"}, assigners={_resolved_user("a@co.com")}),
+        _gt(description="d", values={"x"}, assigners=set()),
+    )
+    msg = _info_messages(mock_logger)[0]
+    # description and allowed_values unchanged → not shown
+    assert "description" not in msg
+    assert "allowed_values" not in msg
+    assert "assigners" in msg
+
+
+# log_governed_tag_delete — show what's being torn down
+
+
+def test_logger_governed_tag_delete_shows_values_and_assigners_being_lost() -> None:
+    cl, mock_logger = _make_change_logger()
+    cl.log_governed_tag_delete(_gt(
+        description="legacy",
+        values={"a", "b"},
+        assigners={_resolved_user("admin@co.com")},
+    ))
+    msg = _info_messages(mock_logger)[0]
+    assert "legacy" in msg
+    assert "a" in msg and "b" in msg
+    assert "admin@co.com" in msg
+
+
+def test_logger_governed_tag_delete_increments_deleted_counter() -> None:
+    cl, _ = _make_change_logger()
+    cl.log_governed_tag_delete(_gt())
+    assert cl._governed_tags_deleted == 1
+
+
+def test_logger_governed_tag_delete_counts_assigners_as_revokes() -> None:
+    """Deleting a tag with N assigners counts each as a revoke for the summary."""
+    cl, _ = _make_change_logger()
+    cl.log_governed_tag_delete(_gt(assigners={
+        _resolved_user("alice@co.com"), _resolved_user("bob@co.com"),
+    }))
+    assert cl._governed_tag_assigners_revoked == 2
+
+
+# Summary integration
+
+
+def test_logger_includes_governed_tags_in_summary() -> None:
+    cl, _ = _make_change_logger()
+    cl.log_governed_tag_create(_gt(name="a"))
+    cl.log_governed_tag_update(_gt(name="b", description="new"), _gt(name="b", description="old"))
+    summary = cl._build_summary()
+    assert "Governed tags:" in summary
+    assert "1 created" in summary
+    assert "1 updated" in summary
+
+
+def test_logger_includes_governed_tag_assigners_in_summary_via_create_and_update() -> None:
+    cl, _ = _make_change_logger()
+    cl.log_governed_tag_create(_gt(name="new", assigners={_resolved_user("alice@co.com")}))
+    cl.log_governed_tag_update(
+        _gt(assigners={_resolved_user("c@co.com")}),
+        _gt(assigners={_resolved_user("d@co.com")}),
+    )
+    summary = cl._build_summary()
+    assert "Governed tag assigners:" in summary
+    assert "2 granted" in summary
+    assert "1 revoked" in summary
+
+
+def test_logger_includes_governed_tag_assigners_in_dry_run_summary() -> None:
+    cl, _ = _make_change_logger(dry_run=True)
+    cl.log_governed_tag_create(_gt(assigners={_resolved_user("alice@co.com")}))
+    summary = cl._build_summary()
+    assert "Governed tag assigners:" in summary
+    assert "1 to grant" in summary

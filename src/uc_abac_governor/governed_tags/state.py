@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from uc_abac_governor.principals.state import Principal
+
 
 @dataclass(frozen=True)
 class GovernedTag:
@@ -9,6 +11,7 @@ class GovernedTag:
     name: str
     description: str = ""
     allowed_values: frozenset[str] = frozenset()
+    assigners: frozenset[Principal] = frozenset()
 
 
 @dataclass

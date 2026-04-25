@@ -328,7 +328,7 @@ class GovernedTagConfig(BaseModel):
         validation_alias=AliasChoices("description", "comment"),
     )
     allowed_values: list[str] = Field(default_factory=list)
-    allowed_principals: list[str] = Field(default_factory=list)
+    assigners: list[str] = Field(default_factory=list)
 
 
 class ResourcesConfig(BaseModel):

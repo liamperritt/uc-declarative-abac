@@ -1,22 +1,73 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from uc_abac_governor.logger import ChangeLogger
+    from uc_abac_governor.principals.resolver import PrincipalResolver
+
 from uc_abac_governor.governed_tags.state import GovernedTag, GovernedTagDiff
+from uc_abac_governor.principals.state import Principal
+from uc_abac_governor.types import ExecutionError, PrincipalValidationError
+
+
+def _resolve_governed_tag_assigners(
+    tag: GovernedTag,
+    resolver: PrincipalResolver,
+    change_logger: ChangeLogger,
+) -> GovernedTag:
+    """Return a new GovernedTag with each principal in ``assigners``
+    resolved against the workspace.
+
+    Principals that fail to resolve are logged once via
+    ``change_logger.log_error`` and dropped from the tag's assigners
+    — consistent with the privileges differ. Dropping (rather than aborting)
+    means an unresolvable principal won't trigger a phantom grant/revoke on
+    every run; the operator surfaces the error and fixes the config.
+    """
+    resolved: set[Principal] = set()
+    for principal in tag.assigners:
+        try:
+            resolved.add(resolver.resolve_principal(principal))
+        except PrincipalValidationError as exc:
+            change_logger.log_error(ExecutionError(
+                context=f"Resolve principal for ASSIGN on GOVERNED_TAG {tag.name}",
+                exception=exc,
+            ))
+            continue
+    return GovernedTag(
+        name=tag.name,
+        description=tag.description,
+        allowed_values=tag.allowed_values,
+        assigners=frozenset(resolved),
+    )
 
 
 def compute_governed_tag_diff(
     desired: set[GovernedTag],
     actual: set[GovernedTag],
+    resolver: PrincipalResolver,
+    change_logger: ChangeLogger,
     enable_deletion: bool = False,
 ) -> GovernedTagDiff:
     """Compute create / update / delete diff between desired and actual governed tags.
 
-    Tag policies present in ``actual`` but absent from ``desired`` are left alone
-    by default (no-delete invariant). When ``enable_deletion=True``, they flow into
+    Principals on both sides are resolved before comparison so the two sides
+    speak the same dialect (config-side has display names; UC-side has
+    identifiers). Tag policies present in ``actual`` but absent from ``desired``
+    are left alone by default. When ``enable_deletion=True``, they flow into
     ``to_delete`` so the executor can issue ``delete_tag_policy`` calls — gated
     by interactive confirmation or ``--force`` at the governor boundary.
     """
-    desired_by_name = {gt.name: gt for gt in desired}
-    actual_by_name = {gt.name: gt for gt in actual}
+    desired_resolved = {
+        _resolve_governed_tag_assigners(t, resolver, change_logger) for t in desired
+    }
+    actual_resolved = {
+        _resolve_governed_tag_assigners(t, resolver, change_logger) for t in actual
+    }
+
+    desired_by_name = {gt.name: gt for gt in desired_resolved}
+    actual_by_name = {gt.name: gt for gt in actual_resolved}
 
     to_create = {gt for name, gt in desired_by_name.items() if name not in actual_by_name}
 

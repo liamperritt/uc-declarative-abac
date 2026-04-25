@@ -7,3 +7,5 @@ resources:
         - dev
         - test
         - prod
+      assigners:
+        - sp_uc_governor_test

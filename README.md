@@ -535,7 +535,7 @@ Governed tags specify a tag name with a enforced set of allowed values. They are
 - **`name`** — the governed tag key.
 - **`description`** — a human-readable description of the governed tag's purpose. `comment` is still accepted as a backward-compatible alias on input.
 - **`allowed_values`** — the fixed list of values that can be assigned to this tag. ABAC policies reference these tag key-value pairs to determine which columns to mask, which rows to filter, or which objects to grant access on.
-- **`allowed_principals`** — the list of principals who allowed to `ASSIGN` the tag to Unity Catalog objects. This can be useful for users to test tag assignments within `dev` catalogs that are not governed by this `uc_abac_governor` framework. It is not recommended to manually assign tags to UC objects that are governed by this framework, as this will result in those tags being blown away the next time that this framework runs.
+- **`assigners`** — the list of principals (users, groups, or service principals by display name) who are permitted to `ASSIGN` the tag to Unity Catalog objects. This is reconciled via the Account Access Control Proxy rule-set API: principals listed here receive the ASSIGN role on the tag policy, principals not listed have it revoked. Useful for letting users test tag assignments within `dev` catalogs that are not governed by this framework — manually assigning a governed tag to a UC object that *is* governed will be reverted on the next run. The framework only manages `assigners` on tags it knows about (declared in config); tags present on the account but absent from config retain their existing ACLs untouched.
 
 ```yaml
 # resources/governed_tags/pii.yaml
@@ -548,7 +548,7 @@ resources:
         - name
         - address
         - drivers_license
-      allowed_principals:
+      assigners:
         - account_users
 
 # resources/governed_tags/classification.yaml
@@ -562,7 +562,7 @@ resources:
         - internal
         - confidential
         - restricted
-      allowed_principals:
+      assigners:
         - data_governance_team
         - john.smith@company.com
         - sp_data_governor
@@ -722,7 +722,7 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 - **Governed tag diffing** — computes creates and updates by comparing desired vs actual state; `allowed_values` is compared as a set so cosmetic YAML reordering does not trigger an update; tag policies present in the account but absent from YAML are left alone (no-delete invariant for this iteration)
 - **Governed tag execution** — `create_tag_policy` for new entries; `update_tag_policy` with a precise `update_mask` (`description`, `values`, or both) per changed field on existing entries; allowed values are sorted before being sent to the SDK for deterministic output
 - **Ordering** — governed tags are reconciled *before* catalog-scoped `SET TAGS` statements, so new tag keys exist in the account before assignments reference them
-- **Forward compatibility** — `allowed_principals` is accepted by the config parser but not yet enforced; assignment ACL management will arrive in a later iteration
+- **Assigner ACLs (`assigners`)** — for each governed tag declared in config, the engine reconciles the `ASSIGN` role on the tag policy via the Account Access Control Proxy rule-set API (`WorkspaceClient.account_access_control_proxy.{get_rule_set, update_rule_set}`). Rule-set fetches are scoped to the intersection of desired and actual tag names (1 + |intersection| API calls per run, dispatched concurrently). Tag policies present on the account but absent from config retain their existing assigner ACLs untouched — symmetric with the no-delete-by-default invariant for the rest of the resource. Read-modify-write with optimistic-concurrency etag preserves any non-ASSIGN grant rules across updates. Newly-created tags receive their `assigners` immediately after `create_tag_policy` returns the new tag id. Account ID is read from `WorkspaceClient.config.account_id`
 
 #### Securables domain
 - **Owner management** — detects owner drift between config and workspace; updates via WorkspaceClient API for all securable types (catalogs, schemas, tables, volumes, functions)
@@ -800,7 +800,6 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 
 ### Not yet implemented
 
-- **Governed tag assignment ACLs** — `allowed_principals` is parsed but not yet enforced; assigning which users, groups, or service principals may `ASSIGN` a governed tag to UC objects will be wired through `AccountAccessControlProxyAPI` in a future iteration
 - **Object attributes** — `comment`, `rfa_destination` on securables (the `owner` attribute is implemented; adding new attributes requires only a field on `SecurableAttributes` and an executor dispatch branch). Enforcement is already gated by `--enable-taggable-management`.
 - **Direct mask/filter** — `filter` on tables and `mask` on columns (non-ABAC, directly applied functions)
 - **Abstracted privilege names** — `use`, `read`, `edit`, `create` expanding to multiple UC privileges

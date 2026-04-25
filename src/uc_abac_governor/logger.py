@@ -30,6 +30,24 @@ def _format_change_line(symbol: str, securable_type: str, full_name: str, action
     return f"  {symbol} {securable_type:<{_TYPE_WIDTH}} {full_name:<{_NAME_WIDTH}} {action}"
 
 
+def _format_set_delta(added: frozenset[str], removed: frozenset[str]) -> str:
+    """Format an add/remove delta on a string set as `+a, +b, -c, -d` (sorted)."""
+    parts: list[str] = []
+    parts.extend(f"+{v}" for v in sorted(added))
+    parts.extend(f"-{v}" for v in sorted(removed))
+    return ", ".join(parts)
+
+
+def _format_principal_delta(
+    added: frozenset[Principal], removed: frozenset[Principal],
+) -> str:
+    """Format an add/remove delta on a Principal set as `+name, -name` (sorted by name)."""
+    parts: list[str] = []
+    parts.extend(f"+{p.name}" for p in sorted(added, key=lambda p: p.name))
+    parts.extend(f"-{p.name}" for p in sorted(removed, key=lambda p: p.name))
+    return ", ".join(parts)
+
+
 class ChangeLogger:
     """Context manager for logging governance changes.
 
@@ -58,6 +76,8 @@ class ChangeLogger:
         self._governed_tags_created = 0
         self._governed_tags_updated = 0
         self._governed_tags_deleted = 0
+        self._governed_tag_assigners_granted = 0
+        self._governed_tag_assigners_revoked = 0
         self._errors: list[ExecutionError] = []
 
     @property
@@ -238,36 +258,93 @@ class ChangeLogger:
     # ------------------------------------------------------------------
 
     def log_governed_tag_create(self, gt: GovernedTag) -> None:
-        """Log a governed tag (account-level tag policy) being created."""
+        """Log a governed tag (account-level tag policy) being created — enumerates
+        the description, allowed values, and assigners being deployed. Empty
+        fields are omitted from the line. Assigners are also counted as grants
+        for the summary."""
         self._governed_tags_created += 1
+        self._governed_tag_assigners_granted += len(gt.assigners)
         action_verb = "Create" if self._dry_run else "Created"
+        parts: list[str] = []
+        if gt.description:
+            parts.append(f"description='{gt.description}'")
+        if gt.allowed_values:
+            parts.append(f"allowed_values={','.join(sorted(gt.allowed_values))}")
+        if gt.assigners:
+            parts.append(
+                f"assigners="
+                f"{','.join(sorted(p.name for p in gt.assigners))}"
+            )
+        suffix = f" ({' | '.join(parts)})" if parts else ""
         self._log_info(_format_change_line(
             "+", "GOVERNED_TAG", gt.name,
-            f"{action_verb} governed tag ({len(gt.allowed_values)} allowed values)",
+            f"{action_verb} governed tag{suffix}",
         ))
 
     def log_governed_tag_update(self, gt: GovernedTag, old: GovernedTag | None) -> None:
-        """Log a governed tag being updated, noting which fields changed."""
+        """Log a governed tag being updated — shows the specific deltas per field.
+
+        - description: 'old' -> 'new'
+        - allowed_values: +added, -removed
+        - assigners: +granted, -revoked
+
+        Unchanged fields are omitted. Assigner deltas also increment the
+        assigners_granted/revoked counters for the summary, so dry-run and
+        real-run produce identical detail."""
         self._governed_tags_updated += 1
         action_verb = "Update" if self._dry_run else "Updated"
-        changes: list[str] = []
-        if old is None or gt.description != (old.description if old else ""):
-            changes.append("description")
-        if old is None or gt.allowed_values != (old.allowed_values if old else frozenset()):
-            changes.append("values")
-        summary = ", ".join(changes) if changes else "no fields"
+
+        old_desc = old.description if old else ""
+        old_values = old.allowed_values if old else frozenset()
+        old_assigners = old.assigners if old else frozenset()
+
+        parts: list[str] = []
+        if gt.description != old_desc:
+            parts.append(f"description: '{old_desc}' -> '{gt.description}'")
+
+        added_values = gt.allowed_values - old_values
+        removed_values = old_values - gt.allowed_values
+        if added_values or removed_values:
+            parts.append(f"allowed_values: {_format_set_delta(added_values, removed_values)}")
+
+        added_assigners = gt.assigners - old_assigners
+        removed_assigners = old_assigners - gt.assigners
+        if added_assigners or removed_assigners:
+            self._governed_tag_assigners_granted += len(added_assigners)
+            self._governed_tag_assigners_revoked += len(removed_assigners)
+            parts.append(
+                f"assigners: "
+                f"{_format_principal_delta(added_assigners, removed_assigners)}"
+            )
+
+        summary = " | ".join(parts) if parts else "no fields"
         self._log_info(_format_change_line(
             "~", "GOVERNED_TAG", gt.name,
             f"{action_verb} governed tag ({summary})",
         ))
 
     def log_governed_tag_delete(self, gt: GovernedTag) -> None:
-        """Log a governed tag being deleted from the account."""
+        """Log a governed tag being deleted — enumerates the description, allowed
+        values, and assigners being torn down so operators can see what's being
+        lost. Assigners are also counted as revokes for the summary, since the
+        rule set is destroyed with the tag."""
         self._governed_tags_deleted += 1
+        self._governed_tag_assigners_revoked += len(gt.assigners)
         action_verb = "Delete" if self._dry_run else "Deleted"
+        parts: list[str] = []
+        if gt.description:
+            parts.append(f"description='{gt.description}'")
+        if gt.allowed_values:
+            parts.append(f"allowed_values={','.join(sorted(gt.allowed_values))}")
+        if gt.assigners:
+            parts.append(
+                f"assigners="
+                f"{','.join(sorted(p.name for p in gt.assigners))}"
+            )
+        suffix = f" ({' | '.join(parts)})" if parts else ""
         self._log_info(_format_change_line(
             "-", "GOVERNED_TAG", gt.name,
-            f"{action_verb} governed tag",
+            f"{action_verb} governed tag{suffix}",
         ))
 
     # ------------------------------------------------------------------
@@ -330,11 +407,19 @@ class ChangeLogger:
         if self._governed_tags_deleted:
             gt_parts.append(f"{self._governed_tags_deleted} deleted")
 
+        gt_assigner_parts: list[str] = []
+        if self._governed_tag_assigners_granted:
+            gt_assigner_parts.append(f"{self._governed_tag_assigners_granted} granted")
+        if self._governed_tag_assigners_revoked:
+            gt_assigner_parts.append(f"{self._governed_tag_assigners_revoked} revoked")
+
         sections: list[str] = []
         if sec_parts:
             sections.append("Securables: " + ", ".join(sec_parts))
         if gt_parts:
             sections.append("Governed tags: " + ", ".join(gt_parts))
+        if gt_assigner_parts:
+            sections.append("Governed tag assigners: " + ", ".join(gt_assigner_parts))
         if tag_parts:
             sections.append("Tags: " + ", ".join(tag_parts))
         if policy_parts:
@@ -383,11 +468,19 @@ class ChangeLogger:
         if self._governed_tags_deleted:
             gt_parts.append(f"{self._governed_tags_deleted} to delete")
 
+        gt_assigner_parts: list[str] = []
+        if self._governed_tag_assigners_granted:
+            gt_assigner_parts.append(f"{self._governed_tag_assigners_granted} to grant")
+        if self._governed_tag_assigners_revoked:
+            gt_assigner_parts.append(f"{self._governed_tag_assigners_revoked} to revoke")
+
         sections: list[str] = []
         if sec_parts:
             sections.append("Securables: " + ", ".join(sec_parts))
         if gt_parts:
             sections.append("Governed tags: " + ", ".join(gt_parts))
+        if gt_assigner_parts:
+            sections.append("Governed tag assigners: " + ", ".join(gt_assigner_parts))
         if tag_parts:
             sections.append("Tags: " + ", ".join(tag_parts))
         if policy_parts:
