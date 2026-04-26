@@ -494,6 +494,55 @@ def test_securable_executor_emits_one_alter_per_column():
     assert "amount" in sql_blob and "DECIMAL(18,2)" in sql_blob
 
 
+def test_securable_executor_preserves_column_declaration_order_within_a_table():
+    """Multiple Columns for the same parent table are emitted in their input-list
+    order — not alphabetised by column name. The list order ultimately reflects
+    the user's YAML declaration order."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        securables_to_create=[
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.t.zebra", data_type="STRING"),
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.t.apple", data_type="STRING"),
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.t.mango", data_type="STRING"),
+        ],
+    )
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    column_names = [s.split("ADD COLUMN `")[1].split("`")[0] for s in stmts]
+    assert column_names == ["zebra", "apple", "mango"]
+
+
+def test_securable_executor_groups_columns_by_parent_table_in_order():
+    """Across multiple parent tables, columns are grouped together by parent;
+    within each parent, the input-list order is preserved."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        securables_to_create=[
+            # Interleaved input order across two tables.
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.t1.b", data_type="STRING"),
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.t2.x", data_type="STRING"),
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.t1.a", data_type="STRING"),
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.t2.y", data_type="STRING"),
+        ],
+    )
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    column_names = [s.split("ADD COLUMN `")[1].split("`")[0] for s in stmts]
+    # t1 columns appear together (in their input order: b then a),
+    # then t2 columns together (x then y). Cross-table grouping protects
+    # against parent-table interleaving — the SQL DDL is per-table anyway.
+    t1_indices = [i for i, name in enumerate(column_names) if name in ("b", "a")]
+    t2_indices = [i for i, name in enumerate(column_names) if name in ("x", "y")]
+    assert max(t1_indices) < min(t2_indices) or max(t2_indices) < min(t1_indices), (
+        f"Expected per-table grouping; got {column_names}"
+    )
+    # Within each parent, input order is preserved.
+    assert column_names[t1_indices[0]] == "b" and column_names[t1_indices[1]] == "a"
+    assert column_names[t2_indices[0]] == "x" and column_names[t2_indices[1]] == "y"
+
+
 def test_securable_executor_alter_table_add_column_targets_parent_table():
     """The column's parent table (everything up to the last '.') is the ALTER TABLE target."""
     uc_helper = MagicMock()

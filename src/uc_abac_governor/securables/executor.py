@@ -32,8 +32,17 @@ _CREATION_DEPTH: dict[SecurableType, int] = {
 
 
 def _creation_sort_key(info: Securable) -> tuple[int, str]:
-    """Sort creates parent-first (by depth), then alphabetically by full_name."""
+    """Sort creates parent-first (by depth), then alphabetically by full_name.
+
+    Columns are an exception: they share a key with every other column on the
+    same parent table so that Python's stable sort preserves their input-list
+    order (which traces back to the user's YAML declaration order). Sorting
+    columns by their own full_name would silently re-order them alphabetically.
+    """
     depth = _CREATION_DEPTH.get(info.securable_type, 99)
+    if isinstance(info, Column):
+        parent_full_name, _, _ = info.full_name.rpartition(".")
+        return (depth, parent_full_name)
     return (depth, info.full_name)
 
 
