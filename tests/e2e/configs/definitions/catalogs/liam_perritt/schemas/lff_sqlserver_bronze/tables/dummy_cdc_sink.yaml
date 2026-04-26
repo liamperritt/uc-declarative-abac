@@ -8,5 +8,10 @@ definitions:
         uc_gov_pipeline: lff
       columns:
         - name: data
+          type: string
           tags:
-            uc_gov_pii: ~
+            uc_gov_pii: name
+        - name: new_column
+          type: string
+          tags:
+            uc_gov_pii: address

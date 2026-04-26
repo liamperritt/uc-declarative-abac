@@ -116,12 +116,21 @@ class NonexistentSecurableError(GovernorError):
         self.securable_type = securable_type
         self.full_name = full_name
         self.hint = hint
-        message = (
+        base = (
             f"Nonexistent {securable_type.value} {full_name!r} declared in config but "
-            f"not found in Unity Catalog. Either create it in UC, or remove it from config."
+            f"not found in Unity Catalog."
         )
         if hint:
-            message = f"{message} {hint}"
+            # A hint means a downstream validator ran (typically with the
+            # creation flag already on) and identified a specific blocker.
+            # The hint is the actionable advice; suggesting the flag here
+            # would be redundant (the user has already set it).
+            message = f"{base} {hint}"
+        else:
+            message = (
+                f"{base} Please add the --enable-taggable-creation flag to have "
+                "the engine create it, or remove it from config."
+            )
         super().__init__(message)
 
 

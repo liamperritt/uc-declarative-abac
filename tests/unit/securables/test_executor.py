@@ -448,3 +448,117 @@ def test_securable_executor_orders_creations_parent_first():
     idx_volume = next(i for i, s in enumerate(stmts) if "CREATE VOLUME" in s.upper())
     assert idx_catalog < idx_schema < idx_table, f"expected catalog < schema < table, got {[idx_catalog, idx_schema, idx_table]}"
     assert idx_schema < idx_volume, f"expected schema < volume, got schema={idx_schema}, volume={idx_volume}"
+
+
+# ---------------------------------------------------------------------------
+# COLUMN dispatch: ALTER TABLE ADD COLUMN
+# ---------------------------------------------------------------------------
+
+
+def test_securable_executor_builds_alter_table_add_column_sql_for_column():
+    """A standalone Column in securables_to_create produces ALTER TABLE ADD COLUMN SQL."""
+    uc_helper = MagicMock()
+    column = Column(
+        securable_type=SecurableType.COLUMN,
+        full_name="cat.sch.orders.email",
+        data_type="STRING",
+    )
+    diff = SecurableDiff(securables_to_create=[column])
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    sql = stmts[0]
+    _assert_sql_contains(sql, "ALTER TABLE", "ADD COLUMN", "cat.sch.orders", "email", "STRING")
+    # Backtick quoting on parent table and column name.
+    assert "`cat`.`sch`.`orders`" in sql
+    assert "`email`" in sql
+
+
+def test_securable_executor_emits_one_alter_per_column():
+    """Multiple Column entries each produce their own ALTER TABLE ADD COLUMN statement."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        securables_to_create=[
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.email", data_type="STRING"),
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.amount", data_type="DECIMAL(18,2)"),
+        ],
+    )
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 2
+    assert all("ALTER TABLE" in s.upper() and "ADD COLUMN" in s.upper() for s in stmts)
+    sql_blob = " ".join(stmts)
+    assert "email" in sql_blob and "STRING" in sql_blob
+    assert "amount" in sql_blob and "DECIMAL(18,2)" in sql_blob
+
+
+def test_securable_executor_alter_table_add_column_targets_parent_table():
+    """The column's parent table (everything up to the last '.') is the ALTER TABLE target."""
+    uc_helper = MagicMock()
+    column = Column(
+        securable_type=SecurableType.COLUMN,
+        full_name="my_catalog.my_schema.my_table.my_col",
+        data_type="INT",
+    )
+    diff = SecurableDiff(securables_to_create=[column])
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    sql = stmts[0]
+    # Parent is my_catalog.my_schema.my_table; column is my_col
+    assert "`my_catalog`.`my_schema`.`my_table`" in sql
+    assert "`my_col` INT" in sql
+
+
+def test_securable_executor_skips_alter_table_in_dry_run():
+    """In dry-run mode, ALTER TABLE ADD COLUMN is not invoked on the SDK."""
+    uc_helper = MagicMock()
+    column = Column(
+        securable_type=SecurableType.COLUMN,
+        full_name="cat.sch.orders.email",
+        data_type="STRING",
+    )
+    diff = SecurableDiff(securables_to_create=[column])
+
+    execute_securable_diff(uc_helper, diff, ChangeLogger(dry_run=True), dry_run=True)
+
+    uc_helper.execute_sql.assert_not_called()
+
+
+def test_securable_executor_logs_error_and_continues_on_alter_table_failure():
+    """An exception during one ALTER TABLE ADD COLUMN does not abort subsequent columns."""
+    uc_helper = MagicMock()
+    uc_helper.execute_sql.side_effect = [Exception("boom"), None]
+    cl = ChangeLogger()
+    diff = SecurableDiff(
+        securables_to_create=[
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.fail", data_type="STRING"),
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.succeed", data_type="STRING"),
+        ],
+    )
+
+    execute_securable_diff(uc_helper, diff, cl)
+
+    assert uc_helper.execute_sql.call_count == 2
+    assert cl.has_errors
+
+
+def test_securable_executor_orders_columns_after_their_parent_table():
+    """When a Column and its parent Table are both in to_create, the table is created first."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        securables_to_create=[
+            # Out of order on purpose.
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.tbl.new_col", data_type="STRING"),
+            Table(securable_type=SecurableType.TABLE, full_name="cat.sch.tbl",
+                  columns=(Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.tbl.a", data_type="STRING"),)),
+        ],
+    )
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    idx_table = next(i for i, s in enumerate(stmts) if "CREATE TABLE" in s.upper())
+    idx_alter = next(i for i, s in enumerate(stmts) if "ALTER TABLE" in s.upper())
+    assert idx_table < idx_alter

@@ -781,14 +781,21 @@ def test_column_config_data_type_defaults_to_none():
 
 
 # ---------------------------------------------------------------------------
-# ParameterConfig.type coercion
+# ParameterConfig.data_type coercion + alias
 # ---------------------------------------------------------------------------
 
 
-def test_parameter_config_coerces_lowercase_type():
-    """A lowercase type string like 'string' is coerced to STRING."""
+def test_parameter_config_coerces_lowercase_data_type():
+    """A lowercase value supplied via the legacy 'type' YAML key is coerced to upper case
+    and stored on the canonical `data_type` attribute."""
     param = ParameterConfig.model_validate({"name": "col", "type": "string"})
-    assert param.type == "STRING"
+    assert param.data_type == "STRING"
+
+
+def test_parameter_config_accepts_data_type_alias():
+    """The canonical 'data_type' YAML key is accepted (alongside the legacy 'type' alias)."""
+    param = ParameterConfig.model_validate({"name": "col", "data_type": "INT"})
+    assert param.data_type == "INT"
 
 
 # ---------------------------------------------------------------------------

@@ -25,7 +25,7 @@ from uc_abac_governor.policies.state import Policy
 from uc_abac_governor.principals.state import Principal
 from uc_abac_governor.tags.state import SecurableTag
 from uc_abac_governor.privileges.state import SecurablePrivilege
-from uc_abac_governor.securables.state import Function, SecurableAttributes, Securable
+from uc_abac_governor.securables.state import Column, Function, SecurableAttributes, Securable, Table
 from uc_abac_governor.types import GovernorError, PolicyType, PrincipalType, PrivilegeType, SecurableType
 
 _logger = logging.getLogger("uc_abac_governor")
@@ -193,29 +193,42 @@ def _fetch_external_links_rows(response: StatementResponse) -> list[list[str]]:
 
 
 def _build_securables_query(catalog_names: list[str]) -> str:
-    """Build a UNION ALL query for securable attributes and function definitions."""
+    """Build a UNION ALL query for securable attributes, function definitions, and table columns.
+
+    The TABLE arm joins ``information_schema.columns`` and aggregates each table's
+    column names (in ``ordinal_position`` order) into a JSON string array. Only
+    the column *names* are projected — ``data_type`` is intentionally excluded
+    to keep the wire payload small. Column data types are only used on the desired
+    side of the diff (for CREATE TABLE / ADD COLUMN SQL emission).
+    """
     in_clause = _build_catalog_in_clause(catalog_names)
     parts = [
         f"SELECT 'CATALOG' AS securable_type, catalog_name AS full_name, "
-        f"catalog_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment "
+        f"catalog_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, NULL AS columns "
         f"FROM system.information_schema.catalogs "
         f"WHERE catalog_name IN {in_clause}",
 
         f"SELECT 'SCHEMA' AS securable_type, "
         f"concat(catalog_name, '.', schema_name) AS full_name, "
-        f"schema_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment "
+        f"schema_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, NULL AS columns "
         f"FROM system.information_schema.schemata "
         f"WHERE catalog_name IN {in_clause} AND schema_name != 'information_schema'",
 
         f"SELECT 'TABLE' AS securable_type, "
-        f"concat(table_catalog, '.', table_schema, '.', table_name) AS full_name, "
-        f"table_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment "
-        f"FROM system.information_schema.tables "
-        f"WHERE table_catalog IN {in_clause} AND table_schema != 'information_schema'",
+        f"concat(t.table_catalog, '.', t.table_schema, '.', t.table_name) AS full_name, "
+        f"t.table_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, "
+        f"to_json(transform(sort_array(collect_list(struct(c.ordinal_position, c.column_name))), x -> x.column_name)) AS columns "
+        f"FROM system.information_schema.tables t "
+        f"LEFT JOIN system.information_schema.columns c "
+        f"ON t.table_catalog = c.table_catalog "
+        f"AND t.table_schema = c.table_schema "
+        f"AND t.table_name = c.table_name "
+        f"WHERE t.table_catalog IN {in_clause} AND t.table_schema != 'information_schema' "
+        f"GROUP BY t.table_catalog, t.table_schema, t.table_name, t.table_owner",
 
         f"SELECT 'VOLUME' AS securable_type, "
         f"concat(volume_catalog, '.', volume_schema, '.', volume_name) AS full_name, "
-        f"volume_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment "
+        f"volume_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, NULL AS columns "
         f"FROM system.information_schema.volumes "
         f"WHERE volume_catalog IN {in_clause} AND volume_schema != 'information_schema'",
 
@@ -224,7 +237,8 @@ def _build_securables_query(catalog_names: list[str]) -> str:
         f"r.routine_owner AS owner, "
         f"to_json(transform(sort_array(collect_list(struct(p.ordinal_position, p.parameter_name, p.data_type))), x -> struct(x.parameter_name, x.data_type))) AS parameters, "
         f"r.routine_definition AS routine_definition, "
-        f"r.comment AS routine_comment "
+        f"r.comment AS routine_comment, "
+        f"NULL AS columns "
         f"FROM system.information_schema.routines r "
         f"LEFT JOIN system.information_schema.parameters p "
         f"ON r.specific_catalog = p.specific_catalog "
@@ -241,7 +255,7 @@ def _parse_securable_rows(
 ) -> tuple[set[Securable], set[SecurableAttributes]]:
     """Parse raw SQL rows into securables and attributes.
 
-    Row columns: [securable_type, full_name, owner, parameters_json, routine_definition, routine_comment]
+    Row columns: [securable_type, full_name, owner, parameters_json, routine_definition, routine_comment, columns_json]
     """
     securables: set[Securable] = set()
     attributes: set[SecurableAttributes] = set()
@@ -252,6 +266,7 @@ def _parse_securable_rows(
         parameters_json = row[3]
         routine_definition = row[4]
         routine_comment = row[5] if len(row) > 5 else None
+        columns_json = row[6] if len(row) > 6 else None
 
         owner_principal = (
             Principal(principal_type=PrincipalType.UNKNOWN, identifier=owner)
@@ -280,6 +295,23 @@ def _parse_securable_rows(
                     parameters=params,
                     definition=routine_definition,
                     comment=routine_comment if routine_comment else None,
+                )
+            )
+        elif securable_type == SecurableType.TABLE:
+            column_names = json.loads(columns_json) if columns_json else []
+            columns = tuple(
+                Column(
+                    securable_type=SecurableType.COLUMN,
+                    full_name=f"{full_name}.{name}",
+                    data_type=None,
+                )
+                for name in column_names
+            )
+            securables.add(
+                Table(
+                    securable_type=SecurableType.TABLE,
+                    full_name=full_name,
+                    columns=columns,
                 )
             )
         else:

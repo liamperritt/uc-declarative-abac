@@ -8,6 +8,7 @@ if TYPE_CHECKING:
 
 from uc_abac_governor.helpers import quote_securable as quote_securable
 from uc_abac_governor.securables.state import (
+    Column,
     Function,
     Securable,
     SecurableDiff,
@@ -43,6 +44,8 @@ def _build_create_sql(info: Securable) -> str:
             return _build_create_function_sql(info)
         case Table():
             return _build_create_table_sql(info)
+        case Column():
+            return _build_alter_table_add_column_sql(info)
         case Securable(securable_type=SecurableType.CATALOG):
             return _build_create_catalog_sql(info)
         case Securable(securable_type=SecurableType.SCHEMA):
@@ -78,6 +81,17 @@ def _build_create_table_sql(info: Table) -> str:
         f"`{c.full_name.rsplit('.', 1)[-1]}` {c.data_type}" for c in info.columns
     )
     return f"CREATE TABLE IF NOT EXISTS {quote_securable(info.full_name)} ({column_defs})"
+
+
+def _build_alter_table_add_column_sql(info: Column) -> str:
+    """``ALTER TABLE <parent> ADD COLUMN `<name>` <TYPE>`` — adds a single column to
+    an existing table. The differ has already validated that ``data_type`` is set
+    before a Column reaches this builder."""
+    parent_full_name, _, column_name = info.full_name.rpartition(".")
+    return (
+        f"ALTER TABLE {quote_securable(parent_full_name)} "
+        f"ADD COLUMN `{column_name}` {info.data_type}"
+    )
 
 
 def _build_replace_sql(info: Securable) -> str:

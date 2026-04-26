@@ -8,13 +8,14 @@ if TYPE_CHECKING:
 
 from uc_abac_governor.securables.state import (
     AttributeUpdate,
+    Column,
     Function,
     SecurableAttributes,
     SecurableDiff,
     Securable,
     Table,
 )
-from uc_abac_governor.types import ExecutionError, NonexistentSecurableError, PrincipalValidationError
+from uc_abac_governor.types import ExecutionError, NonexistentSecurableError, PrincipalValidationError, SecurableType
 
 _GOVERNED_ATTRIBUTES = ["owner"]
 
@@ -55,6 +56,16 @@ def compute_securable_diff(
         securables_to_create = _log_nonexistent_non_function_securables(
             securables_to_create, change_logger,
         )
+
+    table_full_names_being_created = {
+        s.full_name for s in securables_to_create
+        if s.securable_type == SecurableType.TABLE
+    }
+    columns_to_create = _diff_table_columns(
+        desired_securables, actual_securables,
+        table_full_names_being_created, change_logger, enable_taggable_creation,
+    )
+    securables_to_create.extend(columns_to_create)
 
     created_full_names = {s.full_name for s in securables_to_create}
 
@@ -146,6 +157,72 @@ def _table_creation_blocker(table: Table) -> str | None:
             "every column must specify its UC datatype to enable table creation."
         )
     return None
+
+
+def _column_creation_blocker(column: Column) -> str | None:
+    """Return a reason string if ``column`` cannot be validly created via
+    ALTER TABLE ADD COLUMN, else None. A creatable column must declare its
+    UC datatype via the ``data_type`` field — ALTER TABLE syntax requires it."""
+    if not column.data_type:
+        return "Declare a 'type' on the column to enable creation."
+    return None
+
+
+def _diff_table_columns(
+    desired: set[Securable],
+    actual: set[Securable],
+    table_full_names_being_created: set[str],
+    change_logger: ChangeLogger,
+    enable_taggable_creation: bool,
+) -> list[Column]:
+    """For each desired Table that already exists in UC (i.e. NOT being created
+    this run), compare its declared columns against the columns fetched from UC
+    and return any columns that should be added via ALTER TABLE ADD COLUMN.
+
+    Logs ``NonexistentSecurableError(COLUMN, ...)`` for missing columns that
+    can't be created (flag off, or flag on but column lacks ``data_type``).
+    Columns present in actual but absent from desired are ignored — additive only.
+    """
+    actual_tables_by_name = {
+        s.full_name: s for s in actual
+        if isinstance(s, Table)
+    }
+
+    columns_to_create: list[Column] = []
+    for desired_sec in desired:
+        if not isinstance(desired_sec, Table):
+            continue
+        if desired_sec.full_name in table_full_names_being_created:
+            continue  # the CREATE TABLE path handles its columns
+        actual_table = actual_tables_by_name.get(desired_sec.full_name)
+        if actual_table is None:
+            continue  # missing-table error is handled separately
+        actual_column_names = {c.full_name for c in actual_table.columns}
+
+        for col in desired_sec.columns:
+            if col.full_name in actual_column_names:
+                continue  # already exists in UC
+
+            if enable_taggable_creation:
+                blocker = _column_creation_blocker(col)
+                if blocker is None:
+                    columns_to_create.append(col)
+                    continue
+                change_logger.log_error(ExecutionError(
+                    context=f"Validate ADD COLUMN {col.full_name}",
+                    exception=NonexistentSecurableError(
+                        SecurableType.COLUMN, col.full_name, hint=blocker,
+                    ),
+                ))
+            else:
+                change_logger.log_error(ExecutionError(
+                    context=f"Existence check: COLUMN {col.full_name}",
+                    exception=NonexistentSecurableError(
+                        SecurableType.COLUMN, col.full_name,
+                    ),
+                ))
+
+    return columns_to_create
 
 
 def _validate_tables_for_creation(

@@ -586,10 +586,12 @@ def test_securable_differ_still_logs_error_when_taggable_creation_disabled():
 
 
 def test_securable_differ_does_not_add_table_to_replace_when_desired_columns_differ_from_actual():
-    """An existing TABLE (base Securable on actual side) plus a desired Table with
-    columns must not be marked for replacement — only Functions are replaceable."""
+    """An existing TABLE on the actual side plus a desired Table with columns must
+    not be marked for replacement — only Functions are replaceable. With taggable
+    creation enabled and the desired column carrying a data_type, the missing
+    column flows into securables_to_create instead."""
     desired_table = _typed_table("cat.sch.orders", "email")
-    actual_table = _sec(SecurableType.TABLE, "cat.sch.orders")
+    actual_table = _actual_table("cat.sch.orders")  # exists in UC, has no columns yet
     change_logger = _change_logger()
 
     diff = compute_securable_diff(
@@ -597,6 +599,194 @@ def test_securable_differ_does_not_add_table_to_replace_when_desired_columns_dif
         enable_taggable_creation=True,
     )
 
-    assert diff.securables_to_create == []
     assert diff.securables_to_replace == []
     assert _nonexistent_errors(change_logger) == []
+    # The missing column flows into securables_to_create as a Column with its data_type.
+    assert any(
+        isinstance(s, Column) and s.full_name == "cat.sch.orders.email"
+        for s in diff.securables_to_create
+    )
+
+
+# ---------------------------------------------------------------------------
+# Column-existence validation
+# ---------------------------------------------------------------------------
+
+
+def _actual_table(full_name: str, *col_names: str) -> Table:
+    """Shorthand: build an actual-side Table with columns whose data_type is None
+    (matches what fetch_actual_securables produces — actual-side never carries types)."""
+    return Table(
+        securable_type=SecurableType.TABLE,
+        full_name=full_name,
+        columns=tuple(
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name=f"{full_name}.{name}",
+                data_type=None,
+            )
+            for name in col_names
+        ),
+    )
+
+
+def test_securable_differ_logs_nonexistent_column_when_missing_and_taggable_creation_disabled():
+    """A column declared in config but absent from actual is logged as NonexistentSecurableError(COLUMN)."""
+    desired = {_typed_table("cat.sch.orders", "email", "amount")}
+    actual = {_actual_table("cat.sch.orders", "amount")}  # 'email' is missing
+    change_logger = _change_logger()
+
+    diff = compute_securable_diff(
+        set(), set(), desired, actual, _resolver(), change_logger,
+    )
+
+    offenders = {(e.securable_type, e.full_name) for e in _nonexistent_errors(change_logger)}
+    assert (SecurableType.COLUMN, "cat.sch.orders.email") in offenders
+    # No Column emitted when flag is off.
+    assert not any(isinstance(s, Column) for s in diff.securables_to_create)
+
+
+def test_securable_differ_emits_column_to_create_when_missing_and_taggable_creation_enabled_with_data_type():
+    """Missing column + flag on + data_type set → Column appears in securables_to_create."""
+    desired = {_typed_table("cat.sch.orders", "email")}
+    actual = {_actual_table("cat.sch.orders")}  # no columns yet
+    change_logger = _change_logger()
+
+    diff = compute_securable_diff(
+        set(), set(), desired, actual, _resolver(), change_logger,
+        enable_taggable_creation=True,
+    )
+
+    column_entries = [s for s in diff.securables_to_create if isinstance(s, Column)]
+    assert len(column_entries) == 1
+    assert column_entries[0].full_name == "cat.sch.orders.email"
+    assert column_entries[0].data_type == "STRING"
+    assert _nonexistent_errors(change_logger) == []
+
+
+def test_securable_differ_logs_nonexistent_column_with_hint_when_taggable_creation_enabled_but_data_type_missing():
+    """Missing column + flag on + data_type missing → NonexistentSecurableError logged with hint."""
+    desired_table = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sch.orders",
+        columns=(
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.orders.email",
+                data_type=None,
+            ),
+        ),
+    )
+    actual = {_actual_table("cat.sch.orders")}
+    change_logger = _change_logger()
+
+    compute_securable_diff(
+        set(), set(), {desired_table}, actual, _resolver(), change_logger,
+        enable_taggable_creation=True,
+    )
+
+    errors = _nonexistent_errors(change_logger)
+    column_errors = [e for e in errors if e.securable_type == SecurableType.COLUMN]
+    assert len(column_errors) == 1
+    assert column_errors[0].full_name == "cat.sch.orders.email"
+    assert column_errors[0].hint is not None
+    assert "type" in column_errors[0].hint.lower()
+
+
+def test_securable_differ_does_not_emit_column_when_already_present_in_actual():
+    """A column declared in both desired and actual produces no diff entry."""
+    desired = {_typed_table("cat.sch.orders", "email")}
+    actual = {_actual_table("cat.sch.orders", "email")}
+    change_logger = _change_logger()
+
+    diff = compute_securable_diff(
+        set(), set(), desired, actual, _resolver(), change_logger,
+        enable_taggable_creation=True,
+    )
+
+    assert not any(isinstance(s, Column) for s in diff.securables_to_create)
+    assert _nonexistent_errors(change_logger) == []
+
+
+def test_securable_differ_ignores_columns_present_only_in_actual():
+    """Columns present in UC but not declared in config are left alone (additive only)."""
+    desired = {_typed_table("cat.sch.orders", "email")}
+    actual = {_actual_table("cat.sch.orders", "email", "legacy_field")}
+    change_logger = _change_logger()
+
+    diff = compute_securable_diff(
+        set(), set(), desired, actual, _resolver(), change_logger,
+        enable_taggable_creation=True,
+    )
+
+    assert not any(isinstance(s, Column) for s in diff.securables_to_create)
+    assert _nonexistent_errors(change_logger) == []
+
+
+def test_securable_differ_skips_column_check_for_table_being_created():
+    """When the table itself is in to_create (also missing from actual), the table's
+    columns are not separately added — they'll be created via CREATE TABLE."""
+    desired = {_typed_table("cat.sch.new_orders", "email", "amount")}
+    actual: set[Securable] = set()  # neither table nor columns exist
+    change_logger = _change_logger()
+
+    diff = compute_securable_diff(
+        set(), set(), desired, actual, _resolver(), change_logger,
+        enable_taggable_creation=True,
+    )
+
+    # Only the Table is in to_create — no separate Column entries.
+    assert not any(isinstance(s, Column) for s in diff.securables_to_create)
+    table_entries = [s for s in diff.securables_to_create if isinstance(s, Table)]
+    assert len(table_entries) == 1
+    # The table carries its columns inside (Table.columns) — that's how CREATE TABLE works.
+    assert len(table_entries[0].columns) == 2
+
+
+# ---------------------------------------------------------------------------
+# NonexistentSecurableError message
+# ---------------------------------------------------------------------------
+
+
+def test_nonexistent_securable_error_message_recommends_enable_taggable_creation_flag():
+    """Without a hint (flag off → existence check), the message tells the user to set
+    --enable-taggable-creation rather than asking them to create the object manually."""
+    desired = {_sec(SecurableType.CATALOG, "ghost_catalog")}
+    change_logger = _change_logger()
+
+    compute_securable_diff(set(), set(), desired, set(), _resolver(), change_logger)
+
+    err = next(
+        e.exception for e in change_logger.errors
+        if isinstance(e.exception, NonexistentSecurableError)
+    )
+    msg = str(err)
+    assert "--enable-taggable-creation" in msg
+    # The old phrasing should be gone.
+    assert "Either create it in UC" not in msg
+
+
+def test_nonexistent_securable_error_uses_hint_when_provided_instead_of_flag_boilerplate():
+    """When a hint is given (flag on but validation failed), the message uses the hint
+    and does NOT also tell the user to set the flag (they already have it on)."""
+    table = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sch.empty",
+        columns=(),  # no columns → blocker
+    )
+    change_logger = _change_logger()
+
+    compute_securable_diff(
+        set(), set(), {table}, set(), _resolver(), change_logger,
+        enable_taggable_creation=True,
+    )
+
+    err = next(
+        e.exception for e in change_logger.errors
+        if isinstance(e.exception, NonexistentSecurableError)
+    )
+    msg = str(err)
+    # The hint is surfaced.
+    assert "Configure at least one column" in msg
+    # The flag-boilerplate should NOT appear when a hint is present.
+    assert "--enable-taggable-creation" not in msg

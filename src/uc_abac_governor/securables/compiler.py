@@ -54,7 +54,7 @@ def compile_desired_attributes(config: ResourcesConfig) -> set[SecurableAttribut
 def _compile_function(func: FunctionConfig) -> Function:
     """Build a Function from a FunctionConfig."""
     parameters = tuple(
-        (param.name, param.type) for param in func.parameters
+        (param.name, param.data_type) for param in func.parameters
     ) if func.parameters else ()
     return Function(
         securable_type=SecurableType.FUNCTION,

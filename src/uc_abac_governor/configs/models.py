@@ -111,11 +111,13 @@ PolicyConfig = Union[MaskPolicyConfig, FilterPolicyConfig, GrantPolicyConfig]
 
 class ParameterConfig(BaseModel):
     name: str
-    type: str
+    data_type: str = Field(
+        validation_alias=AliasChoices("data_type", "type"),
+    )
 
-    @field_validator("type", mode="before")
+    @field_validator("data_type", mode="before")
     @classmethod
-    def _coerce_type_to_uppercase(cls, v):
+    def _coerce_data_type_to_uppercase(cls, v):
         if isinstance(v, str):
             return v.upper()
         return v

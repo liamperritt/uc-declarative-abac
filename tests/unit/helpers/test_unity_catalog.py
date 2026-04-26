@@ -623,11 +623,13 @@ def test_uc_helper_parses_securable_rows_for_attributes(mock_fetch):
             owner=Principal(principal_type=PrincipalType.UNKNOWN, identifier="vol_owner"),
         ),
     }
+    from uc_abac_governor.securables.state import Table
+
     assert attributes == expected_attributes
     assert securables == {
         Securable(securable_type=SecurableType.CATALOG, full_name="my_catalog"),
         Securable(securable_type=SecurableType.SCHEMA, full_name="my_catalog.sales"),
-        Securable(securable_type=SecurableType.TABLE, full_name="my_catalog.sales.orders"),
+        Table(securable_type=SecurableType.TABLE, full_name="my_catalog.sales.orders", columns=()),
         Securable(securable_type=SecurableType.VOLUME, full_name="my_catalog.landing.files"),
     }
 
@@ -655,14 +657,16 @@ def test_uc_helper_fetch_actual_securables_returns_base_securable_for_schema_row
 
 
 @patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
-def test_uc_helper_fetch_actual_securables_returns_base_securable_for_table_rows(mock_fetch):
-    """A TABLE row produces a base Securable(TABLE, full_name)."""
+def test_uc_helper_fetch_actual_securables_returns_table_for_table_rows(mock_fetch):
+    """A TABLE row produces a Table(TABLE, full_name, columns=()) when no columns are present."""
+    from uc_abac_governor.securables.state import Table
+
     mock_fetch.return_value = [["TABLE", "cat.sales.orders", None, None, None]]
     helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
 
     securables, _ = helper.fetch_actual_securables(["cat"])
 
-    assert Securable(securable_type=SecurableType.TABLE, full_name="cat.sales.orders") in securables
+    assert Table(securable_type=SecurableType.TABLE, full_name="cat.sales.orders", columns=()) in securables
 
 
 @patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
@@ -792,6 +796,126 @@ def test_uc_helper_returns_empty_securables_for_empty_catalog_list():
     assert securables == set()
     assert attributes == set()
     client.statement_execution.execute_statement.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# UnityCatalogHelper.fetch_actual_securables — column-name aggregation
+# ---------------------------------------------------------------------------
+
+
+@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_table_row_with_columns_emits_table_with_column_objects(mock_fetch):
+    """A TABLE row carrying a JSON column-name array produces a Table with Column entries
+    in ordinal-position order (data_type=None — not fetched)."""
+    from uc_abac_governor.securables.state import Column, Table
+
+    rows = [
+        ["TABLE", "cat.sales.orders", "table_owner", None, None, None, '["id","customer_id","amount"]'],
+    ]
+    mock_fetch.return_value = rows
+    helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
+
+    securables, _ = helper.fetch_actual_securables(["cat"])
+
+    expected_table = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sales.orders",
+        columns=(
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sales.orders.id", data_type=None),
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sales.orders.customer_id", data_type=None),
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sales.orders.amount", data_type=None),
+        ),
+    )
+    assert expected_table in securables
+
+
+@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_table_row_with_null_columns_emits_table_with_empty_columns(mock_fetch):
+    """A TABLE row whose columns JSON is null/missing produces an empty Table.columns tuple."""
+    from uc_abac_governor.securables.state import Table
+
+    rows = [
+        ["TABLE", "cat.sales.orders", "owner", None, None, None, None],
+    ]
+    mock_fetch.return_value = rows
+    helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
+
+    securables, _ = helper.fetch_actual_securables(["cat"])
+
+    expected_table = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sales.orders",
+        columns=(),
+    )
+    assert expected_table in securables
+
+
+@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_table_row_with_empty_columns_array_emits_table_with_empty_columns(mock_fetch):
+    """A TABLE row with an empty JSON array '[]' for columns produces an empty Table.columns."""
+    from uc_abac_governor.securables.state import Table
+
+    rows = [
+        ["TABLE", "cat.sales.empty", "owner", None, None, None, "[]"],
+    ]
+    mock_fetch.return_value = rows
+    helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
+
+    securables, _ = helper.fetch_actual_securables(["cat"])
+
+    expected_table = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sales.empty",
+        columns=(),
+    )
+    assert expected_table in securables
+
+
+def test_uc_helper_securables_query_joins_columns_table_and_aggregates_by_ordinal_position():
+    """The TABLE arm joins information_schema.columns and aggregates column names by ordinal_position."""
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.fetch_actual_securables(["my_catalog"])
+
+    sql = _get_executed_sql(client)
+
+    # information_schema.columns must be referenced
+    assert "information_schema.columns" in sql
+
+    # Aggregation idiom: collect_list(struct(ordinal_position, column_name))
+    assert "ordinal_position" in sql
+    assert "column_name" in sql
+    assert "collect_list" in sql.lower()
+    assert "sort_array" in sql.lower()
+
+
+def test_uc_helper_securables_query_does_not_fetch_column_data_types():
+    """Per design: column data_type is not part of the actual-state fetch — only desired side uses it."""
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.fetch_actual_securables(["my_catalog"])
+
+    sql = _get_executed_sql(client)
+    sql_lower = sql.lower()
+
+    # The TABLE arm should not project any column from information_schema.columns
+    # other than column_name + ordinal_position. data_type is intentionally excluded
+    # to keep the wire payload small (we don't use it from the actual side).
+    # Find the TABLE arm by looking for the section between 'TABLE' AS securable_type
+    # and the next UNION ALL.
+    table_arm_start = sql_lower.find("'table' as securable_type")
+    assert table_arm_start != -1, "TABLE arm not found in query"
+    after_table_arm = sql_lower[table_arm_start:]
+    # Find the next UNION ALL boundary (or end of string)
+    next_union = after_table_arm.find("union all")
+    table_arm = after_table_arm[:next_union] if next_union != -1 else after_table_arm
+
+    # Within the TABLE arm, there should be no reference to c.data_type.
+    assert "c.data_type" not in table_arm, (
+        f"TABLE arm should not project column data_type. Arm:\n{table_arm}"
+    )
 
 
 # ---------------------------------------------------------------------------

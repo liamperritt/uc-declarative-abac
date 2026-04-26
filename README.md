@@ -728,7 +728,7 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 - **Owner management** — detects owner drift between config and workspace; updates via WorkspaceClient API for all securable types (catalogs, schemas, tables, volumes, functions)
 - **Function creation** — creates new functions via `CREATE FUNCTION` SQL with parameters and return expression (no `RETURNS` clause; UC infers the type)
 - **Function replacement** — replaces existing functions whose parameters or definition have changed via `CREATE OR REPLACE FUNCTION` SQL
-- **Single state query** — `fetch_actual_securables` combines attributes and function definitions in one UNION ALL query with `collect_list`/`sort_array`/`transform` aggregation for function parameters
+- **Single state query** — `fetch_actual_securables` combines attributes and function definitions in one UNION ALL query with `collect_list`/`sort_array`/`transform` aggregation for function parameters and table columns
 
 #### Tags domain
 - **Tag compilation** — walks catalog → schema → table → column → volume hierarchy, emitting desired tags
@@ -789,7 +789,7 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 - **Privileged-action opt-in flags** — five classes of mutation are gated behind explicit CLI flags. Each defaults to `false`; if unset, the corresponding actions are **skipped in both dry runs and real runs** — no fetch, no diff, no log section, no SQL. Pass the flag to opt in:
   - `--enable-tag-management` — create/update/remove tag assignments on securables. When off, the privileges compiler still honours grant-policy matches, but it matches against the *actual* on-disk UC tag state rather than the config's desired tags (since the engine is not going to apply the config's tags this run).
   - `--enable-taggable-management` — update attributes (currently `owner`; future: `comment`, `rfa_destination`) on existing taggable securables (catalogs, schemas, tables, volumes). Function attributes are always engine-managed independently of this flag.
-  - `--enable-taggable-creation` — create catalogs, schemas, tables, and volumes declared in config but absent from UC. Tables must declare ≥1 column with a `type` string on each (e.g. `type: STRING`); otherwise table creation fails with a `NonexistentSecurableError` explaining the requirement. Creation is managed-only (no `LOCATION` clauses). The securables domain does not fetch columns or attempt to add columns to pre-existing tables in this iteration.
+  - `--enable-taggable-creation` — create catalogs, schemas, tables, and volumes declared in config but absent from UC. Tables must declare ≥1 column with a `type` string on each (e.g. `type: STRING`); otherwise table creation fails with a `NonexistentSecurableError` explaining the requirement. Creation is managed-only (no `LOCATION` clauses). Columns declared in config but missing from a pre-existing table are added via `ALTER TABLE … ADD COLUMN` as long as the column declares a `type`; columns without a `type` fail validation with a hint, just like the table case. By default (flag off), columns missing from a pre-existing table are surfaced as `NonexistentSecurableError` at dry-run, so drift is caught before any SQL runs.
   - `--enable-privilege-management` — grant/revoke privileges via `GRANT`/`REVOKE` SQL.
   - `--enable-governed-tag-deletion` — delete governed tags (account-level tag policies) that exist in UC but are absent from config. **High blast radius — deleting a tag policy orphans every object assigned that tag key across the account.** The engine logs the list of tags slated for deletion and requires an interactive `y`/`yes` confirmation at the terminal before issuing any `delete_tag_policy` call. UC itself decides what happens to objects that reference the deleted tag (typically: orphans them); the engine does not scan for references. Pair with `--force` in non-interactive contexts (see below).
 
@@ -800,10 +800,9 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 
 ### Not yet implemented
 
-- **Object attributes** — `comment`, `rfa_destination` on securables (the `owner` attribute is implemented; adding new attributes requires only a field on `SecurableAttributes` and an executor dispatch branch). Enforcement is already gated by `--enable-taggable-management`.
+- **Object attributes** — `comment`, `rfa_destination`, and `location` on securables (the `owner` attribute is implemented; adding new attributes requires only a field on `SecurableAttributes` and an executor dispatch branch). Enforcement is already gated by `--enable-taggable-management`.
 - **Direct mask/filter** — `filter` on tables and `mask` on columns (non-ABAC, directly applied functions)
 - **Abstracted privilege names** — `use`, `read`, `edit`, `create` expanding to multiple UC privileges
-- **Nonexistent column validation** — the securables differ raises `NonexistentSecurableError` on dry-run (and real-run) when a catalog, schema, table, or volume declared in config doesn't exist in UC, but **columns are not checked**. A config that references a column that doesn't exist on its parent table will pass dry-run and only fail at execute time (when the `ALTER TABLE ... ALTER COLUMN ... SET TAGS` SQL runs). Column-level existence checking would require either extending `fetch_actual_securables` to include columns or querying `information_schema.columns` separately.
 
 ---
 
