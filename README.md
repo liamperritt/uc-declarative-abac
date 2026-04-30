@@ -198,11 +198,11 @@ definitions:
       tags:
         env: prod
       policies:
-        - $ref: $defs/policies/abac|grant_use_catalog
-        - $ref: $defs/policies/abac|mask_pii_email
+        - $defs/policies/abac|grant_use_catalog
+        - $defs/policies/abac|mask_pii_email
       schemas:
-        - $ref: $defs/schemas/operations|sales
-        - $ref: $defs/schemas/operations|landing
+        - $defs/schemas/operations|sales
+        - $defs/schemas/operations|landing
 
 # resources/catalogs/operations_prod.yaml
 resources:
@@ -266,7 +266,7 @@ definitions:
       tags:
         shared: ~
       functions:
-        - $ref: $defs/functions/platform|shared|mask_pii_email
+        - $defs/functions/platform|shared|mask_pii_email
 
 
 # resources/catalogs/platform_prod/schemas/shared/shared.yaml
