@@ -609,7 +609,7 @@ resources:
         env: test
 ```
 
-**Pattern 3 — fully inline.** If you don't need reuse, skip the definition layer entirely and declare the catalog straight under `resources:`:
+**Pattern 2 — fully inline.** If you don't need reuse, skip the definition layer entirely and declare the catalog straight under `resources:`:
 
 ```yaml
 # resources/catalogs/operations_prod.yaml
