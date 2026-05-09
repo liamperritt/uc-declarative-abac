@@ -435,7 +435,7 @@ definitions:
 # definitions/shared/policies/mask_customer_name_pii.yaml
 definitions:
   policies:
-    shared|mask_retail_segment_customer_names_pii
+    shared|mask_retail_segment_customer_names_pii:
       name: mask_retail_segment_customer_names_pii
       comment: Mask retail-segment customer names (not commercial-segment customer names) from all users except account admins
       type: mask
