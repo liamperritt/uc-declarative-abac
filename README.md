@@ -574,7 +574,7 @@ Once a tag policy is created, you can apply it to tables, columns, schemas, and 
 
 Catalogs are deployed by placing an entry under `resources: catalogs:`. The recommended form is a thin `$ref` to a matching catalog definition — this keeps all the interesting composition (schemas, policies, tags) in the definition, and leaves the resource side as a one-line pointer. Overrides can be applied on the `$ref` entry when a resource needs to differ from its definition (for example, a test catalog that reuses a prod definition but changes `name`, a couple of tags, or a function reference).
 
-**Pattern 1 — thin `$ref` with optional overrides.** One catalog definition, one matching resource:
+**Pattern 1 — thin `$ref` with optional overrides.** One catalog definition, multiple matching resource:
 
 ```yaml
 # definitions/catalogs/operations/operations.yaml
@@ -584,13 +584,11 @@ definitions:
       name: operations
       comment: Operations catalog
       owner: data_platform_team
-      tags:
-        env: prod
       policies:
-        - $ref: $defs/policies/abac|mask_pii_email
+        - $defs/policies/abac|mask_pii_email
       schemas:
-        - $ref: $defs/schemas/operations_prod|sales
-        - $ref: $defs/schemas/operations_prod|landing
+        - $defs/schemas/operations_prod|sales
+        - $defs/schemas/operations_prod|landing
 
 # resources/catalogs/operations_prod.yaml
 resources:
@@ -598,6 +596,17 @@ resources:
     operations_prod:
       $ref: $defs/catalogs/operations
       name: operations_prod
+      tags:
+        env: prod
+
+# resources/catalogs/operations_test.yaml
+resources:
+  catalogs:
+    operations_test:
+      $ref: $defs/catalogs/operations
+      name: operations_test
+      tags:
+        env: test
 ```
 
 **Pattern 3 — fully inline.** If you don't need reuse, skip the definition layer entirely and declare the catalog straight under `resources:`:
@@ -612,9 +621,9 @@ resources:
       tags:
         env: prod
       policies:
-        - $ref: $defs/policies/abac|mask_pii_email
+        - $defs/policies/abac|mask_pii_email
       schemas:
-        - $ref: $defs/schemas/operations|sales
+        - $defs/schemas/operations|sales
 ```
 
 ### Overrides
