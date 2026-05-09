@@ -195,8 +195,6 @@ definitions:
       comment: Operations catalog
       owner: data_platform_team
       rfa_destination: data-governance@company.com
-      tags:
-        env: prod
       policies:
         - $defs/policies/abac|grant_use_catalog
         - $defs/policies/abac|mask_pii_email
@@ -210,6 +208,8 @@ resources:
     operations_prod:
       $ref: $defs/catalogs/operations
       name: operations_prod
+      tags:
+        env: prod
 ```
 
 #### Schema definitions
