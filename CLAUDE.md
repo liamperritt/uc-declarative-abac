@@ -1,4 +1,4 @@
-# UC ABAC Governor — Development Guide
+# UC Declarative ABAC  — Development Guide
 
 ## Project overview
 
@@ -39,7 +39,7 @@ Comparing raw strings (or pre-resolution `Principal`s with only one side populat
 
 #### The `Principal` type
 
-A single frozen dataclass at `src/uc_abac_governor/principals/state.py` represents both unresolved and resolved principals. Resolution status is a runtime property, not a type:
+A single frozen dataclass at `src/uc_declarative_abac/principals/state.py` represents both unresolved and resolved principals. Resolution status is a runtime property, not a type:
 
 - **Unresolved:** `principal_type == PrincipalType.UNKNOWN`, with exactly one of `name` / `identifier` truthy. Config-side has `name` set; UC-side has `identifier` set.
 - **Resolved:** `principal_type` ∈ {USER, GROUP, SERVICE_PRINCIPAL}, with both `name` and `identifier` truthy. This invariant is enforced by `__post_init__`.
@@ -51,7 +51,7 @@ A single frozen dataclass at `src/uc_abac_governor/principals/state.py` represen
 3. **Differs** (`<domain>/differ.py`) own principal resolution. `compute_*_diff` accepts a `PrincipalResolver` and a `ChangeLogger`, resolves principals on both desired and actual state internally (via a private `_resolve_*` helper in the same module), and returns a fully-resolved diff. Unknown principals are logged and the affected state row is dropped.
 4. **Executors** call `ensure_resolved(principal)` from `principals/resolver.py` before reading `.identifier`. This asserts the runtime invariant.
 
-#### Key APIs (all in `src/uc_abac_governor/principals/resolver.py`)
+#### Key APIs (all in `src/uc_declarative_abac/principals/resolver.py`)
 
 - `PrincipalResolver(ws_helper).resolve_principal(p)` — resolve one, raises `PrincipalValidationError` on failure.
 - `PrincipalResolver(ws_helper).resolve_principals(batch)` — all-or-nothing; on any failure raises one `PrincipalValidationError` whose message lists every offender.

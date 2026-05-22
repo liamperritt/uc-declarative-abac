@@ -5,11 +5,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from uc_abac_governor.governor import run
-from uc_abac_governor.policies.state import Policy, PolicyDiff
-from uc_abac_governor.privileges.state import PrivilegeDiff
-from uc_abac_governor.tags.state import TagDiff
-from uc_abac_governor.types import (
+from uc_declarative_abac.governor import run
+from uc_declarative_abac.policies.state import Policy, PolicyDiff
+from uc_declarative_abac.privileges.state import PrivilegeDiff
+from uc_declarative_abac.tags.state import TagDiff
+from uc_declarative_abac.types import (
     ExecutionBatchError,
     PolicyType,
     PrincipalValidationError,
@@ -151,7 +151,7 @@ def _securable_existence_rows(config_dict: dict) -> list[list]:
     """
     import copy
 
-    from uc_abac_governor.configs.consolidator import consolidate_resources
+    from uc_declarative_abac.configs.consolidator import consolidate_resources
 
     resources = copy.deepcopy(config_dict.get("resources") or {})
     consolidated = consolidate_resources(resources)
@@ -209,7 +209,7 @@ def _install_fetch_router(
         return []
 
     monkeypatch.setattr(
-        "uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows",
+        "uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows",
         _route,
     )
 
@@ -348,7 +348,7 @@ def test_governor_runs_both_domains_independently(
 # ---------------------------------------------------------------------------
 
 
-@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_governor_produces_empty_diffs_when_in_sync(
     mock_fetch, tmp_yaml_dir, mock_workspace_client):
     """When actual state matches desired, both diffs are empty and no SQL is executed."""
@@ -544,7 +544,7 @@ def test_governor_fetches_tags_privileges_and_principals_in_parallel(
 def test_governor_raises_execution_batch_error_when_sql_fails(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """When mutation SQL fails, governor.run() raises ExecutionBatchError with collected errors."""
-    from uc_abac_governor.types import ExecutionBatchError
+    from uc_declarative_abac.types import ExecutionBatchError
 
     config = _catalog_with_tags_and_grants_config()
     root = tmp_yaml_dir({"resources/catalog.yaml": config})
@@ -889,7 +889,7 @@ def _seed_actual_state_for_sp_idempotency(mock_workspace_client: MagicMock, sp_a
     # Patch _fetch_external_links_rows at test scope
     import unittest.mock as _mock
     patcher = _mock.patch(
-        "uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows",
+        "uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows",
         side_effect=lambda response: _rows_for_sql(getattr(response, "_sql", "") or ""),
     )
     patcher.start()
@@ -916,7 +916,7 @@ def _seed_actual_state_for_sp_idempotency(mock_workspace_client: MagicMock, sp_a
 def test_governor_collects_unknown_principal_errors(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """Unknown principals are collected as errors in ExecutionBatchError, not raised as PrincipalValidationError."""
-    from uc_abac_governor.types import ExecutionBatchError, ExecutionError
+    from uc_declarative_abac.types import ExecutionBatchError, ExecutionError
 
     config = _catalog_with_grant_policy_config()
     root = tmp_yaml_dir({"resources/catalog.yaml": config})
@@ -945,7 +945,7 @@ def test_governor_collects_unknown_principal_errors(
 def test_governor_continues_with_valid_principals_when_some_are_unknown(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """Valid principals get GRANT SQL executed; unknown ones become errors in ExecutionBatchError."""
-    from uc_abac_governor.types import ExecutionBatchError
+    from uc_declarative_abac.types import ExecutionBatchError
 
     config = _catalog_with_two_grant_policies_config()
     root = tmp_yaml_dir({"resources/catalog.yaml": config})
@@ -1229,7 +1229,7 @@ def test_governor_creates_missing_taggables_when_taggable_creation_enabled(
     _setup_mock_workspace_empty_state(mock_workspace_client)
     # Route every fetch to empty rows — the catalog doesn't exist in UC.
     monkeypatch.setattr(
-        "uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows",
+        "uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows",
         lambda response: [],
     )
     _setup_mock_principals(mock_workspace_client, "data_engineers")
@@ -1250,7 +1250,7 @@ def test_governor_does_not_create_missing_taggables_when_taggable_creation_disab
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """Without --enable-taggable-creation, a missing catalog raises ExecutionBatchError
     with a NonexistentSecurableError (the pre-flag behaviour)."""
-    from uc_abac_governor.types import ExecutionBatchError, NonexistentSecurableError
+    from uc_declarative_abac.types import ExecutionBatchError, NonexistentSecurableError
 
     config = {
         "resources": {
@@ -1262,7 +1262,7 @@ def test_governor_does_not_create_missing_taggables_when_taggable_creation_disab
     root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
     monkeypatch.setattr(
-        "uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows",
+        "uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows",
         lambda response: [],
     )
     _setup_mock_empty_principals(mock_workspace_client)
@@ -1289,7 +1289,7 @@ def test_governor_still_checks_nonexistent_securables_when_taggable_management_d
     """A catalog declared in config but absent from UC still produces a
     NonexistentSecurableError even when taggable management is off — the validation
     is independent of the attribute-management flag."""
-    from uc_abac_governor.types import ExecutionBatchError, NonexistentSecurableError
+    from uc_declarative_abac.types import ExecutionBatchError, NonexistentSecurableError
 
     config = {
         "resources": {
@@ -1302,7 +1302,7 @@ def test_governor_still_checks_nonexistent_securables_when_taggable_management_d
     _setup_mock_workspace_empty_state(mock_workspace_client)
     # Route EVERY query to empty rows — ghost_catalog absent from actual securables.
     monkeypatch.setattr(
-        "uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows",
+        "uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows",
         lambda response: [],
     )
     _setup_mock_empty_principals(mock_workspace_client)

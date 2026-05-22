@@ -7,4 +7,4 @@ definitions:
       to:
         - uc_governor_test_team
       has_tags:
-        uc_gov_managed_by: uc_abac_governor
+        uc_gov_managed_by: uc_declarative_abac

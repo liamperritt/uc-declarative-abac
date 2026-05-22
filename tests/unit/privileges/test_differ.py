@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from uc_abac_governor.logger import ChangeLogger
-from uc_abac_governor.principals.resolver import PrincipalResolver
-from uc_abac_governor.principals.state import Principal
-from uc_abac_governor.privileges.differ import compute_privilege_diff
-from uc_abac_governor.privileges.state import PrivilegeDiff, SecurablePrivilege
-from uc_abac_governor.types import PrincipalType, PrivilegeType, SecurableType
+from uc_declarative_abac.logger import ChangeLogger
+from uc_declarative_abac.principals.resolver import PrincipalResolver
+from uc_declarative_abac.principals.state import Principal
+from uc_declarative_abac.privileges.differ import compute_privilege_diff
+from uc_declarative_abac.privileges.state import PrivilegeDiff, SecurablePrivilege
+from uc_declarative_abac.types import PrincipalType, PrivilegeType, SecurableType
 
 
 def _resolver() -> PrincipalResolver:

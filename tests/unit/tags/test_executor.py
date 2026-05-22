@@ -5,10 +5,10 @@ from unittest.mock import MagicMock
 import pytest
 import sqlglot
 
-from uc_abac_governor.logger import ChangeLogger
-from uc_abac_governor.tags.executor import execute_tag_diff
-from uc_abac_governor.tags.state import SecurableTag, TagDiff
-from uc_abac_governor.types import InteractiveConfirmationRequiredError, SecurableType
+from uc_declarative_abac.logger import ChangeLogger
+from uc_declarative_abac.tags.executor import execute_tag_diff
+from uc_declarative_abac.tags.state import SecurableTag, TagDiff
+from uc_declarative_abac.types import InteractiveConfirmationRequiredError, SecurableType
 
 
 def _parse_sql(sql: str):

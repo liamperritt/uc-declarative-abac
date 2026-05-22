@@ -790,7 +790,7 @@ wheels = [
 ]
 
 [[package]]
-name = "uc-abac-governor"
+name = "uc-declarative-abac"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

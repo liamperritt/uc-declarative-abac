@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from uc_abac_governor.configs.models import ResourcesConfig
-from uc_abac_governor.principals.state import Principal
-from uc_abac_governor.securables.compiler import compile_desired_attributes, compile_desired_securables
-from uc_abac_governor.securables.state import Column, Function, Securable, SecurableAttributes, Table
-from uc_abac_governor.types import PrincipalType, SecurableType
+from uc_declarative_abac.configs.models import ResourcesConfig
+from uc_declarative_abac.principals.state import Principal
+from uc_declarative_abac.securables.compiler import compile_desired_attributes, compile_desired_securables
+from uc_declarative_abac.securables.state import Column, Function, Securable, SecurableAttributes, Table
+from uc_declarative_abac.types import PrincipalType, SecurableType
 
 
 def _unknown_owner(name: str) -> Principal:

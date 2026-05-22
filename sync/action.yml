@@ -1,0 +1,139 @@
+name: UC Declarative ABAC Sync
+description: Sync Unity Catalog ABAC governance with declarative YAML configs.
+author: Liam Perritt
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  config-dir:
+    description: Path to the YAML config directory, relative to the caller's repo root.
+    required: true
+  warehouse-id:
+    description: SQL warehouse ID the engine will use to execute UC queries.
+    required: true
+  profile:
+    description: >-
+      Optional Databricks CLI profile name from ~/.databrickscfg. Omit (leave empty)
+      to use unified auth via environment variables — e.g. DATABRICKS_HOST +
+      DATABRICKS_TOKEN (PAT), DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET (OAuth M2M),
+      or a metadata/managed-identity source. Set these on the step's env block.
+    required: false
+    default: ''
+  dry-run:
+    description: If "true", print the planned changes without executing them.
+    required: false
+    default: 'false'
+  use-workspace-scim:
+    description: >-
+      If "true", fetch principals from the workspace SCIM API instead of the account
+      SCIM proxy. This can be useful for limited test runs against a test workspace.
+    required: false
+    default: 'false'
+  enable-tag-management:
+    description: >-
+      If "true", permit the engine to create/update/remove tag assignments on securables.
+      Off by default — when unset, the tags domain is skipped in both dry-run and real-run.
+    required: false
+    default: 'false'
+  enable-privilege-management:
+    description: >-
+      If "true", permit the engine to GRANT/REVOKE privileges via SQL. Off by default —
+      when unset, the privileges domain is skipped in both dry-run and real-run.
+    required: false
+    default: 'false'
+  enable-taggable-management:
+    description: >-
+      If "true", permit the engine to update attributes (e.g. owner) on existing
+      catalogs, schemas, tables, and volumes. Off by default — when unset, non-function
+      attribute updates are skipped.
+    required: false
+    default: 'false'
+  enable-taggable-creation:
+    description: >-
+      If "true", permit the engine to create catalogs, schemas, tables, and volumes
+      declared in config but absent from Unity Catalog. Off by default — when unset,
+      missing non-function securables raise NonexistentSecurableError.
+    required: false
+    default: 'false'
+  enable-governed-tag-deletion:
+    description: >-
+      If "true", permit the engine to delete governed tags (account-level tag
+      policies) that exist in the account but are absent from config. Off by default.
+      Requires interactive confirmation unless ``force`` is also "true"; in a
+      non-interactive GitHub Actions runner, ``force`` MUST be set or the run
+      will error out.
+    required: false
+    default: 'false'
+  force:
+    description: >-
+      If "true", skip every interactive confirmation prompt and auto-confirm
+      destructive actions. Required in non-interactive CI contexts (e.g. GitHub
+      Actions) whenever a destructive gate like ``enable-governed-tag-deletion``
+      is also set.
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+
+    - name: Install uc-declarative-abac
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install "$ACTION_PATH/.."
+
+    - name: Run uc-declarative-abac
+      shell: bash
+      env:
+        CONFIG_DIR: ${{ inputs.config-dir }}
+        WAREHOUSE_ID: ${{ inputs.warehouse-id }}
+        PROFILE: ${{ inputs.profile }}
+        DRY_RUN: ${{ inputs.dry-run }}
+        USE_WORKSPACE_SCIM: ${{ inputs.use-workspace-scim }}
+        ENABLE_TAG_MANAGEMENT: ${{ inputs.enable-tag-management }}
+        ENABLE_PRIVILEGE_MANAGEMENT: ${{ inputs.enable-privilege-management }}
+        ENABLE_TAGGABLE_MANAGEMENT: ${{ inputs.enable-taggable-management }}
+        ENABLE_TAGGABLE_CREATION: ${{ inputs.enable-taggable-creation }}
+        ENABLE_GOVERNED_TAG_DELETION: ${{ inputs.enable-governed-tag-deletion }}
+        FORCE: ${{ inputs.force }}
+      run: |
+        args=(
+          --config-dir "$CONFIG_DIR"
+          --warehouse-id "$WAREHOUSE_ID"
+        )
+        if [[ -n "$PROFILE" ]]; then
+          args+=(--profile "$PROFILE")
+        fi
+        if [[ "$DRY_RUN" == "true" ]]; then
+          args+=(--dry-run)
+        fi
+        if [[ "$USE_WORKSPACE_SCIM" == "true" ]]; then
+          args+=(--use-workspace-scim)
+        fi
+        if [[ "$ENABLE_TAG_MANAGEMENT" == "true" ]]; then
+          args+=(--enable-tag-management)
+        fi
+        if [[ "$ENABLE_PRIVILEGE_MANAGEMENT" == "true" ]]; then
+          args+=(--enable-privilege-management)
+        fi
+        if [[ "$ENABLE_TAGGABLE_MANAGEMENT" == "true" ]]; then
+          args+=(--enable-taggable-management)
+        fi
+        if [[ "$ENABLE_TAGGABLE_CREATION" == "true" ]]; then
+          args+=(--enable-taggable-creation)
+        fi
+        if [[ "$ENABLE_GOVERNED_TAG_DELETION" == "true" ]]; then
+          args+=(--enable-governed-tag-deletion)
+        fi
+        if [[ "$FORCE" == "true" ]]; then
+          args+=(--force)
+        fi
+        python -m uc_declarative_abac "${args[@]}"

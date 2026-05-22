@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from datetime import date
 
-from uc_abac_governor.configs.models import ResourcesConfig
-from uc_abac_governor.logger import ChangeLogger
-from uc_abac_governor.principals.state import Principal
-from uc_abac_governor.privileges.compiler import compile_desired_privileges
-from uc_abac_governor.privileges.state import SecurablePrivilege
-from uc_abac_governor.tags.state import SecurableTag
-from uc_abac_governor.types import (
+from uc_declarative_abac.configs.models import ResourcesConfig
+from uc_declarative_abac.logger import ChangeLogger
+from uc_declarative_abac.principals.state import Principal
+from uc_declarative_abac.privileges.compiler import compile_desired_privileges
+from uc_declarative_abac.privileges.state import SecurablePrivilege
+from uc_declarative_abac.tags.state import SecurableTag
+from uc_declarative_abac.types import (
     PrincipalType,
     PrivilegeType,
     SecurableType,

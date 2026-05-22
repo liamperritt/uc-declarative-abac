@@ -1,9 +1,9 @@
 import pytest
 
-from uc_abac_governor.configs.consolidator import consolidate_resources
-from uc_abac_governor.configs.models import ResourcesConfig
-from uc_abac_governor.configs.resolver import resolve_refs
-from uc_abac_governor.types import DuplicateResourceError, GovernorError
+from uc_declarative_abac.configs.consolidator import consolidate_resources
+from uc_declarative_abac.configs.models import ResourcesConfig
+from uc_declarative_abac.configs.resolver import resolve_refs
+from uc_declarative_abac.types import DuplicateResourceError, GovernorError
 
 
 def _inline_fn_dict(name: str, return_expr: str = "col") -> dict:

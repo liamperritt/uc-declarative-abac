@@ -22,13 +22,13 @@ Env-based auth (CI, GitHub Actions, Databricks Apps):
 ```bash
 export DATABRICKS_HOST=https://<workspace>.cloud.databricks.com
 export DATABRICKS_TOKEN=<personal-access-token>
-python -m uc_abac_governor --config-dir tests/e2e/configs --warehouse-id <warehouse-id> --enable-tag-management --enable-privilege-management --dry-run
+python -m uc_declarative_abac --config-dir tests/e2e/configs --warehouse-id <warehouse-id> --enable-tag-management --enable-privilege-management --dry-run
 ```
 
 Local development via `~/.databrickscfg` profile:
 
 ```bash
-python -m uc_abac_governor --config-dir tests/e2e/configs --warehouse-id <warehouse-id> --profile <profile-name> --enable-tag-management --enable-privilege-management --dry-run
+python -m uc_declarative_abac --config-dir tests/e2e/configs --warehouse-id <warehouse-id> --profile <profile-name> --enable-tag-management --enable-privilege-management --dry-run
 ```
 
 ### Authentication
@@ -53,7 +53,7 @@ Resolution precedence matches the SDK's unified-auth chain: explicit `--profile`
 
 ### GitHub Action
 
-The repo ships a composite GitHub Action at `govern/action.yml` so any other repo that stores its governance YAML in Git can reconcile Unity Catalog on every push / PR / schedule without installing the package or scripting a Python run. Reference it as `liam-perritt/uc-abac-governor/govern@<ref>` (where `<ref>` is a tag, branch, or commit SHA).
+The repo ships a composite GitHub Action at `sync/action.yml` so any other repo that stores its governance YAML in Git can reconcile Unity Catalog on every push / PR / schedule without installing the package or scripting a Python run. Reference it as `liam-perritt/uc-declarative-abac/sync@<ref>` (where `<ref>` is a tag, branch, or commit SHA).
 
 **Inputs:**
 
@@ -74,7 +74,7 @@ The repo ships a composite GitHub Action at `govern/action.yml` so any other rep
 **Example workflow in a caller repo** (`.github/workflows/deploy-uc-governance.yml`):
 
 ```yaml
-name: Deploy UC governance
+name: Sync UC governance
 on:
   pull_request:
     paths: ['configs/**']
@@ -87,13 +87,13 @@ on:
     - cron: '0 7 * * *'   # ~5–6pm Sydney time — re-sync to catch any drift introduced during the day
 
 jobs:
-  deploy:
+  sync:
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: <github-org>/uc-abac-governor/govern@v1
+      - uses: <github-org>/uc-declarative-abac/sync@v1
         with:
           config-dir: configs/
           warehouse-id: ${{ vars.DATABRICKS_WAREHOUSE_ID }}
@@ -773,7 +773,7 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 #### Principal management
 - **Account SCIM proxy** (default) — fetches all account-level principals via `/api/2.0/account/scim/v2/` endpoints with pagination
 - **Workspace SCIM** (optional `--use-workspace-scim`) — fetches workspace-level principals via SDK
-- **Centralised resolution** — `PrincipalResolver` (in `uc_abac_governor.principals`) bridges YAML display names with UC identifiers. Service principals appear in config by display name but in UC system tables / SDK responses as `application_id`; the resolver normalises both sides to the same `Principal` object so diffs compare correctly across all domains
+- **Centralised resolution** — `PrincipalResolver` (in `uc_declarative_abac.principals`) bridges YAML display names with UC identifiers. Service principals appear in config by display name but in UC system tables / SDK responses as `application_id`; the resolver normalises both sides to the same `Principal` object so diffs compare correctly across all domains
 - **Per-domain integration** — each domain's `compute_*_diff` accepts the shared `PrincipalResolver` and `ChangeLogger` and resolves principals internally on both desired and actual state before diffing
 - **Runtime guards** — `ensure_resolved(p)` / `ensure_all_resolved(iterable)` assert the resolved invariant at the executor boundary before SQL emission
 - **Batch failure reporting** — unresolved principals in a single state object are aggregated into one `PrincipalValidationError` message listing every offender
@@ -792,8 +792,8 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 - **Structured logging** — `Securables` / `Governed tags` / `Tags` / `Policies` / `Privileges` section headers, ordered by securable type then name, with dry-run prefix support and summary counts
 
 #### Infrastructure
-- **CLI** (`python -m uc_abac_governor`) — required: `--config-dir`, `--warehouse-id`. Optional: `--profile` (CLI profile name from `~/.databrickscfg`; omit to use unified auth via env vars / default profile / metadata service — see the [Authentication](#authentication) section), `--dry-run`, `--use-workspace-scim`, the five opt-in mutation flags (`--enable-tag-management`, `--enable-taggable-management`, `--enable-taggable-creation`, `--enable-privilege-management`, `--enable-governed-tag-deletion`), and `--force` (skip interactive confirmations) described below.
-- **GitHub Action** — reusable composite action at `govern/action.yml`; caller repos invoke it as `liam-perritt/uc-abac-governor/govern@<ref>` to reconcile their own YAML configs against UC on push / PR / schedule (see the [GitHub Action](#github-action) section)
+- **CLI** (`python -m uc_declarative_abac`) — required: `--config-dir`, `--warehouse-id`. Optional: `--profile` (CLI profile name from `~/.databrickscfg`; omit to use unified auth via env vars / default profile / metadata service — see the [Authentication](#authentication) section), `--dry-run`, `--use-workspace-scim`, the five opt-in mutation flags (`--enable-tag-management`, `--enable-taggable-management`, `--enable-taggable-creation`, `--enable-privilege-management`, `--enable-governed-tag-deletion`), and `--force` (skip interactive confirmations) described below.
+- **GitHub Action** — reusable composite action at `sync/action.yml`; caller repos invoke it as `liam-perritt/uc-declarative-abac/sync@<ref>` to reconcile their own YAML configs against UC on push / PR / schedule (see the [GitHub Action](#github-action) section)
 - **Hybrid SQL polling** — `wait_timeout=50s` with `on_wait_timeout=CONTINUE` and 10s polling for long-running queries
 - **External links** — fetches SQL results via external link URLs for large result sets
 - **Parallel state fetch** — securables, tags, privileges, policies, governed tags, and principals are fetched concurrently

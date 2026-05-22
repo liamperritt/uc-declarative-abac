@@ -3,13 +3,13 @@ from __future__ import annotations
 import logging
 from unittest.mock import MagicMock
 
-from uc_abac_governor.policies.state import Policy
-from uc_abac_governor.privileges.state import SecurablePrivilege
-from uc_abac_governor.logger import ChangeLogger
-from uc_abac_governor.securables.state import AttributeUpdate, Function, Securable
-from uc_abac_governor.tags.state import SecurableTag
-from uc_abac_governor.principals.state import Principal
-from uc_abac_governor.types import PrincipalType, PolicyType, PrivilegeType, SecurableType, ExecutionError
+from uc_declarative_abac.policies.state import Policy
+from uc_declarative_abac.privileges.state import SecurablePrivilege
+from uc_declarative_abac.logger import ChangeLogger
+from uc_declarative_abac.securables.state import AttributeUpdate, Function, Securable
+from uc_declarative_abac.tags.state import SecurableTag
+from uc_declarative_abac.principals.state import Principal
+from uc_declarative_abac.types import PrincipalType, PolicyType, PrivilegeType, SecurableType, ExecutionError
 
 
 # ---------------------------------------------------------------------------
@@ -523,7 +523,7 @@ def _gt(
     values: set[str] | None = None,
     assigners: set[Principal] | None = None,
 ):
-    from uc_abac_governor.governed_tags.state import GovernedTag
+    from uc_declarative_abac.governed_tags.state import GovernedTag
     return GovernedTag(
         name=name,
         description=description,

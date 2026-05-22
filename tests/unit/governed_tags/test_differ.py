@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from uc_abac_governor.governed_tags.differ import compute_governed_tag_diff
-from uc_abac_governor.governed_tags.state import GovernedTag
-from uc_abac_governor.logger import ChangeLogger
-from uc_abac_governor.principals.resolver import PrincipalResolver
-from uc_abac_governor.principals.state import Principal
-from uc_abac_governor.types import PrincipalType, PrincipalValidationError
+from uc_declarative_abac.governed_tags.differ import compute_governed_tag_diff
+from uc_declarative_abac.governed_tags.state import GovernedTag
+from uc_declarative_abac.logger import ChangeLogger
+from uc_declarative_abac.principals.resolver import PrincipalResolver
+from uc_declarative_abac.principals.state import Principal
+from uc_declarative_abac.types import PrincipalType, PrincipalValidationError
 
 
 def _gt(

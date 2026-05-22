@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from uc_abac_governor.logger import ChangeLogger
-from uc_abac_governor.policies.executor import execute_policy_diff
-from uc_abac_governor.policies.state import Policy, PolicyDiff
-from uc_abac_governor.principals.state import Principal
-from uc_abac_governor.types import ExecutionError, PolicyType, PrincipalType, SecurableType
+from uc_declarative_abac.logger import ChangeLogger
+from uc_declarative_abac.policies.executor import execute_policy_diff
+from uc_declarative_abac.policies.state import Policy, PolicyDiff
+from uc_declarative_abac.principals.state import Principal
+from uc_declarative_abac.types import ExecutionError, PolicyType, PrincipalType, SecurableType
 
 
 def _resolved(name: str, principal_type: PrincipalType = PrincipalType.GROUP) -> Principal:

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from uc_abac_governor.principals.state import Principal
-from uc_abac_governor.types import PrincipalType
+from uc_declarative_abac.principals.state import Principal
+from uc_declarative_abac.types import PrincipalType
 
 
 # ---------------------------------------------------------------------------

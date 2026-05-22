@@ -4,14 +4,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from uc_abac_governor.helpers.workspace import WorkspaceHelper
-from uc_abac_governor.principals.resolver import (
+from uc_declarative_abac.helpers.workspace import WorkspaceHelper
+from uc_declarative_abac.principals.resolver import (
     PrincipalResolver,
     ensure_all_resolved,
     ensure_resolved,
 )
-from uc_abac_governor.principals.state import Principal
-from uc_abac_governor.types import GovernorError, PrincipalType, PrincipalValidationError
+from uc_declarative_abac.principals.state import Principal
+from uc_declarative_abac.types import GovernorError, PrincipalType, PrincipalValidationError
 
 
 # ---------------------------------------------------------------------------

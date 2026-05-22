@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from uc_abac_governor.configs.models import FunctionConfig, ParameterConfig, ResourcesConfig
-from uc_abac_governor.types import DuplicateResourceError
+from uc_declarative_abac.configs.models import FunctionConfig, ParameterConfig, ResourcesConfig
+from uc_declarative_abac.types import DuplicateResourceError
 
 
 def _minimal_catalog(**overrides):

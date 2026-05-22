@@ -4,11 +4,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from uc_abac_governor.governed_tags.executor import execute_governed_tag_diff
-from uc_abac_governor.governed_tags.state import GovernedTag, GovernedTagDiff
-from uc_abac_governor.logger import ChangeLogger
-from uc_abac_governor.principals.state import Principal
-from uc_abac_governor.types import PrincipalType
+from uc_declarative_abac.governed_tags.executor import execute_governed_tag_diff
+from uc_declarative_abac.governed_tags.state import GovernedTag, GovernedTagDiff
+from uc_declarative_abac.logger import ChangeLogger
+from uc_declarative_abac.principals.state import Principal
+from uc_declarative_abac.types import PrincipalType
 
 
 def _gt(
@@ -266,7 +266,7 @@ def test_governed_tag_executor_raises_interactive_confirmation_error_on_eof_when
     ws_helper, change_logger, monkeypatch,
 ):
     """EOFError from `input()` in a non-forced context raises InteractiveConfirmationRequiredError."""
-    from uc_abac_governor.types import InteractiveConfirmationRequiredError
+    from uc_declarative_abac.types import InteractiveConfirmationRequiredError
 
     def _raise_eof(*_):
         raise EOFError()

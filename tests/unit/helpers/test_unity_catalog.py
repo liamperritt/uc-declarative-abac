@@ -6,18 +6,18 @@ import pytest
 import sqlglot
 from databricks.sdk.service.sql import Disposition, StatementState
 
-from uc_abac_governor.configs.models import ResourcesConfig
-from uc_abac_governor.helpers.unity_catalog import (
+from uc_declarative_abac.configs.models import ResourcesConfig
+from uc_declarative_abac.helpers.unity_catalog import (
     UnityCatalogHelper,
     _POLL_INTERVAL_SECONDS,  # exception to the "no private imports" rule: needed to
                              # anchor the polling-cadence test to the production constant
 )
-from uc_abac_governor.policies.state import Policy
-from uc_abac_governor.tags.state import SecurableTag
-from uc_abac_governor.principals.state import Principal
-from uc_abac_governor.privileges.state import SecurablePrivilege
-from uc_abac_governor.securables.state import Function, Securable, SecurableAttributes
-from uc_abac_governor.types import GovernorError, PolicyType, PrincipalType, PrivilegeType, SecurableType
+from uc_declarative_abac.policies.state import Policy
+from uc_declarative_abac.tags.state import SecurableTag
+from uc_declarative_abac.principals.state import Principal
+from uc_declarative_abac.privileges.state import SecurablePrivilege
+from uc_declarative_abac.securables.state import Function, Securable, SecurableAttributes
+from uc_declarative_abac.types import GovernorError, PolicyType, PrincipalType, PrivilegeType, SecurableType
 
 WAREHOUSE_ID = "test-warehouse-id"
 
@@ -69,7 +69,7 @@ def _make_mock_workspace_client(data_array: list[list[str]] | None = None) -> Ma
 # ---------------------------------------------------------------------------
 
 
-@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_fetches_actual_tags_from_query_results(mock_fetch):
     """Mock returns aggregated tag rows (one row per securable, tags as JSON) -> correct set of SecurableTag."""
     rows = [
@@ -99,7 +99,7 @@ def test_uc_helper_fetches_actual_tags_from_query_results(mock_fetch):
     assert result == expected
 
 
-@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_parses_multiple_tags_from_single_securable_row(mock_fetch):
     """One input row with a JSON array of multiple tag structs produces one SecurableTag per tag,
     all sharing the same (securable_type, securable_full_name)."""
@@ -125,7 +125,7 @@ def test_uc_helper_parses_multiple_tags_from_single_securable_row(mock_fetch):
     }
 
 
-@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_coerces_null_tag_value_to_empty_string(mock_fetch):
     """A JSON tag_value of null is coerced to the empty string, matching SecurableTag's default."""
     rows = [
@@ -269,7 +269,7 @@ def test_uc_helper_tags_query_groups_by_securable_columns_per_arm():
 # ---------------------------------------------------------------------------
 
 
-@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_fetches_actual_privileges_from_query_results(mock_fetch):
     """Mock returns privilege rows -> correct set of SecurablePrivilege."""
     rows = [
@@ -299,7 +299,7 @@ def test_uc_helper_fetches_actual_privileges_from_query_results(mock_fetch):
     assert result == expected
 
 
-@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_fetches_volume_privileges_from_query_results(mock_fetch):
     """Mock returns volume privilege rows -> correct set of SecurablePrivilege."""
     rows = [
@@ -429,7 +429,7 @@ def _make_statement_response(
     return response
 
 
-@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_returns_results_when_query_completes_within_timeout(mock_fetch):
     """When execute_statement returns SUCCEEDED, results are returned without polling."""
     tag_rows = [
@@ -460,7 +460,7 @@ def test_uc_helper_returns_results_when_query_completes_within_timeout(mock_fetc
 
 
 @patch("time.sleep")
-@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_polls_for_results_when_query_exceeds_timeout(mock_fetch, mock_sleep):
     """When execute_statement returns PENDING, polls get_statement until SUCCEEDED."""
     tag_rows = [
@@ -494,7 +494,7 @@ def test_uc_helper_polls_for_results_when_query_exceeds_timeout(mock_fetch, mock
     assert len(result) == 1
 
 
-@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_raises_on_failed_query(mock_fetch):
     """When execute_statement returns FAILED, a GovernorError is raised."""
     mock_fetch.return_value = []
@@ -512,7 +512,7 @@ def test_uc_helper_raises_on_failed_query(mock_fetch):
         helper.fetch_actual_tags(["my_catalog"])
 
 
-@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_uses_continue_on_wait_timeout(mock_fetch):
     """execute_statement is called with on_wait_timeout=CONTINUE for hybrid polling."""
     mock_fetch.return_value = []
@@ -586,7 +586,7 @@ def test_uc_helper_returns_empty_privileges_for_empty_catalog_list():
 # ---------------------------------------------------------------------------
 
 
-@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_parses_securable_rows_for_attributes(mock_fetch):
     """Non-function rows produce SecurableAttributes plus a base Securable per row."""
     rows = [
@@ -623,7 +623,7 @@ def test_uc_helper_parses_securable_rows_for_attributes(mock_fetch):
             owner=Principal(principal_type=PrincipalType.UNKNOWN, identifier="vol_owner"),
         ),
     }
-    from uc_abac_governor.securables.state import Table
+    from uc_declarative_abac.securables.state import Table
 
     assert attributes == expected_attributes
     assert securables == {
@@ -634,7 +634,7 @@ def test_uc_helper_parses_securable_rows_for_attributes(mock_fetch):
     }
 
 
-@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_fetch_actual_securables_returns_base_securable_for_catalog_rows(mock_fetch):
     """A CATALOG row produces a base Securable(CATALOG, full_name) in the securables set."""
     mock_fetch.return_value = [["CATALOG", "cat_a", None, None, None]]
@@ -645,7 +645,7 @@ def test_uc_helper_fetch_actual_securables_returns_base_securable_for_catalog_ro
     assert Securable(securable_type=SecurableType.CATALOG, full_name="cat_a") in securables
 
 
-@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_fetch_actual_securables_returns_base_securable_for_schema_rows(mock_fetch):
     """A SCHEMA row produces a base Securable(SCHEMA, full_name)."""
     mock_fetch.return_value = [["SCHEMA", "cat.sales", None, None, None]]
@@ -656,10 +656,10 @@ def test_uc_helper_fetch_actual_securables_returns_base_securable_for_schema_row
     assert Securable(securable_type=SecurableType.SCHEMA, full_name="cat.sales") in securables
 
 
-@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_fetch_actual_securables_returns_table_for_table_rows(mock_fetch):
     """A TABLE row produces a Table(TABLE, full_name, columns=()) when no columns are present."""
-    from uc_abac_governor.securables.state import Table
+    from uc_declarative_abac.securables.state import Table
 
     mock_fetch.return_value = [["TABLE", "cat.sales.orders", None, None, None]]
     helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
@@ -669,7 +669,7 @@ def test_uc_helper_fetch_actual_securables_returns_table_for_table_rows(mock_fet
     assert Table(securable_type=SecurableType.TABLE, full_name="cat.sales.orders", columns=()) in securables
 
 
-@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_fetch_actual_securables_returns_base_securable_for_volume_rows(mock_fetch):
     """A VOLUME row produces a base Securable(VOLUME, full_name)."""
     mock_fetch.return_value = [["VOLUME", "cat.landing.files", None, None, None]]
@@ -680,7 +680,7 @@ def test_uc_helper_fetch_actual_securables_returns_base_securable_for_volume_row
     assert Securable(securable_type=SecurableType.VOLUME, full_name="cat.landing.files") in securables
 
 
-@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_parses_securable_rows_for_functions(mock_fetch):
     """Function rows produce Function in the securables set."""
     rows = [
@@ -711,7 +711,7 @@ def test_uc_helper_parses_securable_rows_for_functions(mock_fetch):
     assert securables == expected
 
 
-@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_parses_function_routine_comment_into_function_comment(mock_fetch):
     """When routine_comment is populated, it appears on Function.comment."""
     rows = [
@@ -733,7 +733,7 @@ def test_uc_helper_parses_function_routine_comment_into_function_comment(mock_fe
     assert func.comment == "Masks email column"
 
 
-@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_parses_securable_rows_emits_function_attributes(mock_fetch):
     """Function rows also emit SecurableAttributes with the owner."""
     rows = [
@@ -803,11 +803,11 @@ def test_uc_helper_returns_empty_securables_for_empty_catalog_list():
 # ---------------------------------------------------------------------------
 
 
-@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_table_row_with_columns_emits_table_with_column_objects(mock_fetch):
     """A TABLE row carrying a JSON column-name array produces a Table with Column entries
     in ordinal-position order (data_type=None — not fetched)."""
-    from uc_abac_governor.securables.state import Column, Table
+    from uc_declarative_abac.securables.state import Column, Table
 
     rows = [
         ["TABLE", "cat.sales.orders", "table_owner", None, None, None, '["id","customer_id","amount"]'],
@@ -829,10 +829,10 @@ def test_uc_helper_table_row_with_columns_emits_table_with_column_objects(mock_f
     assert expected_table in securables
 
 
-@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_table_row_with_null_columns_emits_table_with_empty_columns(mock_fetch):
     """A TABLE row whose columns JSON is null/missing produces an empty Table.columns tuple."""
-    from uc_abac_governor.securables.state import Table
+    from uc_declarative_abac.securables.state import Table
 
     rows = [
         ["TABLE", "cat.sales.orders", "owner", None, None, None, None],
@@ -850,10 +850,10 @@ def test_uc_helper_table_row_with_null_columns_emits_table_with_empty_columns(mo
     assert expected_table in securables
 
 
-@patch("uc_abac_governor.helpers.unity_catalog._fetch_external_links_rows")
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_table_row_with_empty_columns_array_emits_table_with_empty_columns(mock_fetch):
     """A TABLE row with an empty JSON array '[]' for columns produces an empty Table.columns."""
-    from uc_abac_governor.securables.state import Table
+    from uc_declarative_abac.securables.state import Table
 
     rows = [
         ["TABLE", "cat.sales.empty", "owner", None, None, None, "[]"],
