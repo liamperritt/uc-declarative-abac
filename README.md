@@ -1,6 +1,6 @@
-# UC ABAC Governor
+# UC Declarative ABAC
 
-The UC ABAC Governor lets Databricks customers define their Attribute-Based Access Control (ABAC) governance model via **declarative YAML files**. Define once, version in Git, and deploy to Unity Catalog—including as a **GitHub Action** from a repo containing your YAML configs.
+The UC Declarative ABAC framework lets Databricks customers define their Attribute-Based Access Control (ABAC) governance model via **declarative YAML files**. Define once, version in Git, and deploy to Unity Catalog—including as a **GitHub Action** from a repo containing your YAML configs.
 
 ## Overview
 
@@ -818,4 +818,4 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 
 ---
 
-*Define governance in YAML. Version it. Deploy it.*
+*Declare governance in YAML. Version it. Deploy it.*
