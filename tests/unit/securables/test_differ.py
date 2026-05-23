@@ -20,6 +20,15 @@ from uc_declarative_abac.types import NonexistentSecurableError, PrincipalType, 
 import pytest
 
 
+# Catalogs referenced across the test fixtures. Tests opting into creation pass
+# this set as ``creation_in_scope_catalogs`` — equivalent to "create everything"
+# under the per-catalog model. Tests exercising the disabled path pass an
+# explicit ``frozenset()`` instead.
+_ALL_TEST_CATALOGS = frozenset(
+    {"cat", "new_cat", "ghost", "ghost_catalog", "ghost_cat_a", "ghost_cat_b", "my_catalog", "catalog"}
+)
+
+
 def _resolver() -> PrincipalResolver:
     """A resolver whose ws_helper is never consulted — test inputs are already resolved."""
     return PrincipalResolver(MagicMock())
@@ -502,7 +511,7 @@ def test_securable_differ_emits_catalog_schema_volume_in_to_create_when_taggable
 
     diff = compute_securable_diff(
         set(), set(), desired, set(), _resolver(), change_logger,
-        enable_taggable_creation=True,
+        creation_in_scope_catalogs=_ALL_TEST_CATALOGS,
     )
 
     assert _sec(SecurableType.CATALOG, "new_cat") in diff.securables_to_create
@@ -518,7 +527,7 @@ def test_securable_differ_emits_table_in_to_create_when_columns_valid_and_taggab
 
     diff = compute_securable_diff(
         set(), set(), {table}, set(), _resolver(), change_logger,
-        enable_taggable_creation=True,
+        creation_in_scope_catalogs=_ALL_TEST_CATALOGS,
     )
 
     assert table in diff.securables_to_create
@@ -537,7 +546,7 @@ def test_securable_differ_logs_error_when_table_has_no_columns_and_taggable_crea
 
     diff = compute_securable_diff(
         set(), set(), {empty_table}, set(), _resolver(), change_logger,
-        enable_taggable_creation=True,
+        creation_in_scope_catalogs=_ALL_TEST_CATALOGS,
     )
 
     assert empty_table not in diff.securables_to_create
@@ -561,7 +570,7 @@ def test_securable_differ_logs_error_when_any_column_missing_data_type_and_tagga
 
     diff = compute_securable_diff(
         set(), set(), {table}, set(), _resolver(), change_logger,
-        enable_taggable_creation=True,
+        creation_in_scope_catalogs=_ALL_TEST_CATALOGS,
     )
 
     assert table not in diff.securables_to_create
@@ -596,7 +605,7 @@ def test_securable_differ_does_not_add_table_to_replace_when_desired_columns_dif
 
     diff = compute_securable_diff(
         set(), set(), {desired_table}, {actual_table}, _resolver(), change_logger,
-        enable_taggable_creation=True,
+        creation_in_scope_catalogs=_ALL_TEST_CATALOGS,
     )
 
     assert diff.securables_to_replace == []
@@ -654,7 +663,7 @@ def test_securable_differ_emits_column_to_create_when_missing_and_taggable_creat
 
     diff = compute_securable_diff(
         set(), set(), desired, actual, _resolver(), change_logger,
-        enable_taggable_creation=True,
+        creation_in_scope_catalogs=_ALL_TEST_CATALOGS,
     )
 
     column_entries = [s for s in diff.securables_to_create if isinstance(s, Column)]
@@ -682,7 +691,7 @@ def test_securable_differ_logs_nonexistent_column_with_hint_when_taggable_creati
 
     compute_securable_diff(
         set(), set(), {desired_table}, actual, _resolver(), change_logger,
-        enable_taggable_creation=True,
+        creation_in_scope_catalogs=_ALL_TEST_CATALOGS,
     )
 
     errors = _nonexistent_errors(change_logger)
@@ -701,7 +710,7 @@ def test_securable_differ_does_not_emit_column_when_already_present_in_actual():
 
     diff = compute_securable_diff(
         set(), set(), desired, actual, _resolver(), change_logger,
-        enable_taggable_creation=True,
+        creation_in_scope_catalogs=_ALL_TEST_CATALOGS,
     )
 
     assert not any(isinstance(s, Column) for s in diff.securables_to_create)
@@ -716,7 +725,7 @@ def test_securable_differ_ignores_columns_present_only_in_actual():
 
     diff = compute_securable_diff(
         set(), set(), desired, actual, _resolver(), change_logger,
-        enable_taggable_creation=True,
+        creation_in_scope_catalogs=_ALL_TEST_CATALOGS,
     )
 
     assert not any(isinstance(s, Column) for s in diff.securables_to_create)
@@ -732,7 +741,7 @@ def test_securable_differ_skips_column_check_for_table_being_created():
 
     diff = compute_securable_diff(
         set(), set(), desired, actual, _resolver(), change_logger,
-        enable_taggable_creation=True,
+        creation_in_scope_catalogs=_ALL_TEST_CATALOGS,
     )
 
     # Only the Table is in to_create — no separate Column entries.
@@ -778,7 +787,7 @@ def test_nonexistent_securable_error_uses_hint_when_provided_instead_of_flag_boi
 
     compute_securable_diff(
         set(), set(), {table}, set(), _resolver(), change_logger,
-        enable_taggable_creation=True,
+        creation_in_scope_catalogs=_ALL_TEST_CATALOGS,
     )
 
     err = next(

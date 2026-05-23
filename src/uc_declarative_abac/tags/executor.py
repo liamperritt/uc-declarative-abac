@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from uc_declarative_abac.helpers.unity_catalog import UnityCatalogHelper
     from uc_declarative_abac.logger import ChangeLogger
 
-from uc_declarative_abac.helpers import quote_securable as quote_securable
+from uc_declarative_abac.utils import quote_securable as quote_securable
 from uc_declarative_abac.tags.state import SecurableTag, TagDiff
 from uc_declarative_abac.types import ExecutionError, InteractiveConfirmationRequiredError, SecurableType
 

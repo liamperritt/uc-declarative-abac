@@ -37,6 +37,7 @@ from uc_declarative_abac.tags.differ import compute_tag_diff
 from uc_declarative_abac.tags.executor import execute_tag_diff
 from uc_declarative_abac.tags.state import TagDiff
 from uc_declarative_abac.types import ExecutionBatchError, SecurableType
+from uc_declarative_abac.utils import catalog_of, parse_catalog_filter
 
 _logger = logging.getLogger("uc_declarative_abac")
 
@@ -52,11 +53,21 @@ class GovernorDiffsResult:
     privilege_diff: PrivilegeDiff
 
 
-def _function_attributes_only(attrs: set[SecurableAttributes]) -> set[SecurableAttributes]:
-    """Drop non-function attributes — used when --enable-taggable-management is off,
-    so the attribute differ only sees FUNCTION owners (functions are engine-managed
-    independently of the taggable-management gate)."""
-    return {a for a in attrs if a.securable_type == SecurableType.FUNCTION}
+def _filter_taggable_attributes(
+    attrs: set[SecurableAttributes], in_scope_catalogs: frozenset[str],
+) -> set[SecurableAttributes]:
+    """Drop non-function attributes whose catalog isn't in scope.
+
+    FUNCTION attributes always flow through (functions are engine-managed
+    independently of the taggable-management gate). When ``in_scope_catalogs``
+    is empty, this collapses to "function attributes only" — which is the
+    behaviour when ``--enable-taggable-management`` is off.
+    """
+    return {
+        a for a in attrs
+        if a.securable_type == SecurableType.FUNCTION
+        or catalog_of(a.full_name) in in_scope_catalogs
+    }
 
 
 def run(
@@ -70,6 +81,10 @@ def run(
     enable_taggable_creation: bool = False,
     enable_privilege_management: bool = False,
     enable_governed_tag_deletion: bool = False,
+    manage_tags_for_catalogs: str = "*",
+    manage_privileges_for_catalogs: str = "*",
+    manage_taggables_for_catalogs: str = "*",
+    create_taggables_for_catalogs: str = "*",
     force: bool = False,
 ) -> GovernorDiffsResult:
     """Run the full governance pipeline: discover, resolve, compile, diff, apply.
@@ -77,12 +92,19 @@ def run(
     Returns the computed diffs for every domain in execution order.
     In dry-run mode, diffs are computed but no SQL is executed.
 
-    The three ``enable_*`` flags gate mutation classes. Each defaults to False;
+    The four ``enable_*`` flags gate mutation classes. Each defaults to False;
     when unset the corresponding domain is skipped in both dry-run and real-run
     (no fetch, no diff, no log, no execute). ``enable_privilege_management=True``
     with ``enable_tag_management=False`` makes the privileges compiler match its
     grant policies against the on-disk (``actual``) tag state instead of the
     config's desired tags.
+
+    The four ``*_for_catalogs`` strings further scope each enabled domain to a
+    subset of the configured catalogs. ``"*"`` (the default) means "all
+    configured catalogs"; a comma-separated list narrows to the listed names.
+    A filter has no effect unless its paired ``enable_*`` flag is set. Unknown
+    catalog names raise ``ValueError`` early. Function securables are never
+    catalog-filtered — they're engine-managed and flow through all scopes.
     """
     # 1. Discover + load + resolve YAML
     paths = discover_yaml_files(config_dir)
@@ -91,6 +113,26 @@ def run(
     consolidated = consolidate_resources(resolved)
     config = ResourcesConfig.model_validate(consolidated)
     catalog_names = list(config.catalogs.keys())
+
+    # Parse per-domain catalog filters. Each scope is empty when its paired
+    # enable flag is off — that single representation drives the rest of the
+    # pipeline (empty set ⇒ domain inert for every catalog).
+    tag_scope = (
+        parse_catalog_filter(manage_tags_for_catalogs, catalog_names)
+        if enable_tag_management else frozenset()
+    )
+    privilege_scope = (
+        parse_catalog_filter(manage_privileges_for_catalogs, catalog_names)
+        if enable_privilege_management else frozenset()
+    )
+    taggable_management_scope = (
+        parse_catalog_filter(manage_taggables_for_catalogs, catalog_names)
+        if enable_taggable_management else frozenset()
+    )
+    taggable_creation_scope = (
+        parse_catalog_filter(create_taggables_for_catalogs, catalog_names)
+        if enable_taggable_creation else frozenset()
+    )
 
     # 2. Compile desired governed tags up-front so we can scope the rule-set
     #    fetches inside the parallel block to (actual ∩ desired) — keeps the
@@ -131,17 +173,18 @@ def run(
     # 4. Securables workflow (before tags and privileges)
     desired_attributes = compile_desired_attributes(config)
     desired_securables = compile_desired_securables(config)
-    if not enable_taggable_management:
-        # Drop non-function attribute updates on both sides — the engine must not
-        # touch catalog/schema/table/volume owners without the taggable-management
-        # opt-in. Function attributes flow through because FUNCTION creation /
-        # replacement is always engine-managed.
-        desired_attributes = _function_attributes_only(desired_attributes)
-        actual_attributes = _function_attributes_only(actual_attributes)
+    # Drop non-function attribute updates whose catalog isn't in scope — the
+    # engine must not touch catalog/schema/table/volume owners outside the
+    # taggable-management scope. Function attributes flow through because
+    # FUNCTION creation / replacement is always engine-managed. When the
+    # taggable-management gate is off entirely, ``taggable_management_scope``
+    # is empty and this collapses to "function attributes only".
+    desired_attributes = _filter_taggable_attributes(desired_attributes, taggable_management_scope)
+    actual_attributes = _filter_taggable_attributes(actual_attributes, taggable_management_scope)
     securable_diff = compute_securable_diff(
         desired_attributes, actual_attributes, desired_securables, actual_securables,
         resolver, change_logger,
-        enable_taggable_creation=enable_taggable_creation,
+        creation_in_scope_catalogs=taggable_creation_scope,
     )
 
     if securable_diff.securables_to_create or securable_diff.securables_to_replace or securable_diff.attributes_to_update:
@@ -167,8 +210,20 @@ def run(
     # 5. Tags workflow
     if enable_tag_management:
         desired_tags = compile_desired_tags(config)
-        tag_diff = compute_tag_diff(desired_tags, actual_tags)
-        tags_for_privilege_matching = desired_tags
+        in_scope_desired_tags = {
+            t for t in desired_tags if catalog_of(t.securable_full_name) in tag_scope
+        }
+        in_scope_actual_tags = {
+            t for t in actual_tags if catalog_of(t.securable_full_name) in tag_scope
+        }
+        out_of_scope_actual_tags = {
+            t for t in actual_tags if catalog_of(t.securable_full_name) not in tag_scope
+        }
+        tag_diff = compute_tag_diff(in_scope_desired_tags, in_scope_actual_tags)
+        # Post-run tag state used by the privileges compiler: in-scope catalogs
+        # reflect the desired (about to be applied); out-of-scope reflect actual
+        # (left untouched this run).
+        tags_for_privilege_matching = in_scope_desired_tags | out_of_scope_actual_tags
     else:
         tag_diff = TagDiff()
         # When tag management is off the engine will not reconcile the config's
@@ -190,8 +245,14 @@ def run(
             config, tags_for_privilege_matching, governed_tag_names, change_logger,
             run_date=date.today(),
         )
+        in_scope_compiled_privileges = {
+            p for p in compiled_privileges if catalog_of(p.securable_full_name) in privilege_scope
+        }
+        in_scope_actual_privileges = {
+            p for p in actual_privileges if catalog_of(p.securable_full_name) in privilege_scope
+        }
         privilege_diff = compute_privilege_diff(
-            compiled_privileges, actual_privileges, resolver, change_logger,
+            in_scope_compiled_privileges, in_scope_actual_privileges, resolver, change_logger,
         )
     else:
         privilege_diff = PrivilegeDiff()

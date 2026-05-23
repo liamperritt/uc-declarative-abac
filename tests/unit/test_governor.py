@@ -1326,6 +1326,359 @@ def test_governor_still_checks_nonexistent_securables_when_taggable_management_d
     )
 
 
+# ---------------------------------------------------------------------------
+# Per-catalog filter flags (--*-for-catalogs)
+# ---------------------------------------------------------------------------
+
+
+def _two_catalog_tags_config() -> dict:
+    """Two catalogs, each with a tag declared on the catalog itself."""
+    return {
+        "resources": {
+            "catalogs": {
+                "cat_a": {"tags": {"env": "prod"}},
+                "cat_b": {"tags": {"env": "prod"}},
+            }
+        }
+    }
+
+
+def _two_catalog_grants_config() -> dict:
+    """Two catalogs, each with a tag and a grant policy keyed by that tag."""
+    return {
+        "resources": {
+            "governed_tags": {
+                "env": {"allowed_values": ["prod"]},
+            },
+            "catalogs": {
+                "cat_a": {
+                    "tags": {"env": "prod"},
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["data_engineers"],
+                            "has_tags": {"env": "prod"},
+                        },
+                    ],
+                },
+                "cat_b": {
+                    "tags": {"env": "prod"},
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["data_engineers"],
+                            "has_tags": {"env": "prod"},
+                        },
+                    ],
+                },
+            }
+        }
+    }
+
+
+def _two_catalog_owners_config() -> dict:
+    """Two catalogs, each declaring an owner — exercises taggable-management."""
+    return {
+        "resources": {
+            "catalogs": {
+                "cat_a": {"owner": "data_engineers"},
+                "cat_b": {"owner": "data_engineers"},
+            }
+        }
+    }
+
+
+def test_governor_tag_filter_scopes_tag_set_sql_to_listed_catalog_only(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """With --manage-tags-for-catalogs=cat_a, only cat_a tags emit SET TAGS SQL."""
+    config = _two_catalog_tags_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_tag_management=True,
+        manage_tags_for_catalogs="cat_a",
+    )
+
+    set_tag_stmts = [s for s in mock_workspace_client.executed_sql if "SET TAGS" in s.upper()]
+    assert any("cat_a" in s for s in set_tag_stmts), (
+        f"Expected at least one SET TAGS for cat_a, got: {set_tag_stmts}"
+    )
+    assert all("cat_b" not in s for s in set_tag_stmts), (
+        f"Expected no SET TAGS touching cat_b, got: {set_tag_stmts}"
+    )
+
+
+def test_governor_tag_filter_excludes_out_of_scope_catalogs_from_tag_diff(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """The returned tag_diff.to_add contains only in-scope catalog tags."""
+    config = _two_catalog_tags_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_tag_management=True,
+        manage_tags_for_catalogs="cat_a",
+    )
+
+    catalogs_in_diff = {t.securable_full_name.split(".", 1)[0] for t in result.tag_diff.to_add}
+    assert catalogs_in_diff == {"cat_a"}, (
+        f"Expected tag_diff.to_add to only contain cat_a entries, got catalogs: {catalogs_in_diff}"
+    )
+
+
+def test_governor_privilege_filter_scopes_grants_to_listed_catalog_only(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """With --manage-privileges-for-catalogs=cat_a, only cat_a privileges are granted."""
+    config = _two_catalog_grants_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_tag_management=True,
+        enable_privilege_management=True,
+        manage_privileges_for_catalogs="cat_a",
+    )
+
+    catalogs_in_grants = {
+        p.securable_full_name.split(".", 1)[0] for p in result.privilege_diff.to_grant
+    }
+    assert catalogs_in_grants == {"cat_a"}, (
+        f"Expected to_grant to only contain cat_a entries, got catalogs: {catalogs_in_grants}"
+    )
+    grant_stmts = [s for s in mock_workspace_client.executed_sql if s.upper().startswith("GRANT")]
+    assert all("cat_b" not in s for s in grant_stmts), (
+        f"Expected no GRANT touching cat_b, got: {grant_stmts}"
+    )
+
+
+def test_governor_taggable_management_filter_scopes_attribute_updates_to_listed_catalog_only(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """Owner is declared on both catalogs but the filter pins management to cat_a."""
+    config = _two_catalog_owners_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_taggable_management=True,
+        manage_taggables_for_catalogs="cat_a",
+    )
+
+    catalog_updates = [
+        u for u in result.securable_diff.attributes_to_update
+        if u.securable_type == SecurableType.CATALOG
+    ]
+    full_names = {u.full_name for u in catalog_updates}
+    assert "cat_a" in full_names, f"Expected cat_a owner update, got: {full_names}"
+    assert "cat_b" not in full_names, f"Expected no cat_b owner update, got: {full_names}"
+
+
+def test_governor_taggable_creation_filter_creates_only_listed_catalog(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """With --create-taggables-for-catalogs=cat_a and both catalogs missing from UC,
+    only cat_a gets a CREATE CATALOG statement. cat_b surfaces as NonexistentSecurableError."""
+    from uc_declarative_abac.types import ExecutionBatchError, NonexistentSecurableError
+
+    config = {
+        "resources": {
+            "catalogs": {
+                "cat_a": {},
+                "cat_b": {},
+            }
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    monkeypatch.setattr(
+        "uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows",
+        lambda response: [],
+    )
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    with pytest.raises(ExecutionBatchError) as exc_info:
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            enable_taggable_creation=True,
+            create_taggables_for_catalogs="cat_a",
+        )
+
+    nonexistent = [e for e in exc_info.value.errors if isinstance(e.exception, NonexistentSecurableError)]
+    cat_b_errors = [e for e in nonexistent if e.exception.full_name == "cat_b"]
+    cat_a_errors = [e for e in nonexistent if e.exception.full_name == "cat_a"]
+    assert cat_b_errors, "Expected NonexistentSecurableError for out-of-scope cat_b"
+    assert not cat_a_errors, "Expected NO NonexistentSecurableError for in-scope cat_a"
+
+    create_stmts = [s for s in mock_workspace_client.executed_sql if "CREATE CATALOG" in s.upper()]
+    assert any("cat_a" in s for s in create_stmts), (
+        f"Expected CREATE CATALOG for cat_a, got: {create_stmts}"
+    )
+    assert all("cat_b" not in s for s in create_stmts), (
+        f"Expected no CREATE CATALOG for cat_b, got: {create_stmts}"
+    )
+
+
+def test_governor_taggable_creation_filter_still_creates_functions_in_out_of_scope_catalogs(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """Functions are always engine-managed — they flow through the creation filter
+    regardless of catalog scope."""
+    config = {
+        "resources": {
+            "catalogs": {
+                "cat_a": {
+                    "schemas": [{
+                        "name": "sch",
+                        "functions": [{
+                            "name": "mask_email",
+                            "parameters": [{"name": "x", "type": "STRING"}],
+                            "return": "x",
+                        }],
+                    }],
+                },
+                "cat_b": {
+                    "schemas": [{
+                        "name": "sch",
+                        "functions": [{
+                            "name": "mask_phone",
+                            "parameters": [{"name": "x", "type": "STRING"}],
+                            "return": "x",
+                        }],
+                    }],
+                },
+            }
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    # Both catalogs (with their schemas) exist in UC; the functions are missing.
+    sec_rows = _securable_existence_rows(config)
+    monkeypatch.setattr(
+        "uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows",
+        lambda response: sec_rows if (
+            "catalog_owner" in (getattr(response, "_sql", "") or "").lower()
+            or "schema_owner" in (getattr(response, "_sql", "") or "").lower()
+            or "routine_owner" in (getattr(response, "_sql", "") or "").lower()
+        ) else [],
+    )
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_taggable_creation=True,
+        create_taggables_for_catalogs="cat_a",
+    )
+
+    create_func_stmts = [
+        s for s in mock_workspace_client.executed_sql if "FUNCTION" in s.upper() and "CREATE" in s.upper()
+    ]
+    assert any("mask_email" in s for s in create_func_stmts), (
+        f"Expected mask_email function created in cat_a, got: {create_func_stmts}"
+    )
+    assert any("mask_phone" in s for s in create_func_stmts), (
+        f"Expected mask_phone function created in cat_b (functions always engine-managed), "
+        f"got: {create_func_stmts}"
+    )
+
+
+def test_governor_tag_filter_uses_actual_tags_for_out_of_scope_catalogs_when_grants_match(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """With tag mgmt scoped to cat_a, privileges compiler must read out-of-scope cat_b's
+    tag state from UC (actual_tags) — because cat_b's tags aren't being reconciled
+    this run, so the desired tag state for cat_b is irrelevant for grant matching."""
+    config = _two_catalog_grants_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    # cat_b has env=prod in UC (actual), cat_a does not yet.
+    actual_tag_rows = [
+        ["CATALOG", "cat_b", '[{"tag_name":"env","tag_value":"prod"}]'],
+    ]
+    _install_fetch_router(monkeypatch, config, tag_rows=actual_tag_rows)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_tag_management=True,
+        enable_privilege_management=True,
+        manage_tags_for_catalogs="cat_a",  # cat_b's tags untouched this run
+    )
+
+    # cat_b's grant policy matches against UC's actual env=prod tag → grant emitted.
+    cat_b_grants = [p for p in result.privilege_diff.to_grant if p.securable_full_name.startswith("cat_b")]
+    assert cat_b_grants, (
+        f"Expected cat_b grant from actual tag state, got: {result.privilege_diff.to_grant}"
+    )
+
+
+def test_governor_raises_when_catalog_filter_references_unknown_catalog(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """Typos in the filter list raise ValueError early — before any UC operations."""
+    config = _two_catalog_tags_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    with pytest.raises(ValueError) as exc_info:
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            enable_tag_management=True,
+            manage_tags_for_catalogs="cat_a,typo_cat",
+        )
+    assert "typo_cat" in str(exc_info.value)
+
+
+def test_governor_filter_is_no_op_when_corresponding_enable_flag_is_off(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """A non-default filter value with the enable flag off is silently ignored —
+    even unknown catalog names don't error, because parsing is skipped entirely."""
+    config = _two_catalog_tags_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_tag_management=False,
+        manage_tags_for_catalogs="totally_made_up_catalog",
+    )
+
+    assert result.tag_diff == TagDiff()
+    set_tag_stmts = [s for s in mock_workspace_client.executed_sql if "SET TAGS" in s.upper()]
+    assert set_tag_stmts == []
+
+
 def test_governor_deletes_governed_tag_when_flag_and_force_enabled(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """With enable_governed_tag_deletion=True and force=True, a governed tag that

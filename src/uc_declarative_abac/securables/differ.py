@@ -16,6 +16,7 @@ from uc_declarative_abac.securables.state import (
     Table,
 )
 from uc_declarative_abac.types import ExecutionError, NonexistentSecurableError, PrincipalValidationError, SecurableType
+from uc_declarative_abac.utils import catalog_of
 
 _GOVERNED_ATTRIBUTES = ["owner"]
 
@@ -27,7 +28,7 @@ def compute_securable_diff(
     actual_securables: set[Securable],
     resolver: PrincipalResolver,
     change_logger: ChangeLogger,
-    enable_taggable_creation: bool = False,
+    creation_in_scope_catalogs: frozenset[str] = frozenset(),
 ) -> SecurableDiff:
     """Compute the diff between desired and actual securable state.
 
@@ -36,13 +37,15 @@ def compute_securable_diff(
     affected row (the SecurableAttributes itself is retained so the securable's
     create/replace info isn't lost).
 
-    When ``enable_taggable_creation`` is False (default), non-function securables
-    declared in config but absent from UC are logged as ``NonexistentSecurableError``
-    and dropped from ``securables_to_create``. When True, they flow through for
-    the executor to create, with one exception: Tables require ≥1 column and
-    every column must have a non-None ``type``. Tables that fail this check are
-    logged as errors (with a hint explaining the requirement) and dropped,
-    surfacing later via ``ExecutionBatchError``.
+    Non-function securables declared in config but absent from UC are created
+    only if their catalog is in ``creation_in_scope_catalogs``; out-of-scope
+    catalogs (and the all-empty set, which is the default and means "creation
+    disabled for everything") log ``NonexistentSecurableError`` and are dropped
+    from ``securables_to_create``. Functions are always engine-managed and flow
+    through regardless of scope. Tables require ≥1 column and every column must
+    have a non-None ``type``. In-scope tables that fail this check are logged
+    as errors (with a hint explaining the requirement) and dropped, surfacing
+    later via ``ExecutionBatchError``.
     """
     desired_attrs = _resolve_attribute_owners(desired_attrs, resolver, change_logger)
     actual_attrs = _resolve_attribute_owners(actual_attrs, resolver, change_logger)
@@ -50,12 +53,12 @@ def compute_securable_diff(
     securables_to_create, securables_to_replace = _diff_securables(
         desired_securables, actual_securables
     )
-    if enable_taggable_creation:
-        securables_to_create = _validate_tables_for_creation(securables_to_create, change_logger)
-    else:
-        securables_to_create = _log_nonexistent_non_function_securables(
-            securables_to_create, change_logger,
-        )
+    creatable, blocked = _partition_by_creation_scope(
+        securables_to_create, creation_in_scope_catalogs,
+    )
+    creatable = _validate_tables_for_creation(creatable, change_logger)
+    _log_nonexistent_non_function_securables(blocked, change_logger)
+    securables_to_create = creatable
 
     table_full_names_being_created = {
         s.full_name for s in securables_to_create
@@ -63,7 +66,7 @@ def compute_securable_diff(
     }
     columns_to_create = _diff_table_columns(
         desired_securables, actual_securables,
-        table_full_names_being_created, change_logger, enable_taggable_creation,
+        table_full_names_being_created, change_logger, creation_in_scope_catalogs,
     )
     securables_to_create.extend(columns_to_create)
 
@@ -173,15 +176,16 @@ def _diff_table_columns(
     actual: set[Securable],
     table_full_names_being_created: set[str],
     change_logger: ChangeLogger,
-    enable_taggable_creation: bool,
+    creation_in_scope_catalogs: frozenset[str],
 ) -> list[Column]:
     """For each desired Table that already exists in UC (i.e. NOT being created
     this run), compare its declared columns against the columns fetched from UC
     and return any columns that should be added via ALTER TABLE ADD COLUMN.
 
     Logs ``NonexistentSecurableError(COLUMN, ...)`` for missing columns that
-    can't be created (flag off, or flag on but column lacks ``data_type``).
-    Columns present in actual but absent from desired are ignored — additive only.
+    can't be created (catalog out of creation scope, or in scope but column
+    lacks ``data_type``). Columns present in actual but absent from desired
+    are ignored — additive only.
     """
     actual_tables_by_name = {
         s.full_name: s for s in actual
@@ -203,7 +207,7 @@ def _diff_table_columns(
             if col.full_name in actual_column_names:
                 continue  # already exists in UC
 
-            if enable_taggable_creation:
+            if catalog_of(col.full_name) in creation_in_scope_catalogs:
                 blocker = _column_creation_blocker(col)
                 if blocker is None:
                     columns_to_create.append(col)
@@ -223,6 +227,28 @@ def _diff_table_columns(
                 ))
 
     return columns_to_create
+
+
+def _partition_by_creation_scope(
+    to_create: list[Securable],
+    in_scope_catalogs: frozenset[str],
+) -> tuple[list[Securable], list[Securable]]:
+    """Split ``to_create`` into (creatable, blocked).
+
+    Functions are always creatable — they're engine-managed and exempt from
+    the catalog-scope gate. Other securables (catalogs, schemas, tables,
+    volumes) are creatable only if their catalog is in ``in_scope_catalogs``.
+    """
+    creatable: list[Securable] = []
+    blocked: list[Securable] = []
+    for sec in to_create:
+        if isinstance(sec, Function):
+            creatable.append(sec)
+        elif catalog_of(sec.full_name) in in_scope_catalogs:
+            creatable.append(sec)
+        else:
+            blocked.append(sec)
+    return creatable, blocked
 
 
 def _validate_tables_for_creation(

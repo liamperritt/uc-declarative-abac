@@ -66,6 +66,30 @@ def main() -> None:
         help="Permit the engine to create catalogs, schemas, tables, and volumes declared in config but absent from UC. Off by default.",
     )
     parser.add_argument(
+        "--manage-tags-for-catalogs",
+        type=str,
+        default="*",
+        help="Comma-separated catalog names to scope tag management to (default '*' = all configured catalogs). No effect unless --enable-tag-management is set.",
+    )
+    parser.add_argument(
+        "--manage-privileges-for-catalogs",
+        type=str,
+        default="*",
+        help="Comma-separated catalog names to scope privilege management to (default '*' = all configured catalogs). No effect unless --enable-privilege-management is set.",
+    )
+    parser.add_argument(
+        "--manage-taggables-for-catalogs",
+        type=str,
+        default="*",
+        help="Comma-separated catalog names to scope taggable attribute updates (e.g. owner) to (default '*' = all configured catalogs). Function attributes always flow through. No effect unless --enable-taggable-management is set.",
+    )
+    parser.add_argument(
+        "--create-taggables-for-catalogs",
+        type=str,
+        default="*",
+        help="Comma-separated catalog names to scope creation of missing catalogs/schemas/tables/volumes to (default '*' = all configured catalogs). Function creation always flows through. No effect unless --enable-taggable-creation is set.",
+    )
+    parser.add_argument(
         "--enable-governed-tag-deletion",
         action="store_true",
         default=False,
@@ -99,6 +123,10 @@ def main() -> None:
         enable_taggable_creation=args.enable_taggable_creation,
         enable_privilege_management=args.enable_privilege_management,
         enable_governed_tag_deletion=args.enable_governed_tag_deletion,
+        manage_tags_for_catalogs=args.manage_tags_for_catalogs,
+        manage_privileges_for_catalogs=args.manage_privileges_for_catalogs,
+        manage_taggables_for_catalogs=args.manage_taggables_for_catalogs,
+        create_taggables_for_catalogs=args.create_taggables_for_catalogs,
         force=args.force,
     )
 

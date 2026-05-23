@@ -56,6 +56,34 @@ inputs:
       missing non-function securables raise NonexistentSecurableError.
     required: false
     default: 'false'
+  manage-tags-for-catalogs:
+    description: >-
+      Comma-separated catalog names to scope tag management to (default '*' = all
+      configured catalogs). No effect unless ``enable-tag-management`` is set.
+    required: false
+    default: '*'
+  manage-privileges-for-catalogs:
+    description: >-
+      Comma-separated catalog names to scope privilege management to (default '*'
+      = all configured catalogs). No effect unless ``enable-privilege-management``
+      is set.
+    required: false
+    default: '*'
+  manage-taggables-for-catalogs:
+    description: >-
+      Comma-separated catalog names to scope taggable attribute updates (e.g.
+      owner) to (default '*' = all configured catalogs). Function attributes
+      always flow through. No effect unless ``enable-taggable-management`` is set.
+    required: false
+    default: '*'
+  create-taggables-for-catalogs:
+    description: >-
+      Comma-separated catalog names to scope creation of missing catalogs/schemas
+      /tables/volumes to (default '*' = all configured catalogs). Function
+      creation always flows through. No effect unless ``enable-taggable-creation``
+      is set.
+    required: false
+    default: '*'
   enable-governed-tag-deletion:
     description: >-
       If "true", permit the engine to delete governed tags (account-level tag
@@ -102,6 +130,10 @@ runs:
         ENABLE_PRIVILEGE_MANAGEMENT: ${{ inputs.enable-privilege-management }}
         ENABLE_TAGGABLE_MANAGEMENT: ${{ inputs.enable-taggable-management }}
         ENABLE_TAGGABLE_CREATION: ${{ inputs.enable-taggable-creation }}
+        MANAGE_TAGS_FOR_CATALOGS: ${{ inputs.manage-tags-for-catalogs }}
+        MANAGE_PRIVILEGES_FOR_CATALOGS: ${{ inputs.manage-privileges-for-catalogs }}
+        MANAGE_TAGGABLES_FOR_CATALOGS: ${{ inputs.manage-taggables-for-catalogs }}
+        CREATE_TAGGABLES_FOR_CATALOGS: ${{ inputs.create-taggables-for-catalogs }}
         ENABLE_GOVERNED_TAG_DELETION: ${{ inputs.enable-governed-tag-deletion }}
         FORCE: ${{ inputs.force }}
       run: |
@@ -130,6 +162,10 @@ runs:
         if [[ "$ENABLE_TAGGABLE_CREATION" == "true" ]]; then
           args+=(--enable-taggable-creation)
         fi
+        args+=(--manage-tags-for-catalogs "$MANAGE_TAGS_FOR_CATALOGS")
+        args+=(--manage-privileges-for-catalogs "$MANAGE_PRIVILEGES_FOR_CATALOGS")
+        args+=(--manage-taggables-for-catalogs "$MANAGE_TAGGABLES_FOR_CATALOGS")
+        args+=(--create-taggables-for-catalogs "$CREATE_TAGGABLES_FOR_CATALOGS")
         if [[ "$ENABLE_GOVERNED_TAG_DELETION" == "true" ]]; then
           args+=(--enable-governed-tag-deletion)
         fi
