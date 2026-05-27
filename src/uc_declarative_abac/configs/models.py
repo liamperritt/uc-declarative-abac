@@ -164,7 +164,7 @@ class FunctionConfig(BaseSecurableConfig):
     @classmethod
     def _reject_tags(cls, data):
         if isinstance(data, dict) and "tags" in data:
-            raise ValueError("Functions do not support tags")
+            raise ValueError("Function tags are not currently supported")
         return data
 
 
