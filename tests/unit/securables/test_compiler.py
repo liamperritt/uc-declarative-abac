@@ -226,8 +226,12 @@ def test_securable_compiler_emits_schema_comment_in_attributes():
     ) in result
 
 
-def test_securable_compiler_emits_table_comment_and_location_in_attributes():
-    """A table with comment and external location produces a SecurableAttributes carrying both."""
+def test_securable_compiler_emits_table_comment_in_attributes():
+    """A table with a comment produces a SecurableAttributes carrying it.
+
+    ``location`` is creation-only (not part of SecurableAttributes); see
+    ``test_securables_compiler_plumbs_*_onto_*_securable`` for CREATE-time plumbing.
+    """
     config = ResourcesConfig.model_validate({
         "catalogs": {
             "my_cat": {
@@ -253,12 +257,14 @@ def test_securable_compiler_emits_table_comment_and_location_in_attributes():
         securable_type=SecurableType.TABLE,
         full_name="my_cat.sales.orders",
         comment="Orders fact",
-        location="s3://ext/orders",
     ) in result
 
 
-def test_securable_compiler_emits_volume_comment_and_location_in_attributes():
-    """A volume with comment and external location produces a SecurableAttributes carrying both."""
+def test_securable_compiler_emits_volume_comment_in_attributes():
+    """A volume with a comment produces a SecurableAttributes carrying it.
+
+    ``location`` is creation-only (not part of SecurableAttributes).
+    """
     config = ResourcesConfig.model_validate({
         "catalogs": {
             "my_cat": {
@@ -284,12 +290,11 @@ def test_securable_compiler_emits_volume_comment_and_location_in_attributes():
         securable_type=SecurableType.VOLUME,
         full_name="my_cat.landing.raw",
         comment="Raw landing",
-        location="s3://ext/raw",
     ) in result
 
 
 def test_securable_compiler_emits_attributes_when_only_comment_is_set():
-    """A catalog with only a comment (no owner, no location) still produces a SecurableAttributes."""
+    """A catalog with only a comment (no owner) still produces a SecurableAttributes."""
     config = ResourcesConfig.model_validate({
         "catalogs": {
             "my_cat": {"comment": "Just a comment"},
@@ -305,8 +310,10 @@ def test_securable_compiler_emits_attributes_when_only_comment_is_set():
     ) in result
 
 
-def test_securable_compiler_emits_attributes_when_only_location_is_set():
-    """A volume with only a location (no owner, no comment) still produces a SecurableAttributes."""
+def test_securable_compiler_emits_no_attributes_when_only_location_is_set():
+    """A volume with only a location (no owner, no comment) does NOT produce a
+    SecurableAttributes — ``location`` is creation-only and isn't tracked as a
+    managed attribute."""
     config = ResourcesConfig.model_validate({
         "catalogs": {
             "my_cat": {
@@ -324,11 +331,7 @@ def test_securable_compiler_emits_attributes_when_only_location_is_set():
 
     result = compile_desired_attributes(config)
 
-    assert SecurableAttributes(
-        securable_type=SecurableType.VOLUME,
-        full_name="my_cat.landing.raw",
-        location="s3://ext/raw",
-    ) in result
+    assert not any(a.securable_type == SecurableType.VOLUME for a in result)
 
 
 def test_securable_compiler_does_not_emit_function_comment_into_attributes():
@@ -717,13 +720,13 @@ def test_securables_compiler_emits_nothing_for_empty_config():
 # ---------------------------------------------------------------------------
 
 
-def test_securables_compiler_plumbs_comment_onto_catalog_securable():
-    """Catalog Securable carries comment for CREATE-time SQL embedding. ``location`` is
-    not currently emitted for catalogs (managed location is not exposed in info-schema)."""
+def test_securables_compiler_plumbs_comment_and_location_onto_catalog_securable():
+    """Catalog Securable carries comment and managed location for CREATE-time SQL embedding."""
     config = ResourcesConfig.model_validate({
         "catalogs": {
             "my_cat": {
                 "comment": "Prod",
+                "location": "s3://managed/my_cat",
             },
         },
     })
@@ -732,12 +735,11 @@ def test_securables_compiler_plumbs_comment_onto_catalog_securable():
 
     catalog = next(s for s in result if s.full_name == "my_cat" and s.securable_type == SecurableType.CATALOG)
     assert catalog.comment == "Prod"
-    assert catalog.location is None
+    assert catalog.location == "s3://managed/my_cat"
 
 
-def test_securables_compiler_plumbs_comment_onto_schema_securable():
-    """Schema Securable carries comment for CREATE-time SQL embedding. ``location`` is
-    not currently emitted for schemas (managed location is not exposed in info-schema)."""
+def test_securables_compiler_plumbs_comment_and_location_onto_schema_securable():
+    """Schema Securable carries comment and managed location for CREATE-time SQL embedding."""
     config = ResourcesConfig.model_validate({
         "catalogs": {
             "my_cat": {
@@ -745,6 +747,7 @@ def test_securables_compiler_plumbs_comment_onto_schema_securable():
                     {
                         "name": "sales",
                         "comment": "Sales",
+                        "location": "s3://managed/sales",
                     },
                 ],
             },
@@ -755,7 +758,7 @@ def test_securables_compiler_plumbs_comment_onto_schema_securable():
 
     schema = next(s for s in result if s.full_name == "my_cat.sales")
     assert schema.comment == "Sales"
-    assert schema.location is None
+    assert schema.location == "s3://managed/sales"
 
 
 def test_securables_compiler_plumbs_comment_and_location_onto_table_securable():

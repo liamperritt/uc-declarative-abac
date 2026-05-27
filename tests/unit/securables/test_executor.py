@@ -823,79 +823,6 @@ def test_securable_executor_escapes_single_quotes_in_comment_update():
 
 
 # ---------------------------------------------------------------------------
-# ALTER location via SQL (catalog/schema only)
-# ---------------------------------------------------------------------------
-
-
-def test_securable_executor_alters_catalog_managed_location_via_alter_sql():
-    uc_helper = MagicMock()
-    diff = SecurableDiff(attributes_to_update=[AttributeUpdate(
-        securable_type=SecurableType.CATALOG,
-        full_name="my_cat",
-        attribute="location",
-        old_value="s3://old",
-        new_value="s3://new",
-    )])
-
-    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
-
-    assert len(stmts) == 1
-    _assert_sql_contains(stmts[0], "ALTER CATALOG", "my_cat", "SET MANAGED LOCATION", "s3://new")
-
-
-def test_securable_executor_alters_schema_managed_location_via_alter_sql():
-    uc_helper = MagicMock()
-    diff = SecurableDiff(attributes_to_update=[AttributeUpdate(
-        securable_type=SecurableType.SCHEMA,
-        full_name="cat.sales",
-        attribute="location",
-        old_value="s3://old",
-        new_value="s3://new",
-    )])
-
-    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
-
-    assert len(stmts) == 1
-    _assert_sql_contains(stmts[0], "ALTER SCHEMA", "cat.sales", "SET MANAGED LOCATION", "s3://new")
-
-
-def test_securable_executor_logs_error_when_location_update_targets_table():
-    """Defensive: a TABLE location AttributeUpdate that bypasses the differ produces a logged error, not a raise."""
-    uc_helper = MagicMock()
-    logger = ChangeLogger()
-    diff = SecurableDiff(attributes_to_update=[AttributeUpdate(
-        securable_type=SecurableType.TABLE,
-        full_name="cat.sales.orders",
-        attribute="location",
-        old_value="s3://old",
-        new_value="s3://new",
-    )])
-
-    stmts = execute_securable_diff(uc_helper, diff, logger)
-
-    assert stmts == []
-    assert len(logger.errors) == 1
-    assert "location" in logger.errors[0].context.lower()
-
-
-def test_securable_executor_logs_error_when_location_update_targets_volume():
-    uc_helper = MagicMock()
-    logger = ChangeLogger()
-    diff = SecurableDiff(attributes_to_update=[AttributeUpdate(
-        securable_type=SecurableType.VOLUME,
-        full_name="cat.landing.raw",
-        attribute="location",
-        old_value="s3://old",
-        new_value="s3://new",
-    )])
-
-    stmts = execute_securable_diff(uc_helper, diff, logger)
-
-    assert stmts == []
-    assert len(logger.errors) == 1
-
-
-# ---------------------------------------------------------------------------
 # Dry-run + error continuation for new attribute paths
 # ---------------------------------------------------------------------------
 
@@ -909,22 +836,6 @@ def test_securable_executor_skips_alter_comment_in_dry_run():
         attribute="comment",
         old_value="Old",
         new_value="New",
-    )])
-
-    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger(), dry_run=True)
-
-    assert stmts == []
-    uc_helper.execute_sql.assert_not_called()
-
-
-def test_securable_executor_skips_alter_location_in_dry_run():
-    uc_helper = MagicMock()
-    diff = SecurableDiff(attributes_to_update=[AttributeUpdate(
-        securable_type=SecurableType.CATALOG,
-        full_name="my_cat",
-        attribute="location",
-        old_value="s3://old",
-        new_value="s3://new",
     )])
 
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger(), dry_run=True)

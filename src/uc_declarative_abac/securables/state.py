@@ -26,7 +26,6 @@ class SecurableAttributes:
     full_name: str
     owner: Principal | None = None
     comment: str | None = None
-    location: str | None = None
 
 
 @dataclass(frozen=True)
@@ -40,8 +39,10 @@ class Securable:
 
     ``comment`` and ``location`` ride along here so the executor can embed them
     in CREATE statements for the four taggable types (catalogs, schemas, tables,
-    volumes). For ALTER paths against pre-existing objects, the executor reads
-    these values from ``SecurableAttributes`` instead.
+    volumes). ``comment`` is also a governed (updatable) attribute on
+    ``SecurableAttributes``; ``location`` is **only** consulted at CREATE time —
+    the engine does not fetch, diff, or alter it (same shape as
+    ``Column.data_type``).
 
     To add creation support for a new securable type (e.g. tables):
     1. Create a Table(Securable) subclass with table-specific fields

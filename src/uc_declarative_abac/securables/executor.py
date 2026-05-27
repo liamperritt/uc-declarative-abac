@@ -229,27 +229,6 @@ def _build_comment_update_sql(securable_type: SecurableType, full_name: str, com
             )
 
 
-def _build_location_update_sql(securable_type: SecurableType, full_name: str, location: str) -> str:
-    """Build an ALTER SQL statement to set the managed location of a catalog or schema.
-
-    Table/volume external location is immutable — the differ filters those before they
-    reach the executor. Reaching this builder for TABLE/VOLUME indicates a differ regression.
-    """
-    quoted = quote_securable(full_name)
-    escaped = _escape_sql_string_literal(location)
-    match securable_type:
-        case SecurableType.CATALOG:
-            return f"ALTER CATALOG {quoted} SET MANAGED LOCATION '{escaped}'"
-        case SecurableType.SCHEMA:
-            return f"ALTER SCHEMA {quoted} SET MANAGED LOCATION '{escaped}'"
-        case _:
-            raise GovernorError(
-                f"Location alters are not supported for {securable_type.value} — "
-                "external location is immutable; this update should have been filtered "
-                "by the differ."
-            )
-
-
 def _apply_owner_update(uc_helper: UnityCatalogHelper, update: AttributeUpdate) -> None:
     """Apply an owner change via the SDK ``update_owner`` dispatch."""
     if isinstance(update.new_value, Principal):
@@ -266,7 +245,7 @@ def _execute_sql_attribute_update(
     statements: list[str],
     stmt: str,
 ) -> bool:
-    """Run a SQL-based attribute update (comment/location). Returns True on success or in dry-run.
+    """Run a SQL-based attribute update (comment). Returns True on success or in dry-run.
 
     On failure: logs an ExecutionError and returns False. Successful executions
     append to ``statements`` so the caller can report the issued SQL.
@@ -310,20 +289,6 @@ def _apply_attribute_update(
             return _execute_sql_attribute_update(
                 uc_helper, change_logger, dry_run, statements, stmt,
             )
-        case "location":
-            try:
-                stmt = _build_location_update_sql(
-                    update.securable_type, update.full_name, str(update.new_value),
-                )
-            except GovernorError as exc:
-                change_logger.log_error(ExecutionError(
-                    context=f"Update location on {update.securable_type.value} {update.full_name}",
-                    exception=exc,
-                ))
-                return False
-            return _execute_sql_attribute_update(
-                uc_helper, change_logger, dry_run, statements, stmt,
-            )
         case _:
             change_logger.log_error(ExecutionError(
                 context=f"Unknown attribute {update.attribute!r} on {update.securable_type.value} {update.full_name}",
@@ -341,7 +306,7 @@ def execute_securable_diff(
     """Execute securable creates, replaces, and attribute updates from a SecurableDiff.
 
     Execution order: creates (SQL) -> replaces (SQL) -> attribute updates
-    (SDK call for ``owner``; SQL ALTER for ``comment``/``location``).
+    (SDK call for ``owner``; SQL ALTER for ``comment``).
     Returns the list of SQL statements that were successfully executed
     (empty in dry-run mode).
     """

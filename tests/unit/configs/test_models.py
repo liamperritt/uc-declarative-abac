@@ -785,35 +785,23 @@ def test_column_config_data_type_defaults_to_none():
 # ---------------------------------------------------------------------------
 
 
-def test_catalog_config_accepts_comment():
-    """Catalog configs round-trip 'comment'. ``location`` is not currently supported
-    for catalogs (managed location is not exposed in ``information_schema``)."""
+def test_catalog_config_accepts_comment_and_location():
+    """Catalog configs round-trip 'comment' and 'location' (managed location, CREATE-only)."""
     config = ResourcesConfig.model_validate({
         "catalogs": {
             "my_cat": {
                 "comment": "Prod analytics catalog",
+                "location": "s3://prod-bucket/my_cat",
             },
         },
     })
     cat = config.catalogs["my_cat"]
     assert cat.comment == "Prod analytics catalog"
+    assert cat.location == "s3://prod-bucket/my_cat"
 
 
-def test_catalog_config_has_no_location_attribute():
-    """``location`` is not currently supported on catalogs — the resulting model has no
-    such attribute. Pydantic silently drops any ``location`` key supplied in YAML."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {"comment": "Prod"},
-        },
-    })
-    cat = config.catalogs["my_cat"]
-    assert not hasattr(cat, "location")
-
-
-def test_schema_config_accepts_comment():
-    """Schema configs round-trip 'comment'. ``location`` is not currently supported
-    for schemas (managed location is not exposed in ``information_schema``)."""
+def test_schema_config_accepts_comment_and_location():
+    """Schema configs round-trip 'comment' and 'location' (managed location, CREATE-only)."""
     config = ResourcesConfig.model_validate({
         "catalogs": {
             "my_cat": {
@@ -821,6 +809,7 @@ def test_schema_config_accepts_comment():
                     {
                         "name": "sales",
                         "comment": "Sales data",
+                        "location": "s3://prod-bucket/my_cat/sales",
                     },
                 ],
             },
@@ -828,20 +817,7 @@ def test_schema_config_accepts_comment():
     })
     schema = config.catalogs["my_cat"].schemas[0]
     assert schema.comment == "Sales data"
-
-
-def test_schema_config_has_no_location_attribute():
-    """``location`` is not currently supported on schemas — the resulting model has no
-    such attribute. Pydantic silently drops any ``location`` key supplied in YAML."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "schemas": [{"name": "sales", "comment": "Sales"}],
-            },
-        },
-    })
-    schema = config.catalogs["my_cat"].schemas[0]
-    assert not hasattr(schema, "location")
+    assert schema.location == "s3://prod-bucket/my_cat/sales"
 
 
 def test_table_config_accepts_comment_and_location():
@@ -895,11 +871,7 @@ def test_volume_config_accepts_comment_and_location():
 
 
 def test_taggable_configs_default_comment_and_location_to_none():
-    """When 'comment'/'location' are omitted, they default to None.
-
-    Catalog and schema do not have a 'location' field (managed location is not
-    currently supported).
-    """
+    """When 'comment'/'location' are omitted, they default to None."""
     config = ResourcesConfig.model_validate({
         "catalogs": {
             "my_cat": {
@@ -915,8 +887,8 @@ def test_taggable_configs_default_comment_and_location_to_none():
     })
     cat = config.catalogs["my_cat"]
     schema = cat.schemas[0]
-    assert cat.comment is None
-    assert schema.comment is None
+    assert cat.comment is None and cat.location is None
+    assert schema.comment is None and schema.location is None
     assert schema.tables[0].comment is None and schema.tables[0].location is None
     assert schema.volumes[0].comment is None and schema.volumes[0].location is None
 

@@ -247,6 +247,7 @@ class VolumeConfig(BaseTaggableConfig):
 
 class SchemaConfig(BaseTaggableConfig):
     catalog_name: str
+    location: str | None = None
     policies: list[PolicyConfig] | None = None
     tables: list[TableConfig] | None = None
     volumes: list[VolumeConfig] | None = None
@@ -297,6 +298,7 @@ class SchemaConfig(BaseTaggableConfig):
 
 
 class CatalogConfig(BaseTaggableConfig):
+    location: str | None = None
     policies: list[PolicyConfig] | None = None
     schemas: list[SchemaConfig] | None = None
 

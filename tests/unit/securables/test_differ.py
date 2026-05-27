@@ -322,7 +322,7 @@ def test_securable_differ_ignores_matching_function_comments():
 
 
 # ---------------------------------------------------------------------------
-# Comment + location attribute diffing
+# Comment attribute diffing
 # ---------------------------------------------------------------------------
 
 
@@ -332,14 +332,12 @@ def _attrs(
     *,
     owner: Principal | None = None,
     comment: str | None = None,
-    location: str | None = None,
 ) -> SecurableAttributes:
     return SecurableAttributes(
         securable_type=sec_type,
         full_name=full_name,
         owner=owner,
         comment=comment,
-        location=location,
     )
 
 
@@ -410,24 +408,6 @@ def test_securable_differ_ignores_comment_when_config_does_not_specify():
     assert diff.attributes_to_update == []
 
 
-def test_securable_differ_detects_catalog_managed_location_change():
-    desired = {_attrs(SecurableType.CATALOG, "cat", location="s3://new")}
-    actual = {_attrs(SecurableType.CATALOG, "cat", location="s3://old")}
-
-    diff = compute_securable_diff(desired, actual, set(), set(), _resolver(), _change_logger())
-
-    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [("location", "s3://new")]
-
-
-def test_securable_differ_detects_schema_managed_location_change():
-    desired = {_attrs(SecurableType.SCHEMA, "cat.sales", location="s3://new")}
-    actual = {_attrs(SecurableType.SCHEMA, "cat.sales", location="s3://old")}
-
-    diff = compute_securable_diff(desired, actual, set(), set(), _resolver(), _change_logger())
-
-    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [("location", "s3://new")]
-
-
 # ---------------------------------------------------------------------------
 # View-comment guard
 # ---------------------------------------------------------------------------
@@ -454,90 +434,19 @@ def test_securable_differ_logs_error_when_comment_change_targets_a_view():
 
 
 # ---------------------------------------------------------------------------
-# Table/volume external-location guard
+# Newly-created securables: comment handled by CREATE, not ALTER
 # ---------------------------------------------------------------------------
 
 
-def test_securable_differ_logs_error_when_existing_table_location_changes():
-    """Location change on an existing table fails — external location is immutable."""
-    table = Table(
-        securable_type=SecurableType.TABLE,
-        full_name="cat.sales.orders",
-        table_type="EXTERNAL",
-    )
-    desired = {_attrs(SecurableType.TABLE, "cat.sales.orders", location="s3://new")}
-    actual = {_attrs(SecurableType.TABLE, "cat.sales.orders", location="s3://old")}
-    logger = _change_logger()
-
-    diff = compute_securable_diff(desired, actual, set(), {table}, _resolver(), logger)
-
-    assert diff.attributes_to_update == []
-    assert len(logger.errors) == 1
-    assert "location" in logger.errors[0].context.lower()
-    assert "immutable" in str(logger.errors[0].exception).lower()
-
-
-def test_securable_differ_logs_error_when_existing_volume_location_changes():
-    """Location change on an existing volume fails — external location is immutable."""
-    desired = {_attrs(SecurableType.VOLUME, "cat.landing.raw", location="s3://new")}
-    actual = {_attrs(SecurableType.VOLUME, "cat.landing.raw", location="s3://old")}
-    logger = _change_logger()
-
-    diff = compute_securable_diff(desired, actual, set(), set(), _resolver(), logger)
-
-    assert diff.attributes_to_update == []
-    assert len(logger.errors) == 1
-    assert "location" in logger.errors[0].context.lower()
-
-
-def test_securable_differ_logs_error_when_config_sets_location_on_existing_managed_table():
-    """Config declares external location on a table that exists in UC with no location → still an error."""
-    table = Table(
-        securable_type=SecurableType.TABLE,
-        full_name="cat.sales.orders",
-        table_type="MANAGED",
-    )
-    desired = {_attrs(SecurableType.TABLE, "cat.sales.orders", location="s3://new")}
-    actual = {_attrs(SecurableType.TABLE, "cat.sales.orders", location=None)}
-    logger = _change_logger()
-
-    diff = compute_securable_diff(desired, actual, set(), {table}, _resolver(), logger)
-
-    assert diff.attributes_to_update == []
-    assert len(logger.errors) == 1
-
-
-def test_securable_differ_does_not_log_error_when_config_omits_location_for_existing_external_table():
-    """Config has no location, actual has one → no diff, no error (unmanaged direction)."""
-    table = Table(
-        securable_type=SecurableType.TABLE,
-        full_name="cat.sales.orders",
-        table_type="EXTERNAL",
-    )
-    desired = {_attrs(SecurableType.TABLE, "cat.sales.orders", location=None)}
-    actual = {_attrs(SecurableType.TABLE, "cat.sales.orders", location="s3://existing")}
-    logger = _change_logger()
-
-    diff = compute_securable_diff(desired, actual, set(), {table}, _resolver(), logger)
-
-    assert diff.attributes_to_update == []
-    assert logger.errors == []
-
-
-# ---------------------------------------------------------------------------
-# Newly-created securables: comment/location handled by CREATE, not ALTER
-# ---------------------------------------------------------------------------
-
-
-def test_securable_differ_does_not_emit_comment_or_location_update_for_newly_created_catalog():
-    """A new catalog's comment + location ride along on the CREATE — no AttributeUpdate."""
+def test_securable_differ_does_not_emit_comment_update_for_newly_created_catalog():
+    """A new catalog's comment rides along on the CREATE — no AttributeUpdate."""
     catalog = Securable(
         securable_type=SecurableType.CATALOG,
         full_name="new_cat",
         comment="Brand new",
         location="s3://new_cat",
     )
-    desired_attrs = {_attrs(SecurableType.CATALOG, "new_cat", comment="Brand new", location="s3://new_cat")}
+    desired_attrs = {_attrs(SecurableType.CATALOG, "new_cat", comment="Brand new")}
 
     diff = compute_securable_diff(
         desired_attrs, set(), {catalog}, set(), _resolver(), _change_logger(),
@@ -547,11 +456,10 @@ def test_securable_differ_does_not_emit_comment_or_location_update_for_newly_cre
     assert catalog in diff.securables_to_create
     attribute_names = {u.attribute for u in diff.attributes_to_update}
     assert "comment" not in attribute_names
-    assert "location" not in attribute_names
 
 
-def test_securable_differ_does_not_emit_comment_or_location_update_for_newly_created_table():
-    """A new table's comment + external location ride along on CREATE — no AttributeUpdate."""
+def test_securable_differ_does_not_emit_comment_update_for_newly_created_table():
+    """A new table's comment rides along on CREATE — no AttributeUpdate."""
     table = Table(
         securable_type=SecurableType.TABLE,
         full_name="new_cat.sales.orders",
@@ -559,7 +467,7 @@ def test_securable_differ_does_not_emit_comment_or_location_update_for_newly_cre
         comment="New table",
         location="s3://ext/orders",
     )
-    desired_attrs = {_attrs(SecurableType.TABLE, "new_cat.sales.orders", comment="New table", location="s3://ext/orders")}
+    desired_attrs = {_attrs(SecurableType.TABLE, "new_cat.sales.orders", comment="New table")}
 
     diff = compute_securable_diff(
         desired_attrs, set(), {table}, set(), _resolver(), _change_logger(),
@@ -568,7 +476,6 @@ def test_securable_differ_does_not_emit_comment_or_location_update_for_newly_cre
 
     attribute_names = {u.attribute for u in diff.attributes_to_update}
     assert "comment" not in attribute_names
-    assert "location" not in attribute_names
 
 
 def test_securable_differ_still_emits_owner_update_for_newly_created_catalog():

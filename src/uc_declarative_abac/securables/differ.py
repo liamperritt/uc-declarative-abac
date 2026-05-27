@@ -18,12 +18,7 @@ from uc_declarative_abac.securables.state import (
 from uc_declarative_abac.types import ExecutionError, GovernorError, NonexistentSecurableError, PrincipalValidationError, SecurableType
 from uc_declarative_abac.utils import catalog_of
 
-_GOVERNED_ATTRIBUTES = ["owner", "comment", "location"]
-
-# Securable types whose ``location`` (external location) is immutable after creation —
-# the engine refuses to ALTER. catalog/schema use a *managed* location which IS alterable
-# and therefore not in this set.
-_LOCATION_IMMUTABLE_SECURABLE_TYPES = frozenset({SecurableType.TABLE, SecurableType.VOLUME})
+_GOVERNED_ATTRIBUTES = ["owner", "comment"]
 
 # ``information_schema.tables.table_type`` values that don't support ``COMMENT ON TABLE …``
 # / ``ALTER TABLE … SET COMMENT`` via the path this engine uses. Today only regular VIEWs are
@@ -350,15 +345,15 @@ def _diff_attributes(
       ``table_type`` is ``MATERIALIZED_VIEW`` or ``STREAMING_TABLE`` (the SDK
       ``tables.update(owner=...)`` path does not support them); logged as an
       ``ExecutionError`` and dropped.
-    - ``comment`` / ``location`` — skipped for newly-created securables because
-      the executor embeds them in the CREATE statement. For existing securables:
-        * comment on a view (``Table.table_type == "VIEW"``) is refused — UC
-          doesn't support ``COMMENT ON`` for views via this path. Logged as an
-          ``ExecutionError`` and dropped.
-        * location on a TABLE/VOLUME is refused — external location is immutable
-          after creation. Logged and dropped.
-        * comment on any other securable, and location on catalog/schema (managed
-          location) flow through as ALTER updates.
+    - ``comment`` — skipped for newly-created securables because the executor
+      embeds the comment in the CREATE statement. For existing securables,
+      comment on a view (``Table.table_type`` in ``_COMMENT_IMMUTABLE_TABLE_TYPES``)
+      is refused — UC doesn't support ``COMMENT ON`` for views via this path;
+      logged as an ``ExecutionError`` and dropped. Comments on other types flow
+      through as ALTER updates.
+
+    ``location`` is creation-only (see ``compile_desired_securables``) and is
+    not in ``_GOVERNED_ATTRIBUTES`` — it's never diffed.
 
     For resolved Principals, equality uses dataclass field equality — two
     resolved principals with the same identifier + name + type compare equal.
@@ -416,12 +411,11 @@ def _should_skip_or_log(
 ) -> bool:
     """Return True if the update should be dropped (skipped silently or after logging).
 
-    ``comment``/``location`` updates on a securable that's being created this run
-    are dropped silently — the CREATE statement embeds those values. For existing
-    securables, the view-comment, immutable-location, and immutable-owner rules
-    log an error before dropping.
+    ``comment`` updates on a securable that's being created this run are dropped
+    silently — the CREATE statement embeds the comment. For existing securables,
+    the view-comment and immutable-owner rules log an error before dropping.
     """
-    if is_being_created and update.attribute in ("comment", "location"):
+    if is_being_created and update.attribute == "comment":
         return True
 
     if update.attribute == "comment" and update.full_name in view_full_names:
@@ -429,16 +423,6 @@ def _should_skip_or_log(
             context=f"Update comment on {update.securable_type.value} {update.full_name}",
             exception=GovernorError(
                 "Cannot alter comment on a VIEW — only the view owner can alter comment."
-            ),
-        ))
-        return True
-
-    if update.attribute == "location" and update.securable_type in _LOCATION_IMMUTABLE_SECURABLE_TYPES:
-        change_logger.log_error(ExecutionError(
-            context=f"Update location on {update.securable_type.value} {update.full_name}",
-            exception=GovernorError(
-                f"External location is immutable; cannot ALTER. "
-                f"Desired '{update.new_value}', actual '{update.old_value}'."
             ),
         ))
         return True
