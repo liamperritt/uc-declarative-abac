@@ -333,13 +333,13 @@ Row-level and column-level security are applied via **tag-based ABAC policies**:
 
 Column-level fields:
 - **`name`** — the column name (required).
-- **`type`** — the column data type (optional). If provided and the table does not yet exist, the framework will attempt to create it as a managed table with the specified column types.
+- **`type`** — the column data type (optional). If provided and the table does not yet exist, the framework will attempt to create it with the specified column types.
 - **`tags`** — key-value or valueless tags applied to the column. These can be matched by ABAC policy definitions.
 
 Table-level fields (in addition to the common fields `name`, `comment`, `owner`, `tags`, `rfa_email`):
 - **`columns`** — list of column-level configurations (see above).
 - **`policies`** — list of policy `$ref`/`$defs` entries or inline policies scoped to this table.
-- **`location`** — external storage location (URI). Setting `location` on a new table makes it an external table; the LOCATION clause is included in `CREATE TABLE`. External location is **immutable after creation** — if config and UC disagree on an existing table's location, the engine logs an error in both dry-run and deployment.
+- **`location`** — external storage location (URI). Setting `location` on a new table makes it an external table; the LOCATION clause is included in `CREATE TABLE`. External location is **immutable after creation**.
 
 Comments are supported on managed and external tables, but **not on views**. If a table's actual `table_type` is `VIEW`, a comment change is refused with a logged error (set the comment in the view definition instead). Column-level comments are not currently supported.
 
