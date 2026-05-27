@@ -127,6 +127,7 @@ class BaseSecurableConfig(BaseModel, ABC):
     """Base model for all UC securable configs. Not intended to be instantiated directly."""
     name: str
     owner: str | None = None
+    comment: str | None = None
     tags: dict[str, str] | None = None
 
     @computed_field
@@ -153,7 +154,6 @@ class FunctionConfig(BaseSecurableConfig):
     schema_name: str
     parameters: list[ParameterConfig] | None = None
     definition: str = Field(alias="return")
-    comment: str | None = None
 
     @computed_field
     @property
@@ -185,6 +185,13 @@ class ColumnConfig(BaseTaggableConfig):
             "it is always inherited from the table"
         )
 
+    @field_validator("comment", mode="before")
+    @classmethod
+    def _reject_comment(cls, v):
+        raise ValueError(
+            "Column-level comments are not currently supported"
+        )
+
     @computed_field
     @property
     def full_name(self) -> str:
@@ -194,6 +201,7 @@ class ColumnConfig(BaseTaggableConfig):
 class TableConfig(BaseTaggableConfig):
     catalog_name: str
     schema_name: str
+    location: str | None = None
     policies: list[PolicyConfig] | None = None
     columns: list[ColumnConfig] | None = None
 
@@ -229,6 +237,7 @@ class TableConfig(BaseTaggableConfig):
 class VolumeConfig(BaseTaggableConfig):
     catalog_name: str
     schema_name: str
+    location: str | None = None
 
     @computed_field
     @property

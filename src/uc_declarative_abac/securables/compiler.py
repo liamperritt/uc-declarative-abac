@@ -10,17 +10,35 @@ def _emit_attributes(
     securable_type: SecurableType,
     obj: SecurableConfig,
 ) -> SecurableAttributes | None:
-    """Return a SecurableAttributes if the object has a non-None owner, else None.
+    """Return a SecurableAttributes if any managed attribute is set, else None.
 
-    The owner is emitted as an unresolved Principal (principal_type=UNKNOWN)
-    carrying the display name from config. Resolution happens post-fetch.
+    Managed attributes today: ``owner``, ``comment``, ``location``. The owner
+    is emitted as an unresolved Principal (principal_type=UNKNOWN) carrying
+    the display name from config; resolution happens post-fetch. ``comment``
+    and ``location`` are read directly from the config and only apply to the
+    four taggable types (catalogs, schemas, tables, volumes); for functions
+    only ``owner`` is emitted here (the function's comment lives on the
+    ``Function`` securable itself, since it's part of the replaceable
+    definition).
     """
-    if obj.owner is None:
+    owner = (
+        Principal(principal_type=PrincipalType.UNKNOWN, name=obj.owner)
+        if obj.owner else None
+    )
+    if securable_type == SecurableType.FUNCTION:
+        comment, location = None, None
+    else:
+        comment = getattr(obj, "comment", None)
+        location = getattr(obj, "location", None)
+
+    if owner is None and comment is None and location is None:
         return None
     return SecurableAttributes(
         securable_type=securable_type,
         full_name=obj.full_name,
-        owner=Principal(principal_type=PrincipalType.UNKNOWN, name=obj.owner),
+        owner=owner,
+        comment=comment,
+        location=location,
     )
 
 
@@ -75,23 +93,32 @@ def _compile_column(col: ColumnConfig) -> Column:
 
 
 def _compile_table(table: TableConfig) -> Table:
-    """Build a Table with its declared columns in YAML declaration order."""
+    """Build a Table with its declared columns in YAML declaration order.
+
+    ``comment`` and ``location`` are plumbed onto the Table so the executor
+    can embed them in the CREATE TABLE statement (LOCATION makes the table
+    external).
+    """
     return Table(
         securable_type=SecurableType.TABLE,
         full_name=table.full_name,
         columns=tuple(_compile_column(c) for c in (table.columns or [])),
+        comment=table.comment,
+        location=table.location,
     )
 
 
 def compile_desired_securables(config: ResourcesConfig) -> set[Securable]:
     """Walk the config tree and emit a Securable for every declared securable.
 
-    Catalogs, schemas, and volumes are emitted as base ``Securable`` (type +
-    full_name only). Tables are emitted as ``Table`` subclass instances carrying
-    their declared columns (each column as a ``Column`` with an optional UC
-    datatype) — the executor reads these when building ``CREATE TABLE`` SQL.
-    Functions are emitted as ``Function`` instances carrying their parameters,
-    definition, and optional comment so the differ can detect replacement.
+    Catalogs and schemas are emitted as base ``Securable`` instances carrying
+    ``comment`` for the executor to embed in CREATE statements; the engine
+    does not currently manage their managed location. Volumes are emitted as
+    base ``Securable`` carrying ``comment`` and ``location`` (external).
+    Tables are emitted as ``Table`` subclass instances carrying their declared
+    columns plus ``comment`` / ``location``. Functions are emitted as
+    ``Function`` instances carrying their parameters, definition, and optional
+    comment so the differ can detect replacement.
     """
     securables: set[Securable] = set()
 
@@ -99,11 +126,13 @@ def compile_desired_securables(config: ResourcesConfig) -> set[Securable]:
         securables.add(Securable(
             securable_type=SecurableType.CATALOG,
             full_name=catalog.full_name,
+            comment=catalog.comment,
         ))
         for schema in catalog.schemas or []:
             securables.add(Securable(
                 securable_type=SecurableType.SCHEMA,
                 full_name=schema.full_name,
+                comment=schema.comment,
             ))
             for table in schema.tables or []:
                 securables.add(_compile_table(table))
@@ -111,6 +140,8 @@ def compile_desired_securables(config: ResourcesConfig) -> set[Securable]:
                 securables.add(Securable(
                     securable_type=SecurableType.VOLUME,
                     full_name=volume.full_name,
+                    comment=volume.comment,
+                    location=volume.location,
                 ))
             for func in schema.functions or []:
                 securables.add(_compile_function(func))

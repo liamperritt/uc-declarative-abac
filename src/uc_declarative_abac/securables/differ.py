@@ -15,10 +15,25 @@ from uc_declarative_abac.securables.state import (
     Securable,
     Table,
 )
-from uc_declarative_abac.types import ExecutionError, NonexistentSecurableError, PrincipalValidationError, SecurableType
+from uc_declarative_abac.types import ExecutionError, GovernorError, NonexistentSecurableError, PrincipalValidationError, SecurableType
 from uc_declarative_abac.utils import catalog_of
 
-_GOVERNED_ATTRIBUTES = ["owner"]
+_GOVERNED_ATTRIBUTES = ["owner", "comment", "location"]
+
+# Securable types whose ``location`` (external location) is immutable after creation —
+# the engine refuses to ALTER. catalog/schema use a *managed* location which IS alterable
+# and therefore not in this set.
+_LOCATION_IMMUTABLE_SECURABLE_TYPES = frozenset({SecurableType.TABLE, SecurableType.VOLUME})
+
+# ``information_schema.tables.table_type`` values that don't support ``COMMENT ON TABLE …``
+# / ``ALTER TABLE … SET COMMENT`` via the path this engine uses. Today only regular VIEWs are
+# affected.
+_COMMENT_IMMUTABLE_TABLE_TYPES = frozenset({"VIEW", "METRIC_VIEW"})
+
+# ``information_schema.tables.table_type`` values that don't support ``ALTER TABLE … OWNER TO``
+# via the SDK paths this engine uses. Regular VIEW *does* support owner changes via
+# ``ALTER VIEW … OWNER TO`` and is intentionally excluded.
+_OWNER_IMMUTABLE_TABLE_TYPES = frozenset({"MATERIALIZED_VIEW", "STREAMING_TABLE"})
 
 
 def compute_securable_diff(
@@ -72,8 +87,20 @@ def compute_securable_diff(
 
     created_full_names = {s.full_name for s in securables_to_create}
 
+    view_full_names = {
+        s.full_name for s in actual_securables
+        if isinstance(s, Table) and s.table_type in _COMMENT_IMMUTABLE_TABLE_TYPES
+    }
+    owner_immutable_full_names = {
+        s.full_name for s in actual_securables
+        if isinstance(s, Table) and s.table_type in _OWNER_IMMUTABLE_TABLE_TYPES
+    }
+
     attributes_to_update = _diff_attributes(
         desired_attrs, actual_attrs, created_full_names,
+        view_full_names=view_full_names,
+        owner_immutable_full_names=owner_immutable_full_names,
+        change_logger=change_logger,
     )
 
     return SecurableDiff(
@@ -310,8 +337,28 @@ def _diff_attributes(
     desired_attrs: set[SecurableAttributes],
     actual_attrs: set[SecurableAttributes],
     created_full_names: set[str],
+    view_full_names: set[str],
+    owner_immutable_full_names: set[str],
+    change_logger: ChangeLogger,
 ) -> list[AttributeUpdate]:
     """Return attribute updates by comparing desired vs actual attributes.
+
+    Per-attribute rules:
+
+    - ``owner`` — emitted as an SDK update even for newly-created securables
+      (UC CREATE does not accept an owner). Refused for tables whose
+      ``table_type`` is ``MATERIALIZED_VIEW`` or ``STREAMING_TABLE`` (the SDK
+      ``tables.update(owner=...)`` path does not support them); logged as an
+      ``ExecutionError`` and dropped.
+    - ``comment`` / ``location`` — skipped for newly-created securables because
+      the executor embeds them in the CREATE statement. For existing securables:
+        * comment on a view (``Table.table_type == "VIEW"``) is refused — UC
+          doesn't support ``COMMENT ON`` for views via this path. Logged as an
+          ``ExecutionError`` and dropped.
+        * location on a TABLE/VOLUME is refused — external location is immutable
+          after creation. Logged and dropped.
+        * comment on any other securable, and location on catalog/schema (managed
+          location) flow through as ALTER updates.
 
     For resolved Principals, equality uses dataclass field equality — two
     resolved principals with the same identifier + name + type compare equal.
@@ -331,6 +378,8 @@ def _diff_attributes(
         if actual is None and desired.full_name not in created_full_names:
             continue
 
+        is_being_created = desired.full_name in created_full_names
+
         for attr in _GOVERNED_ATTRIBUTES:
             new_value = getattr(desired, attr)
             if new_value is None:
@@ -339,12 +388,69 @@ def _diff_attributes(
             old_value = getattr(actual, attr, None) if actual is not None else None
             if old_value == new_value:
                 continue
-            updates.append(AttributeUpdate(
+
+            update = AttributeUpdate(
                 securable_type=desired.securable_type,
                 full_name=desired.full_name,
                 attribute=attr,
                 old_value=old_value if old_value is not None else "",
                 new_value=new_value,
-            ))
+            )
+
+            if _should_skip_or_log(
+                update, is_being_created,
+                view_full_names, owner_immutable_full_names, change_logger,
+            ):
+                continue
+            updates.append(update)
 
     return updates
+
+
+def _should_skip_or_log(
+    update: AttributeUpdate,
+    is_being_created: bool,
+    view_full_names: set[str],
+    owner_immutable_full_names: set[str],
+    change_logger: ChangeLogger,
+) -> bool:
+    """Return True if the update should be dropped (skipped silently or after logging).
+
+    ``comment``/``location`` updates on a securable that's being created this run
+    are dropped silently — the CREATE statement embeds those values. For existing
+    securables, the view-comment, immutable-location, and immutable-owner rules
+    log an error before dropping.
+    """
+    if is_being_created and update.attribute in ("comment", "location"):
+        return True
+
+    if update.attribute == "comment" and update.full_name in view_full_names:
+        change_logger.log_error(ExecutionError(
+            context=f"Update comment on {update.securable_type.value} {update.full_name}",
+            exception=GovernorError(
+                "Cannot alter comment on a VIEW — only the view owner can alter comment."
+            ),
+        ))
+        return True
+
+    if update.attribute == "location" and update.securable_type in _LOCATION_IMMUTABLE_SECURABLE_TYPES:
+        change_logger.log_error(ExecutionError(
+            context=f"Update location on {update.securable_type.value} {update.full_name}",
+            exception=GovernorError(
+                f"External location is immutable; cannot ALTER. "
+                f"Desired '{update.new_value}', actual '{update.old_value}'."
+            ),
+        ))
+        return True
+
+    if update.attribute == "owner" and update.full_name in owner_immutable_full_names:
+        change_logger.log_error(ExecutionError(
+            context=f"Update owner on {update.securable_type.value} {update.full_name}",
+            exception=GovernorError(
+                "Materialized views and streaming tables do not support owner "
+                "changes via this engine. Change ownership of the pipeline instead."
+            ),
+        ))
+        return True
+
+    return False

@@ -322,6 +322,393 @@ def test_securable_differ_ignores_matching_function_comments():
 
 
 # ---------------------------------------------------------------------------
+# Comment + location attribute diffing
+# ---------------------------------------------------------------------------
+
+
+def _attrs(
+    sec_type: SecurableType,
+    full_name: str,
+    *,
+    owner: Principal | None = None,
+    comment: str | None = None,
+    location: str | None = None,
+) -> SecurableAttributes:
+    return SecurableAttributes(
+        securable_type=sec_type,
+        full_name=full_name,
+        owner=owner,
+        comment=comment,
+        location=location,
+    )
+
+
+def test_securable_differ_detects_catalog_comment_change():
+    """A comment difference on an existing catalog produces an AttributeUpdate."""
+    desired = {_attrs(SecurableType.CATALOG, "my_catalog", comment="New")}
+    actual = {_attrs(SecurableType.CATALOG, "my_catalog", comment="Old")}
+
+    diff = compute_securable_diff(desired, actual, set(), set(), _resolver(), _change_logger())
+
+    assert len(diff.attributes_to_update) == 1
+    update = diff.attributes_to_update[0]
+    assert update.attribute == "comment"
+    assert update.old_value == "Old"
+    assert update.new_value == "New"
+
+
+def test_securable_differ_detects_schema_comment_change():
+    desired = {_attrs(SecurableType.SCHEMA, "cat.sales", comment="New")}
+    actual = {_attrs(SecurableType.SCHEMA, "cat.sales", comment="Old")}
+
+    diff = compute_securable_diff(desired, actual, set(), set(), _resolver(), _change_logger())
+
+    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [("comment", "New")]
+
+
+def test_securable_differ_detects_table_comment_change_on_non_view_table():
+    """Comment diff on a TABLE whose actual table_type is MANAGED flows through normally."""
+    table = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sales.orders",
+        table_type="MANAGED",
+    )
+    desired = {_attrs(SecurableType.TABLE, "cat.sales.orders", comment="New")}
+    actual = {_attrs(SecurableType.TABLE, "cat.sales.orders", comment="Old")}
+
+    diff = compute_securable_diff(desired, actual, set(), {table}, _resolver(), _change_logger())
+
+    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [("comment", "New")]
+
+
+def test_securable_differ_detects_volume_comment_change():
+    desired = {_attrs(SecurableType.VOLUME, "cat.landing.raw", comment="New")}
+    actual = {_attrs(SecurableType.VOLUME, "cat.landing.raw", comment="Old")}
+
+    diff = compute_securable_diff(desired, actual, set(), set(), _resolver(), _change_logger())
+
+    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [("comment", "New")]
+
+
+def test_securable_differ_ignores_matching_comments():
+    """Identical comment on both sides produces no diff."""
+    desired = {_attrs(SecurableType.CATALOG, "cat", comment="same")}
+    actual = {_attrs(SecurableType.CATALOG, "cat", comment="same")}
+
+    diff = compute_securable_diff(desired, actual, set(), set(), _resolver(), _change_logger())
+
+    assert diff.attributes_to_update == []
+
+
+def test_securable_differ_ignores_comment_when_config_does_not_specify():
+    """Desired comment None + actual comment set → no diff (unmanaged direction)."""
+    desired = {_attrs(SecurableType.CATALOG, "cat", comment=None)}
+    actual = {_attrs(SecurableType.CATALOG, "cat", comment="some")}
+
+    diff = compute_securable_diff(desired, actual, set(), set(), _resolver(), _change_logger())
+
+    assert diff.attributes_to_update == []
+
+
+def test_securable_differ_detects_catalog_managed_location_change():
+    desired = {_attrs(SecurableType.CATALOG, "cat", location="s3://new")}
+    actual = {_attrs(SecurableType.CATALOG, "cat", location="s3://old")}
+
+    diff = compute_securable_diff(desired, actual, set(), set(), _resolver(), _change_logger())
+
+    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [("location", "s3://new")]
+
+
+def test_securable_differ_detects_schema_managed_location_change():
+    desired = {_attrs(SecurableType.SCHEMA, "cat.sales", location="s3://new")}
+    actual = {_attrs(SecurableType.SCHEMA, "cat.sales", location="s3://old")}
+
+    diff = compute_securable_diff(desired, actual, set(), set(), _resolver(), _change_logger())
+
+    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [("location", "s3://new")]
+
+
+# ---------------------------------------------------------------------------
+# View-comment guard
+# ---------------------------------------------------------------------------
+
+
+def test_securable_differ_logs_error_when_comment_change_targets_a_view():
+    """Comment change on an actual-side view (table_type='VIEW') is refused via ChangeLogger."""
+    view = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sales.orders_v",
+        table_type="VIEW",
+    )
+    desired = {_attrs(SecurableType.TABLE, "cat.sales.orders_v", comment="New")}
+    actual = {_attrs(SecurableType.TABLE, "cat.sales.orders_v", comment="Old")}
+    logger = _change_logger()
+
+    diff = compute_securable_diff(desired, actual, set(), {view}, _resolver(), logger)
+
+    assert diff.attributes_to_update == []
+    assert len(logger.errors) == 1
+    assert "comment" in logger.errors[0].context.lower()
+    assert "TABLE" in logger.errors[0].context
+    assert "VIEW" in str(logger.errors[0].exception)
+
+
+# ---------------------------------------------------------------------------
+# Table/volume external-location guard
+# ---------------------------------------------------------------------------
+
+
+def test_securable_differ_logs_error_when_existing_table_location_changes():
+    """Location change on an existing table fails — external location is immutable."""
+    table = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sales.orders",
+        table_type="EXTERNAL",
+    )
+    desired = {_attrs(SecurableType.TABLE, "cat.sales.orders", location="s3://new")}
+    actual = {_attrs(SecurableType.TABLE, "cat.sales.orders", location="s3://old")}
+    logger = _change_logger()
+
+    diff = compute_securable_diff(desired, actual, set(), {table}, _resolver(), logger)
+
+    assert diff.attributes_to_update == []
+    assert len(logger.errors) == 1
+    assert "location" in logger.errors[0].context.lower()
+    assert "immutable" in str(logger.errors[0].exception).lower()
+
+
+def test_securable_differ_logs_error_when_existing_volume_location_changes():
+    """Location change on an existing volume fails — external location is immutable."""
+    desired = {_attrs(SecurableType.VOLUME, "cat.landing.raw", location="s3://new")}
+    actual = {_attrs(SecurableType.VOLUME, "cat.landing.raw", location="s3://old")}
+    logger = _change_logger()
+
+    diff = compute_securable_diff(desired, actual, set(), set(), _resolver(), logger)
+
+    assert diff.attributes_to_update == []
+    assert len(logger.errors) == 1
+    assert "location" in logger.errors[0].context.lower()
+
+
+def test_securable_differ_logs_error_when_config_sets_location_on_existing_managed_table():
+    """Config declares external location on a table that exists in UC with no location → still an error."""
+    table = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sales.orders",
+        table_type="MANAGED",
+    )
+    desired = {_attrs(SecurableType.TABLE, "cat.sales.orders", location="s3://new")}
+    actual = {_attrs(SecurableType.TABLE, "cat.sales.orders", location=None)}
+    logger = _change_logger()
+
+    diff = compute_securable_diff(desired, actual, set(), {table}, _resolver(), logger)
+
+    assert diff.attributes_to_update == []
+    assert len(logger.errors) == 1
+
+
+def test_securable_differ_does_not_log_error_when_config_omits_location_for_existing_external_table():
+    """Config has no location, actual has one → no diff, no error (unmanaged direction)."""
+    table = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sales.orders",
+        table_type="EXTERNAL",
+    )
+    desired = {_attrs(SecurableType.TABLE, "cat.sales.orders", location=None)}
+    actual = {_attrs(SecurableType.TABLE, "cat.sales.orders", location="s3://existing")}
+    logger = _change_logger()
+
+    diff = compute_securable_diff(desired, actual, set(), {table}, _resolver(), logger)
+
+    assert diff.attributes_to_update == []
+    assert logger.errors == []
+
+
+# ---------------------------------------------------------------------------
+# Newly-created securables: comment/location handled by CREATE, not ALTER
+# ---------------------------------------------------------------------------
+
+
+def test_securable_differ_does_not_emit_comment_or_location_update_for_newly_created_catalog():
+    """A new catalog's comment + location ride along on the CREATE — no AttributeUpdate."""
+    catalog = Securable(
+        securable_type=SecurableType.CATALOG,
+        full_name="new_cat",
+        comment="Brand new",
+        location="s3://new_cat",
+    )
+    desired_attrs = {_attrs(SecurableType.CATALOG, "new_cat", comment="Brand new", location="s3://new_cat")}
+
+    diff = compute_securable_diff(
+        desired_attrs, set(), {catalog}, set(), _resolver(), _change_logger(),
+        creation_in_scope_catalogs=frozenset({"new_cat"}),
+    )
+
+    assert catalog in diff.securables_to_create
+    attribute_names = {u.attribute for u in diff.attributes_to_update}
+    assert "comment" not in attribute_names
+    assert "location" not in attribute_names
+
+
+def test_securable_differ_does_not_emit_comment_or_location_update_for_newly_created_table():
+    """A new table's comment + external location ride along on CREATE — no AttributeUpdate."""
+    table = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="new_cat.sales.orders",
+        columns=(Column(securable_type=SecurableType.COLUMN, full_name="new_cat.sales.orders.id", data_type="BIGINT"),),
+        comment="New table",
+        location="s3://ext/orders",
+    )
+    desired_attrs = {_attrs(SecurableType.TABLE, "new_cat.sales.orders", comment="New table", location="s3://ext/orders")}
+
+    diff = compute_securable_diff(
+        desired_attrs, set(), {table}, set(), _resolver(), _change_logger(),
+        creation_in_scope_catalogs=frozenset({"new_cat"}),
+    )
+
+    attribute_names = {u.attribute for u in diff.attributes_to_update}
+    assert "comment" not in attribute_names
+    assert "location" not in attribute_names
+
+
+def test_securable_differ_still_emits_owner_update_for_newly_created_catalog():
+    """Owner is set via SDK after CREATE (UC CREATE doesn't accept owner) — regression guard."""
+    catalog = Securable(
+        securable_type=SecurableType.CATALOG,
+        full_name="new_cat",
+    )
+    desired_attrs = {_attrs(SecurableType.CATALOG, "new_cat", owner=_owner("team_data"))}
+
+    diff = compute_securable_diff(
+        desired_attrs, set(), {catalog}, set(), _resolver(), _change_logger(),
+        creation_in_scope_catalogs=frozenset({"new_cat"}),
+    )
+
+    attribute_names = {u.attribute for u in diff.attributes_to_update}
+    assert "owner" in attribute_names
+
+
+# ---------------------------------------------------------------------------
+# Owner-immutable table types (MATERIALIZED_VIEW, STREAMING_TABLE)
+# ---------------------------------------------------------------------------
+
+
+def test_securable_differ_logs_error_when_owner_change_targets_a_materialized_view():
+    """Owner change on a Table whose actual table_type is MATERIALIZED_VIEW is refused."""
+    mv = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sales.orders_mv",
+        table_type="MATERIALIZED_VIEW",
+    )
+    desired = {_attrs(SecurableType.TABLE, "cat.sales.orders_mv", owner=_owner("new_owner"))}
+    actual = {_attrs(SecurableType.TABLE, "cat.sales.orders_mv", owner=_owner("old_owner"))}
+    logger = _change_logger()
+
+    diff = compute_securable_diff(desired, actual, set(), {mv}, _resolver(), logger)
+
+    assert diff.attributes_to_update == []
+    assert len(logger.errors) == 1
+    assert "owner" in logger.errors[0].context.lower()
+    assert "TABLE" in logger.errors[0].context
+    assert "cat.sales.orders_mv" in logger.errors[0].context
+
+
+def test_securable_differ_logs_error_when_owner_change_targets_a_streaming_table():
+    """Owner change on a Table whose actual table_type is STREAMING_TABLE is refused."""
+    st = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sales.orders_st",
+        table_type="STREAMING_TABLE",
+    )
+    desired = {_attrs(SecurableType.TABLE, "cat.sales.orders_st", owner=_owner("new_owner"))}
+    actual = {_attrs(SecurableType.TABLE, "cat.sales.orders_st", owner=_owner("old_owner"))}
+    logger = _change_logger()
+
+    diff = compute_securable_diff(desired, actual, set(), {st}, _resolver(), logger)
+
+    assert diff.attributes_to_update == []
+    assert len(logger.errors) == 1
+    assert "owner" in logger.errors[0].context.lower()
+
+
+def test_securable_differ_emits_owner_change_for_view_table_type():
+    """Regression guard: regular VIEWs support owner changes via ALTER VIEW … OWNER TO."""
+    view = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sales.orders_v",
+        table_type="VIEW",
+    )
+    desired = {_attrs(SecurableType.TABLE, "cat.sales.orders_v", owner=_owner("new_owner"))}
+    actual = {_attrs(SecurableType.TABLE, "cat.sales.orders_v", owner=_owner("old_owner"))}
+    logger = _change_logger()
+
+    diff = compute_securable_diff(desired, actual, set(), {view}, _resolver(), logger)
+
+    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [
+        ("owner", _owner("new_owner")),
+    ]
+    assert logger.errors == []
+
+
+def test_securable_differ_emits_owner_change_for_managed_table():
+    """Regression guard: MANAGED tables support owner changes normally."""
+    table = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sales.orders",
+        table_type="MANAGED",
+    )
+    desired = {_attrs(SecurableType.TABLE, "cat.sales.orders", owner=_owner("new_owner"))}
+    actual = {_attrs(SecurableType.TABLE, "cat.sales.orders", owner=_owner("old_owner"))}
+    logger = _change_logger()
+
+    diff = compute_securable_diff(desired, actual, set(), {table}, _resolver(), logger)
+
+    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [
+        ("owner", _owner("new_owner")),
+    ]
+    assert logger.errors == []
+
+
+def test_securable_differ_does_not_log_error_when_owner_matches_on_materialized_view():
+    """When desired and actual owners on an MV match, no diff is emitted and no error is logged."""
+    mv = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sales.orders_mv",
+        table_type="MATERIALIZED_VIEW",
+    )
+    same_owner = _owner("same")
+    desired = {_attrs(SecurableType.TABLE, "cat.sales.orders_mv", owner=same_owner)}
+    actual = {_attrs(SecurableType.TABLE, "cat.sales.orders_mv", owner=same_owner)}
+    logger = _change_logger()
+
+    diff = compute_securable_diff(desired, actual, set(), {mv}, _resolver(), logger)
+
+    assert diff.attributes_to_update == []
+    assert logger.errors == []
+
+
+def test_securable_differ_owner_guard_does_not_affect_non_owner_attributes_on_mv():
+    """The owner-immutable guard fires only for `owner` — a comment update on an MV doesn't
+    trigger the owner-immutable error (the MV's table_type is not VIEW, so the comment update
+    flows through to the executor as an ALTER)."""
+    mv = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sales.orders_mv",
+        table_type="MATERIALIZED_VIEW",
+    )
+    desired = {_attrs(SecurableType.TABLE, "cat.sales.orders_mv", comment="new")}
+    actual = {_attrs(SecurableType.TABLE, "cat.sales.orders_mv", comment="old")}
+    logger = _change_logger()
+
+    diff = compute_securable_diff(desired, actual, set(), {mv}, _resolver(), logger)
+
+    # The owner guard is not triggered. The comment update is emitted normally since
+    # MATERIALIZED_VIEW is not in the comment-immutable (VIEW-only) set.
+    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [("comment", "new")]
+    assert logger.errors == []
+
+
+# ---------------------------------------------------------------------------
 # Nonexistent-securable existence enforcement
 # ---------------------------------------------------------------------------
 

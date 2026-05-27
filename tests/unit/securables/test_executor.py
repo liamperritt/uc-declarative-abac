@@ -611,3 +611,353 @@ def test_securable_executor_orders_columns_after_their_parent_table():
     idx_table = next(i for i, s in enumerate(stmts) if "CREATE TABLE" in s.upper())
     idx_alter = next(i for i, s in enumerate(stmts) if "ALTER TABLE" in s.upper())
     assert idx_table < idx_alter
+
+
+# ---------------------------------------------------------------------------
+# CREATE SQL: comment + location embedding
+# ---------------------------------------------------------------------------
+
+
+def test_securable_executor_builds_create_catalog_sql_with_managed_location_and_comment():
+    """CREATE CATALOG embeds MANAGED LOCATION and COMMENT when set on the Securable."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        securables_to_create=[Securable(
+            securable_type=SecurableType.CATALOG,
+            full_name="my_cat",
+            comment="Prod",
+            location="s3://prod/my_cat",
+        )],
+    )
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    _assert_sql_contains(stmts[0], "CREATE CATALOG", "my_cat", "MANAGED LOCATION", "s3://prod/my_cat", "COMMENT", "Prod")
+
+
+def test_securable_executor_builds_create_catalog_sql_minimal_when_no_attributes_set():
+    """Regression: a catalog with no comment/location keeps the existing CREATE form."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        securables_to_create=[Securable(securable_type=SecurableType.CATALOG, full_name="my_cat")],
+    )
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    assert "MANAGED LOCATION" not in stmts[0].upper()
+    assert "COMMENT" not in stmts[0].upper()
+
+
+def test_securable_executor_builds_create_schema_sql_with_managed_location_and_comment():
+    """CREATE SCHEMA embeds MANAGED LOCATION and COMMENT when set."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        securables_to_create=[Securable(
+            securable_type=SecurableType.SCHEMA,
+            full_name="my_cat.sales",
+            comment="Sales data",
+            location="s3://prod/sales",
+        )],
+    )
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    _assert_sql_contains(stmts[0], "CREATE SCHEMA", "my_cat.sales", "MANAGED LOCATION", "s3://prod/sales", "COMMENT", "Sales data")
+
+
+def test_securable_executor_builds_create_table_sql_with_external_location_and_comment():
+    """CREATE TABLE with a LOCATION makes it external; embeds COMMENT when set."""
+    uc_helper = MagicMock()
+    table = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sch.orders",
+        columns=(Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.id", data_type="BIGINT"),),
+        comment="Orders fact",
+        location="s3://ext/orders",
+    )
+    diff = SecurableDiff(securables_to_create=[table])
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    _assert_sql_contains(stmts[0], "CREATE TABLE", "cat.sch.orders", "COMMENT", "Orders fact", "LOCATION", "s3://ext/orders")
+
+
+def test_securable_executor_builds_create_table_sql_omits_location_when_unset():
+    """CREATE TABLE without LOCATION stays managed — no LOCATION clause emitted."""
+    uc_helper = MagicMock()
+    table = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sch.orders",
+        columns=(Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.id", data_type="BIGINT"),),
+    )
+    diff = SecurableDiff(securables_to_create=[table])
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    assert " LOCATION " not in stmts[0].upper()
+
+
+def test_securable_executor_builds_create_external_volume_sql_when_location_is_set():
+    """A Volume Securable with LOCATION produces CREATE EXTERNAL VOLUME with the LOCATION clause."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        securables_to_create=[Securable(
+            securable_type=SecurableType.VOLUME,
+            full_name="cat.sch.raw",
+            comment="Raw landing",
+            location="s3://ext/raw",
+        )],
+    )
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    _assert_sql_contains(stmts[0], "CREATE EXTERNAL VOLUME", "cat.sch.raw", "LOCATION", "s3://ext/raw", "COMMENT", "Raw landing")
+
+
+def test_securable_executor_builds_create_managed_volume_sql_when_location_is_unset():
+    """A Volume Securable without LOCATION produces a managed CREATE VOLUME (no EXTERNAL keyword)."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        securables_to_create=[Securable(securable_type=SecurableType.VOLUME, full_name="cat.sch.raw")],
+    )
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    assert "EXTERNAL VOLUME" not in stmts[0].upper()
+    _assert_sql_contains(stmts[0], "CREATE VOLUME", "cat.sch.raw")
+
+
+# ---------------------------------------------------------------------------
+# ALTER comment via SQL
+# ---------------------------------------------------------------------------
+
+
+def test_securable_executor_alters_catalog_comment_via_alter_sql():
+    """A comment AttributeUpdate on a CATALOG produces ALTER CATALOG ... SET COMMENT '...'."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(attributes_to_update=[AttributeUpdate(
+        securable_type=SecurableType.CATALOG,
+        full_name="my_cat",
+        attribute="comment",
+        old_value="Old",
+        new_value="New",
+    )])
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    _assert_sql_contains(stmts[0], "ALTER CATALOG", "my_cat", "SET COMMENT", "New")
+
+
+def test_securable_executor_alters_schema_comment_via_alter_sql():
+    uc_helper = MagicMock()
+    diff = SecurableDiff(attributes_to_update=[AttributeUpdate(
+        securable_type=SecurableType.SCHEMA,
+        full_name="cat.sales",
+        attribute="comment",
+        old_value="Old",
+        new_value="New",
+    )])
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    _assert_sql_contains(stmts[0], "ALTER SCHEMA", "cat.sales", "SET COMMENT", "New")
+
+
+def test_securable_executor_alters_table_comment_via_comment_on_sql():
+    """Table comment uses COMMENT ON TABLE ... IS '...' (not ALTER TABLE SET COMMENT)."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(attributes_to_update=[AttributeUpdate(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sales.orders",
+        attribute="comment",
+        old_value="Old",
+        new_value="New",
+    )])
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    _assert_sql_contains(stmts[0], "COMMENT ON TABLE", "cat.sales.orders", "IS", "New")
+
+
+def test_securable_executor_alters_volume_comment_via_comment_on_sql():
+    uc_helper = MagicMock()
+    diff = SecurableDiff(attributes_to_update=[AttributeUpdate(
+        securable_type=SecurableType.VOLUME,
+        full_name="cat.landing.raw",
+        attribute="comment",
+        old_value="Old",
+        new_value="New",
+    )])
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    _assert_sql_contains(stmts[0], "COMMENT ON VOLUME", "cat.landing.raw", "IS", "New")
+
+
+def test_securable_executor_escapes_single_quotes_in_comment_update():
+    """Comments with single quotes are SQL-escaped before embedding."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(attributes_to_update=[AttributeUpdate(
+        securable_type=SecurableType.CATALOG,
+        full_name="my_cat",
+        attribute="comment",
+        old_value="",
+        new_value="It's risky",
+    )])
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    assert "It\\'s risky" in stmts[0]
+
+
+# ---------------------------------------------------------------------------
+# ALTER location via SQL (catalog/schema only)
+# ---------------------------------------------------------------------------
+
+
+def test_securable_executor_alters_catalog_managed_location_via_alter_sql():
+    uc_helper = MagicMock()
+    diff = SecurableDiff(attributes_to_update=[AttributeUpdate(
+        securable_type=SecurableType.CATALOG,
+        full_name="my_cat",
+        attribute="location",
+        old_value="s3://old",
+        new_value="s3://new",
+    )])
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    _assert_sql_contains(stmts[0], "ALTER CATALOG", "my_cat", "SET MANAGED LOCATION", "s3://new")
+
+
+def test_securable_executor_alters_schema_managed_location_via_alter_sql():
+    uc_helper = MagicMock()
+    diff = SecurableDiff(attributes_to_update=[AttributeUpdate(
+        securable_type=SecurableType.SCHEMA,
+        full_name="cat.sales",
+        attribute="location",
+        old_value="s3://old",
+        new_value="s3://new",
+    )])
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    _assert_sql_contains(stmts[0], "ALTER SCHEMA", "cat.sales", "SET MANAGED LOCATION", "s3://new")
+
+
+def test_securable_executor_logs_error_when_location_update_targets_table():
+    """Defensive: a TABLE location AttributeUpdate that bypasses the differ produces a logged error, not a raise."""
+    uc_helper = MagicMock()
+    logger = ChangeLogger()
+    diff = SecurableDiff(attributes_to_update=[AttributeUpdate(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sales.orders",
+        attribute="location",
+        old_value="s3://old",
+        new_value="s3://new",
+    )])
+
+    stmts = execute_securable_diff(uc_helper, diff, logger)
+
+    assert stmts == []
+    assert len(logger.errors) == 1
+    assert "location" in logger.errors[0].context.lower()
+
+
+def test_securable_executor_logs_error_when_location_update_targets_volume():
+    uc_helper = MagicMock()
+    logger = ChangeLogger()
+    diff = SecurableDiff(attributes_to_update=[AttributeUpdate(
+        securable_type=SecurableType.VOLUME,
+        full_name="cat.landing.raw",
+        attribute="location",
+        old_value="s3://old",
+        new_value="s3://new",
+    )])
+
+    stmts = execute_securable_diff(uc_helper, diff, logger)
+
+    assert stmts == []
+    assert len(logger.errors) == 1
+
+
+# ---------------------------------------------------------------------------
+# Dry-run + error continuation for new attribute paths
+# ---------------------------------------------------------------------------
+
+
+def test_securable_executor_skips_alter_comment_in_dry_run():
+    """In dry-run mode, comment ALTER statements are not executed against the helper."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(attributes_to_update=[AttributeUpdate(
+        securable_type=SecurableType.CATALOG,
+        full_name="my_cat",
+        attribute="comment",
+        old_value="Old",
+        new_value="New",
+    )])
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger(), dry_run=True)
+
+    assert stmts == []
+    uc_helper.execute_sql.assert_not_called()
+
+
+def test_securable_executor_skips_alter_location_in_dry_run():
+    uc_helper = MagicMock()
+    diff = SecurableDiff(attributes_to_update=[AttributeUpdate(
+        securable_type=SecurableType.CATALOG,
+        full_name="my_cat",
+        attribute="location",
+        old_value="s3://old",
+        new_value="s3://new",
+    )])
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger(), dry_run=True)
+
+    assert stmts == []
+    uc_helper.execute_sql.assert_not_called()
+
+
+def test_securable_executor_logs_error_and_continues_on_alter_comment_failure():
+    """If the SQL ALTER fails, log an ExecutionError and continue to the next update."""
+    uc_helper = MagicMock()
+    uc_helper.execute_sql.side_effect = [RuntimeError("boom"), None]
+    logger = ChangeLogger()
+    diff = SecurableDiff(attributes_to_update=[
+        AttributeUpdate(
+            securable_type=SecurableType.CATALOG,
+            full_name="bad_cat",
+            attribute="comment",
+            old_value="Old",
+            new_value="New",
+        ),
+        AttributeUpdate(
+            securable_type=SecurableType.SCHEMA,
+            full_name="good.sch",
+            attribute="comment",
+            old_value="Old",
+            new_value="New",
+        ),
+    ])
+
+    stmts = execute_securable_diff(uc_helper, diff, logger)
+
+    assert len(stmts) == 1
+    _assert_sql_contains(stmts[0], "ALTER SCHEMA", "good.sch")
+    assert len(logger.errors) == 1
+    assert "ALTER CATALOG" in logger.errors[0].context

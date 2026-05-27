@@ -200,35 +200,50 @@ def _build_securables_query(catalog_names: list[str]) -> str:
     the column *names* are projected — ``data_type`` is intentionally excluded
     to keep the wire payload small. Column data types are only used on the desired
     side of the diff (for CREATE TABLE / ADD COLUMN SQL emission).
+
+    Each arm projects 10 columns in this order:
+    ``securable_type, full_name, owner, parameters, routine_definition,
+    routine_comment, columns, comment, location, table_type``. ``comment`` is
+    populated for catalogs/schemas/tables/volumes; ``location`` is populated
+    only for tables (``storage_path``) and volumes (``storage_location``) —
+    catalog and schema managed locations are not currently exposed in
+    ``information_schema`` and the engine does not manage them. ``table_type``
+    is populated for TABLE rows only (used to flag views so the differ can
+    refuse comment alters on them). Function rows use ``routine_comment`` for
+    their comment and leave ``comment`` NULL.
     """
     in_clause = _build_catalog_in_clause(catalog_names)
     parts = [
         f"SELECT 'CATALOG' AS securable_type, catalog_name AS full_name, "
-        f"catalog_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, NULL AS columns "
+        f"catalog_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, NULL AS columns, "
+        f"comment AS comment, NULL AS location, NULL AS table_type "
         f"FROM system.information_schema.catalogs "
         f"WHERE catalog_name IN {in_clause}",
 
         f"SELECT 'SCHEMA' AS securable_type, "
         f"concat(catalog_name, '.', schema_name) AS full_name, "
-        f"schema_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, NULL AS columns "
+        f"schema_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, NULL AS columns, "
+        f"comment AS comment, NULL AS location, NULL AS table_type "
         f"FROM system.information_schema.schemata "
         f"WHERE catalog_name IN {in_clause} AND schema_name != 'information_schema'",
 
         f"SELECT 'TABLE' AS securable_type, "
         f"concat(t.table_catalog, '.', t.table_schema, '.', t.table_name) AS full_name, "
         f"t.table_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, "
-        f"to_json(transform(sort_array(collect_list(struct(c.ordinal_position, c.column_name))), x -> x.column_name)) AS columns "
+        f"to_json(transform(sort_array(collect_list(struct(c.ordinal_position, c.column_name))), x -> x.column_name)) AS columns, "
+        f"t.comment AS comment, t.storage_path AS location, t.table_type AS table_type "
         f"FROM system.information_schema.tables t "
         f"LEFT JOIN system.information_schema.columns c "
         f"ON t.table_catalog = c.table_catalog "
         f"AND t.table_schema = c.table_schema "
         f"AND t.table_name = c.table_name "
         f"WHERE t.table_catalog IN {in_clause} AND t.table_schema != 'information_schema' "
-        f"GROUP BY t.table_catalog, t.table_schema, t.table_name, t.table_owner",
+        f"GROUP BY t.table_catalog, t.table_schema, t.table_name, t.table_owner, t.comment, t.storage_path, t.table_type",
 
         f"SELECT 'VOLUME' AS securable_type, "
         f"concat(volume_catalog, '.', volume_schema, '.', volume_name) AS full_name, "
-        f"volume_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, NULL AS columns "
+        f"volume_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, NULL AS columns, "
+        f"comment AS comment, storage_location AS location, NULL AS table_type "
         f"FROM system.information_schema.volumes "
         f"WHERE volume_catalog IN {in_clause} AND volume_schema != 'information_schema'",
 
@@ -238,7 +253,7 @@ def _build_securables_query(catalog_names: list[str]) -> str:
         f"to_json(transform(sort_array(collect_list(struct(p.ordinal_position, p.parameter_name, p.data_type))), x -> struct(x.parameter_name, x.data_type))) AS parameters, "
         f"r.routine_definition AS routine_definition, "
         f"r.comment AS routine_comment, "
-        f"NULL AS columns "
+        f"NULL AS columns, NULL AS comment, NULL AS location, NULL AS table_type "
         f"FROM system.information_schema.routines r "
         f"LEFT JOIN system.information_schema.parameters p "
         f"ON r.specific_catalog = p.specific_catalog "
@@ -255,7 +270,17 @@ def _parse_securable_rows(
 ) -> tuple[set[Securable], set[SecurableAttributes]]:
     """Parse raw SQL rows into securables and attributes.
 
-    Row columns: [securable_type, full_name, owner, parameters_json, routine_definition, routine_comment, columns_json]
+    Row columns (positional):
+      0. securable_type
+      1. full_name
+      2. owner
+      3. parameters_json (functions)
+      4. routine_definition (functions)
+      5. routine_comment (functions)
+      6. columns_json (tables)
+      7. comment (catalogs/schemas/tables/volumes)
+      8. location (catalogs/schemas → managed; tables/volumes → external)
+      9. table_type (tables only — e.g. ``"MANAGED"``, ``"EXTERNAL"``, ``"VIEW"``)
     """
     securables: set[Securable] = set()
     attributes: set[SecurableAttributes] = set()
@@ -267,6 +292,9 @@ def _parse_securable_rows(
         routine_definition = row[4]
         routine_comment = row[5] if len(row) > 5 else None
         columns_json = row[6] if len(row) > 6 else None
+        comment = row[7] if len(row) > 7 else None
+        location = row[8] if len(row) > 8 else None
+        table_type = row[9] if len(row) > 9 else None
 
         owner_principal = (
             Principal(principal_type=PrincipalType.UNKNOWN, identifier=owner)
@@ -277,6 +305,8 @@ def _parse_securable_rows(
                 securable_type=securable_type,
                 full_name=full_name,
                 owner=owner_principal,
+                comment=comment if comment else None,
+                location=location if location else None,
             )
         )
 
@@ -312,6 +342,7 @@ def _parse_securable_rows(
                     securable_type=SecurableType.TABLE,
                     full_name=full_name,
                     columns=columns,
+                    table_type=table_type if table_type else None,
                 )
             )
         else:

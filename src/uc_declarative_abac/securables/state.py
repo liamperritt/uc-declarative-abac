@@ -15,7 +15,7 @@ class SecurableAttributes:
     object state). Both desired (from config) and actual (from system tables)
     use this same representation.
 
-    To add a new governed attribute (e.g. comment, rfa_destination):
+    To add a new governed attribute (e.g. rfa_destination):
     1. Add the field here with a default of None
     2. Update the compiler to emit it from config
     3. Update the state query to fetch it
@@ -25,6 +25,8 @@ class SecurableAttributes:
     securable_type: SecurableType
     full_name: str
     owner: Principal | None = None
+    comment: str | None = None
+    location: str | None = None
 
 
 @dataclass(frozen=True)
@@ -36,6 +38,11 @@ class Securable:
     they dispatch via structural pattern matching (match/case on the Securable
     subclass).
 
+    ``comment`` and ``location`` ride along here so the executor can embed them
+    in CREATE statements for the four taggable types (catalogs, schemas, tables,
+    volumes). For ALTER paths against pre-existing objects, the executor reads
+    these values from ``SecurableAttributes`` instead.
+
     To add creation support for a new securable type (e.g. tables):
     1. Create a Table(Securable) subclass with table-specific fields
     2. Update the compiler to emit Table instances
@@ -46,6 +53,8 @@ class Securable:
 
     securable_type: SecurableType
     full_name: str
+    comment: str | None = field(default=None, kw_only=True)
+    location: str | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -68,25 +77,31 @@ class Table(Securable):
 
     Column order is significant because CREATE TABLE SQL emits columns in tuple
     order; authors' YAML ordering is preserved.
+
+    ``table_type`` is populated only on the actual-state side (from
+    ``information_schema.tables``) — values include ``"MANAGED"``, ``"EXTERNAL"``,
+    ``"VIEW"``, ``"MATERIALIZED_VIEW"``, ``"STREAMING_TABLE"``. The differ uses
+    ``"VIEW"`` to refuse comment updates on views.
     """
 
     securable_type: Literal[SecurableType.TABLE]
     columns: tuple[Column, ...] = ()
+    table_type: str | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)
 class Function(Securable):
-    """Function-specific state: parameters, body, and comment.
+    """Function-specific state: parameters and body.
 
-    The comment is part of the replaceable function definition — a change to
-    the comment triggers a CREATE OR REPLACE FUNCTION, not a separate attribute
-    update.
+    ``comment`` is inherited from ``Securable`` and is part of the replaceable
+    function definition — a change to the comment triggers a CREATE OR REPLACE
+    FUNCTION, not a separate attribute update. ``location`` is inherited but
+    unused (functions have no storage location).
     """
 
     securable_type: Literal[SecurableType.FUNCTION]
     parameters: tuple[tuple[str, str], ...]
     definition: str
-    comment: str | None = None
 
 
 @dataclass(frozen=True)

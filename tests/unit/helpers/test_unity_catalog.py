@@ -890,6 +890,188 @@ def test_uc_helper_securables_query_joins_columns_table_and_aggregates_by_ordina
     assert "sort_array" in sql.lower()
 
 
+# ---------------------------------------------------------------------------
+# UnityCatalogHelper.fetch_actual_securables — comment / location / table_type
+# ---------------------------------------------------------------------------
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_parses_catalog_comment_into_attributes(mock_fetch):
+    """A CATALOG row with comment produces SecurableAttributes carrying it. Catalog
+    managed location is not currently projected (info-schema does not expose it)."""
+    mock_fetch.return_value = [
+        ["CATALOG", "my_cat", "admin", None, None, None, None,
+         "Prod catalog", None, None],
+    ]
+    helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
+
+    _securables, attributes = helper.fetch_actual_securables(["my_cat"])
+
+    assert SecurableAttributes(
+        securable_type=SecurableType.CATALOG,
+        full_name="my_cat",
+        owner=Principal(principal_type=PrincipalType.UNKNOWN, identifier="admin"),
+        comment="Prod catalog",
+    ) in attributes
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_parses_schema_comment_into_attributes(mock_fetch):
+    """A SCHEMA row with comment produces SecurableAttributes carrying it. Schema
+    managed location is not currently projected (info-schema does not expose it)."""
+    mock_fetch.return_value = [
+        ["SCHEMA", "my_cat.sales", "schema_owner", None, None, None, None,
+         "Sales data", None, None],
+    ]
+    helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
+
+    _securables, attributes = helper.fetch_actual_securables(["my_cat"])
+
+    expected_attr = SecurableAttributes(
+        securable_type=SecurableType.SCHEMA,
+        full_name="my_cat.sales",
+        owner=Principal(principal_type=PrincipalType.UNKNOWN, identifier="schema_owner"),
+        comment="Sales data",
+    )
+    assert expected_attr in attributes
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_parses_table_comment_and_location_into_attributes(mock_fetch):
+    """A TABLE row with comment + storage_path produces SecurableAttributes carrying both."""
+    mock_fetch.return_value = [
+        ["TABLE", "my_cat.sales.orders", "table_owner", None, None, None, "[]",
+         "Orders fact", "s3://ext/orders", "EXTERNAL"],
+    ]
+    helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
+
+    _securables, attributes = helper.fetch_actual_securables(["my_cat"])
+
+    expected_attr = SecurableAttributes(
+        securable_type=SecurableType.TABLE,
+        full_name="my_cat.sales.orders",
+        owner=Principal(principal_type=PrincipalType.UNKNOWN, identifier="table_owner"),
+        comment="Orders fact",
+        location="s3://ext/orders",
+    )
+    assert expected_attr in attributes
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_parses_volume_comment_and_location_into_attributes(mock_fetch):
+    """A VOLUME row with comment + storage_location produces SecurableAttributes carrying both."""
+    mock_fetch.return_value = [
+        ["VOLUME", "my_cat.landing.raw", "vol_owner", None, None, None, None,
+         "Raw landing", "s3://ext/raw", None],
+    ]
+    helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
+
+    _securables, attributes = helper.fetch_actual_securables(["my_cat"])
+
+    expected_attr = SecurableAttributes(
+        securable_type=SecurableType.VOLUME,
+        full_name="my_cat.landing.raw",
+        owner=Principal(principal_type=PrincipalType.UNKNOWN, identifier="vol_owner"),
+        comment="Raw landing",
+        location="s3://ext/raw",
+    )
+    assert expected_attr in attributes
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_parses_table_type_view_onto_table_securable(mock_fetch):
+    """A TABLE row whose table_type is 'VIEW' produces a Table carrying table_type='VIEW'."""
+    from uc_declarative_abac.securables.state import Table
+
+    mock_fetch.return_value = [
+        ["TABLE", "my_cat.sales.orders_v", "view_owner", None, None, None, "[]",
+         None, None, "VIEW"],
+    ]
+    helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
+
+    securables, _ = helper.fetch_actual_securables(["my_cat"])
+
+    table = next(s for s in securables if s.full_name == "my_cat.sales.orders_v")
+    assert isinstance(table, Table)
+    assert table.table_type == "VIEW"
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_parses_table_type_managed_onto_table_securable(mock_fetch):
+    """A TABLE row with table_type='MANAGED' surfaces on Table.table_type — regression guard for non-view rows."""
+    from uc_declarative_abac.securables.state import Table
+
+    mock_fetch.return_value = [
+        ["TABLE", "my_cat.sales.orders", "owner", None, None, None, "[]",
+         None, None, "MANAGED"],
+    ]
+    helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
+
+    securables, _ = helper.fetch_actual_securables(["my_cat"])
+
+    table = next(s for s in securables if s.full_name == "my_cat.sales.orders")
+    assert isinstance(table, Table)
+    assert table.table_type == "MANAGED"
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_parses_null_comment_and_location_as_none(mock_fetch):
+    """Empty/NULL comment and location values decode to None on SecurableAttributes."""
+    mock_fetch.return_value = [
+        ["CATALOG", "my_cat", "admin", None, None, None, None, None, None, None],
+        ["CATALOG", "my_other", "admin", None, None, None, None, "", "", None],
+    ]
+    helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
+
+    _, attributes = helper.fetch_actual_securables(["my_cat", "my_other"])
+
+    for attr in attributes:
+        assert attr.comment is None
+        assert attr.location is None
+
+
+def test_uc_helper_securables_query_projects_comment_for_taggable_arms():
+    """The securables query projects a `comment` column for catalogs/schemas/tables/volumes."""
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.fetch_actual_securables(["my_cat"])
+
+    sql = _get_executed_sql(client).lower()
+    # Each taggable arm projects a comment column. Look for `comment as comment` (case-insensitive).
+    assert sql.count("as comment") >= 4
+
+
+def test_uc_helper_securables_query_projects_location_using_correct_info_schema_names():
+    """The securables query maps each arm's location source column correctly.
+
+    Catalog and schema managed locations are not currently projected (info-schema
+    does not expose ``storage_root`` reliably across UC regions); the engine does
+    not manage them. Tables project ``storage_path``; volumes project
+    ``storage_location``.
+    """
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.fetch_actual_securables(["my_cat"])
+
+    sql = _get_executed_sql(client).lower()
+    assert "storage_root" not in sql
+    assert "storage_path" in sql
+    assert "storage_location" in sql
+
+
+def test_uc_helper_securables_query_projects_table_type_for_table_arm():
+    """The TABLE arm projects information_schema.tables.table_type, used by the differ to detect views."""
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.fetch_actual_securables(["my_cat"])
+
+    sql = _get_executed_sql(client).lower()
+    assert "table_type as table_type" in sql or "t.table_type as table_type" in sql
+
+
 def test_uc_helper_securables_query_does_not_fetch_column_data_types():
     """Per design: column data_type is not part of the actual-state fetch — only desired side uses it."""
     client = _make_mock_workspace_client()

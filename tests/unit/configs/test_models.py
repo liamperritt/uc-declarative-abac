@@ -781,6 +781,147 @@ def test_column_config_data_type_defaults_to_none():
 
 
 # ---------------------------------------------------------------------------
+# Catalog/Schema/Table/Volume comment + location fields
+# ---------------------------------------------------------------------------
+
+
+def test_catalog_config_accepts_comment():
+    """Catalog configs round-trip 'comment'. ``location`` is not currently supported
+    for catalogs (managed location is not exposed in ``information_schema``)."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "comment": "Prod analytics catalog",
+            },
+        },
+    })
+    cat = config.catalogs["my_cat"]
+    assert cat.comment == "Prod analytics catalog"
+
+
+def test_catalog_config_has_no_location_attribute():
+    """``location`` is not currently supported on catalogs — the resulting model has no
+    such attribute. Pydantic silently drops any ``location`` key supplied in YAML."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {"comment": "Prod"},
+        },
+    })
+    cat = config.catalogs["my_cat"]
+    assert not hasattr(cat, "location")
+
+
+def test_schema_config_accepts_comment():
+    """Schema configs round-trip 'comment'. ``location`` is not currently supported
+    for schemas (managed location is not exposed in ``information_schema``)."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "schemas": [
+                    {
+                        "name": "sales",
+                        "comment": "Sales data",
+                    },
+                ],
+            },
+        },
+    })
+    schema = config.catalogs["my_cat"].schemas[0]
+    assert schema.comment == "Sales data"
+
+
+def test_schema_config_has_no_location_attribute():
+    """``location`` is not currently supported on schemas — the resulting model has no
+    such attribute. Pydantic silently drops any ``location`` key supplied in YAML."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "schemas": [{"name": "sales", "comment": "Sales"}],
+            },
+        },
+    })
+    schema = config.catalogs["my_cat"].schemas[0]
+    assert not hasattr(schema, "location")
+
+
+def test_table_config_accepts_comment_and_location():
+    """Table configs round-trip 'comment' and 'location' (external location)."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "schemas": [
+                    {
+                        "name": "sales",
+                        "tables": [
+                            {
+                                "name": "orders",
+                                "comment": "Orders fact table",
+                                "location": "s3://external/orders",
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+    })
+    table = config.catalogs["my_cat"].schemas[0].tables[0]
+    assert table.comment == "Orders fact table"
+    assert table.location == "s3://external/orders"
+
+
+def test_volume_config_accepts_comment_and_location():
+    """Volume configs round-trip 'comment' and 'location' (external location)."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "schemas": [
+                    {
+                        "name": "landing",
+                        "volumes": [
+                            {
+                                "name": "raw",
+                                "comment": "Raw landing volume",
+                                "location": "s3://external/raw_volumes/raw",
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+    })
+    volume = config.catalogs["my_cat"].schemas[0].volumes[0]
+    assert volume.comment == "Raw landing volume"
+    assert volume.location == "s3://external/raw_volumes/raw"
+
+
+def test_taggable_configs_default_comment_and_location_to_none():
+    """When 'comment'/'location' are omitted, they default to None.
+
+    Catalog and schema do not have a 'location' field (managed location is not
+    currently supported).
+    """
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "schemas": [
+                    {
+                        "name": "sales",
+                        "tables": [{"name": "orders"}],
+                        "volumes": [{"name": "raw"}],
+                    },
+                ],
+            },
+        },
+    })
+    cat = config.catalogs["my_cat"]
+    schema = cat.schemas[0]
+    assert cat.comment is None
+    assert schema.comment is None
+    assert schema.tables[0].comment is None and schema.tables[0].location is None
+    assert schema.volumes[0].comment is None and schema.volumes[0].location is None
+
+
+# ---------------------------------------------------------------------------
 # ParameterConfig.data_type coercion + alias
 # ---------------------------------------------------------------------------
 

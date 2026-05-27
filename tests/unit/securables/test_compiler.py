@@ -160,8 +160,8 @@ def test_securable_compiler_emits_function_owner():
     ) in result
 
 
-def test_securable_compiler_skips_securables_without_owner():
-    """A catalog with no owner is not emitted in the result set."""
+def test_securable_compiler_skips_securables_without_managed_attributes():
+    """A catalog with no owner/comment/location is not emitted in the attributes set."""
     config = ResourcesConfig.model_validate(
         {
             "catalogs": {
@@ -173,6 +173,191 @@ def test_securable_compiler_skips_securables_without_owner():
     result = compile_desired_attributes(config)
 
     assert result == set()
+
+
+# ---------------------------------------------------------------------------
+# compile_desired_attributes — comment + location
+# ---------------------------------------------------------------------------
+
+
+def test_securable_compiler_emits_catalog_comment_in_attributes():
+    """A catalog with a comment produces a SecurableAttributes carrying it. Catalogs
+    do not currently support ``location`` (managed location)."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "comment": "Prod catalog",
+            },
+        },
+    })
+
+    result = compile_desired_attributes(config)
+
+    assert SecurableAttributes(
+        securable_type=SecurableType.CATALOG,
+        full_name="my_cat",
+        owner=None,
+        comment="Prod catalog",
+    ) in result
+
+
+def test_securable_compiler_emits_schema_comment_in_attributes():
+    """A schema with a comment produces a SecurableAttributes carrying it. Schemas
+    do not currently support ``location`` (managed location)."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "schemas": [
+                    {
+                        "name": "sales",
+                        "comment": "Sales data",
+                    },
+                ],
+            },
+        },
+    })
+
+    result = compile_desired_attributes(config)
+
+    assert SecurableAttributes(
+        securable_type=SecurableType.SCHEMA,
+        full_name="my_cat.sales",
+        comment="Sales data",
+    ) in result
+
+
+def test_securable_compiler_emits_table_comment_and_location_in_attributes():
+    """A table with comment and external location produces a SecurableAttributes carrying both."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "schemas": [
+                    {
+                        "name": "sales",
+                        "tables": [
+                            {
+                                "name": "orders",
+                                "comment": "Orders fact",
+                                "location": "s3://ext/orders",
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+    })
+
+    result = compile_desired_attributes(config)
+
+    assert SecurableAttributes(
+        securable_type=SecurableType.TABLE,
+        full_name="my_cat.sales.orders",
+        comment="Orders fact",
+        location="s3://ext/orders",
+    ) in result
+
+
+def test_securable_compiler_emits_volume_comment_and_location_in_attributes():
+    """A volume with comment and external location produces a SecurableAttributes carrying both."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "schemas": [
+                    {
+                        "name": "landing",
+                        "volumes": [
+                            {
+                                "name": "raw",
+                                "comment": "Raw landing",
+                                "location": "s3://ext/raw",
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+    })
+
+    result = compile_desired_attributes(config)
+
+    assert SecurableAttributes(
+        securable_type=SecurableType.VOLUME,
+        full_name="my_cat.landing.raw",
+        comment="Raw landing",
+        location="s3://ext/raw",
+    ) in result
+
+
+def test_securable_compiler_emits_attributes_when_only_comment_is_set():
+    """A catalog with only a comment (no owner, no location) still produces a SecurableAttributes."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {"comment": "Just a comment"},
+        },
+    })
+
+    result = compile_desired_attributes(config)
+
+    assert SecurableAttributes(
+        securable_type=SecurableType.CATALOG,
+        full_name="my_cat",
+        comment="Just a comment",
+    ) in result
+
+
+def test_securable_compiler_emits_attributes_when_only_location_is_set():
+    """A volume with only a location (no owner, no comment) still produces a SecurableAttributes."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "schemas": [
+                    {
+                        "name": "landing",
+                        "volumes": [
+                            {"name": "raw", "location": "s3://ext/raw"},
+                        ],
+                    },
+                ],
+            },
+        },
+    })
+
+    result = compile_desired_attributes(config)
+
+    assert SecurableAttributes(
+        securable_type=SecurableType.VOLUME,
+        full_name="my_cat.landing.raw",
+        location="s3://ext/raw",
+    ) in result
+
+
+def test_securable_compiler_does_not_emit_function_comment_into_attributes():
+    """Function comments live on the Function securable itself, not on SecurableAttributes."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "schemas": [
+                    {
+                        "name": "shared",
+                        "functions": [
+                            {
+                                "name": "mask_pii",
+                                "parameters": [{"name": "x", "type": "STRING"}],
+                                "return": "x",
+                                "comment": "Mask helper",
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+    })
+
+    result = compile_desired_attributes(config)
+
+    # No SecurableAttributes is emitted for the function (no owner, and we don't
+    # promote function comments into the attribute path).
+    assert not any(a.securable_type == SecurableType.FUNCTION for a in result)
 
 
 # ---------------------------------------------------------------------------
@@ -525,3 +710,107 @@ def test_securables_compiler_emits_nothing_for_empty_config():
     config = ResourcesConfig.model_validate({"catalogs": {}})
 
     assert compile_desired_securables(config) == set()
+
+
+# ---------------------------------------------------------------------------
+# compile_desired_securables — CREATE-time comment + location plumbing
+# ---------------------------------------------------------------------------
+
+
+def test_securables_compiler_plumbs_comment_onto_catalog_securable():
+    """Catalog Securable carries comment for CREATE-time SQL embedding. ``location`` is
+    not currently emitted for catalogs (managed location is not exposed in info-schema)."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "comment": "Prod",
+            },
+        },
+    })
+
+    result = compile_desired_securables(config)
+
+    catalog = next(s for s in result if s.full_name == "my_cat" and s.securable_type == SecurableType.CATALOG)
+    assert catalog.comment == "Prod"
+    assert catalog.location is None
+
+
+def test_securables_compiler_plumbs_comment_onto_schema_securable():
+    """Schema Securable carries comment for CREATE-time SQL embedding. ``location`` is
+    not currently emitted for schemas (managed location is not exposed in info-schema)."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "schemas": [
+                    {
+                        "name": "sales",
+                        "comment": "Sales",
+                    },
+                ],
+            },
+        },
+    })
+
+    result = compile_desired_securables(config)
+
+    schema = next(s for s in result if s.full_name == "my_cat.sales")
+    assert schema.comment == "Sales"
+    assert schema.location is None
+
+
+def test_securables_compiler_plumbs_comment_and_location_onto_table_securable():
+    """Table securable carries comment and external location for CREATE-time SQL embedding."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "schemas": [
+                    {
+                        "name": "sales",
+                        "tables": [
+                            {
+                                "name": "orders",
+                                "comment": "Orders",
+                                "location": "s3://ext/orders",
+                                "columns": [{"name": "id", "type": "BIGINT"}],
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+    })
+
+    result = compile_desired_securables(config)
+
+    table = next(s for s in result if s.full_name == "my_cat.sales.orders")
+    assert isinstance(table, Table)
+    assert table.comment == "Orders"
+    assert table.location == "s3://ext/orders"
+
+
+def test_securables_compiler_plumbs_comment_and_location_onto_volume_securable():
+    """Volume Securable carries comment and external location for CREATE-time SQL embedding."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "schemas": [
+                    {
+                        "name": "landing",
+                        "volumes": [
+                            {
+                                "name": "raw",
+                                "comment": "Raw",
+                                "location": "s3://ext/raw",
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+    })
+
+    result = compile_desired_securables(config)
+
+    volume = next(s for s in result if s.full_name == "my_cat.landing.raw")
+    assert volume.comment == "Raw"
+    assert volume.location == "s3://ext/raw"
