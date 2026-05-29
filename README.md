@@ -446,6 +446,8 @@ definitions:
       comment: Mask retail-segment customer names (not commercial-segment customer names) from all users except account admins
       type: mask
       function: platform.abac.mask_retail_segment_customer_names_pii
+      has_tags:
+        domain: customer
       columns:
         - alias: name
           has_tags:
@@ -458,8 +460,6 @@ definitions:
         - account_users
       except:
         - customer_pii_viewers
-      has_tags:
-        domain: customer
 
 # definitions/shared/policies/filter_by_region.yaml
 definitions:
