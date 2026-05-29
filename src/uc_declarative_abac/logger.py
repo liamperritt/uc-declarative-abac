@@ -206,26 +206,19 @@ class ChangeLogger:
     def _display_value(self, value: object) -> str:
         """Return a display-friendly string for an AttributeUpdate value.
 
-        ``value`` is a ``frozenset[str] | frozenset[Principal]``:
-
-        - empty → empty string (matches the legacy "no value" rendering)
-        - single Principal → its display name
-        - single string → the string itself
-        - multi-element → sorted, comma-separated list of names / strings
+        Each element of a frozenset/set is wrapped in single quotes and joined
+        with ``, ``. Empty collections render as ``''``.
         """
         if isinstance(value, (frozenset, set)):
             if not value:
-                return ""
-            if len(value) == 1:
-                only = next(iter(value))
-                return only.name if isinstance(only, Principal) else str(only)
+                return "''"
             rendered = sorted(
                 v.name if isinstance(v, Principal) else str(v) for v in value
             )
-            return ", ".join(rendered)
+            return ", ".join(f"'{r}'" for r in rendered)
         if isinstance(value, Principal):
-            return value.name
-        return str(value)
+            return f"'{value.name}'"
+        return f"'{value}'"
 
     def log_attribute_update(self, update: AttributeUpdate) -> None:
         """Log an attribute being updated on a securable."""
@@ -235,7 +228,7 @@ class ChangeLogger:
         new = self._display_value(update.new_value)
         self._log_info(_format_change_line(
             "~", update.securable_type.value, update.full_name,
-            f"{action_verb} {update.attribute}: '{old}' -> '{new}'",
+            f"{action_verb} {update.attribute}: {old} -> {new}",
         ))
 
     def log_securable_create(self, info: Securable) -> None:

@@ -420,8 +420,8 @@ def test_logger_renders_attribute_update_for_multi_value_frozenset() -> None:
     log_line = "\n".join(_info_messages(mock_logger))
     assert "alice@x.com" in log_line
     assert "bob@y.com" in log_line
-    # Sorted, comma-separated rendering
-    assert "alice@x.com, bob@y.com" in log_line
+    # Each element individually quoted, sorted, comma-separated
+    assert "'alice@x.com', 'bob@y.com'" in log_line
     # Must not appear as a repr-style frozenset/set
     assert "frozenset(" not in log_line
 
