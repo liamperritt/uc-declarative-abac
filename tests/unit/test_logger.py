@@ -4,12 +4,13 @@ import logging
 from unittest.mock import MagicMock
 
 from uc_declarative_abac.policies.state import Policy
+from uc_declarative_abac.utils import ExecutionError
 from uc_declarative_abac.privileges.state import SecurablePrivilege
 from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.securables.state import AttributeUpdate, Function, Securable
 from uc_declarative_abac.tags.state import SecurableTag
 from uc_declarative_abac.principals.state import Principal
-from uc_declarative_abac.types import PrincipalType, PolicyType, PrivilegeType, SecurableType, ExecutionError
+from uc_declarative_abac.types import PolicyType, PrincipalType, PrivilegeType, SecurableType
 
 
 # ---------------------------------------------------------------------------

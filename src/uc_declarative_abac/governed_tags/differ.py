@@ -7,8 +7,9 @@ if TYPE_CHECKING:
     from uc_declarative_abac.principals.resolver import PrincipalResolver
 
 from uc_declarative_abac.governed_tags.state import GovernedTag, GovernedTagDiff
+from uc_declarative_abac.utils import ExecutionError, PrincipalValidationError
 from uc_declarative_abac.principals.state import Principal
-from uc_declarative_abac.types import ExecutionError, PrincipalValidationError
+
 
 
 def _resolve_governed_tag_assigners(
@@ -57,7 +58,7 @@ def compute_governed_tag_diff(
     identifiers). Tag policies present in ``actual`` but absent from ``desired``
     are left alone by default. When ``enable_deletion=True``, they flow into
     ``to_delete`` so the executor can issue ``delete_tag_policy`` calls — gated
-    by interactive confirmation or ``--force`` at the governor boundary.
+    by interactive confirmation or ``--force`` at the orchestrator boundary.
     """
     desired_resolved = {
         _resolve_governed_tag_assigners(t, resolver, change_logger) for t in desired

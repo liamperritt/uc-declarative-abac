@@ -6,7 +6,7 @@ if TYPE_CHECKING:
     from uc_declarative_abac.helpers.unity_catalog import UnityCatalogHelper
     from uc_declarative_abac.logger import ChangeLogger
 
-from uc_declarative_abac.utils import quote_securable as quote_securable
+from uc_declarative_abac.utils import ExecutionError, OrchestratorError, quote_securable as quote_securable
 from uc_declarative_abac.securables.state import (
     AttributeUpdate,
     Column,
@@ -17,7 +17,7 @@ from uc_declarative_abac.securables.state import (
 )
 from uc_declarative_abac.principals.resolver import ensure_resolved
 from uc_declarative_abac.principals.state import Principal
-from uc_declarative_abac.types import ExecutionError, GovernorError, SecurableType
+from uc_declarative_abac.types import SecurableType
 
 
 # Creation order: a parent must exist before any of its children can be created.
@@ -215,7 +215,7 @@ def _build_comment_update_sql(securable_type: SecurableType, full_name: str, com
     quoted = quote_securable(full_name)
     escaped = _escape_sql_string_literal(comment)
     if securable_type in (SecurableType.COLUMN, SecurableType.FUNCTION):
-        raise GovernorError(
+        raise OrchestratorError(
             f"Comment updates not supported for {securable_type.value}."
         )
     return f'COMMENT ON {securable_type.name} {quoted} IS "{escaped}"'
@@ -307,7 +307,7 @@ def _apply_attribute_update(
         case _:
             change_logger.log_error(ExecutionError(
                 context=f"Unknown attribute {update.attribute!r} on {update.securable_type.value} {update.full_name}",
-                exception=GovernorError(f"No executor branch for attribute {update.attribute!r}"),
+                exception=OrchestratorError(f"No executor branch for attribute {update.attribute!r}"),
             ))
             return False
 

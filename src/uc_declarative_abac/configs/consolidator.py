@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from uc_declarative_abac.utils import OrchestratorError
 from typing import Iterable
 
-from uc_declarative_abac.types import GovernorError
+
 
 
 _DEFAULT_SCHEMA_NAME = "default"
@@ -53,7 +54,7 @@ def _rewrite_policy_function_to_full_name(
         return
     fn_name = function.get("name")
     if not fn_name:
-        raise GovernorError(
+        raise OrchestratorError(
             f"Inline function definition in policy '{policy.get('name', '<unnamed>')}' is missing required 'name' field"
         )
     schema.setdefault("functions", []).append(function)
@@ -87,7 +88,7 @@ def consolidate_resources(resolved: dict) -> dict:
     for key, schema in resolved.pop("schemas", {}).items():
         cat_name = schema.get("catalog_name")
         if not cat_name:
-            raise GovernorError(f"Standalone schema '{key}' is missing required 'catalog_name'")
+            raise OrchestratorError(f"Standalone schema '{key}' is missing required 'catalog_name'")
         _ensure_catalog(catalogs, cat_name)
         catalogs[cat_name].setdefault("schemas", []).append(schema)
 
@@ -95,9 +96,9 @@ def consolidate_resources(resolved: dict) -> dict:
         cat_name = table.get("catalog_name")
         schema_name = table.get("schema_name")
         if not cat_name:
-            raise GovernorError(f"Standalone table '{key}' is missing required 'catalog_name'")
+            raise OrchestratorError(f"Standalone table '{key}' is missing required 'catalog_name'")
         if not schema_name:
-            raise GovernorError(f"Standalone table '{key}' is missing required 'schema_name'")
+            raise OrchestratorError(f"Standalone table '{key}' is missing required 'schema_name'")
         _ensure_catalog(catalogs, cat_name)
         schema = _find_or_create_schema(catalogs[cat_name], schema_name)
         schema.setdefault("tables", []).append(table)
@@ -106,9 +107,9 @@ def consolidate_resources(resolved: dict) -> dict:
         cat_name = volume.get("catalog_name")
         schema_name = volume.get("schema_name")
         if not cat_name:
-            raise GovernorError(f"Standalone volume '{key}' is missing required 'catalog_name'")
+            raise OrchestratorError(f"Standalone volume '{key}' is missing required 'catalog_name'")
         if not schema_name:
-            raise GovernorError(f"Standalone volume '{key}' is missing required 'schema_name'")
+            raise OrchestratorError(f"Standalone volume '{key}' is missing required 'schema_name'")
         _ensure_catalog(catalogs, cat_name)
         schema = _find_or_create_schema(catalogs[cat_name], schema_name)
         schema.setdefault("volumes", []).append(volume)
@@ -116,7 +117,7 @@ def consolidate_resources(resolved: dict) -> dict:
     for key, policy in resolved.pop("policies", {}).items():
         cat_name = policy.get("catalog_name")
         if not cat_name:
-            raise GovernorError(f"Standalone policy '{key}' is missing required 'catalog_name'")
+            raise OrchestratorError(f"Standalone policy '{key}' is missing required 'catalog_name'")
         schema_name = policy.get("schema_name")
         table_name = policy.get("table_name")
         _ensure_catalog(catalogs, cat_name)

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from uc_declarative_abac.configs.models import ResourcesConfig
+from uc_declarative_abac.utils import UngovernedTagError
 from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.policies.compiler import compile_desired_policies
 from uc_declarative_abac.policies.state import Policy
-from uc_declarative_abac.types import PolicyType, SecurableType, UngovernedTagError
+from uc_declarative_abac.types import PolicyType, SecurableType
 
 
 # Permissive superset of every tag key used across the fixtures in this file.

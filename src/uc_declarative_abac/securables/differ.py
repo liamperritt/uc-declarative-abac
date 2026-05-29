@@ -16,8 +16,8 @@ from uc_declarative_abac.securables.state import (
     Securable,
     Table,
 )
-from uc_declarative_abac.types import ExecutionError, GovernorError, NonexistentSecurableError, PrincipalValidationError, SecurableType
-from uc_declarative_abac.utils import catalog_of
+from uc_declarative_abac.types import SecurableType
+from uc_declarative_abac.utils import ExecutionError, NonexistentSecurableError, OrchestratorError, PrincipalValidationError, catalog_of
 
 _GOVERNED_ATTRIBUTES = ["owner", "comment", "rfa_destinations"]
 
@@ -296,7 +296,7 @@ def _validate_tables_for_creation(
     Non-Table securables pass through unchanged — with ``--enable-taggable-creation``
     on, catalogs, schemas, volumes, and valid tables all flow to the executor.
     Tables missing columns or column types are logged as ``NonexistentSecurableError``
-    (with a hint explaining the requirement) so the governor's end-of-run
+    (with a hint explaining the requirement) so the orchestrator's end-of-run
     ``ExecutionBatchError`` gate picks them up alongside any other errors.
     """
     kept: list[Securable] = []
@@ -326,7 +326,7 @@ def _log_nonexistent_non_function_securables(
     the executor to ``CREATE FUNCTION``. Any other type in ``to_create`` means the
     config references a UC object that does not yet exist; the engine does not
     support creating those today. We log each offender via ``ChangeLogger.log_error``
-    (so the governor's final ``ExecutionBatchError`` gate surfaces them alongside
+    (so the orchestrator's final ``ExecutionBatchError`` gate surfaces them alongside
     any other accumulated errors) and drop them from the diff to prevent downstream
     executors from attempting to touch them.
     """
@@ -437,7 +437,7 @@ def _should_skip_or_log(
     if update.attribute == "comment" and update.full_name in view_full_names:
         change_logger.log_error(ExecutionError(
             context=f"Update comment on {update.securable_type.value} {update.full_name}",
-            exception=GovernorError(
+            exception=OrchestratorError(
                 "Cannot alter comment on a VIEW — only the view owner can alter comment."
             ),
         ))
@@ -446,7 +446,7 @@ def _should_skip_or_log(
     if update.attribute == "owner" and update.full_name in owner_immutable_full_names:
         change_logger.log_error(ExecutionError(
             context=f"Update owner on {update.securable_type.value} {update.full_name}",
-            exception=GovernorError(
+            exception=OrchestratorError(
                 "Materialized views and streaming tables do not support owner "
                 "changes via this engine. Change ownership of the pipeline instead."
             ),

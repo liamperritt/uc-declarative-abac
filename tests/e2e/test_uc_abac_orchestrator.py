@@ -1,6 +1,6 @@
 """End-to-end tests for UC Declarative ABAC  against a live Databricks workspace.
 
-Tests run the full governor pipeline against the liam_perritt catalog in
+Tests run the full orchestrator pipeline against the liam_perritt catalog in
 the field-eng-east workspace, exercising tags and grant policies at the
 catalog, schema, table, and volume levels.
 
@@ -20,7 +20,7 @@ from pathlib import Path
 
 from databricks.sdk import WorkspaceClient
 
-from uc_declarative_abac.governor import run
+from uc_declarative_abac.orchestrator import run
 from uc_declarative_abac.governed_tags.state import GovernedTag
 from uc_declarative_abac.securables.state import AttributeUpdate, Function, SecurableAttributes
 from uc_declarative_abac.tags.state import SecurableTag

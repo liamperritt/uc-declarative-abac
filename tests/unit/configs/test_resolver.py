@@ -3,7 +3,8 @@ from __future__ import annotations
 import pytest
 
 from uc_declarative_abac.configs.resolver import resolve_refs
-from uc_declarative_abac.types import ResolutionError, UnreferencedDefinitionError
+from uc_declarative_abac.utils import ResolutionError, UnreferencedDefinitionError
+
 
 
 # ---------------------------------------------------------------------------

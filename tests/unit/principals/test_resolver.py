@@ -5,13 +5,14 @@ from unittest.mock import MagicMock
 import pytest
 
 from uc_declarative_abac.helpers.workspace import WorkspaceHelper
+from uc_declarative_abac.utils import OrchestratorError, PrincipalValidationError
 from uc_declarative_abac.principals.resolver import (
     PrincipalResolver,
     ensure_all_resolved,
     ensure_resolved,
 )
 from uc_declarative_abac.principals.state import Principal
-from uc_declarative_abac.types import GovernorError, PrincipalType, PrincipalValidationError
+from uc_declarative_abac.types import PrincipalType
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +219,7 @@ def test_ensure_resolved_returns_resolved_principal_unchanged():
 
 def test_ensure_resolved_raises_for_unresolved():
     p = Principal(principal_type=PrincipalType.UNKNOWN, name="x")
-    with pytest.raises(GovernorError):
+    with pytest.raises(OrchestratorError):
         ensure_resolved(p)
 
 
@@ -232,5 +233,5 @@ def test_ensure_all_resolved_maps_over_collection():
 def test_ensure_all_resolved_raises_on_first_unresolved():
     resolved = Principal(principal_type=PrincipalType.USER, name="a", identifier="a")
     unresolved = Principal(principal_type=PrincipalType.UNKNOWN, name="b")
-    with pytest.raises(GovernorError):
+    with pytest.raises(OrchestratorError):
         ensure_all_resolved([resolved, unresolved])

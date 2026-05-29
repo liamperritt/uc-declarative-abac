@@ -12,14 +12,10 @@ if TYPE_CHECKING:
     from uc_declarative_abac.logger import ChangeLogger
 
 from uc_declarative_abac.governed_tags.state import GovernedTag, GovernedTagDiff
+from uc_declarative_abac.utils import ExecutionError, InteractiveConfirmationRequiredError, OrchestratorError
 from uc_declarative_abac.principals.resolver import ensure_resolved
 from uc_declarative_abac.principals.state import Principal
-from uc_declarative_abac.types import (
-    ExecutionError,
-    GovernorError,
-    InteractiveConfirmationRequiredError,
-    PrincipalType,
-)
+from uc_declarative_abac.types import PrincipalType
 
 _logger = logging.getLogger("uc_declarative_abac")
 
@@ -59,7 +55,7 @@ def _principal_to_ruleset_string(principal: Principal) -> str:
         return f"groups/{principal.name}"
     if principal.principal_type == PrincipalType.SERVICE_PRINCIPAL:
         return f"servicePrincipals/{principal.identifier}"
-    raise GovernorError(f"Unsupported principal type for rule set: {principal!r}")
+    raise OrchestratorError(f"Unsupported principal type for rule set: {principal!r}")
 
 
 def _build_grant_rules(
@@ -99,7 +95,7 @@ def _apply_assigners(
     if not tag_id:
         change_logger.log_error(ExecutionError(
             context=f"update_rule_set({gt.name})",
-            exception=GovernorError(f"Tag policy id not cached for {gt.name!r}"),
+            exception=OrchestratorError(f"Tag policy id not cached for {gt.name!r}"),
         ))
         return
     try:

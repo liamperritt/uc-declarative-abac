@@ -4,17 +4,12 @@ from collections import defaultdict
 from datetime import date
 
 from uc_declarative_abac.configs.models import ResourcesConfig, GrantPolicyConfig
+from uc_declarative_abac.utils import ExecutionError, UngovernedTagError
 from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.principals.state import Principal
 from uc_declarative_abac.tags.state import SecurableTag
 from uc_declarative_abac.privileges.state import SecurablePrivilege
-from uc_declarative_abac.types import (
-    ExecutionError,
-    PrincipalType,
-    PrivilegeType,
-    SecurableType,
-    UngovernedTagError,
-)
+from uc_declarative_abac.types import PrincipalType, PrivilegeType, SecurableType
 
 # Privileges valid for each securable type. Higher-level securables inherit
 # all privileges from lower levels. Unknown privileges are allowed on all types.

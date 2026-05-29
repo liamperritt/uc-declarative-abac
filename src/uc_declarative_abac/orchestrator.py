@@ -36,15 +36,15 @@ from uc_declarative_abac.tags.compiler import compile_desired_tags
 from uc_declarative_abac.tags.differ import compute_tag_diff
 from uc_declarative_abac.tags.executor import execute_tag_diff
 from uc_declarative_abac.tags.state import TagDiff
-from uc_declarative_abac.types import ExecutionBatchError, SecurableType
-from uc_declarative_abac.utils import catalog_of, parse_catalog_filter
+from uc_declarative_abac.types import SecurableType
+from uc_declarative_abac.utils import ExecutionBatchError, catalog_of, parse_catalog_filter
 
 _logger = logging.getLogger("uc_declarative_abac")
 
 
 @dataclass(frozen=True)
-class GovernorDiffsResult:
-    """Computed diffs from one ``governor.run()`` invocation, one per domain."""
+class OrchestratorDiffsResult:
+    """Computed diffs from one ``orchestrator.run()`` invocation, one per domain."""
 
     securable_diff: SecurableDiff
     governed_tag_diff: GovernedTagDiff
@@ -86,7 +86,7 @@ def run(
     manage_taggables_for_catalogs: str = "*",
     create_taggables_for_catalogs: str = "*",
     force: bool = False,
-) -> GovernorDiffsResult:
+) -> OrchestratorDiffsResult:
     """Run the full governance pipeline: discover, resolve, compile, diff, apply.
 
     Returns the computed diffs for every domain in execution order.
@@ -299,7 +299,7 @@ def run(
     if change_logger.has_errors:
         raise ExecutionBatchError(change_logger.errors)
 
-    return GovernorDiffsResult(
+    return OrchestratorDiffsResult(
         securable_diff=securable_diff,
         governed_tag_diff=governed_tag_diff,
         tag_diff=tag_diff,

@@ -6,7 +6,8 @@ if TYPE_CHECKING:
     from uc_declarative_abac.helpers.workspace import WorkspaceHelper
 
 from uc_declarative_abac.principals.state import Principal
-from uc_declarative_abac.types import GovernorError, PrincipalType, PrincipalValidationError
+from uc_declarative_abac.utils import OrchestratorError, PrincipalValidationError
+from uc_declarative_abac.types import PrincipalType
 
 
 class PrincipalResolver:
@@ -52,13 +53,13 @@ class PrincipalResolver:
 
 
 def ensure_resolved(principal: Principal) -> Principal:
-    """Runtime guard: raise GovernorError if principal is not resolved."""
+    """Runtime guard: raise OrchestratorError if principal is not resolved."""
     if principal.principal_type == PrincipalType.UNKNOWN:
-        raise GovernorError(
+        raise OrchestratorError(
             f"Expected a resolved Principal but got UNKNOWN type: {principal!r}"
         )
     if not principal.name or not principal.identifier:
-        raise GovernorError(
+        raise OrchestratorError(
             f"Expected a resolved Principal with both name and identifier: {principal!r}"
         )
     return principal

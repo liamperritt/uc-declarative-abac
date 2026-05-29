@@ -1,9 +1,10 @@
 import pytest
 
 from uc_declarative_abac.configs.consolidator import consolidate_resources
+from uc_declarative_abac.utils import DuplicateResourceError, OrchestratorError
 from uc_declarative_abac.configs.models import ResourcesConfig
 from uc_declarative_abac.configs.resolver import resolve_refs
-from uc_declarative_abac.types import DuplicateResourceError, GovernorError
+
 
 
 def _inline_fn_dict(name: str, return_expr: str = "col") -> dict:
@@ -175,7 +176,7 @@ def test_consolidator_rejects_schema_without_catalog_name():
             "my_schema": {"name": "sales"}
         },
     }
-    with pytest.raises(GovernorError):
+    with pytest.raises(OrchestratorError):
         consolidate_resources(data)
 
 
@@ -194,7 +195,7 @@ def test_consolidator_rejects_table_without_catalog_name():
             }
         },
     }
-    with pytest.raises(GovernorError):
+    with pytest.raises(OrchestratorError):
         consolidate_resources(data)
 
 
@@ -213,7 +214,7 @@ def test_consolidator_rejects_table_without_schema_name():
             }
         },
     }
-    with pytest.raises(GovernorError):
+    with pytest.raises(OrchestratorError):
         consolidate_resources(data)
 
 
@@ -232,7 +233,7 @@ def test_consolidator_rejects_volume_without_schema_name():
             }
         },
     }
-    with pytest.raises(GovernorError):
+    with pytest.raises(OrchestratorError):
         consolidate_resources(data)
 
 
@@ -477,7 +478,7 @@ def test_consolidator_uses_overridden_name_from_ref_function():
 
 
 def test_consolidator_raises_when_inline_function_missing_name():
-    """An inline function dict without a 'name' raises GovernorError naming the policy."""
+    """An inline function dict without a 'name' raises OrchestratorError naming the policy."""
     data = {
         "catalogs": {
             "c1": {
@@ -488,7 +489,7 @@ def test_consolidator_raises_when_inline_function_missing_name():
             }
         }
     }
-    with pytest.raises(GovernorError, match="my_policy"):
+    with pytest.raises(OrchestratorError, match="my_policy"):
         consolidate_resources(data)
 
 

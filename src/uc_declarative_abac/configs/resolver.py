@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from uc_declarative_abac.utils import ResolutionError, UnreferencedDefinitionError
 import copy
 from typing import Any
 
-from uc_declarative_abac.types import ResolutionError, UnreferencedDefinitionError
+
 
 
 def resolve_refs(definitions: dict, resources: dict) -> dict:

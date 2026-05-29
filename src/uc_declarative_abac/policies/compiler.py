@@ -5,16 +5,11 @@ from uc_declarative_abac.configs.models import (
     PolicyColumnConfig,
     ResourcesConfig,
 )
+from uc_declarative_abac.utils import ExecutionError, UngovernedTagError
 from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.policies.state import Policy
 from uc_declarative_abac.principals.state import Principal
-from uc_declarative_abac.types import (
-    ExecutionError,
-    PolicyType,
-    PrincipalType,
-    SecurableType,
-    UngovernedTagError,
-)
+from uc_declarative_abac.types import PolicyType, PrincipalType, SecurableType
 
 
 _WILDCARD = "*"

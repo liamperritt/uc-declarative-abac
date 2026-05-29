@@ -266,8 +266,7 @@ def test_governed_tag_executor_raises_interactive_confirmation_error_on_eof_when
     ws_helper, change_logger, monkeypatch,
 ):
     """EOFError from `input()` in a non-forced context raises InteractiveConfirmationRequiredError."""
-    from uc_declarative_abac.types import InteractiveConfirmationRequiredError
-
+    from uc_declarative_abac.utils import InteractiveConfirmationRequiredError
     def _raise_eof(*_):
         raise EOFError()
     monkeypatch.setattr("builtins.input", _raise_eof)

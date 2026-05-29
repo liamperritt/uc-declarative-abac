@@ -6,9 +6,10 @@ import pytest
 import sqlglot
 
 from uc_declarative_abac.logger import ChangeLogger
+from uc_declarative_abac.utils import InteractiveConfirmationRequiredError
 from uc_declarative_abac.tags.executor import execute_tag_diff
 from uc_declarative_abac.tags.state import SecurableTag, TagDiff
-from uc_declarative_abac.types import InteractiveConfirmationRequiredError, SecurableType
+from uc_declarative_abac.types import SecurableType
 
 
 def _parse_sql(sql: str):

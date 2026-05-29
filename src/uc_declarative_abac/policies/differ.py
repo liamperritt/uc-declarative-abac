@@ -7,8 +7,9 @@ if TYPE_CHECKING:
     from uc_declarative_abac.principals.resolver import PrincipalResolver
 
 from uc_declarative_abac.policies.state import Policy, PolicyDiff
+from uc_declarative_abac.utils import ExecutionError, PrincipalValidationError
 from uc_declarative_abac.principals.state import Principal
-from uc_declarative_abac.types import ExecutionError, PrincipalValidationError
+
 
 
 def compute_policy_diff(
@@ -26,7 +27,7 @@ def compute_policy_diff(
     - to_create: policy not present in actual
     - to_replace: policy present in both but fields differ
     Policies present only in actual are ignored (UC policies are never deleted
-    by the governor).
+    by the orchestrator).
     """
     desired_resolved = _resolve_policy_principals(desired, resolver, change_logger)
     actual_resolved = _resolve_policy_principals(actual, resolver, change_logger)

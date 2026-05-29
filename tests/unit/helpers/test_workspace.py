@@ -5,7 +5,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from uc_declarative_abac.helpers.workspace import WorkspaceHelper
-from uc_declarative_abac.types import DuplicateServicePrincipalError, PrincipalValidationError
+from uc_declarative_abac.utils import DuplicateServicePrincipalError, PrincipalValidationError
+
 
 
 # ---------------------------------------------------------------------------
@@ -851,13 +852,12 @@ def test_workspace_helper_update_tag_policy_rule_set_builds_update_request() -> 
 
 
 def test_workspace_helper_raises_when_account_id_unset_for_rule_set_call() -> None:
-    """Building a ruleset name without account_id raises a clear GovernorError."""
-    from uc_declarative_abac.types import GovernorError
-
+    """Building a ruleset name without account_id raises a clear OrchestratorError."""
+    from uc_declarative_abac.utils import OrchestratorError
     client = _client_with_account_id(account_id=None)
     helper = WorkspaceHelper(client)
 
-    with pytest.raises(GovernorError):
+    with pytest.raises(OrchestratorError):
         helper.get_tag_policy_rule_set("tp-pii")
 
 

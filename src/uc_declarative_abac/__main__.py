@@ -6,7 +6,7 @@ from pathlib import Path
 
 from databricks.sdk import WorkspaceClient
 
-from uc_declarative_abac.governor import run
+from uc_declarative_abac.orchestrator import run
 
 
 def main() -> None:

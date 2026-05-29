@@ -9,13 +9,9 @@ from databricks.sdk.service.iam import GrantRule, RuleSetResponse, RuleSetUpdate
 from databricks.sdk.service.tags import TagPolicy
 
 from uc_declarative_abac.governed_tags.state import GovernedTag
+from uc_declarative_abac.utils import DuplicateServicePrincipalError, OrchestratorError, PrincipalValidationError
 from uc_declarative_abac.principals.state import Principal
-from uc_declarative_abac.types import (
-    DuplicateServicePrincipalError,
-    GovernorError,
-    PrincipalType,
-    PrincipalValidationError,
-)
+from uc_declarative_abac.types import PrincipalType
 
 _logger = logging.getLogger("uc_declarative_abac")
 
@@ -337,7 +333,7 @@ class WorkspaceHelper:
         """Look up the tag's id from the cache, then fetch its default rule set."""
         tag_id = self._tag_policy_id_by_name.get(tag_name)
         if not tag_id:
-            raise GovernorError(
+            raise OrchestratorError(
                 f"Tag policy id not cached for {tag_name!r}; call fetch_actual_governed_tags "
                 "or register_created_tag_policy first."
             )
@@ -368,7 +364,7 @@ class WorkspaceHelper:
         """Read account_id from the WorkspaceClient config; raise on absence."""
         account_id = getattr(self._client.config, "account_id", None)
         if not account_id:
-            raise GovernorError(
+            raise OrchestratorError(
                 "WorkspaceClient.config.account_id is not set; required for tag-policy "
                 "rule-set operations. Configure account_id in your Databricks profile."
             )
@@ -387,6 +383,6 @@ class WorkspaceHelper:
 
     def delete_tag_policy(self, tag_key: str) -> None:
         """Delete a governed tag (account-level tag policy) by its key. Thin
-        passthrough to the SDK — gated at the governor boundary by the
+        passthrough to the SDK — gated at the orchestrator boundary by the
         ``--enable-governed-tag-deletion`` flag and interactive confirmation."""
         self._client.tag_policies.delete_tag_policy(tag_key)

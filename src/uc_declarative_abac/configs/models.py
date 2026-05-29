@@ -7,8 +7,8 @@ from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, Field, computed_field, field_validator, model_validator
 
-from uc_declarative_abac.types import DuplicateResourceError, PolicyType, PrivilegeType
-from uc_declarative_abac.utils import validate_rfa_destinations
+from uc_declarative_abac.types import PolicyType, PrivilegeType
+from uc_declarative_abac.utils import DuplicateResourceError, validate_rfa_destinations
 
 
 def _coerce_null_tag_values(tags: dict | None) -> dict | None:

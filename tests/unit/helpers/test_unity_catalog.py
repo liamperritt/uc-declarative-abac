@@ -7,6 +7,7 @@ import sqlglot
 from databricks.sdk.service.sql import Disposition, StatementState
 
 from uc_declarative_abac.configs.models import ResourcesConfig
+from uc_declarative_abac.utils import OrchestratorError
 from uc_declarative_abac.helpers.unity_catalog import (
     UnityCatalogHelper,
     _POLL_INTERVAL_SECONDS,  # exception to the "no private imports" rule: needed to
@@ -17,7 +18,7 @@ from uc_declarative_abac.tags.state import SecurableTag
 from uc_declarative_abac.principals.state import Principal
 from uc_declarative_abac.privileges.state import SecurablePrivilege
 from uc_declarative_abac.securables.state import Function, Securable, SecurableAttributes
-from uc_declarative_abac.types import GovernorError, PolicyType, PrincipalType, PrivilegeType, SecurableType
+from uc_declarative_abac.types import PolicyType, PrincipalType, PrivilegeType, SecurableType
 
 WAREHOUSE_ID = "test-warehouse-id"
 
@@ -496,7 +497,7 @@ def test_uc_helper_polls_for_results_when_query_exceeds_timeout(mock_fetch, mock
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_raises_on_failed_query(mock_fetch):
-    """When execute_statement returns FAILED, a GovernorError is raised."""
+    """When execute_statement returns FAILED, a OrchestratorError is raised."""
     mock_fetch.return_value = []
 
     response = _make_statement_response(
@@ -508,7 +509,7 @@ def test_uc_helper_raises_on_failed_query(mock_fetch):
 
     helper = UnityCatalogHelper(client, WAREHOUSE_ID)
 
-    with pytest.raises((GovernorError, RuntimeError)):
+    with pytest.raises((OrchestratorError, RuntimeError)):
         helper.fetch_actual_tags(["my_catalog"])
 
 

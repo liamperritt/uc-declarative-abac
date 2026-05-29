@@ -5,17 +5,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from uc_declarative_abac.governor import run
+from uc_declarative_abac.orchestrator import run
+from uc_declarative_abac.utils import ExecutionBatchError, PrincipalValidationError, UngovernedTagError
 from uc_declarative_abac.policies.state import Policy, PolicyDiff
 from uc_declarative_abac.privileges.state import PrivilegeDiff
 from uc_declarative_abac.tags.state import TagDiff
-from uc_declarative_abac.types import (
-    ExecutionBatchError,
-    PolicyType,
-    PrincipalValidationError,
-    SecurableType,
-    UngovernedTagError,
-)
+from uc_declarative_abac.types import PolicyType, SecurableType
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +251,7 @@ def _setup_mock_principals_with_groups(
 # ---------------------------------------------------------------------------
 
 
-def test_governor_runs_tags_workflow_end_to_end(
+def test_orchestrator_runs_tags_workflow_end_to_end(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """YAML configs with tagged catalog -> tag_diff.to_add is non-empty, SQL was executed."""
     config = _catalog_with_tags_config()
@@ -282,7 +277,7 @@ def test_governor_runs_tags_workflow_end_to_end(
     )
 
 
-def test_governor_runs_privileges_workflow_end_to_end(
+def test_orchestrator_runs_privileges_workflow_end_to_end(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """YAML with grant policy + tagged objects, empty actual privileges -> privilege_diff.to_grant is non-empty."""
     config = _catalog_with_grant_policy_config()
@@ -310,7 +305,7 @@ def test_governor_runs_privileges_workflow_end_to_end(
     )
 
 
-def test_governor_runs_both_domains_independently(
+def test_orchestrator_runs_both_domains_independently(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """Both tag and privilege changes are computed; verify both diffs are populated."""
     config = _catalog_with_tags_and_grants_config()
@@ -349,7 +344,7 @@ def test_governor_runs_both_domains_independently(
 
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
-def test_governor_produces_empty_diffs_when_in_sync(
+def test_orchestrator_produces_empty_diffs_when_in_sync(
     mock_fetch, tmp_yaml_dir, mock_workspace_client):
     """When actual state matches desired, both diffs are empty and no SQL is executed."""
     config = _catalog_with_grant_policy_config()
@@ -422,7 +417,7 @@ def test_governor_produces_empty_diffs_when_in_sync(
 # ---------------------------------------------------------------------------
 
 
-def test_governor_validates_principals_before_applying(
+def test_orchestrator_validates_principals_before_applying(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """Policy references unknown principal -> ExecutionBatchError, no GRANT/REVOKE SQL executed."""
     config = _catalog_with_grant_policy_config()
@@ -449,7 +444,7 @@ def test_governor_validates_principals_before_applying(
     )
 
 
-def test_governor_dry_run_does_not_execute_sql(
+def test_orchestrator_dry_run_does_not_execute_sql(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """dry_run=True -> diffs are computed but no mutation SQL is executed."""
     config = _catalog_with_tags_and_grants_config()
@@ -484,7 +479,7 @@ def test_governor_dry_run_does_not_execute_sql(
 # ---------------------------------------------------------------------------
 
 
-def test_governor_fetches_tags_privileges_and_principals_in_parallel(
+def test_orchestrator_fetches_tags_privileges_and_principals_in_parallel(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """Mock delays on fetch methods; total elapsed < sum of delays proves parallelism."""
     config = _catalog_with_tags_and_grants_config()
@@ -541,11 +536,10 @@ def test_governor_fetches_tags_privileges_and_principals_in_parallel(
 # ---------------------------------------------------------------------------
 
 
-def test_governor_raises_execution_batch_error_when_sql_fails(
+def test_orchestrator_raises_execution_batch_error_when_sql_fails(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
-    """When mutation SQL fails, governor.run() raises ExecutionBatchError with collected errors."""
-    from uc_declarative_abac.types import ExecutionBatchError
-
+    """When mutation SQL fails, orchestrator.run() raises ExecutionBatchError with collected errors."""
+    from uc_declarative_abac.utils import ExecutionBatchError
     config = _catalog_with_tags_and_grants_config()
     root = tmp_yaml_dir({"resources/catalog.yaml": config})
 
@@ -656,7 +650,7 @@ def _catalog_with_mask_policy_config() -> dict:
 # ---------------------------------------------------------------------------
 
 
-def test_governor_runs_policies_workflow_end_to_end(
+def test_orchestrator_runs_policies_workflow_end_to_end(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """A MASK policy with no corresponding actual UC policy -> CREATE POLICY SQL is executed."""
     config = _catalog_with_mask_policy_config()
@@ -677,7 +671,7 @@ def test_governor_runs_policies_workflow_end_to_end(
     assert len(create_stmts) == 1, f"Expected CREATE POLICY SQL, got: {mock_workspace_client.executed_sql}"
 
 
-def test_governor_policies_workflow_is_idempotent(
+def test_orchestrator_policies_workflow_is_idempotent(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """When list_policies returns the same policy already exists, no CREATE POLICY SQL is executed."""
     config = _catalog_with_mask_policy_config()
@@ -744,7 +738,7 @@ def _setup_mock_principals_with_sp(
     mock_workspace_client.api_client.do.side_effect = _scim_do
 
 
-def test_governor_is_idempotent_for_service_principal_across_display_name_and_app_id():
+def test_orchestrator_is_idempotent_for_service_principal_across_display_name_and_app_id():
     """Same workspace principal referenced by display_name in YAML and application_id in UC
     state (GRANT system tables, list_policies SDK response) should produce an empty diff on
     the second run — proving that PrincipalResolver bridges the two representations correctly."""
@@ -913,11 +907,10 @@ def _seed_actual_state_for_sp_idempotency(mock_workspace_client: MagicMock, sp_a
     mock_workspace_client.policies.list_policies.return_value = iter([fake_policy])
 
 
-def test_governor_collects_unknown_principal_errors(
+def test_orchestrator_collects_unknown_principal_errors(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """Unknown principals are collected as errors in ExecutionBatchError, not raised as PrincipalValidationError."""
-    from uc_declarative_abac.types import ExecutionBatchError, ExecutionError
-
+    from uc_declarative_abac.utils import ExecutionBatchError, ExecutionError
     config = _catalog_with_grant_policy_config()
     root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
@@ -942,11 +935,10 @@ def test_governor_collects_unknown_principal_errors(
     )
 
 
-def test_governor_continues_with_valid_principals_when_some_are_unknown(
+def test_orchestrator_continues_with_valid_principals_when_some_are_unknown(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """Valid principals get GRANT SQL executed; unknown ones become errors in ExecutionBatchError."""
-    from uc_declarative_abac.types import ExecutionBatchError
-
+    from uc_declarative_abac.utils import ExecutionBatchError
     config = _catalog_with_two_grant_policies_config()
     root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
@@ -985,7 +977,7 @@ def test_governor_continues_with_valid_principals_when_some_are_unknown(
 # ---------------------------------------------------------------------------
 
 
-def test_governor_skips_tags_workflow_when_tag_management_disabled(
+def test_orchestrator_skips_tags_workflow_when_tag_management_disabled(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """With enable_tag_management=False, no tag diff is computed and no ALTER SET TAGS SQL runs."""
     config = _catalog_with_tags_config()
@@ -1010,7 +1002,7 @@ def test_governor_skips_tags_workflow_when_tag_management_disabled(
     )
 
 
-def test_governor_does_not_fetch_actual_tags_when_both_tag_and_privilege_management_disabled(
+def test_orchestrator_does_not_fetch_actual_tags_when_both_tag_and_privilege_management_disabled(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """When neither tag nor privilege management is enabled, the engine skips the
     actual_tags fetch entirely — no SELECT against any *_tags system table."""
@@ -1035,7 +1027,7 @@ def test_governor_does_not_fetch_actual_tags_when_both_tag_and_privilege_managem
     )
 
 
-def test_governor_skips_privileges_workflow_when_privilege_management_disabled(
+def test_orchestrator_skips_privileges_workflow_when_privilege_management_disabled(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """With enable_privilege_management=False, no privilege diff is computed and no
     GRANT/REVOKE SQL runs."""
@@ -1064,7 +1056,7 @@ def test_governor_skips_privileges_workflow_when_privilege_management_disabled(
     )
 
 
-def test_governor_does_not_fetch_actual_privileges_when_privilege_management_disabled(
+def test_orchestrator_does_not_fetch_actual_privileges_when_privilege_management_disabled(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """When privilege management is off, no SELECT against any *_privileges system table runs."""
     config = _catalog_with_grant_policy_config()
@@ -1088,7 +1080,7 @@ def test_governor_does_not_fetch_actual_privileges_when_privilege_management_dis
     )
 
 
-def test_governor_privileges_use_actual_tags_when_tag_management_disabled(
+def test_orchestrator_privileges_use_actual_tags_when_tag_management_disabled(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """Config declares a grant policy with has_tags {env: prod} but does NOT declare
     the env tag on the catalog. UC's actual_tags fetch returns that tag on the catalog.
@@ -1136,7 +1128,7 @@ def test_governor_privileges_use_actual_tags_when_tag_management_disabled(
     )
 
 
-def test_governor_privileges_use_config_tags_when_tag_management_enabled(
+def test_orchestrator_privileges_use_config_tags_when_tag_management_enabled(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """Opposite pattern: config DOES declare the env=prod tag on the catalog, but UC
     does not. With tag management on, the privileges compiler uses the config tags
@@ -1178,7 +1170,7 @@ def test_governor_privileges_use_config_tags_when_tag_management_enabled(
     )
 
 
-def test_governor_skips_non_function_attribute_updates_when_taggable_management_disabled(
+def test_orchestrator_skips_non_function_attribute_updates_when_taggable_management_disabled(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """Config declares a catalog owner; with taggable management off, the resulting
     diff contains no CATALOG attribute updates."""
@@ -1214,7 +1206,7 @@ def test_governor_skips_non_function_attribute_updates_when_taggable_management_
     )
 
 
-def test_governor_creates_missing_taggables_when_taggable_creation_enabled(
+def test_orchestrator_creates_missing_taggables_when_taggable_creation_enabled(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """With --enable-taggable-creation on, a catalog declared in config but absent
     from UC produces a CREATE CATALOG statement in executed SQL."""
@@ -1246,12 +1238,11 @@ def test_governor_creates_missing_taggables_when_taggable_creation_enabled(
     assert "brand_new_cat" in create_catalog_stmts[0]
 
 
-def test_governor_does_not_create_missing_taggables_when_taggable_creation_disabled(
+def test_orchestrator_does_not_create_missing_taggables_when_taggable_creation_disabled(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """Without --enable-taggable-creation, a missing catalog raises ExecutionBatchError
     with a NonexistentSecurableError (the pre-flag behaviour)."""
-    from uc_declarative_abac.types import ExecutionBatchError, NonexistentSecurableError
-
+    from uc_declarative_abac.utils import ExecutionBatchError, NonexistentSecurableError
     config = {
         "resources": {
             "catalogs": {
@@ -1284,13 +1275,12 @@ def test_governor_does_not_create_missing_taggables_when_taggable_creation_disab
     assert create_stmts == []
 
 
-def test_governor_still_checks_nonexistent_securables_when_taggable_management_disabled(
+def test_orchestrator_still_checks_nonexistent_securables_when_taggable_management_disabled(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """A catalog declared in config but absent from UC still produces a
     NonexistentSecurableError even when taggable management is off — the validation
     is independent of the attribute-management flag."""
-    from uc_declarative_abac.types import ExecutionBatchError, NonexistentSecurableError
-
+    from uc_declarative_abac.utils import ExecutionBatchError, NonexistentSecurableError
     config = {
         "resources": {
             "catalogs": {
@@ -1390,7 +1380,7 @@ def _two_catalog_owners_config() -> dict:
     }
 
 
-def test_governor_tag_filter_scopes_tag_set_sql_to_listed_catalog_only(
+def test_orchestrator_tag_filter_scopes_tag_set_sql_to_listed_catalog_only(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """With --manage-tags-for-catalogs=cat_a, only cat_a tags emit SET TAGS SQL."""
     config = _two_catalog_tags_config()
@@ -1416,7 +1406,7 @@ def test_governor_tag_filter_scopes_tag_set_sql_to_listed_catalog_only(
     )
 
 
-def test_governor_tag_filter_excludes_out_of_scope_catalogs_from_tag_diff(
+def test_orchestrator_tag_filter_excludes_out_of_scope_catalogs_from_tag_diff(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """The returned tag_diff.to_add contains only in-scope catalog tags."""
     config = _two_catalog_tags_config()
@@ -1439,7 +1429,7 @@ def test_governor_tag_filter_excludes_out_of_scope_catalogs_from_tag_diff(
     )
 
 
-def test_governor_privilege_filter_scopes_grants_to_listed_catalog_only(
+def test_orchestrator_privilege_filter_scopes_grants_to_listed_catalog_only(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """With --manage-privileges-for-catalogs=cat_a, only cat_a privileges are granted."""
     config = _two_catalog_grants_config()
@@ -1469,7 +1459,7 @@ def test_governor_privilege_filter_scopes_grants_to_listed_catalog_only(
     )
 
 
-def test_governor_taggable_management_filter_scopes_attribute_updates_to_listed_catalog_only(
+def test_orchestrator_taggable_management_filter_scopes_attribute_updates_to_listed_catalog_only(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """Owner is declared on both catalogs but the filter pins management to cat_a."""
     config = _two_catalog_owners_config()
@@ -1495,12 +1485,11 @@ def test_governor_taggable_management_filter_scopes_attribute_updates_to_listed_
     assert "cat_b" not in full_names, f"Expected no cat_b owner update, got: {full_names}"
 
 
-def test_governor_taggable_creation_filter_creates_only_listed_catalog(
+def test_orchestrator_taggable_creation_filter_creates_only_listed_catalog(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """With --create-taggables-for-catalogs=cat_a and both catalogs missing from UC,
     only cat_a gets a CREATE CATALOG statement. cat_b surfaces as NonexistentSecurableError."""
-    from uc_declarative_abac.types import ExecutionBatchError, NonexistentSecurableError
-
+    from uc_declarative_abac.utils import ExecutionBatchError, NonexistentSecurableError
     config = {
         "resources": {
             "catalogs": {
@@ -1541,7 +1530,7 @@ def test_governor_taggable_creation_filter_creates_only_listed_catalog(
     )
 
 
-def test_governor_taggable_creation_filter_still_creates_functions_in_out_of_scope_catalogs(
+def test_orchestrator_taggable_creation_filter_still_creates_functions_in_out_of_scope_catalogs(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """Functions are always engine-managed — they flow through the creation filter
     regardless of catalog scope."""
@@ -1605,7 +1594,7 @@ def test_governor_taggable_creation_filter_still_creates_functions_in_out_of_sco
     )
 
 
-def test_governor_tag_filter_uses_actual_tags_for_out_of_scope_catalogs_when_grants_match(
+def test_orchestrator_tag_filter_uses_actual_tags_for_out_of_scope_catalogs_when_grants_match(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """With tag mgmt scoped to cat_a, privileges compiler must read out-of-scope cat_b's
     tag state from UC (actual_tags) — because cat_b's tags aren't being reconciled
@@ -1636,7 +1625,7 @@ def test_governor_tag_filter_uses_actual_tags_for_out_of_scope_catalogs_when_gra
     )
 
 
-def test_governor_raises_when_catalog_filter_references_unknown_catalog(
+def test_orchestrator_raises_when_catalog_filter_references_unknown_catalog(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """Typos in the filter list raise ValueError early — before any UC operations."""
     config = _two_catalog_tags_config()
@@ -1656,7 +1645,7 @@ def test_governor_raises_when_catalog_filter_references_unknown_catalog(
     assert "typo_cat" in str(exc_info.value)
 
 
-def test_governor_filter_is_no_op_when_corresponding_enable_flag_is_off(
+def test_orchestrator_filter_is_no_op_when_corresponding_enable_flag_is_off(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """A non-default filter value with the enable flag off is silently ignored —
     even unknown catalog names don't error, because parsing is skipped entirely."""
@@ -1679,7 +1668,7 @@ def test_governor_filter_is_no_op_when_corresponding_enable_flag_is_off(
     assert set_tag_stmts == []
 
 
-def test_governor_deletes_governed_tag_when_flag_and_force_enabled(
+def test_orchestrator_deletes_governed_tag_when_flag_and_force_enabled(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """With enable_governed_tag_deletion=True and force=True, a governed tag that
     exists in UC but is absent from config triggers a delete_tag_policy call."""
@@ -1713,7 +1702,7 @@ def test_governor_deletes_governed_tag_when_flag_and_force_enabled(
     mock_workspace_client.tag_policies.delete_tag_policy.assert_called_once_with("legacy_pii")
 
 
-def test_governor_does_not_delete_governed_tag_when_flag_disabled(
+def test_orchestrator_does_not_delete_governed_tag_when_flag_disabled(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """Without enable_governed_tag_deletion, UC-only governed tags are left alone."""
     config = {
@@ -1743,7 +1732,7 @@ def test_governor_does_not_delete_governed_tag_when_flag_disabled(
     mock_workspace_client.tag_policies.delete_tag_policy.assert_not_called()
 
 
-def test_governor_raises_ungoverned_tag_error_when_grant_policy_references_ungoverned_tag(
+def test_orchestrator_raises_ungoverned_tag_error_when_grant_policy_references_ungoverned_tag(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """A grant policy whose has_tags key is not declared as a governed tag
     (neither in config nor in UC) surfaces as an UngovernedTagError inside the
@@ -1807,14 +1796,14 @@ def _capture_fetch_actual_securables_calls(monkeypatch) -> list[tuple]:
 
     def _spy(self, catalog_names, rfa_targets=None):
         calls.append((tuple(catalog_names), frozenset(rfa_targets or ())))
-        # Return empty actual state so the rest of the governor short-circuits cleanly.
+        # Return empty actual state so the rest of the orchestrator short-circuits cleanly.
         return set(), set()
 
     monkeypatch.setattr(UnityCatalogHelper, "fetch_actual_securables", _spy)
     return calls
 
 
-def test_governor_passes_rfa_targets_for_securables_with_destinations(
+def test_orchestrator_passes_rfa_targets_for_securables_with_destinations(
     tmp_yaml_dir, mock_workspace_client, monkeypatch,
 ):
     """When the config declares rfa_destinations and taggable management is on,
@@ -1858,7 +1847,7 @@ def test_governor_passes_rfa_targets_for_securables_with_destinations(
     })
 
 
-def test_governor_passes_empty_rfa_targets_when_taggable_management_off(
+def test_orchestrator_passes_empty_rfa_targets_when_taggable_management_off(
     tmp_yaml_dir, mock_workspace_client, monkeypatch,
 ):
     """rfa_destinations updates are gated by enable_taggable_management — when it's

@@ -6,11 +6,11 @@ if TYPE_CHECKING:
     from uc_declarative_abac.helpers.unity_catalog import UnityCatalogHelper
     from uc_declarative_abac.logger import ChangeLogger
 
-from uc_declarative_abac.utils import quote_securable as quote_securable
+from uc_declarative_abac.utils import ExecutionError, quote_securable as quote_securable
 from uc_declarative_abac.policies.state import Policy, PolicyDiff
 from uc_declarative_abac.principals.resolver import ensure_all_resolved
 from uc_declarative_abac.principals.state import Principal
-from uc_declarative_abac.types import ExecutionError, PolicyType
+from uc_declarative_abac.types import PolicyType
 
 
 def execute_policy_diff(

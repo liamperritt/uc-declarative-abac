@@ -4,7 +4,8 @@ import pytest
 from pydantic import ValidationError
 
 from uc_declarative_abac.configs.models import FunctionConfig, ParameterConfig, ResourcesConfig
-from uc_declarative_abac.types import DuplicateResourceError
+from uc_declarative_abac.utils import DuplicateResourceError
+
 
 
 def _minimal_catalog(**overrides):

@@ -35,8 +35,8 @@ from uc_declarative_abac.principals.state import Principal
 from uc_declarative_abac.tags.state import SecurableTag
 from uc_declarative_abac.privileges.state import SecurablePrivilege
 from uc_declarative_abac.securables.state import Column, Function, SecurableAttributes, Securable, Table
-from uc_declarative_abac.types import GovernorError, PolicyType, PrincipalType, PrivilegeType, SecurableType
-from uc_declarative_abac.utils import classify_rfa_destination
+from uc_declarative_abac.types import PolicyType, PrincipalType, PrivilegeType, SecurableType
+from uc_declarative_abac.utils import OrchestratorError, classify_rfa_destination
 
 _logger = logging.getLogger("uc_declarative_abac")
 
@@ -200,7 +200,7 @@ def _fetch_external_links_rows(response: StatementResponse) -> list[list[str]]:
         try:
             rows.extend(json.loads(resp.text))
         except json.JSONDecodeError as e:
-            raise GovernorError(f"Failed to parse external link response: {e}") from e
+            raise OrchestratorError(f"Failed to parse external link response: {e}") from e
     return rows
 
 
@@ -518,7 +518,7 @@ class UnityCatalogHelper:
 
         Waits up to 50s for results. If the query is still running, polls
         every 10s via get_statement until it completes.
-        Raises GovernorError on FAILED or CANCELED states.
+        Raises OrchestratorError on FAILED or CANCELED states.
         """
         response = self._client.statement_execution.execute_statement(
             statement=statement,
@@ -533,7 +533,7 @@ class UnityCatalogHelper:
 
         if response.status.state != StatementState.SUCCEEDED:
             error_msg = getattr(response.status.error, "message", "Unknown error")
-            raise GovernorError(f"SQL query failed ({response.status.state}): {error_msg}\nStatement: {statement}")
+            raise OrchestratorError(f"SQL query failed ({response.status.state}): {error_msg}\nStatement: {statement}")
 
         return response
 
