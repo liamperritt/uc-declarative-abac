@@ -8,9 +8,13 @@ from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.iam import GrantRule, RuleSetResponse, RuleSetUpdateRequest
 from databricks.sdk.service.tags import TagPolicy
 
-from uc_declarative_abac.governed_tags.state import GovernedTag
-from uc_declarative_abac.utils import DuplicateServicePrincipalError, OrchestratorError, PrincipalValidationError
-from uc_declarative_abac.principals.state import Principal
+from uc_declarative_abac.governed_tags import GovernedTag
+from uc_declarative_abac.utils import (
+    DuplicateServicePrincipalError,
+    OrchestratorError,
+    PrincipalValidationError,
+)
+from uc_declarative_abac.principals import Principal
 from uc_declarative_abac.types import PrincipalType
 
 _logger = logging.getLogger("uc_declarative_abac")

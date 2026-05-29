@@ -4,10 +4,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from uc_declarative_abac.governed_tags.executor import execute_governed_tag_diff
-from uc_declarative_abac.governed_tags.state import GovernedTag, GovernedTagDiff
+from uc_declarative_abac.governed_tags import (
+    execute_governed_tag_diff,
+    GovernedTag,
+    GovernedTagDiff,
+)
 from uc_declarative_abac.logger import ChangeLogger
-from uc_declarative_abac.principals.state import Principal
+from uc_declarative_abac.principals import Principal
 from uc_declarative_abac.types import PrincipalType
 
 

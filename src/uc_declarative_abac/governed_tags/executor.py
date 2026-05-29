@@ -8,13 +8,22 @@ from databricks.sdk.service.iam import GrantRule
 from databricks.sdk.service.tags import TagPolicy, Value
 
 if TYPE_CHECKING:
-    from uc_declarative_abac.helpers.workspace import WorkspaceHelper
+    from uc_declarative_abac.helpers import WorkspaceHelper
     from uc_declarative_abac.logger import ChangeLogger
 
-from uc_declarative_abac.governed_tags.state import GovernedTag, GovernedTagDiff
-from uc_declarative_abac.utils import ExecutionError, InteractiveConfirmationRequiredError, OrchestratorError
-from uc_declarative_abac.principals.resolver import ensure_resolved
-from uc_declarative_abac.principals.state import Principal
+from uc_declarative_abac.governed_tags.state import (
+    GovernedTag,
+    GovernedTagDiff,
+)
+from uc_declarative_abac.utils import (
+    ExecutionError,
+    InteractiveConfirmationRequiredError,
+    OrchestratorError,
+)
+from uc_declarative_abac.principals import (
+    ensure_resolved,
+    Principal,
+)
 from uc_declarative_abac.types import PrincipalType
 
 _logger = logging.getLogger("uc_declarative_abac")

@@ -3,7 +3,11 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from uc_declarative_abac.configs.models import FunctionConfig, ParameterConfig, ResourcesConfig
+from uc_declarative_abac.configs import (
+    FunctionConfig,
+    ParameterConfig,
+    ResourcesConfig,
+)
 from uc_declarative_abac.utils import DuplicateResourceError
 
 

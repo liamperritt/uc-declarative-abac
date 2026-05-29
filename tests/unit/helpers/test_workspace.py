@@ -4,8 +4,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from uc_declarative_abac.helpers.workspace import WorkspaceHelper
-from uc_declarative_abac.utils import DuplicateServicePrincipalError, PrincipalValidationError
+from uc_declarative_abac.helpers import WorkspaceHelper
+from uc_declarative_abac.utils import (
+    DuplicateServicePrincipalError,
+    PrincipalValidationError,
+)
 
 
 
@@ -252,7 +255,7 @@ def test_workspace_helper_find_unknown_principals_returns_empty_when_all_valid()
 
 def test_workspace_helper_resolves_user_by_name() -> None:
     """resolve_by_name returns a Principal with USER type for a known user."""
-    from uc_declarative_abac.principals.state import Principal
+    from uc_declarative_abac.principals import Principal
     from uc_declarative_abac.types import PrincipalType
 
     client = _make_workspace_client(users=[_make_user("jane@co.com")])
@@ -266,7 +269,7 @@ def test_workspace_helper_resolves_user_by_name() -> None:
 
 def test_workspace_helper_resolves_group_by_name() -> None:
     """resolve_by_name returns a Principal with GROUP type for a known group."""
-    from uc_declarative_abac.principals.state import Principal
+    from uc_declarative_abac.principals import Principal
     from uc_declarative_abac.types import PrincipalType
 
     client = _make_workspace_client(groups=[_make_group("data_engineers")])
@@ -280,7 +283,7 @@ def test_workspace_helper_resolves_group_by_name() -> None:
 
 def test_workspace_helper_resolves_sp_by_name() -> None:
     """resolve_by_name returns a Principal with SP type, using application_id as identifier."""
-    from uc_declarative_abac.principals.state import Principal
+    from uc_declarative_abac.principals import Principal
     from uc_declarative_abac.types import PrincipalType
 
     client = _make_workspace_client(
@@ -296,7 +299,7 @@ def test_workspace_helper_resolves_sp_by_name() -> None:
 
 def test_workspace_helper_resolves_sp_by_identifier() -> None:
     """resolve_by_identifier returns a Principal for a known SP application_id."""
-    from uc_declarative_abac.principals.state import Principal
+    from uc_declarative_abac.principals import Principal
     from uc_declarative_abac.types import PrincipalType
 
     client = _make_workspace_client(
@@ -312,7 +315,7 @@ def test_workspace_helper_resolves_sp_by_identifier() -> None:
 
 def test_workspace_helper_resolves_user_by_identifier() -> None:
     """resolve_by_identifier returns a Principal for a known user email."""
-    from uc_declarative_abac.principals.state import Principal
+    from uc_declarative_abac.principals import Principal
     from uc_declarative_abac.types import PrincipalType
 
     client = _make_workspace_client(users=[_make_user("jane@co.com")])
@@ -331,7 +334,7 @@ def test_workspace_helper_resolves_user_by_identifier() -> None:
 
 def test_workspace_helper_returns_principals_dict() -> None:
     """get_principals returns a dict mapping display name to Principal."""
-    from uc_declarative_abac.principals.state import Principal
+    from uc_declarative_abac.principals import Principal
     from uc_declarative_abac.types import PrincipalType
 
     client = _make_workspace_client(
@@ -557,7 +560,7 @@ def _client_with_account_id(account_id: str | None = "account-123") -> MagicMock
 
 def test_workspace_helper_fetch_actual_governed_tags_returns_policies() -> None:
     """fetch_actual_governed_tags iterates the SDK list and returns a GovernedTag per policy."""
-    from uc_declarative_abac.governed_tags.state import GovernedTag
+    from uc_declarative_abac.governed_tags import GovernedTag
 
     client = MagicMock()
     client.tag_policies.list_tag_policies.return_value = iter([
@@ -590,7 +593,7 @@ def test_workspace_helper_fetch_actual_governed_tags_is_empty_when_no_policies()
 
 def test_workspace_helper_fetch_actual_governed_tags_parses_description_and_values() -> None:
     """Null description becomes empty string; absent values becomes empty frozenset."""
-    from uc_declarative_abac.governed_tags.state import GovernedTag
+    from uc_declarative_abac.governed_tags import GovernedTag
 
     client = MagicMock()
     client.tag_policies.list_tag_policies.return_value = iter([
@@ -722,8 +725,8 @@ def test_workspace_helper_fetch_uses_correct_ruleset_name_format() -> None:
 
 def test_workspace_helper_fetch_parses_user_principal_string() -> None:
     """`users/<username>` in grant_rules becomes Principal(UNKNOWN, identifier=<username>)."""
-    from uc_declarative_abac.governed_tags.state import GovernedTag
-    from uc_declarative_abac.principals.state import Principal
+    from uc_declarative_abac.governed_tags import GovernedTag
+    from uc_declarative_abac.principals import Principal
     from uc_declarative_abac.types import PrincipalType
 
     client = _client_with_account_id()
@@ -746,7 +749,7 @@ def test_workspace_helper_fetch_parses_user_principal_string() -> None:
 
 def test_workspace_helper_fetch_parses_group_principal_string() -> None:
     """`groups/<name>` in grant_rules becomes Principal(UNKNOWN, identifier=<name>)."""
-    from uc_declarative_abac.principals.state import Principal
+    from uc_declarative_abac.principals import Principal
     from uc_declarative_abac.types import PrincipalType
 
     client = _client_with_account_id()
@@ -769,7 +772,7 @@ def test_workspace_helper_fetch_parses_group_principal_string() -> None:
 
 def test_workspace_helper_fetch_parses_sp_principal_string() -> None:
     """`servicePrincipals/<app_id>` becomes Principal(UNKNOWN, identifier=<app_id>)."""
-    from uc_declarative_abac.principals.state import Principal
+    from uc_declarative_abac.principals import Principal
     from uc_declarative_abac.types import PrincipalType
 
     client = _client_with_account_id()

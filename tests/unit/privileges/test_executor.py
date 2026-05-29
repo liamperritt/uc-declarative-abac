@@ -3,10 +3,17 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from uc_declarative_abac.logger import ChangeLogger
-from uc_declarative_abac.privileges.executor import execute_privilege_diff
-from uc_declarative_abac.privileges.state import PrivilegeDiff, SecurablePrivilege
-from uc_declarative_abac.principals.state import Principal
-from uc_declarative_abac.types import PrincipalType, PrivilegeType, SecurableType
+from uc_declarative_abac.privileges import (
+    execute_privilege_diff,
+    PrivilegeDiff,
+    SecurablePrivilege,
+)
+from uc_declarative_abac.principals import Principal
+from uc_declarative_abac.types import (
+    PrincipalType,
+    PrivilegeType,
+    SecurableType,
+)
 
 
 def _assert_sql_contains(sql: str, *fragments: str):
@@ -112,7 +119,7 @@ def test_privilege_executor_resolves_sp_display_name_to_application_id():
 
 def test_privilege_executor_uses_principal_identifier_in_grant_sql():
     """When principal is a Principal object, the SQL uses its identifier (not display_name)."""
-    from uc_declarative_abac.principals.state import Principal
+    from uc_declarative_abac.principals import Principal
     from uc_declarative_abac.types import PrincipalType
 
     uc_helper = MagicMock()

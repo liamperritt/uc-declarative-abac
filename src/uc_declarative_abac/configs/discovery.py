@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from uc_declarative_abac.utils import DuplicateKeyError, DuplicateResourceError
+from uc_declarative_abac.utils import (
+    DuplicateKeyError,
+    DuplicateResourceError,
+)
 from pathlib import Path
 
 import yaml

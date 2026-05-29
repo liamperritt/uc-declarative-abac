@@ -1,10 +1,20 @@
 from __future__ import annotations
 
-from uc_declarative_abac.configs.models import ResourcesConfig
-from uc_declarative_abac.principals.state import Principal
-from uc_declarative_abac.securables.compiler import compile_desired_attributes, compile_desired_securables
-from uc_declarative_abac.securables.state import Column, Function, Securable, SecurableAttributes, Table
-from uc_declarative_abac.types import PrincipalType, SecurableType
+from uc_declarative_abac.configs import ResourcesConfig
+from uc_declarative_abac.principals import Principal
+from uc_declarative_abac.securables import (
+    Column,
+    compile_desired_attributes,
+    compile_desired_securables,
+    Function,
+    Securable,
+    SecurableAttributes,
+    Table,
+)
+from uc_declarative_abac.types import (
+    PrincipalType,
+    SecurableType,
+)
 
 
 def _unknown_owner(name: str) -> Principal:

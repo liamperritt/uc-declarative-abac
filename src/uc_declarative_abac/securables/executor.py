@@ -3,10 +3,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from uc_declarative_abac.helpers.unity_catalog import UnityCatalogHelper
+    from uc_declarative_abac.helpers import UnityCatalogHelper
     from uc_declarative_abac.logger import ChangeLogger
 
-from uc_declarative_abac.utils import ExecutionError, OrchestratorError, quote_securable as quote_securable
+from uc_declarative_abac.utils import (
+    ExecutionError,
+    OrchestratorError,
+    quote_securable,
+)
 from uc_declarative_abac.securables.state import (
     AttributeUpdate,
     Column,
@@ -15,8 +19,10 @@ from uc_declarative_abac.securables.state import (
     SecurableDiff,
     Table,
 )
-from uc_declarative_abac.principals.resolver import ensure_resolved
-from uc_declarative_abac.principals.state import Principal
+from uc_declarative_abac.principals import (
+    ensure_resolved,
+    Principal,
+)
 from uc_declarative_abac.types import SecurableType
 
 

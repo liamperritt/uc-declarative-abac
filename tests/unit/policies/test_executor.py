@@ -4,10 +4,17 @@ from unittest.mock import MagicMock
 
 from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.utils import ExecutionError
-from uc_declarative_abac.policies.executor import execute_policy_diff
-from uc_declarative_abac.policies.state import Policy, PolicyDiff
-from uc_declarative_abac.principals.state import Principal
-from uc_declarative_abac.types import PolicyType, PrincipalType, SecurableType
+from uc_declarative_abac.policies import (
+    execute_policy_diff,
+    Policy,
+    PolicyDiff,
+)
+from uc_declarative_abac.principals import Principal
+from uc_declarative_abac.types import (
+    PolicyType,
+    PrincipalType,
+    SecurableType,
+)
 
 
 def _resolved(name: str, principal_type: PrincipalType = PrincipalType.GROUP) -> Principal:

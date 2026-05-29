@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from uc_declarative_abac.utils import ResolutionError, UnreferencedDefinitionError
+from uc_declarative_abac.utils import (
+    ResolutionError,
+    UnreferencedDefinitionError,
+)
 import copy
 from typing import Any
 

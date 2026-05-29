@@ -1,9 +1,24 @@
 from __future__ import annotations
 
-from uc_declarative_abac.configs.models import ColumnConfig, FunctionConfig, ResourcesConfig, SecurableConfig, TableConfig
-from uc_declarative_abac.principals.state import Principal
-from uc_declarative_abac.securables.state import Column, Function, SecurableAttributes, Securable, Table
-from uc_declarative_abac.types import PrincipalType, SecurableType
+from uc_declarative_abac.configs import (
+    ColumnConfig,
+    FunctionConfig,
+    ResourcesConfig,
+    SecurableConfig,
+    TableConfig,
+)
+from uc_declarative_abac.principals import Principal
+from uc_declarative_abac.securables.state import (
+    Column,
+    Function,
+    Securable,
+    SecurableAttributes,
+    Table,
+)
+from uc_declarative_abac.types import (
+    PrincipalType,
+    SecurableType,
+)
 
 
 def _emit_attributes(

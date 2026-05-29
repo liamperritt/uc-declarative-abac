@@ -4,14 +4,17 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from uc_declarative_abac.helpers.workspace import WorkspaceHelper
-from uc_declarative_abac.utils import OrchestratorError, PrincipalValidationError
-from uc_declarative_abac.principals.resolver import (
-    PrincipalResolver,
+from uc_declarative_abac.helpers import WorkspaceHelper
+from uc_declarative_abac.utils import (
+    OrchestratorError,
+    PrincipalValidationError,
+)
+from uc_declarative_abac.principals import (
     ensure_all_resolved,
     ensure_resolved,
+    Principal,
+    PrincipalResolver,
 )
-from uc_declarative_abac.principals.state import Principal
 from uc_declarative_abac.types import PrincipalType
 
 

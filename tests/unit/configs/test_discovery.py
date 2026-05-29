@@ -2,8 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from uc_declarative_abac.configs.discovery import discover_yaml_files, load_raw_configs
-from uc_declarative_abac.utils import DuplicateKeyError, DuplicateResourceError
+from uc_declarative_abac.configs import (
+    discover_yaml_files,
+    load_raw_configs,
+)
+from uc_declarative_abac.utils import (
+    DuplicateKeyError,
+    DuplicateResourceError,
+)
 
 
 

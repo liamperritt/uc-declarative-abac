@@ -6,11 +6,21 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from uc_declarative_abac.orchestrator import run
-from uc_declarative_abac.utils import ExecutionBatchError, PrincipalValidationError, UngovernedTagError
-from uc_declarative_abac.policies.state import Policy, PolicyDiff
-from uc_declarative_abac.privileges.state import PrivilegeDiff
-from uc_declarative_abac.tags.state import TagDiff
-from uc_declarative_abac.types import PolicyType, SecurableType
+from uc_declarative_abac.utils import (
+    ExecutionBatchError,
+    PrincipalValidationError,
+    UngovernedTagError,
+)
+from uc_declarative_abac.policies import (
+    Policy,
+    PolicyDiff,
+)
+from uc_declarative_abac.privileges import PrivilegeDiff
+from uc_declarative_abac.tags import TagDiff
+from uc_declarative_abac.types import (
+    PolicyType,
+    SecurableType,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +156,7 @@ def _securable_existence_rows(config_dict: dict) -> list[list]:
     """
     import copy
 
-    from uc_declarative_abac.configs.consolidator import consolidate_resources
+    from uc_declarative_abac.configs import consolidate_resources
 
     resources = copy.deepcopy(config_dict.get("resources") or {})
     consolidated = consolidate_resources(resources)
@@ -910,7 +920,10 @@ def _seed_actual_state_for_sp_idempotency(mock_workspace_client: MagicMock, sp_a
 def test_orchestrator_collects_unknown_principal_errors(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """Unknown principals are collected as errors in ExecutionBatchError, not raised as PrincipalValidationError."""
-    from uc_declarative_abac.utils import ExecutionBatchError, ExecutionError
+    from uc_declarative_abac.utils import (
+        ExecutionBatchError,
+        ExecutionError,
+    )
     config = _catalog_with_grant_policy_config()
     root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
@@ -1242,7 +1255,10 @@ def test_orchestrator_does_not_create_missing_taggables_when_taggable_creation_d
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """Without --enable-taggable-creation, a missing catalog raises ExecutionBatchError
     with a NonexistentSecurableError (the pre-flag behaviour)."""
-    from uc_declarative_abac.utils import ExecutionBatchError, NonexistentSecurableError
+    from uc_declarative_abac.utils import (
+        ExecutionBatchError,
+        NonexistentSecurableError,
+    )
     config = {
         "resources": {
             "catalogs": {
@@ -1280,7 +1296,10 @@ def test_orchestrator_still_checks_nonexistent_securables_when_taggable_manageme
     """A catalog declared in config but absent from UC still produces a
     NonexistentSecurableError even when taggable management is off — the validation
     is independent of the attribute-management flag."""
-    from uc_declarative_abac.utils import ExecutionBatchError, NonexistentSecurableError
+    from uc_declarative_abac.utils import (
+        ExecutionBatchError,
+        NonexistentSecurableError,
+    )
     config = {
         "resources": {
             "catalogs": {
@@ -1489,7 +1508,10 @@ def test_orchestrator_taggable_creation_filter_creates_only_listed_catalog(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """With --create-taggables-for-catalogs=cat_a and both catalogs missing from UC,
     only cat_a gets a CREATE CATALOG statement. cat_b surfaces as NonexistentSecurableError."""
-    from uc_declarative_abac.utils import ExecutionBatchError, NonexistentSecurableError
+    from uc_declarative_abac.utils import (
+        ExecutionBatchError,
+        NonexistentSecurableError,
+    )
     config = {
         "resources": {
             "catalogs": {
@@ -1789,7 +1811,7 @@ def test_orchestrator_raises_ungoverned_tag_error_when_grant_policy_references_u
 def _capture_fetch_actual_securables_calls(monkeypatch) -> list[tuple]:
     """Patch UnityCatalogHelper.fetch_actual_securables to record its call args
     while still returning empty state. Returns the live list of recorded calls."""
-    from uc_declarative_abac.helpers.unity_catalog import UnityCatalogHelper
+    from uc_declarative_abac.helpers import UnityCatalogHelper
 
     calls: list[tuple] = []
     original = UnityCatalogHelper.fetch_actual_securables

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from uc_declarative_abac.configs.models import ResourcesConfig
-from uc_declarative_abac.tags.compiler import compile_desired_tags
-from uc_declarative_abac.tags.state import SecurableTag
+from uc_declarative_abac.configs import ResourcesConfig
+from uc_declarative_abac.tags import (
+    compile_desired_tags,
+    SecurableTag,
+)
 from uc_declarative_abac.types import SecurableType
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from uc_declarative_abac.principals.state import Principal
+from uc_declarative_abac.principals import Principal
 from uc_declarative_abac.types import PrincipalType
 
 

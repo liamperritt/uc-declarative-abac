@@ -1,7 +1,10 @@
 from __future__ import annotations
 
-from uc_declarative_abac.tags.differ import compute_tag_diff
-from uc_declarative_abac.tags.state import SecurableTag, TagDiff
+from uc_declarative_abac.tags import (
+    compute_tag_diff,
+    SecurableTag,
+    TagDiff,
+)
 from uc_declarative_abac.types import SecurableType
 
 

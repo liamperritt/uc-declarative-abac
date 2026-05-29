@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from uc_declarative_abac.configs.models import ResourcesConfig, TaggableConfig
+from uc_declarative_abac.configs import (
+    ResourcesConfig,
+    TaggableConfig,
+)
 from uc_declarative_abac.tags.state import SecurableTag
 from uc_declarative_abac.types import SecurableType
 

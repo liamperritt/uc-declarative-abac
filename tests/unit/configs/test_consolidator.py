@@ -1,9 +1,14 @@
 import pytest
 
-from uc_declarative_abac.configs.consolidator import consolidate_resources
-from uc_declarative_abac.utils import DuplicateResourceError, OrchestratorError
-from uc_declarative_abac.configs.models import ResourcesConfig
-from uc_declarative_abac.configs.resolver import resolve_refs
+from uc_declarative_abac.configs import (
+    consolidate_resources,
+    resolve_refs,
+    ResourcesConfig,
+)
+from uc_declarative_abac.utils import (
+    DuplicateResourceError,
+    OrchestratorError,
+)
 
 
 

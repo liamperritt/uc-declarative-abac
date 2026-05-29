@@ -26,17 +26,31 @@ from databricks.sdk.service.sql import (
 
 import logging
 
-from uc_declarative_abac.configs.models import (
+from uc_declarative_abac.configs import (
     BaseFgacPolicyConfig,
     ResourcesConfig,
 )
-from uc_declarative_abac.policies.state import Policy
-from uc_declarative_abac.principals.state import Principal
-from uc_declarative_abac.tags.state import SecurableTag
-from uc_declarative_abac.privileges.state import SecurablePrivilege
-from uc_declarative_abac.securables.state import Column, Function, SecurableAttributes, Securable, Table
-from uc_declarative_abac.types import PolicyType, PrincipalType, PrivilegeType, SecurableType
-from uc_declarative_abac.utils import OrchestratorError, classify_rfa_destination
+from uc_declarative_abac.policies import Policy
+from uc_declarative_abac.principals import Principal
+from uc_declarative_abac.tags import SecurableTag
+from uc_declarative_abac.privileges import SecurablePrivilege
+from uc_declarative_abac.securables import (
+    Column,
+    Function,
+    Securable,
+    SecurableAttributes,
+    Table,
+)
+from uc_declarative_abac.types import (
+    PolicyType,
+    PrincipalType,
+    PrivilegeType,
+    SecurableType,
+)
+from uc_declarative_abac.utils import (
+    classify_rfa_destination,
+    OrchestratorError,
+)
 
 _logger = logging.getLogger("uc_declarative_abac")
 

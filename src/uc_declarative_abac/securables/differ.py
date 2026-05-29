@@ -5,19 +5,25 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from uc_declarative_abac.logger import ChangeLogger
-    from uc_declarative_abac.principals.resolver import PrincipalResolver
+    from uc_declarative_abac.principals import PrincipalResolver
 
 from uc_declarative_abac.securables.state import (
     AttributeUpdate,
     Column,
     Function,
+    Securable,
     SecurableAttributes,
     SecurableDiff,
-    Securable,
     Table,
 )
 from uc_declarative_abac.types import SecurableType
-from uc_declarative_abac.utils import ExecutionError, NonexistentSecurableError, OrchestratorError, PrincipalValidationError, catalog_of
+from uc_declarative_abac.utils import (
+    catalog_of,
+    ExecutionError,
+    NonexistentSecurableError,
+    OrchestratorError,
+    PrincipalValidationError,
+)
 
 _GOVERNED_ATTRIBUTES = ["owner", "comment", "rfa_destinations"]
 

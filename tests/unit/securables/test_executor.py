@@ -3,17 +3,20 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from uc_declarative_abac.logger import ChangeLogger
-from uc_declarative_abac.securables.executor import execute_securable_diff
-from uc_declarative_abac.securables.state import (
+from uc_declarative_abac.securables import (
     AttributeUpdate,
     Column,
+    execute_securable_diff,
     Function,
     Securable,
     SecurableDiff,
     Table,
 )
-from uc_declarative_abac.principals.state import Principal
-from uc_declarative_abac.types import PrincipalType, SecurableType
+from uc_declarative_abac.principals import Principal
+from uc_declarative_abac.types import (
+    PrincipalType,
+    SecurableType,
+)
 
 
 def _assert_sql_contains(sql: str, *fragments: str):

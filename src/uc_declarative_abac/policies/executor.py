@@ -3,13 +3,21 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from uc_declarative_abac.helpers.unity_catalog import UnityCatalogHelper
+    from uc_declarative_abac.helpers import UnityCatalogHelper
     from uc_declarative_abac.logger import ChangeLogger
 
-from uc_declarative_abac.utils import ExecutionError, quote_securable as quote_securable
-from uc_declarative_abac.policies.state import Policy, PolicyDiff
-from uc_declarative_abac.principals.resolver import ensure_all_resolved
-from uc_declarative_abac.principals.state import Principal
+from uc_declarative_abac.utils import (
+    ExecutionError,
+    quote_securable,
+)
+from uc_declarative_abac.policies.state import (
+    Policy,
+    PolicyDiff,
+)
+from uc_declarative_abac.principals import (
+    ensure_all_resolved,
+    Principal,
+)
 from uc_declarative_abac.types import PolicyType
 
 

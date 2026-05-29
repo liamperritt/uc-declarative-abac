@@ -4,10 +4,16 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from uc_declarative_abac.logger import ChangeLogger
-    from uc_declarative_abac.principals.resolver import PrincipalResolver
+    from uc_declarative_abac.principals import PrincipalResolver
 
-from uc_declarative_abac.privileges.state import PrivilegeDiff, SecurablePrivilege
-from uc_declarative_abac.utils import ExecutionError, PrincipalValidationError
+from uc_declarative_abac.privileges.state import (
+    PrivilegeDiff,
+    SecurablePrivilege,
+)
+from uc_declarative_abac.utils import (
+    ExecutionError,
+    PrincipalValidationError,
+)
 
 
 

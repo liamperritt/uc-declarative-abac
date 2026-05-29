@@ -21,12 +21,20 @@ from pathlib import Path
 from databricks.sdk import WorkspaceClient
 
 from uc_declarative_abac.orchestrator import run
-from uc_declarative_abac.governed_tags.state import GovernedTag
-from uc_declarative_abac.securables.state import AttributeUpdate, Function, SecurableAttributes
-from uc_declarative_abac.tags.state import SecurableTag
-from uc_declarative_abac.privileges.state import SecurablePrivilege
-from uc_declarative_abac.principals.state import Principal
-from uc_declarative_abac.types import PrincipalType, PrivilegeType, SecurableType
+from uc_declarative_abac.governed_tags import GovernedTag
+from uc_declarative_abac.securables import (
+    AttributeUpdate,
+    Function,
+    SecurableAttributes,
+)
+from uc_declarative_abac.tags import SecurableTag
+from uc_declarative_abac.privileges import SecurablePrivilege
+from uc_declarative_abac.principals import Principal
+from uc_declarative_abac.types import (
+    PrincipalType,
+    PrivilegeType,
+    SecurableType,
+)
 
 
 # ---------------------------------------------------------------------------

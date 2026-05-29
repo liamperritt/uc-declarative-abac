@@ -4,19 +4,24 @@ from unittest.mock import MagicMock
 
 from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.utils import NonexistentSecurableError
-from uc_declarative_abac.principals.resolver import PrincipalResolver
-from uc_declarative_abac.principals.state import Principal
-from uc_declarative_abac.securables.differ import compute_securable_diff
-from uc_declarative_abac.securables.state import (
+from uc_declarative_abac.principals import (
+    Principal,
+    PrincipalResolver,
+)
+from uc_declarative_abac.securables import (
     AttributeUpdate,
     Column,
+    compute_securable_diff,
     Function,
     Securable,
     SecurableAttributes,
     SecurableDiff,
     Table,
 )
-from uc_declarative_abac.types import PrincipalType, SecurableType
+from uc_declarative_abac.types import (
+    PrincipalType,
+    SecurableType,
+)
 
 import pytest
 

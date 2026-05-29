@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from uc_declarative_abac.principals.state import Principal
+from uc_declarative_abac.principals import Principal
 
 
 @dataclass(frozen=True)

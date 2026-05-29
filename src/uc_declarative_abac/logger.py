@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-from uc_declarative_abac.governed_tags.state import GovernedTag
+from uc_declarative_abac.principals import Principal
 from uc_declarative_abac.utils import ExecutionError
-from uc_declarative_abac.policies.state import Policy
-from uc_declarative_abac.privileges.state import SecurablePrivilege
-from uc_declarative_abac.securables.state import AttributeUpdate, Securable
-from uc_declarative_abac.tags.state import SecurableTag
-from uc_declarative_abac.principals.state import Principal
+
+if TYPE_CHECKING:
+    from uc_declarative_abac.governed_tags import GovernedTag
+    from uc_declarative_abac.policies import Policy
+    from uc_declarative_abac.privileges import SecurablePrivilege
+    from uc_declarative_abac.securables import (
+        AttributeUpdate,
+        Securable,
+    )
+    from uc_declarative_abac.tags import SecurableTag
 
 
 _default_logger = logging.getLogger("uc_declarative_abac")

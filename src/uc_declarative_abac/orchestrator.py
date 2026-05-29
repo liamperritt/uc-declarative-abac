@@ -8,36 +8,57 @@ from pathlib import Path
 
 from databricks.sdk import WorkspaceClient
 
-from uc_declarative_abac.configs.consolidator import consolidate_resources
-from uc_declarative_abac.configs.discovery import discover_yaml_files, load_raw_configs
-from uc_declarative_abac.configs.models import ResourcesConfig
-from uc_declarative_abac.configs.resolver import resolve_refs
-from uc_declarative_abac.governed_tags.compiler import compile_desired_governed_tags
-from uc_declarative_abac.governed_tags.differ import compute_governed_tag_diff
-from uc_declarative_abac.governed_tags.executor import execute_governed_tag_diff
-from uc_declarative_abac.governed_tags.state import GovernedTagDiff
-from uc_declarative_abac.helpers.workspace import WorkspaceHelper
-from uc_declarative_abac.helpers.unity_catalog import UnityCatalogHelper
-from uc_declarative_abac.policies.compiler import compile_desired_policies
-from uc_declarative_abac.policies.differ import compute_policy_diff
-from uc_declarative_abac.policies.executor import execute_policy_diff
-from uc_declarative_abac.policies.state import PolicyDiff
-from uc_declarative_abac.principals.resolver import PrincipalResolver
-from uc_declarative_abac.privileges.compiler import compile_desired_privileges
-from uc_declarative_abac.privileges.differ import compute_privilege_diff
-from uc_declarative_abac.privileges.executor import execute_privilege_diff
-from uc_declarative_abac.privileges.state import PrivilegeDiff
-from uc_declarative_abac.securables.compiler import compile_desired_attributes, compile_desired_securables
-from uc_declarative_abac.securables.differ import compute_securable_diff
-from uc_declarative_abac.securables.executor import execute_securable_diff
-from uc_declarative_abac.securables.state import SecurableAttributes, SecurableDiff
+from uc_declarative_abac.configs import (
+    consolidate_resources,
+    discover_yaml_files,
+    load_raw_configs,
+    resolve_refs,
+    ResourcesConfig,
+)
+from uc_declarative_abac.governed_tags import (
+    compile_desired_governed_tags,
+    compute_governed_tag_diff,
+    execute_governed_tag_diff,
+    GovernedTagDiff,
+)
+from uc_declarative_abac.helpers import (
+    UnityCatalogHelper,
+    WorkspaceHelper,
+)
+from uc_declarative_abac.policies import (
+    compile_desired_policies,
+    compute_policy_diff,
+    execute_policy_diff,
+    PolicyDiff,
+)
+from uc_declarative_abac.principals import PrincipalResolver
+from uc_declarative_abac.privileges import (
+    compile_desired_privileges,
+    compute_privilege_diff,
+    execute_privilege_diff,
+    PrivilegeDiff,
+)
+from uc_declarative_abac.securables import (
+    compile_desired_attributes,
+    compile_desired_securables,
+    compute_securable_diff,
+    execute_securable_diff,
+    SecurableAttributes,
+    SecurableDiff,
+)
 from uc_declarative_abac.logger import ChangeLogger
-from uc_declarative_abac.tags.compiler import compile_desired_tags
-from uc_declarative_abac.tags.differ import compute_tag_diff
-from uc_declarative_abac.tags.executor import execute_tag_diff
-from uc_declarative_abac.tags.state import TagDiff
+from uc_declarative_abac.tags import (
+    compile_desired_tags,
+    compute_tag_diff,
+    execute_tag_diff,
+    TagDiff,
+)
 from uc_declarative_abac.types import SecurableType
-from uc_declarative_abac.utils import ExecutionBatchError, catalog_of, parse_catalog_filter
+from uc_declarative_abac.utils import (
+    catalog_of,
+    ExecutionBatchError,
+    parse_catalog_filter,
+)
 
 _logger = logging.getLogger("uc_declarative_abac")
 
