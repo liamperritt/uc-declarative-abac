@@ -11,10 +11,10 @@ definitions:
           - name: pii
             type: string
         return: "CONCAT('####', SUBSTRING(pii, -4))"
+      column:
+        alias: pii
+        has_tags:
+          uc_gov_pii: '*'
       to:
         - uc_governor_test_team
         - liam.perritt@databricks.com
-      columns:
-        - alias: pii
-          has_tags:
-            uc_gov_pii: '*'

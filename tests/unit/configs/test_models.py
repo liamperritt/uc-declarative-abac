@@ -1223,6 +1223,73 @@ def test_filter_policy_rejects_duplicate_column_aliases():
         ResourcesConfig.model_validate(data)
 
 
+def test_mask_policy_config_accepts_single_column_via_column_alias():
+    """A MaskPolicyConfig given a singular 'column' dict is normalised to columns=[<dict>]."""
+    data = _mask_or_filter_policy_catalog("mask")
+    policy = data["catalogs"]["cat"]["schemas"][0]["tables"][0]["policies"][0]
+    policy.pop("columns")
+    policy["column"] = {"alias": "email", "has_tags": {"pii": "email"}}
+
+    config = ResourcesConfig.model_validate(data)
+
+    resolved = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert len(resolved.columns) == 1
+    assert resolved.columns[0].alias == "email"
+    assert resolved.columns[0].has_tags == {"pii": "email"}
+
+
+def test_filter_policy_config_accepts_single_column_via_column_alias():
+    """A FilterPolicyConfig given a singular 'column' dict is normalised to columns=[<dict>]."""
+    data = _mask_or_filter_policy_catalog("filter")
+    policy = data["catalogs"]["cat"]["schemas"][0]["tables"][0]["policies"][0]
+    policy.pop("columns")
+    policy["column"] = {"alias": "region", "has_tags": {"geo": "eu"}}
+
+    config = ResourcesConfig.model_validate(data)
+
+    resolved = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert len(resolved.columns) == 1
+    assert resolved.columns[0].alias == "region"
+    assert resolved.columns[0].has_tags == {"geo": "eu"}
+
+
+@pytest.mark.parametrize("bad_value", ["email", ["email"], 42, None])
+def test_fgac_policy_config_rejects_column_when_not_a_dict(bad_value):
+    """If 'column' is supplied but is not a mapping, a validation error is raised."""
+    data = _mask_or_filter_policy_catalog("mask")
+    policy = data["catalogs"]["cat"]["schemas"][0]["tables"][0]["policies"][0]
+    policy.pop("columns")
+    policy["column"] = bad_value
+
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate(data)
+
+
+def test_fgac_policy_config_rejects_both_column_and_columns_provided():
+    """Supplying both 'column' and 'columns' on the same policy raises a validation error."""
+    data = _mask_or_filter_policy_catalog("mask")
+    policy = data["catalogs"]["cat"]["schemas"][0]["tables"][0]["policies"][0]
+    policy["column"] = {"alias": "email", "has_tags": {"pii": "email"}}
+    # 'columns' is already set by the helper
+
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate(data)
+
+
+def test_fgac_policy_config_omits_column_attribute_after_normalisation():
+    """After parsing, the resulting model exposes only 'columns' — no leftover 'column' attribute."""
+    data = _mask_or_filter_policy_catalog("mask")
+    policy = data["catalogs"]["cat"]["schemas"][0]["tables"][0]["policies"][0]
+    policy.pop("columns")
+    policy["column"] = {"alias": "email", "has_tags": {"pii": "email"}}
+
+    config = ResourcesConfig.model_validate(data)
+
+    resolved = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert not hasattr(resolved, "column")
+    assert hasattr(resolved, "columns")
+
+
 def test_mask_policy_config_accepts_none_except():
     """A MaskPolicyConfig with 'except' explicitly set to None parses successfully
     with exceptions=None."""

@@ -98,6 +98,23 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
 
     @model_validator(mode="before")
     @classmethod
+    def _normalise_singular_column(cls, data: dict) -> dict:
+        """Accept singular ``column: {...}`` as shorthand for ``columns: [{...}]``."""
+        if not isinstance(data, dict) or "column" not in data:
+            return data
+        if "columns" in data:
+            raise ValueError(
+                "cannot specify both 'column' and 'columns' on a policy"
+            )
+        column = data["column"]
+        if not isinstance(column, dict):
+            raise ValueError(
+                "'column' must be a mapping with 'alias' and 'has_tags' fields"
+            )
+        return {**{k: v for k, v in data.items() if k != "column"}, "columns": [column]}
+
+    @model_validator(mode="before")
+    @classmethod
     def _reject_duplicate_column_aliases(cls, data: dict) -> dict:
         if isinstance(data, dict):
             _check_duplicate_names(

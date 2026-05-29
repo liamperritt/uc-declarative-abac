@@ -416,7 +416,7 @@ Policy fields:
 - **`to`** — the principals the policy is applied to (e.g. who sees the masked value, who gets the row filter applied, or who receives the grant).
 - **`except`** — (`mask` and `filter` types only) principals exempted from the policy. Exempted principals see the original unmasked data or unfiltered rows.
 - **`has_tags`** — a tag-match block that scopes the policy to tagged objects (grants scope to securables within the attached level; masks/filters scope to tagged tables). AND semantics across multiple entries. Supports `'*'` wildcard tag values for matching only against the tag key. See the paragraphs below the examples for the full per-type behaviour.
-- **`columns`** — (`mask` and `filter` types only) an ordered list of column slots, each with an `alias` (a local name used to reference the column within this policy) and a `has_tags` block that selects the actual table column by tag. Every column in the list is passed as an argument to the `function` in declaration order, so the list must match the function's parameter signature. For **mask** polciies, the **first** column is the one the mask function is applied to (i.e. it becomes `ON COLUMN <alias>` in the generated SQL) and is also passed as the first argument to the function.
+- **`column`/`columns`** — (`mask` and `filter` types only) a single column, or an ordered list of column slots, each with an `alias` (a local name used to reference the column within this policy) and a `has_tags` block that selects the actual table column by tag. Every column in the list is passed as an argument to the `function` in declaration order, so the list must match the function's parameter signature. For **mask** polciies, the **first** column in the list is the one the mask function is applied to (i.e. it becomes `ON COLUMN <alias>` in the generated SQL) and is also passed as the first argument to the function.
 - **`privileges`** — (`grant` type only) the UC privileges to assign. Supported values: `select`, `modify`, `create_table`, `create_schema`, `create_function`, `create_volume`, `use_catalog`, `use_schema`, `read_volume`, `write_volume`, `execute`, `all_privileges`, `external_use_schema`, `manage`.
 - **`expiry_date`** — (`grant` type only) ISO 8601 date (`YYYY-MM-DD`) after which the grant is automatically revoked.
 
@@ -429,10 +429,10 @@ definitions:
       comment: Mask email PII from all users except account admins
       type: mask
       function: platform.abac.mask_email_pii
-      columns:
-        - alias: email
-          has_tags:
-            pii: email
+      column:
+        alias: email
+        has_tags:
+          pii: email
       to:
         - account_users
       except:
@@ -451,8 +451,8 @@ definitions:
       columns:
         - alias: name
           has_tags:
-            is_pii: 'true'
-            class: name
+            pii: '*'
+            class.name: '*'
         - alias: segment
           has_tags:
             segment: '*'
