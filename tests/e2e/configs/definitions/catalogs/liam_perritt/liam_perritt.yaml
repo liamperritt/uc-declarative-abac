@@ -2,6 +2,11 @@ definitions:
   catalogs:
     liam_perritt:
       name: liam_perritt
+      comment: Liam Perritt's Personal Catalog
+      rfa_destinations:
+        - liam.perritt@databricks.com
+        - liam.perritt2@databricks.com
+        - b4843c77-437e-4f49-ba24-a7fc1306b96b
       tags:
         uc_gov_env: test
         uc_gov_managed_by: uc_declarative_abac

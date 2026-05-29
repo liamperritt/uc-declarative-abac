@@ -34,14 +34,14 @@ _CREATION_DEPTH: dict[SecurableType, int] = {
 
 def _escape_sql_string_literal(value: str) -> str:
     """Escape single quotes for embedding in a SQL string literal."""
-    return value.replace("'", "\\'")
+    return value.replace("'", "\\'").replace('"', '\\"')
 
 
 def _build_comment_clause(comment: str | None) -> str:
     """Return a `` COMMENT '<escaped>''`` suffix, or empty string if no comment."""
     if not comment:
         return ""
-    return f" COMMENT '{_escape_sql_string_literal(comment)}'"
+    return f' COMMENT "{_escape_sql_string_literal(comment)}"'
 
 
 def _build_managed_location_clause(location: str | None) -> str:
@@ -214,27 +214,24 @@ def _build_comment_update_sql(securable_type: SecurableType, full_name: str, com
     """
     quoted = quote_securable(full_name)
     escaped = _escape_sql_string_literal(comment)
-    match securable_type:
-        case SecurableType.CATALOG:
-            return f"ALTER CATALOG {quoted} SET COMMENT '{escaped}'"
-        case SecurableType.SCHEMA:
-            return f"ALTER SCHEMA {quoted} SET COMMENT '{escaped}'"
-        case SecurableType.TABLE:
-            return f"COMMENT ON TABLE {quoted} IS '{escaped}'"
-        case SecurableType.VOLUME:
-            return f"COMMENT ON VOLUME {quoted} IS '{escaped}'"
-        case _:
-            raise GovernorError(
-                f"Comment updates not supported for {securable_type.value}."
-            )
+    if securable_type in (SecurableType.COLUMN, SecurableType.FUNCTION):
+        raise GovernorError(
+            f"Comment updates not supported for {securable_type.value}."
+        )
+    return f'COMMENT ON {securable_type.name} {quoted} IS "{escaped}"'
 
 
 def _apply_owner_update(uc_helper: UnityCatalogHelper, update: AttributeUpdate) -> None:
-    """Apply an owner change via the SDK ``update_owner`` dispatch."""
-    if isinstance(update.new_value, Principal):
-        owner_id = ensure_resolved(update.new_value).identifier
+    """Apply an owner change via the SDK ``update_owner`` dispatch.
+
+    ``update.new_value`` is a single-element ``frozenset[Principal]``; we
+    unwrap it here at the SDK boundary.
+    """
+    principal = next(iter(update.new_value))
+    if isinstance(principal, Principal):
+        owner_id = ensure_resolved(principal).identifier
     else:
-        owner_id = update.new_value
+        owner_id = principal
     uc_helper.update_owner(update.securable_type, update.full_name, owner_id)
 
 
@@ -283,12 +280,30 @@ def _apply_attribute_update(
                 return False
             return True
         case "comment":
+            new_comment = next(iter(update.new_value))
             stmt = _build_comment_update_sql(
-                update.securable_type, update.full_name, str(update.new_value),
+                update.securable_type, update.full_name, str(new_comment),
             )
             return _execute_sql_attribute_update(
                 uc_helper, change_logger, dry_run, statements, stmt,
             )
+        case "rfa_destinations":
+            if dry_run:
+                return True
+            try:
+                uc_helper.update_rfa_destinations(
+                    update.securable_type, update.full_name, update.new_value,
+                )
+            except Exception as exc:
+                change_logger.log_error(ExecutionError(
+                    context=(
+                        f"update_rfa_destinations("
+                        f"{update.securable_type.value}, {update.full_name})"
+                    ),
+                    exception=exc,
+                ))
+                return False
+            return True
         case _:
             change_logger.log_error(ExecutionError(
                 context=f"Unknown attribute {update.attribute!r} on {update.securable_type.value} {update.full_name}",

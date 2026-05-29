@@ -75,7 +75,7 @@ def _build_policy_sql(policy: Policy, or_replace: bool) -> str:
     ]
     if policy.comment:
         escaped = policy.comment.replace("'", "\\'")
-        lines.append(f"COMMENT '{escaped}'")
+        lines.append(f'COMMENT "{escaped}"')
     lines.extend([
         f"{body_type} {quote_securable(policy.function_name)}",
         f"TO {_quote_principals(policy.to_principals)}",

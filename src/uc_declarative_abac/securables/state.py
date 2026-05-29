@@ -15,17 +15,18 @@ class SecurableAttributes:
     object state). Both desired (from config) and actual (from system tables)
     use this same representation.
 
-    To add a new governed attribute (e.g. rfa_destination):
+    To add a new governed attribute:
     1. Add the field here with a default of None
     2. Update the compiler to emit it from config
-    3. Update the state query to fetch it
-    4. Add an _apply_<attr>_update() method to the executor
+    3. Update the state query (or per-target fetcher) to populate it
+    4. Add a case branch in the executor's ``_apply_attribute_update``
     """
 
     securable_type: SecurableType
     full_name: str
     owner: Principal | None = None
     comment: str | None = None
+    rfa_destinations: frozenset[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -81,8 +82,8 @@ class Table(Securable):
 
     ``table_type`` is populated only on the actual-state side (from
     ``information_schema.tables``) — values include ``"MANAGED"``, ``"EXTERNAL"``,
-    ``"VIEW"``, ``"MATERIALIZED_VIEW"``, ``"STREAMING_TABLE"``. The differ uses
-    ``"VIEW"`` to refuse comment updates on views.
+    ``"VIEW"``, ``"METRIC_VIEW"``, ``"MATERIALIZED_VIEW"``, ``"STREAMING_TABLE"``. The differ uses
+    ``"VIEW"`` and ``"METRIC_VIEW"`` to refuse comment updates on views.
     """
 
     securable_type: Literal[SecurableType.TABLE]
@@ -111,13 +112,23 @@ class AttributeUpdate:
 
     Generic over attribute name so the differ doesn't need to know about
     each attribute type — it just compares fields and emits updates.
+
+    ``old_value`` and ``new_value`` are always set-shaped so scalar attributes
+    (``owner``, ``comment``) and collection attributes (``rfa_destinations``)
+    share one representation:
+
+    - scalar attributes wrap their value in a 1-element frozenset (empty when
+      no value is set)
+    - collection attributes pass through as the natural frozenset
+
+    The executor unwraps single-element frozensets at the SQL/SDK boundary.
     """
 
     securable_type: SecurableType
     full_name: str
     attribute: str
-    old_value: str | Principal
-    new_value: str | Principal
+    old_value: frozenset[str] | frozenset[Principal]
+    new_value: frozenset[str] | frozenset[Principal]
 
 
 @dataclass

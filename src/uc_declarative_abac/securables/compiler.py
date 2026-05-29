@@ -12,13 +12,16 @@ def _emit_attributes(
 ) -> SecurableAttributes | None:
     """Return a SecurableAttributes if any managed (updatable) attribute is set, else None.
 
-    Managed attributes today: ``owner`` and ``comment``. The owner is emitted as
-    an unresolved Principal (principal_type=UNKNOWN) carrying the display name
-    from config; resolution happens post-fetch. ``comment`` is read directly
-    from the config and only applies to the four taggable types (catalogs,
-    schemas, tables, volumes); for functions only ``owner`` is emitted here
-    (the function's comment lives on the ``Function`` securable itself, since
-    it's part of the replaceable definition).
+    Managed attributes: ``owner``, ``comment``, and ``rfa_destinations``. Owner is
+    emitted as an unresolved Principal (principal_type=UNKNOWN) carrying the
+    display name from config; resolution happens post-fetch. ``comment`` is read
+    directly from the config and only applies to the four taggable types
+    (catalogs, schemas, tables, volumes); for functions only ``owner`` and
+    ``rfa_destinations`` are emitted here (the function's comment lives on the
+    ``Function`` securable itself since it's part of the replaceable definition).
+    ``rfa_destinations`` is stored as a frozenset (order-insensitive); the
+    Pydantic validator has already classified every entry, so no further
+    validation is needed here.
 
     ``location`` is **not** a managed attribute — it's only consulted at CREATE
     time (see ``compile_desired_securables``), never diffed.
@@ -32,13 +35,17 @@ def _emit_attributes(
     else:
         comment = getattr(obj, "comment", None)
 
-    if owner is None and comment is None:
+    raw_rfa = getattr(obj, "rfa_destinations", None)
+    rfa_destinations = frozenset(raw_rfa) if raw_rfa else None
+
+    if owner is None and comment is None and rfa_destinations is None:
         return None
     return SecurableAttributes(
         securable_type=securable_type,
         full_name=obj.full_name,
         owner=owner,
         comment=comment,
+        rfa_destinations=rfa_destinations,
     )
 
 

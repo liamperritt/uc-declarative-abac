@@ -125,8 +125,8 @@ def test_securable_executor_calls_update_owner():
                 securable_type=SecurableType.CATALOG,
                 full_name="my_catalog",
                 attribute="owner",
-                old_value="old",
-                new_value="new",
+                old_value=frozenset({"old"}),
+                new_value=frozenset({"new"}),
             ),
         ],
     )
@@ -228,8 +228,8 @@ def test_securable_executor_logs_changes_in_dry_run():
                 securable_type=SecurableType.CATALOG,
                 full_name="my_catalog",
                 attribute="owner",
-                old_value="old",
-                new_value="new",
+                old_value=frozenset({"old"}),
+                new_value=frozenset({"new"}),
             ),
         ],
     )
@@ -263,8 +263,8 @@ def test_securable_executor_extracts_identifier_from_principal():
                 securable_type=SecurableType.FUNCTION,
                 full_name="cat.schema.my_func",
                 attribute="owner",
-                old_value="old_owner",
-                new_value=sp_principal,
+                old_value=frozenset({"old_owner"}),
+                new_value=frozenset({sp_principal}),
             ),
         ],
     )
@@ -298,7 +298,7 @@ def test_securable_executor_create_function_includes_comment_when_set():
     )
 
     (sql,) = execute_securable_diff(uc_helper, diff, ChangeLogger())
-    _assert_sql_contains(sql, "CREATE FUNCTION", "COMMENT 'Identity function'")
+    _assert_sql_contains(sql, "CREATE FUNCTION", 'COMMENT "Identity function"')
 
 
 def test_securable_executor_create_function_omits_comment_clause_when_unset():
@@ -334,7 +334,7 @@ def test_securable_executor_replace_function_includes_comment_when_set():
     )
 
     (sql,) = execute_securable_diff(uc_helper, diff, ChangeLogger())
-    _assert_sql_contains(sql, "CREATE OR REPLACE FUNCTION", "COMMENT 'Updated docs'")
+    _assert_sql_contains(sql, "CREATE OR REPLACE FUNCTION", 'COMMENT "Updated docs"')
 
 
 def test_securable_executor_escapes_single_quotes_in_comment():
@@ -353,7 +353,7 @@ def test_securable_executor_escapes_single_quotes_in_comment():
     )
 
     (sql,) = execute_securable_diff(uc_helper, diff, ChangeLogger())
-    assert "COMMENT 'It\\'s a comment'" in sql
+    assert '''COMMENT "It\\'s a comment"''' in sql
 
 
 # ---------------------------------------------------------------------------
@@ -746,14 +746,14 @@ def test_securable_executor_alters_catalog_comment_via_alter_sql():
         securable_type=SecurableType.CATALOG,
         full_name="my_cat",
         attribute="comment",
-        old_value="Old",
-        new_value="New",
+        old_value=frozenset({"Old"}),
+        new_value=frozenset({"New"}),
     )])
 
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
 
     assert len(stmts) == 1
-    _assert_sql_contains(stmts[0], "ALTER CATALOG", "my_cat", "SET COMMENT", "New")
+    _assert_sql_contains(stmts[0], "COMMENT ON CATALOG", "my_cat", "IS", "New")
 
 
 def test_securable_executor_alters_schema_comment_via_alter_sql():
@@ -762,14 +762,14 @@ def test_securable_executor_alters_schema_comment_via_alter_sql():
         securable_type=SecurableType.SCHEMA,
         full_name="cat.sales",
         attribute="comment",
-        old_value="Old",
-        new_value="New",
+        old_value=frozenset({"Old"}),
+        new_value=frozenset({"New"}),
     )])
 
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
 
     assert len(stmts) == 1
-    _assert_sql_contains(stmts[0], "ALTER SCHEMA", "cat.sales", "SET COMMENT", "New")
+    _assert_sql_contains(stmts[0], "COMMENT ON SCHEMA", "cat.sales", "IS", "New")
 
 
 def test_securable_executor_alters_table_comment_via_comment_on_sql():
@@ -779,8 +779,8 @@ def test_securable_executor_alters_table_comment_via_comment_on_sql():
         securable_type=SecurableType.TABLE,
         full_name="cat.sales.orders",
         attribute="comment",
-        old_value="Old",
-        new_value="New",
+        old_value=frozenset({"Old"}),
+        new_value=frozenset({"New"}),
     )])
 
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
@@ -795,8 +795,8 @@ def test_securable_executor_alters_volume_comment_via_comment_on_sql():
         securable_type=SecurableType.VOLUME,
         full_name="cat.landing.raw",
         attribute="comment",
-        old_value="Old",
-        new_value="New",
+        old_value=frozenset({"Old"}),
+        new_value=frozenset({"New"}),
     )])
 
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
@@ -812,8 +812,8 @@ def test_securable_executor_escapes_single_quotes_in_comment_update():
         securable_type=SecurableType.CATALOG,
         full_name="my_cat",
         attribute="comment",
-        old_value="",
-        new_value="It's risky",
+        old_value=frozenset({""}),
+        new_value=frozenset({"It's risky"}),
     )])
 
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
@@ -834,8 +834,8 @@ def test_securable_executor_skips_alter_comment_in_dry_run():
         securable_type=SecurableType.CATALOG,
         full_name="my_cat",
         attribute="comment",
-        old_value="Old",
-        new_value="New",
+        old_value=frozenset({"Old"}),
+        new_value=frozenset({"New"}),
     )])
 
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger(), dry_run=True)
@@ -854,21 +854,176 @@ def test_securable_executor_logs_error_and_continues_on_alter_comment_failure():
             securable_type=SecurableType.CATALOG,
             full_name="bad_cat",
             attribute="comment",
-            old_value="Old",
-            new_value="New",
+            old_value=frozenset({"Old"}),
+            new_value=frozenset({"New"}),
         ),
         AttributeUpdate(
             securable_type=SecurableType.SCHEMA,
             full_name="good.sch",
             attribute="comment",
-            old_value="Old",
-            new_value="New",
+            old_value=frozenset({"Old"}),
+            new_value=frozenset({"New"}),
         ),
     ])
 
     stmts = execute_securable_diff(uc_helper, diff, logger)
 
     assert len(stmts) == 1
-    _assert_sql_contains(stmts[0], "ALTER SCHEMA", "good.sch")
+    _assert_sql_contains(stmts[0], "COMMENT ON SCHEMA", "good.sch")
     assert len(logger.errors) == 1
-    assert "ALTER CATALOG" in logger.errors[0].context
+    assert "COMMENT ON CATALOG" in logger.errors[0].context
+
+
+# ---------------------------------------------------------------------------
+# RFA destinations updates
+# ---------------------------------------------------------------------------
+
+
+def test_securable_executor_dispatches_rfa_destinations_to_update_rfa_destinations():
+    """An rfa_destinations AttributeUpdate calls uc_helper.update_rfa_destinations."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.TABLE,
+                full_name="cat.sch.orders",
+                attribute="rfa_destinations",
+                old_value=frozenset({"a@b.com"}),
+                new_value=frozenset({"a@b.com", "c@d.com"}),
+            ),
+        ],
+    )
+
+    execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    uc_helper.update_rfa_destinations.assert_called_once()
+    # The SDK call should not leak to execute_sql.
+    uc_helper.execute_sql.assert_not_called()
+
+
+def test_securable_executor_passes_destination_ids_as_frozenset():
+    """The third arg (destination_ids) passed to update_rfa_destinations is a frozenset[str]."""
+    uc_helper = MagicMock()
+    new_destinations = frozenset({"a@b.com", "c@d.com"})
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.TABLE,
+                full_name="cat.sch.orders",
+                attribute="rfa_destinations",
+                old_value=frozenset({"a@b.com"}),
+                new_value=new_destinations,
+            ),
+        ],
+    )
+
+    execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    uc_helper.update_rfa_destinations.assert_called_once()
+    call_args = uc_helper.update_rfa_destinations.call_args
+    # Locate the destination_ids argument from positional or keyword form.
+    if "destination_ids" in call_args.kwargs:
+        passed = call_args.kwargs["destination_ids"]
+    else:
+        # Positional: (securable_type, full_name, destination_ids)
+        passed = call_args.args[2]
+
+    assert isinstance(passed, frozenset)
+    assert passed == new_destinations
+
+
+def test_securable_executor_skips_rfa_destinations_update_in_dry_run():
+    """dry_run=True must NOT invoke uc_helper.update_rfa_destinations."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.TABLE,
+                full_name="cat.sch.orders",
+                attribute="rfa_destinations",
+                old_value=frozenset({"a@b.com"}),
+                new_value=frozenset({"a@b.com", "c@d.com"}),
+            ),
+        ],
+    )
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger(), dry_run=True)
+
+    assert stmts == []
+    uc_helper.update_rfa_destinations.assert_not_called()
+    uc_helper.execute_sql.assert_not_called()
+
+
+def test_securable_executor_logs_error_and_continues_when_rfa_update_fails():
+    """If update_rfa_destinations raises, log an ExecutionError and don't leak to SQL."""
+    uc_helper = MagicMock()
+    uc_helper.update_rfa_destinations.side_effect = RuntimeError("boom")
+    logger = ChangeLogger()
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.TABLE,
+                full_name="cat.sch.orders",
+                attribute="rfa_destinations",
+                old_value=frozenset({"a@b.com"}),
+                new_value=frozenset({"c@d.com"}),
+            ),
+        ],
+    )
+
+    execute_securable_diff(uc_helper, diff, logger)
+
+    assert len(logger.errors) == 1
+    # RFA is SDK-only; no SQL fallback on failure.
+    uc_helper.execute_sql.assert_not_called()
+
+
+def test_securable_executor_returns_empty_statements_for_rfa_destinations_update():
+    """RFA updates are SDK calls, not SQL — the returned statements list stays empty."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.TABLE,
+                full_name="cat.sch.orders",
+                attribute="rfa_destinations",
+                old_value=frozenset({"a@b.com"}),
+                new_value=frozenset({"a@b.com", "c@d.com"}),
+            ),
+        ],
+    )
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    assert stmts == []
+
+
+def test_securable_executor_handles_function_securable_type_for_rfa():
+    """The SDK call carries the securable_type (e.g. FUNCTION) and full_name through."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.FUNCTION,
+                full_name="cat.sch.fn",
+                attribute="rfa_destinations",
+                old_value=frozenset(),
+                new_value=frozenset({"a@b.com"}),
+            ),
+        ],
+    )
+
+    execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    uc_helper.update_rfa_destinations.assert_called_once()
+    call_args = uc_helper.update_rfa_destinations.call_args
+    # Find securable_type and full_name in either positional or keyword position.
+    securable_type_passed = call_args.kwargs.get("securable_type")
+    full_name_passed = call_args.kwargs.get("full_name")
+    if securable_type_passed is None:
+        securable_type_passed = call_args.args[0]
+    if full_name_passed is None:
+        full_name_passed = call_args.args[1]
+
+    assert securable_type_passed == SecurableType.FUNCTION
+    assert full_name_passed == "cat.sch.fn"

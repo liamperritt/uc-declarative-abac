@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.service.catalog import PolicyInfo
+from databricks.sdk.errors import NotFound
+from databricks.sdk.service.catalog import (
+    AccessRequestDestinations,
+    DestinationType,
+    NotificationDestination,
+    PolicyInfo,
+    Securable as SdkSecurable,
+)
 from databricks.sdk.service.catalog import PolicyType as SdkPolicyType
+from databricks.sdk.service.catalog import SecurableType as SdkSecurableType
 from databricks.sdk.service.sql import (
     Disposition,
     ExecuteStatementRequestOnWaitTimeout,
@@ -27,12 +36,15 @@ from uc_declarative_abac.tags.state import SecurableTag
 from uc_declarative_abac.privileges.state import SecurablePrivilege
 from uc_declarative_abac.securables.state import Column, Function, SecurableAttributes, Securable, Table
 from uc_declarative_abac.types import GovernorError, PolicyType, PrincipalType, PrivilegeType, SecurableType
+from uc_declarative_abac.utils import classify_rfa_destination
 
 _logger = logging.getLogger("uc_declarative_abac")
 
 _POLL_INTERVAL_SECONDS = 5
 
 _MAX_POLICY_LIST_WORKERS = 16
+
+_MAX_RFA_WORKERS = 16
 
 
 def _build_catalog_in_clause(catalog_names: list[str]) -> str:
@@ -430,6 +442,61 @@ def _extract_using_columns(using) -> tuple[str, ...]:
     return tuple(arg.column for arg in using if arg.column is not None)
 
 
+_RFA_KIND_TO_SDK_TYPE: dict[str, DestinationType] = {
+    "EMAIL": DestinationType.EMAIL,
+    "URL": DestinationType.URL,
+    "GUID": DestinationType.GENERIC_WEBHOOK,  # GUIDs leave destination_type unset; the RFA API infers it.
+}
+
+
+def _to_sdk_securable_type(securable_type: SecurableType) -> SdkSecurableType:
+    """Map our SecurableType enum to the SDK's catalog.SecurableType enum."""
+    return SdkSecurableType[securable_type.name]
+
+
+def _build_notification_destination(destination_id: str) -> NotificationDestination:
+    """Build an SDK NotificationDestination, classifying the id to set destination_type.
+
+    GUIDs leave ``destination_type`` as ``None`` — the API infers the underlying
+    destination's type (Slack / Teams / GenericWebhook) from the registered
+    destination id. EMAIL and URL get their explicit SDK enum values.
+    """
+    kind = classify_rfa_destination(destination_id)
+    return NotificationDestination(
+        destination_id=destination_id,
+        destination_type=_RFA_KIND_TO_SDK_TYPE[kind],
+    )
+
+
+def _merge_rfa_into_attributes(
+    attributes: set[SecurableAttributes],
+    rfa_map: dict[tuple[SecurableType, str], frozenset[str]],
+) -> set[SecurableAttributes]:
+    """Return a new SecurableAttributes set with rfa_destinations populated per target.
+
+    For each ``(securable_type, full_name)`` in ``rfa_map``:
+
+    - If a matching row exists in ``attributes``, replace it with one carrying
+      the fetched ``rfa_destinations``.
+    - Otherwise (target securable absent from info_schema — typically because
+      it's about to be created), insert a fresh row so the differ sees an
+      actual-side baseline.
+    """
+    by_key = {(a.securable_type, a.full_name): a for a in attributes}
+    for key, destinations in rfa_map.items():
+        existing = by_key.get(key)
+        if existing is not None:
+            by_key[key] = dataclasses.replace(existing, rfa_destinations=destinations)
+        else:
+            sec_type, full_name = key
+            by_key[key] = SecurableAttributes(
+                securable_type=sec_type,
+                full_name=full_name,
+                rfa_destinations=destinations,
+            )
+    return set(by_key.values())
+
+
 class UnityCatalogHelper:
     """Wraps WorkspaceClient for querying UC state and executing SQL.
 
@@ -506,12 +573,23 @@ class UnityCatalogHelper:
         return self._privileges_cache
 
     def fetch_actual_securables(
-        self, catalog_names: list[str]
+        self,
+        catalog_names: list[str],
+        rfa_targets: set[tuple[SecurableType, str]] | None = None,
     ) -> tuple[set[Securable], set[SecurableAttributes]]:
         """Query system tables for securable attributes and function definitions.
 
         Returns a tuple of (securables, attributes) for the given catalogs.
         Results are cached after the first call.
+
+        ``rfa_targets`` is the optional set of ``(securable_type, full_name)``
+        pairs that have ``rfa_destinations`` declared in config. When supplied,
+        the helper fans out one RFA SDK call per target (in parallel) and
+        merges the fetched ``rfa_destinations`` into the returned (and cached)
+        ``SecurableAttributes`` set — including inserting fresh rows for
+        targets that don't yet exist in info_schema. When omitted or empty,
+        no RFA fetch fires and ``SecurableAttributes.rfa_destinations``
+        remains ``None`` on every row.
         """
         if self._securables_cache is not None and self._attributes_cache is not None:
             return self._securables_cache, self._attributes_cache
@@ -523,8 +601,82 @@ class UnityCatalogHelper:
 
         response = self._execute_and_poll(_build_securables_query(catalog_names))
         rows = _fetch_external_links_rows(response)
-        self._securables_cache, self._attributes_cache = _parse_securable_rows(rows)
+        securables, attributes = _parse_securable_rows(rows)
+
+        if rfa_targets:
+            rfa_map = self._fetch_rfa_destinations(rfa_targets)
+            attributes = _merge_rfa_into_attributes(attributes, rfa_map)
+
+        self._securables_cache = securables
+        self._attributes_cache = attributes
         return self._securables_cache, self._attributes_cache
+
+    def _fetch_rfa_destinations(
+        self, targets: set[tuple[SecurableType, str]]
+    ) -> dict[tuple[SecurableType, str], frozenset[str]]:
+        """Fan out one ``rfa.get_access_request_destinations`` call per target.
+
+        404s are treated as ``frozenset()`` — the securable either has no
+        configured destinations or doesn't exist yet (about to be created).
+        Other SDK errors propagate (the run will fail rather than silently
+        skip an actual-state row that might lead to false diffs).
+        """
+        result: dict[tuple[SecurableType, str], frozenset[str]] = {}
+        with ThreadPoolExecutor(max_workers=_MAX_RFA_WORKERS) as pool:
+            futures = {
+                pool.submit(
+                    self._get_rfa_destination_ids, sec_type, full_name,
+                ): (sec_type, full_name)
+                for sec_type, full_name in targets
+            }
+            for future in as_completed(futures):
+                key = futures[future]
+                result[key] = future.result()
+        return result
+
+    def _get_rfa_destination_ids(
+        self, securable_type: SecurableType, full_name: str,
+    ) -> frozenset[str]:
+        """Fetch destination ids for one securable; treat 404 as empty."""
+        try:
+            response = self._client.rfa.get_access_request_destinations(
+                securable_type=securable_type.value.lower(),
+                full_name=full_name,
+            )
+        except NotFound:
+            return frozenset()
+        destinations = response.destinations or []
+        return frozenset(d.destination_id for d in destinations)
+
+    def update_rfa_destinations(
+        self,
+        securable_type: SecurableType,
+        full_name: str,
+        destination_ids: frozenset[str],
+    ) -> None:
+        """Replace the RFA destinations on a securable via the RFA SDK.
+
+        Builds an ``AccessRequestDestinations`` payload with one
+        ``NotificationDestination`` per id (destination_type classified from
+        the id's shape: EMAIL/URL get the matching SDK enum; GUIDs leave it
+        ``None`` so the API can look up the registered destination's type).
+        Posts with ``update_mask="destinations"`` so only the destinations
+        field is mutated.
+        """
+        notification_destinations = [
+            _build_notification_destination(d) for d in destination_ids
+        ]
+        payload = AccessRequestDestinations(
+            securable=SdkSecurable(
+                full_name=full_name,
+                type=_to_sdk_securable_type(securable_type),
+            ),
+            destinations=notification_destinations,
+        )
+        self._client.rfa.update_access_request_destinations(
+            access_request_destinations=payload,
+            update_mask="destinations",
+        )
 
     def update_owner(
         self, securable_type: SecurableType, full_name: str, new_owner: str

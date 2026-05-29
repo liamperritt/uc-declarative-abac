@@ -86,8 +86,8 @@ def test_securable_differ_detects_owner_change():
             securable_type=SecurableType.CATALOG,
             full_name="my_catalog",
             attribute="owner",
-            old_value=_owner("old_owner"),
-            new_value=_owner("new_owner"),
+            old_value=frozenset({_owner("old_owner")}),
+            new_value=frozenset({_owner("new_owner")}),
         )
     ]
 
@@ -145,8 +145,8 @@ def test_securable_differ_records_old_and_new_values():
 
     assert len(diff.attributes_to_update) == 1
     update = diff.attributes_to_update[0]
-    assert update.old_value == _owner("team_a")
-    assert update.new_value == _owner("team_b")
+    assert update.old_value == frozenset({_owner("team_a")})
+    assert update.new_value == frozenset({_owner("team_b")})
     assert update.attribute == "owner"
     assert update.securable_type == SecurableType.SCHEMA
     assert update.full_name == "catalog.my_schema"
@@ -237,7 +237,7 @@ def test_securable_differ_emits_attribute_update_for_created_securable():
     update = diff.attributes_to_update[0]
     assert update.full_name == "catalog.schema.new_func"
     assert update.attribute == "owner"
-    assert update.new_value == _owner("team_data")
+    assert update.new_value == frozenset({_owner("team_data")})
 
 
 # ---------------------------------------------------------------------------
@@ -267,10 +267,8 @@ def test_securable_differ_emits_principal_values_in_attribute_update():
 
     assert len(diff.attributes_to_update) == 1
     update = diff.attributes_to_update[0]
-    assert isinstance(update.new_value, Principal)
-    assert update.new_value == new_principal
-    assert isinstance(update.old_value, Principal)
-    assert update.old_value == old_principal
+    assert update.new_value == frozenset({new_principal})
+    assert update.old_value == frozenset({old_principal})
 
 
 # ---------------------------------------------------------------------------
@@ -351,8 +349,8 @@ def test_securable_differ_detects_catalog_comment_change():
     assert len(diff.attributes_to_update) == 1
     update = diff.attributes_to_update[0]
     assert update.attribute == "comment"
-    assert update.old_value == "Old"
-    assert update.new_value == "New"
+    assert update.old_value == frozenset({"Old"})
+    assert update.new_value == frozenset({"New"})
 
 
 def test_securable_differ_detects_schema_comment_change():
@@ -361,7 +359,7 @@ def test_securable_differ_detects_schema_comment_change():
 
     diff = compute_securable_diff(desired, actual, set(), set(), _resolver(), _change_logger())
 
-    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [("comment", "New")]
+    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [("comment", frozenset({"New"}))]
 
 
 def test_securable_differ_detects_table_comment_change_on_non_view_table():
@@ -376,7 +374,7 @@ def test_securable_differ_detects_table_comment_change_on_non_view_table():
 
     diff = compute_securable_diff(desired, actual, set(), {table}, _resolver(), _change_logger())
 
-    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [("comment", "New")]
+    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [("comment", frozenset({"New"}))]
 
 
 def test_securable_differ_detects_volume_comment_change():
@@ -385,7 +383,7 @@ def test_securable_differ_detects_volume_comment_change():
 
     diff = compute_securable_diff(desired, actual, set(), set(), _resolver(), _change_logger())
 
-    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [("comment", "New")]
+    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [("comment", frozenset({"New"}))]
 
 
 def test_securable_differ_ignores_matching_comments():
@@ -552,7 +550,7 @@ def test_securable_differ_emits_owner_change_for_view_table_type():
     diff = compute_securable_diff(desired, actual, set(), {view}, _resolver(), logger)
 
     assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [
-        ("owner", _owner("new_owner")),
+        ("owner", frozenset({_owner("new_owner")})),
     ]
     assert logger.errors == []
 
@@ -571,7 +569,7 @@ def test_securable_differ_emits_owner_change_for_managed_table():
     diff = compute_securable_diff(desired, actual, set(), {table}, _resolver(), logger)
 
     assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [
-        ("owner", _owner("new_owner")),
+        ("owner", frozenset({_owner("new_owner")})),
     ]
     assert logger.errors == []
 
@@ -611,7 +609,7 @@ def test_securable_differ_owner_guard_does_not_affect_non_owner_attributes_on_mv
 
     # The owner guard is not triggered. The comment update is emitted normally since
     # MATERIALIZED_VIEW is not in the comment-immutable (VIEW-only) set.
-    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [("comment", "new")]
+    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [("comment", frozenset({"new"}))]
     assert logger.errors == []
 
 
@@ -1067,6 +1065,258 @@ def test_nonexistent_securable_error_message_recommends_enable_taggable_creation
     assert "--enable-taggable-creation" in msg
     # The old phrasing should be gone.
     assert "Either create it in UC" not in msg
+
+
+# ---------------------------------------------------------------------------
+# rfa_destinations diff tests
+# ---------------------------------------------------------------------------
+
+
+def test_securable_differ_detects_rfa_destinations_change():
+    """An rfa_destinations difference emits an AttributeUpdate with frozenset values."""
+    desired_attrs = {
+        SecurableAttributes(
+            securable_type=SecurableType.TABLE,
+            full_name="cat.sch.orders",
+            rfa_destinations=frozenset({"dest_a", "dest_b"}),
+        )
+    }
+    actual_attrs = {
+        SecurableAttributes(
+            securable_type=SecurableType.TABLE,
+            full_name="cat.sch.orders",
+            rfa_destinations=frozenset({"dest_a"}),
+        )
+    }
+    table = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sch.orders",
+        table_type="MANAGED",
+    )
+
+    diff = compute_securable_diff(
+        desired_attrs, actual_attrs, set(), {table}, _resolver(), _change_logger(),
+    )
+
+    assert diff.attributes_to_update == [
+        AttributeUpdate(
+            securable_type=SecurableType.TABLE,
+            full_name="cat.sch.orders",
+            attribute="rfa_destinations",
+            old_value=frozenset({"dest_a"}),
+            new_value=frozenset({"dest_a", "dest_b"}),
+        )
+    ]
+
+
+def test_securable_differ_ignores_matching_rfa_destinations():
+    """Same set of destination ids in different orders produces no diff."""
+    desired_attrs = {
+        SecurableAttributes(
+            securable_type=SecurableType.TABLE,
+            full_name="cat.sch.orders",
+            rfa_destinations=frozenset({"dest_a", "dest_b", "dest_c"}),
+        )
+    }
+    actual_attrs = {
+        SecurableAttributes(
+            securable_type=SecurableType.TABLE,
+            full_name="cat.sch.orders",
+            rfa_destinations=frozenset({"dest_c", "dest_a", "dest_b"}),
+        )
+    }
+    table = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sch.orders",
+        table_type="MANAGED",
+    )
+
+    diff = compute_securable_diff(
+        desired_attrs, actual_attrs, set(), {table}, _resolver(), _change_logger(),
+    )
+
+    assert diff.attributes_to_update == []
+
+
+def test_securable_differ_ignores_rfa_destinations_when_desired_is_none():
+    """Desired rfa_destinations None + actual rfa_destinations set → no diff (unmanaged direction)."""
+    desired_attrs = {
+        SecurableAttributes(
+            securable_type=SecurableType.TABLE,
+            full_name="cat.sch.orders",
+            rfa_destinations=None,
+        )
+    }
+    actual_attrs = {
+        SecurableAttributes(
+            securable_type=SecurableType.TABLE,
+            full_name="cat.sch.orders",
+            rfa_destinations=frozenset({"dest_a", "dest_b"}),
+        )
+    }
+    table = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sch.orders",
+        table_type="MANAGED",
+    )
+
+    diff = compute_securable_diff(
+        desired_attrs, actual_attrs, set(), {table}, _resolver(), _change_logger(),
+    )
+
+    assert diff.attributes_to_update == []
+
+
+def test_securable_differ_emits_rfa_destinations_update_for_newly_created_function():
+    """A new function with desired rfa_destinations emits both a create entry AND an
+    rfa_destinations attribute update (RFA must be set after CREATE, unlike comment)."""
+    func = _make_function(full_name="cat.sch.new_func")
+
+    desired_attrs = {
+        SecurableAttributes(
+            securable_type=SecurableType.FUNCTION,
+            full_name="cat.sch.new_func",
+            rfa_destinations=frozenset({"dest_a", "dest_b"}),
+        )
+    }
+    actual_attrs: set[SecurableAttributes] = set()
+
+    diff = compute_securable_diff(
+        desired_attrs, actual_attrs, {func}, set(), _resolver(), _change_logger(),
+    )
+
+    assert func in diff.securables_to_create
+    rfa_updates = [u for u in diff.attributes_to_update if u.attribute == "rfa_destinations"]
+    assert len(rfa_updates) == 1
+    assert rfa_updates[0].full_name == "cat.sch.new_func"
+    assert rfa_updates[0].new_value == frozenset({"dest_a", "dest_b"})
+
+
+def test_securable_differ_emits_rfa_destinations_update_to_clear_destinations():
+    """Desired = empty frozenset vs actual = non-empty frozenset emits a clear update."""
+    desired_attrs = {
+        SecurableAttributes(
+            securable_type=SecurableType.TABLE,
+            full_name="cat.sch.orders",
+            rfa_destinations=frozenset(),
+        )
+    }
+    actual_attrs = {
+        SecurableAttributes(
+            securable_type=SecurableType.TABLE,
+            full_name="cat.sch.orders",
+            rfa_destinations=frozenset({"dest_a", "dest_b"}),
+        )
+    }
+    table = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sch.orders",
+        table_type="MANAGED",
+    )
+
+    diff = compute_securable_diff(
+        desired_attrs, actual_attrs, set(), {table}, _resolver(), _change_logger(),
+    )
+
+    assert len(diff.attributes_to_update) == 1
+    update = diff.attributes_to_update[0]
+    assert update.attribute == "rfa_destinations"
+    assert update.new_value == frozenset()
+    assert update.old_value == frozenset({"dest_a", "dest_b"})
+
+
+def test_securable_differ_records_old_and_new_rfa_destinations():
+    """AttributeUpdate carries the correct old_value and new_value as frozensets."""
+    desired_attrs = {
+        SecurableAttributes(
+            securable_type=SecurableType.SCHEMA,
+            full_name="cat.sales",
+            rfa_destinations=frozenset({"dest_new_1", "dest_new_2"}),
+        )
+    }
+    actual_attrs = {
+        SecurableAttributes(
+            securable_type=SecurableType.SCHEMA,
+            full_name="cat.sales",
+            rfa_destinations=frozenset({"dest_old"}),
+        )
+    }
+
+    diff = compute_securable_diff(
+        desired_attrs, actual_attrs, set(), set(), _resolver(), _change_logger(),
+    )
+
+    assert len(diff.attributes_to_update) == 1
+    update = diff.attributes_to_update[0]
+    assert update.attribute == "rfa_destinations"
+    assert update.securable_type == SecurableType.SCHEMA
+    assert update.full_name == "cat.sales"
+    assert update.old_value == frozenset({"dest_old"})
+    assert update.new_value == frozenset({"dest_new_1", "dest_new_2"})
+
+
+# ---------------------------------------------------------------------------
+# Regression: owner resolution must preserve non-owner fields
+# ---------------------------------------------------------------------------
+
+
+def test_securable_differ_preserves_actual_comment_when_owner_resolves():
+    """An actual-side row that carries both an owner AND a comment must keep its
+    comment after owner resolution. Otherwise the diff loop sees actual.comment
+    as missing and emits a spurious update even when desired.comment matches."""
+    desired_attrs = {
+        SecurableAttributes(
+            securable_type=SecurableType.CATALOG,
+            full_name="my_catalog",
+            comment="In sync with UC",
+        )
+    }
+    actual_attrs = {
+        SecurableAttributes(
+            securable_type=SecurableType.CATALOG,
+            full_name="my_catalog",
+            owner=_owner("catalog_owner"),
+            comment="In sync with UC",
+        )
+    }
+
+    diff = compute_securable_diff(
+        desired_attrs, actual_attrs, set(), set(), _resolver(), _change_logger(),
+    )
+
+    assert diff.attributes_to_update == []
+
+
+def test_securable_differ_preserves_actual_rfa_destinations_when_owner_resolves():
+    """An actual-side row that carries both an owner AND rfa_destinations must
+    keep its rfa_destinations after owner resolution. Same regression as the
+    comment case — exposed in production by the rfa_destinations feature."""
+    desired_attrs = {
+        SecurableAttributes(
+            securable_type=SecurableType.CATALOG,
+            full_name="my_catalog",
+            rfa_destinations=frozenset({"a@b.com", "c@d.com"}),
+        )
+    }
+    actual_attrs = {
+        SecurableAttributes(
+            securable_type=SecurableType.CATALOG,
+            full_name="my_catalog",
+            owner=_owner("catalog_owner"),
+            rfa_destinations=frozenset({"a@b.com", "c@d.com"}),
+        )
+    }
+
+    diff = compute_securable_diff(
+        desired_attrs, actual_attrs, set(), set(), _resolver(), _change_logger(),
+    )
+
+    assert diff.attributes_to_update == []
+
+
+# ---------------------------------------------------------------------------
+# NonexistentSecurableError message (continued)
+# ---------------------------------------------------------------------------
 
 
 def test_nonexistent_securable_error_uses_hint_when_provided_instead_of_flag_boilerplate():

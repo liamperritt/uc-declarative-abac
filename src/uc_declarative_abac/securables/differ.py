@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -18,7 +19,23 @@ from uc_declarative_abac.securables.state import (
 from uc_declarative_abac.types import ExecutionError, GovernorError, NonexistentSecurableError, PrincipalValidationError, SecurableType
 from uc_declarative_abac.utils import catalog_of
 
-_GOVERNED_ATTRIBUTES = ["owner", "comment"]
+_GOVERNED_ATTRIBUTES = ["owner", "comment", "rfa_destinations"]
+
+
+def _to_frozenset(attr: str, value: object) -> frozenset:
+    """Wrap a SecurableAttributes field value into a frozenset for diff comparison.
+
+    Scalar fields (``owner``, ``comment``) become a 1-element frozenset, or
+    an empty frozenset when the value is missing / empty. Collection fields
+    (``rfa_destinations``) pass through as the natural frozenset (``None`` →
+    empty). This keeps the diff loop attribute-agnostic and lets the executor
+    take a uniform set-shaped value.
+    """
+    if attr == "rfa_destinations":
+        return value if value is not None else frozenset()
+    if value is None or value == "":
+        return frozenset()
+    return frozenset({value})
 
 # ``information_schema.tables.table_type`` values that don't support ``COMMENT ON TABLE …``
 # / ``ALTER TABLE … SET COMMENT`` via the path this engine uses. Today only regular VIEWs are
@@ -114,6 +131,11 @@ def _resolve_attribute_owners(
 
     On failure, clears the owner field but retains the SecurableAttributes —
     dropping it would lose the securable's create/replace info.
+
+    Uses ``dataclasses.replace`` so every non-owner field (``comment``,
+    ``rfa_destinations``, …) on the input survives owner resolution.
+    Reconstructing from scratch here silently dropped those fields and broke
+    idempotency for every managed attribute other than ``owner`` itself.
     """
     result: set[SecurableAttributes] = set()
     for attr in unresolved:
@@ -127,17 +149,9 @@ def _resolve_attribute_owners(
                 context=f"Resolve owner for {attr.securable_type.value} {attr.full_name}",
                 exception=exc,
             ))
-            result.add(SecurableAttributes(
-                securable_type=attr.securable_type,
-                full_name=attr.full_name,
-                owner=None,
-            ))
+            result.add(dataclasses.replace(attr, owner=None))
             continue
-        result.add(SecurableAttributes(
-            securable_type=attr.securable_type,
-            full_name=attr.full_name,
-            owner=resolved_owner,
-        ))
+        result.add(dataclasses.replace(attr, owner=resolved_owner))
     return result
 
 
@@ -376,11 +390,13 @@ def _diff_attributes(
         is_being_created = desired.full_name in created_full_names
 
         for attr in _GOVERNED_ATTRIBUTES:
-            new_value = getattr(desired, attr)
-            if new_value is None:
+            desired_raw = getattr(desired, attr)
+            if desired_raw is None:
                 continue
 
-            old_value = getattr(actual, attr, None) if actual is not None else None
+            actual_raw = getattr(actual, attr, None) if actual is not None else None
+            new_value = _to_frozenset(attr, desired_raw)
+            old_value = _to_frozenset(attr, actual_raw)
             if old_value == new_value:
                 continue
 
@@ -388,7 +404,7 @@ def _diff_attributes(
                 securable_type=desired.securable_type,
                 full_name=desired.full_name,
                 attribute=attr,
-                old_value=old_value if old_value is not None else "",
+                old_value=old_value,
                 new_value=new_value,
             )
 

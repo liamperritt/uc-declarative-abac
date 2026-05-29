@@ -1790,3 +1790,101 @@ def test_governor_raises_ungoverned_tag_error_when_grant_policy_references_ungov
         f"Expected at least one UngovernedTagError, got: {exc_info.value.errors}"
     )
     assert any("ungoverned_key" in str(e.exception) for e in ungoverned_errors)
+
+
+# ---------------------------------------------------------------------------
+# rfa_targets threading into fetch_actual_securables
+# ---------------------------------------------------------------------------
+
+
+def _capture_fetch_actual_securables_calls(monkeypatch) -> list[tuple]:
+    """Patch UnityCatalogHelper.fetch_actual_securables to record its call args
+    while still returning empty state. Returns the live list of recorded calls."""
+    from uc_declarative_abac.helpers.unity_catalog import UnityCatalogHelper
+
+    calls: list[tuple] = []
+    original = UnityCatalogHelper.fetch_actual_securables
+
+    def _spy(self, catalog_names, rfa_targets=None):
+        calls.append((tuple(catalog_names), frozenset(rfa_targets or ())))
+        # Return empty actual state so the rest of the governor short-circuits cleanly.
+        return set(), set()
+
+    monkeypatch.setattr(UnityCatalogHelper, "fetch_actual_securables", _spy)
+    return calls
+
+
+def test_governor_passes_rfa_targets_for_securables_with_destinations(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch,
+):
+    """When the config declares rfa_destinations and taggable management is on,
+    fetch_actual_securables is invoked with rfa_targets containing exactly those
+    (securable_type, full_name) pairs.
+
+    The run raises ``ExecutionBatchError`` because the mock returns empty actual
+    state so every declared securable surfaces as nonexistent — that's fine for
+    this test, we only care about how ``fetch_actual_securables`` was invoked.
+    """
+    config = {
+        "resources": {
+            "catalogs": {
+                "my_catalog": {
+                    "rfa_destinations": ["data-gov@example.com"],
+                    "schemas": [
+                        {"name": "sales", "rfa_destinations": ["https://hook.example.com"]},
+                    ],
+                }
+            }
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _setup_mock_empty_principals(mock_workspace_client)
+    calls = _capture_fetch_actual_securables_calls(monkeypatch)
+
+    with pytest.raises(ExecutionBatchError):
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            enable_taggable_management=True,
+        )
+
+    assert len(calls) == 1
+    _catalog_names, rfa_targets = calls[0]
+    assert rfa_targets == frozenset({
+        (SecurableType.CATALOG, "my_catalog"),
+        (SecurableType.SCHEMA, "my_catalog.sales"),
+    })
+
+
+def test_governor_passes_empty_rfa_targets_when_taggable_management_off(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch,
+):
+    """rfa_destinations updates are gated by enable_taggable_management — when it's
+    off, no RFA fetch fires (rfa_targets is an empty set)."""
+    config = {
+        "resources": {
+            "catalogs": {
+                "my_catalog": {
+                    "rfa_destinations": ["data-gov@example.com"],
+                }
+            }
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _setup_mock_empty_principals(mock_workspace_client)
+    calls = _capture_fetch_actual_securables_calls(monkeypatch)
+
+    with pytest.raises(ExecutionBatchError):
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            enable_taggable_management=False,
+        )
+
+    assert len(calls) == 1
+    _catalog_names, rfa_targets = calls[0]
+    assert rfa_targets == frozenset()

@@ -894,6 +894,146 @@ def test_taggable_configs_default_comment_and_location_to_none():
 
 
 # ---------------------------------------------------------------------------
+# comment double-quote rejection
+# ---------------------------------------------------------------------------
+#
+# Comments are emitted into SQL as ``COMMENT "<value>"`` (see
+# ``_build_comment_clause`` in ``src/uc_declarative_abac/securables/executor.py``).
+# A ``"`` inside the value would break the quoting; reject at config-load
+# instead of trying to escape it. Single quotes must still be permitted —
+# they round-trip cleanly through the existing escaping logic exercised by
+# ``test_securable_executor_escapes_single_quotes_in_comment_update``.
+
+
+def test_catalog_config_accepts_comment_without_double_quote():
+    """A catalog comment containing no '\"' character validates successfully."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "comment": "Hello world",
+            },
+        },
+    })
+    assert config.catalogs["my_cat"].comment == "Hello world"
+
+
+def test_catalog_config_accepts_comment_with_single_quote():
+    """Regression guard: single quotes (') in comments must still validate —
+    only double quotes are rejected."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "comment": "It's fine",
+            },
+        },
+    })
+    assert config.catalogs["my_cat"].comment == "It's fine"
+
+
+def test_catalog_config_rejects_comment_containing_double_quote():
+    """A catalog comment containing a '\"' character raises ValidationError."""
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate({
+            "catalogs": {
+                "my_cat": {
+                    "comment": 'A "quoted" word',
+                },
+            },
+        })
+
+
+def test_schema_config_rejects_comment_containing_double_quote():
+    """A schema comment containing a '\"' character raises ValidationError."""
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate({
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "comment": 'A "quoted" word',
+                        },
+                    ],
+                },
+            },
+        })
+
+
+def test_table_config_rejects_comment_containing_double_quote():
+    """A table comment containing a '\"' character raises ValidationError."""
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate({
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "comment": 'A "quoted" word',
+                                },
+                            ],
+                        },
+                    ],
+                },
+            },
+        })
+
+
+def test_volume_config_rejects_comment_containing_double_quote():
+    """A volume comment containing a '\"' character raises ValidationError."""
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate({
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "landing",
+                            "volumes": [
+                                {
+                                    "name": "raw",
+                                    "comment": 'A "quoted" word',
+                                },
+                            ],
+                        },
+                    ],
+                },
+            },
+        })
+
+
+def test_function_config_rejects_comment_containing_double_quote():
+    """A function comment containing a '\"' character raises ValidationError."""
+    with pytest.raises(ValidationError):
+        FunctionConfig.model_validate({
+            "name": "mask_pii_email",
+            "owner": None,
+            "catalog_name": "my_catalog",
+            "schema_name": "shared",
+            "parameters": [{"name": "col", "type": "STRING"}],
+            "return": "CASE WHEN is_member('admins') THEN col ELSE '***' END",
+            "comment": 'A "quoted" word',
+        })
+
+
+def test_catalog_config_comment_validation_message_mentions_double_quote():
+    """The ValidationError message for a comment containing a '\"' should be
+    operator-friendly — it must mention the double-quote character, the
+    phrase 'double-quote', or 'comment' so the cause is obvious."""
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate({
+            "catalogs": {
+                "my_cat": {
+                    "comment": 'Says "hi" inside',
+                },
+            },
+        })
+    rendered = str(exc_info.value).lower()
+    assert '"' in rendered or "double-quote" in rendered or "comment" in rendered
+
+
+# ---------------------------------------------------------------------------
 # ParameterConfig.data_type coercion + alias
 # ---------------------------------------------------------------------------
 
@@ -1195,3 +1335,184 @@ def test_governed_tag_config_accepts_assigners():
 
     gt = config.governed_tags["pii"]
     assert gt.assigners == ["data_governance_team", "user@company.com"]
+
+
+# ---------------------------------------------------------------------------
+# rfa_destinations validation
+# ---------------------------------------------------------------------------
+
+
+_VALID_RFA_DESTINATIONS = [
+    "data-gov@example.com",
+    "https://hooks.example.com/incoming/abc123",
+    "550e8400-e29b-41d4-a716-446655440000",
+]
+
+
+def test_catalog_config_accepts_rfa_destinations_list():
+    """A CatalogConfig with rfa_destinations: [email, url, uuid] validates."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "rfa_destinations": list(_VALID_RFA_DESTINATIONS),
+            },
+        },
+    })
+    cat = config.catalogs["my_cat"]
+    assert list(cat.rfa_destinations) == list(_VALID_RFA_DESTINATIONS)
+
+
+def test_schema_config_accepts_rfa_destinations_list():
+    """A SchemaConfig with rfa_destinations: [email, url, uuid] validates."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "schemas": [
+                    {
+                        "name": "sales",
+                        "rfa_destinations": list(_VALID_RFA_DESTINATIONS),
+                    },
+                ],
+            },
+        },
+    })
+    schema = config.catalogs["my_cat"].schemas[0]
+    assert list(schema.rfa_destinations) == list(_VALID_RFA_DESTINATIONS)
+
+
+def test_table_config_accepts_rfa_destinations_list():
+    """A TableConfig with rfa_destinations: [email, url, uuid] validates."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "schemas": [
+                    {
+                        "name": "sales",
+                        "tables": [
+                            {
+                                "name": "orders",
+                                "rfa_destinations": list(_VALID_RFA_DESTINATIONS),
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+    })
+    table = config.catalogs["my_cat"].schemas[0].tables[0]
+    assert list(table.rfa_destinations) == list(_VALID_RFA_DESTINATIONS)
+
+
+def test_volume_config_accepts_rfa_destinations_list():
+    """A VolumeConfig with rfa_destinations: [email, url, uuid] validates."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "schemas": [
+                    {
+                        "name": "landing",
+                        "volumes": [
+                            {
+                                "name": "raw",
+                                "rfa_destinations": list(_VALID_RFA_DESTINATIONS),
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+    })
+    volume = config.catalogs["my_cat"].schemas[0].volumes[0]
+    assert list(volume.rfa_destinations) == list(_VALID_RFA_DESTINATIONS)
+
+
+def test_function_config_accepts_rfa_destinations_list():
+    """A FunctionConfig with rfa_destinations: [email, url, uuid] validates."""
+    function = FunctionConfig.model_validate({
+        "name": "mask_pii_email",
+        "owner": None,
+        "catalog_name": "my_catalog",
+        "schema_name": "shared",
+        "parameters": [{"name": "col", "type": "STRING"}],
+        "return": "CASE WHEN is_member('admins') THEN col ELSE '***' END",
+        "rfa_destinations": list(_VALID_RFA_DESTINATIONS),
+    })
+    assert list(function.rfa_destinations) == list(_VALID_RFA_DESTINATIONS)
+
+
+def test_catalog_config_rejects_unrecognised_rfa_destination():
+    """A single unrecognised RFA destination string raises ValidationError; the
+    error message mentions the offending value."""
+    bogus = "not-a-real-destination"
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate({
+            "catalogs": {
+                "my_cat": {
+                    "rfa_destinations": [bogus],
+                },
+            },
+        })
+    assert bogus in str(exc_info.value)
+
+
+def test_catalog_config_lists_every_offender_when_multiple_invalid():
+    """Two unrecognised RFA destinations surface together in a single
+    ValidationError that names both offenders."""
+    bogus_one = "garbage-one"
+    bogus_two = "garbage-two"
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate({
+            "catalogs": {
+                "my_cat": {
+                    "rfa_destinations": [
+                        "valid@example.com",
+                        bogus_one,
+                        bogus_two,
+                    ],
+                },
+            },
+        })
+    rendered = str(exc_info.value)
+    assert bogus_one in rendered
+    assert bogus_two in rendered
+
+
+def test_catalog_config_rfa_destinations_defaults_to_none():
+    """When 'rfa_destinations' is omitted, the model attribute defaults to None."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {},
+        },
+    })
+    assert config.catalogs["my_cat"].rfa_destinations is None
+
+
+def test_column_config_rejects_rfa_destinations_entirely():
+    """Any rfa_destinations value on a ColumnConfig — even a syntactically
+    valid one — raises ValidationError with a message that mentions
+    rfa_destinations / not being supported on columns."""
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate({
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "columns": [
+                                        {
+                                            "name": "email",
+                                            "rfa_destinations": ["data-gov@example.com"],
+                                        },
+                                    ],
+                                },
+                            ],
+                        },
+                    ],
+                },
+            },
+        })
+    rendered = str(exc_info.value).lower()
+    assert "rfa_destinations" in rendered or "not supported on columns" in rendered

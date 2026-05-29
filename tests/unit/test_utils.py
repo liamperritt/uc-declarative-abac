@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from uc_declarative_abac.utils import catalog_of, parse_catalog_filter
+from uc_declarative_abac.utils import (
+    catalog_of,
+    classify_rfa_destination,
+    parse_catalog_filter,
+    validate_rfa_destinations,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -66,3 +71,100 @@ def test_utils_parse_catalog_filter_empty_spec_returns_empty_set():
     # callers can rely on `frozenset()` semantics.
     result = parse_catalog_filter("", ["cat_a"])
     assert result == frozenset()
+
+
+# ---------------------------------------------------------------------------
+# classify_rfa_destination
+# ---------------------------------------------------------------------------
+
+
+def test_utils_classify_rfa_destination_returns_email_for_email_address():
+    assert classify_rfa_destination("data-gov@example.com") == "EMAIL"
+
+
+def test_utils_classify_rfa_destination_returns_email_for_plus_addressed_email():
+    assert classify_rfa_destination("foo+bar@baz.co.uk") == "EMAIL"
+
+
+def test_utils_classify_rfa_destination_returns_url_for_https_url():
+    assert classify_rfa_destination("https://example.com/request") == "URL"
+
+
+def test_utils_classify_rfa_destination_returns_url_for_http_url():
+    assert classify_rfa_destination("http://example.com") == "URL"
+
+
+def test_utils_classify_rfa_destination_returns_guid_for_lowercase_uuid():
+    assert classify_rfa_destination("550e8400-e29b-41d4-a716-446655440000") == "GUID"
+
+
+def test_utils_classify_rfa_destination_returns_guid_for_uppercase_uuid():
+    assert classify_rfa_destination("550E8400-E29B-41D4-A716-446655440000") == "GUID"
+
+
+def test_utils_classify_rfa_destination_raises_for_unrecognised_string():
+    with pytest.raises(ValueError):
+        classify_rfa_destination("hello")
+
+
+def test_utils_classify_rfa_destination_raises_for_plain_word():
+    with pytest.raises(ValueError):
+        classify_rfa_destination("not-an-email")
+
+
+def test_utils_classify_rfa_destination_raises_for_non_http_scheme():
+    with pytest.raises(ValueError):
+        classify_rfa_destination("ftp://example.com")
+
+
+def test_utils_classify_rfa_destination_raises_for_partial_uuid():
+    with pytest.raises(ValueError):
+        classify_rfa_destination("550e8400-e29b-41d4-a716")
+
+
+def test_utils_classify_rfa_destination_includes_offending_value_in_message():
+    with pytest.raises(ValueError) as exc_info:
+        classify_rfa_destination("nonsense-value")
+    assert "nonsense-value" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# validate_rfa_destinations
+# ---------------------------------------------------------------------------
+
+
+def test_utils_validate_rfa_destinations_returns_input_when_all_valid():
+    values = [
+        "data-gov@example.com",
+        "https://example.com/request",
+        "550e8400-e29b-41d4-a716-446655440000",
+    ]
+    result = validate_rfa_destinations(values)
+    assert result == values
+
+
+def test_utils_validate_rfa_destinations_accepts_empty_list():
+    assert validate_rfa_destinations([]) == []
+
+
+def test_utils_validate_rfa_destinations_raises_with_every_offender_listed():
+    with pytest.raises(ValueError) as exc_info:
+        validate_rfa_destinations(
+            [
+                "data-gov@example.com",
+                "hello",
+                "ftp://example.com",
+                "https://example.com",
+            ]
+        )
+    msg = str(exc_info.value)
+    assert "hello" in msg
+    assert "ftp://example.com" in msg
+
+
+def test_utils_validate_rfa_destinations_raises_single_error_for_multiple_offenders():
+    with pytest.raises(ValueError) as exc_info:
+        validate_rfa_destinations(["bad-one", "bad-two"])
+    msg = str(exc_info.value)
+    assert "bad-one" in msg
+    assert "bad-two" in msg

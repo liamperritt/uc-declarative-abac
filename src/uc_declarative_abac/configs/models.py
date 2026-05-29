@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import AliasChoices, BaseModel, Field, computed_field, field_validator, model_validator
 
 from uc_declarative_abac.types import DuplicateResourceError, PolicyType, PrivilegeType
+from uc_declarative_abac.utils import validate_rfa_destinations
 
 
 def _coerce_null_tag_values(tags: dict | None) -> dict | None:
@@ -33,6 +34,15 @@ def _check_duplicate_names(
             seen.add(name)
 
 
+def _validate_double_quote_not_in_comment(comment: str | None) -> str | None:
+    """Reject double-quote characters in comments"""
+    if isinstance(comment, str) and '"' in comment:
+        raise ValueError(
+            'comment must not contain a double-quote (") character'
+        )
+    return comment
+
+
 class PolicyColumnConfig(BaseModel):
     alias: str
     has_tags: dict[str, str]
@@ -46,11 +56,20 @@ class BasePolicyConfig(BaseModel, ABC):
     name: str | None = None
     type: PolicyType
     has_tags: dict[str, str] | None = None
+    comment: str | None = None
 
     @field_validator("has_tags", mode="before")
     @classmethod
     def _coerce_null_tags(cls, v: dict) -> dict:
         return _coerce_null_tag_values(v)
+
+    @field_validator("comment", mode="before")
+    @classmethod
+    def _reject_double_quote_in_comment(cls, v: str | None) -> str | None:
+        """Reject double-quote characters in comments — they would break the
+        executor's double-quoted SQL ``COMMENT "..."`` clause. Single quotes
+        are still allowed (the executor escapes them separately)."""
+        return _validate_double_quote_not_in_comment(v)
 
     @computed_field
     @property
@@ -70,7 +89,6 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
     to: list[str]
     exceptions: list[str] | None = Field(default=None, alias="except")
     columns: list[PolicyColumnConfig] | None = None
-    comment: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -129,6 +147,24 @@ class BaseSecurableConfig(BaseModel, ABC):
     owner: str | None = None
     comment: str | None = None
     tags: dict[str, str] | None = None
+    rfa_destinations: list[str] | None = None
+
+    @field_validator("comment", mode="before")
+    @classmethod
+    def _reject_double_quote_in_comment(cls, v: str | None) -> str | None:
+        """Reject double-quote characters in comments — they would break the
+        executor's double-quoted SQL ``COMMENT "..."`` clause. Single quotes
+        are still allowed (the executor escapes them separately)."""
+        return _validate_double_quote_not_in_comment(v)
+
+    @field_validator("rfa_destinations", mode="before")
+    @classmethod
+    def _classify_rfa_destinations(cls, v: list[str] | None) -> list[str] | None:
+        """Run every RFA destination through the shared classifier so unrecognised
+        strings surface at config-load with one error listing every offender."""
+        if v is None:
+            return None
+        return validate_rfa_destinations(v)
 
     @computed_field
     @property
@@ -190,6 +226,14 @@ class ColumnConfig(BaseTaggableConfig):
     def _reject_comment(cls, v):
         raise ValueError(
             "Column-level comments are not currently supported"
+        )
+
+    @field_validator("rfa_destinations", mode="before")
+    @classmethod
+    def _reject_rfa_destinations(cls, v):
+        raise ValueError(
+            "rfa_destinations is not supported on columns; "
+            "set it on the table, schema, or catalog instead"
         )
 
     @computed_field

@@ -364,6 +364,194 @@ def test_securable_compiler_does_not_emit_function_comment_into_attributes():
 
 
 # ---------------------------------------------------------------------------
+# compile_desired_attributes — rfa_destinations
+# ---------------------------------------------------------------------------
+
+
+# A representative mix exercising every regex-recognised RFA destination form:
+# an email, an HTTPS URL, and a canonical 8-4-4-4-12 UUID.
+_RFA_DESTINATIONS = [
+    "data-gov@example.com",
+    "https://hooks.example.com/rfa",
+    "12345678-1234-1234-1234-123456789abc",
+]
+
+
+def test_securable_compiler_emits_catalog_rfa_destinations():
+    """A catalog with rfa_destinations produces a SecurableAttributes carrying the
+    destinations as a frozenset (order-insensitive)."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "rfa_destinations": list(_RFA_DESTINATIONS),
+            },
+        },
+    })
+
+    result = compile_desired_attributes(config)
+
+    assert SecurableAttributes(
+        securable_type=SecurableType.CATALOG,
+        full_name="my_cat",
+        rfa_destinations=frozenset(_RFA_DESTINATIONS),
+    ) in result
+
+
+def test_securable_compiler_emits_schema_rfa_destinations():
+    """A schema with rfa_destinations produces a SecurableAttributes carrying them."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "schemas": [
+                    {
+                        "name": "sales",
+                        "rfa_destinations": list(_RFA_DESTINATIONS),
+                    },
+                ],
+            },
+        },
+    })
+
+    result = compile_desired_attributes(config)
+
+    assert SecurableAttributes(
+        securable_type=SecurableType.SCHEMA,
+        full_name="my_cat.sales",
+        rfa_destinations=frozenset(_RFA_DESTINATIONS),
+    ) in result
+
+
+def test_securable_compiler_emits_table_rfa_destinations():
+    """A table with rfa_destinations produces a SecurableAttributes carrying them."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "schemas": [
+                    {
+                        "name": "sales",
+                        "tables": [
+                            {
+                                "name": "orders",
+                                "rfa_destinations": list(_RFA_DESTINATIONS),
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+    })
+
+    result = compile_desired_attributes(config)
+
+    assert SecurableAttributes(
+        securable_type=SecurableType.TABLE,
+        full_name="my_cat.sales.orders",
+        rfa_destinations=frozenset(_RFA_DESTINATIONS),
+    ) in result
+
+
+def test_securable_compiler_emits_volume_rfa_destinations():
+    """A volume with rfa_destinations produces a SecurableAttributes carrying them."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "schemas": [
+                    {
+                        "name": "landing",
+                        "volumes": [
+                            {
+                                "name": "raw",
+                                "rfa_destinations": list(_RFA_DESTINATIONS),
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+    })
+
+    result = compile_desired_attributes(config)
+
+    assert SecurableAttributes(
+        securable_type=SecurableType.VOLUME,
+        full_name="my_cat.landing.raw",
+        rfa_destinations=frozenset(_RFA_DESTINATIONS),
+    ) in result
+
+
+def test_securable_compiler_emits_function_rfa_destinations():
+    """A function with rfa_destinations produces a SecurableAttributes carrying them."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {
+                "schemas": [
+                    {
+                        "name": "shared",
+                        "functions": [
+                            {
+                                "name": "mask_email",
+                                "parameters": [{"name": "col", "type": "STRING"}],
+                                "return": "col",
+                                "rfa_destinations": list(_RFA_DESTINATIONS),
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+    })
+
+    result = compile_desired_attributes(config)
+
+    assert SecurableAttributes(
+        securable_type=SecurableType.FUNCTION,
+        full_name="my_cat.shared.mask_email",
+        rfa_destinations=frozenset(_RFA_DESTINATIONS),
+    ) in result
+
+
+def test_securable_compiler_rfa_destinations_is_none_when_absent():
+    """A catalog with an owner but no rfa_destinations leaves
+    SecurableAttributes.rfa_destinations as None (not an empty frozenset)."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {"owner": "admin_user"},
+        },
+    })
+
+    result = compile_desired_attributes(config)
+
+    catalog_attrs = next(
+        a for a in result
+        if a.securable_type == SecurableType.CATALOG and a.full_name == "my_cat"
+    )
+    assert catalog_attrs.rfa_destinations is None
+
+
+def test_securable_compiler_emits_attributes_when_only_rfa_destinations_set():
+    """A catalog with only rfa_destinations (no owner, no comment) still produces
+    a SecurableAttributes — and a sibling catalog with no managed attributes at
+    all does not."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "with_rfa": {
+                "rfa_destinations": list(_RFA_DESTINATIONS),
+            },
+            "without_anything": {},
+        },
+    })
+
+    result = compile_desired_attributes(config)
+
+    assert SecurableAttributes(
+        securable_type=SecurableType.CATALOG,
+        full_name="with_rfa",
+        rfa_destinations=frozenset(_RFA_DESTINATIONS),
+    ) in result
+    assert not any(a.full_name == "without_anything" for a in result)
+
+
+# ---------------------------------------------------------------------------
 # compile_desired_securables
 # ---------------------------------------------------------------------------
 

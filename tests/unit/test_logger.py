@@ -388,12 +388,86 @@ def test_logger_logs_attribute_update() -> None:
         securable_type=SecurableType.CATALOG,
         full_name="my_catalog",
         attribute="owner",
-        old_value="old_owner",
-        new_value="new_owner",
+        old_value=frozenset({"old_owner"}),
+        new_value=frozenset({"new_owner"}),
     )
     cl.log_attribute_update(update)
 
     assert cl._attributes_updated == 1
+
+
+def test_logger_renders_attribute_update_for_multi_value_frozenset() -> None:
+    """A multi-element frozenset[str] renders as a sorted comma-separated list."""
+    cl, mock_logger = _make_change_logger()
+    cl.log_attribute_update(AttributeUpdate(
+        securable_type=SecurableType.CATALOG,
+        full_name="my_cat",
+        attribute="rfa_destinations",
+        old_value=frozenset(),
+        new_value=frozenset({"alice@x.com", "bob@y.com"}),
+    ))
+
+    log_line = "\n".join(_info_messages(mock_logger))
+    assert "alice@x.com" in log_line
+    assert "bob@y.com" in log_line
+    # Sorted, comma-separated rendering
+    assert "alice@x.com, bob@y.com" in log_line
+    # Must not appear as a repr-style frozenset/set
+    assert "frozenset(" not in log_line
+
+
+def test_logger_renders_attribute_update_for_principal_frozenset() -> None:
+    """A single-Principal frozenset renders as the Principal's .name, not its repr."""
+    cl, mock_logger = _make_change_logger()
+    cl.log_attribute_update(AttributeUpdate(
+        securable_type=SecurableType.CATALOG,
+        full_name="my_cat",
+        attribute="owner",
+        old_value=frozenset(),
+        new_value=frozenset({Principal(PrincipalType.USER, "joe", "joe")}),
+    ))
+
+    log_line = "\n".join(_info_messages(mock_logger))
+    assert "joe" in log_line
+    # The repr of a Principal must not leak into the log
+    assert "Principal(" not in log_line
+    assert "PrincipalType" not in log_line
+
+
+def test_logger_renders_attribute_update_for_empty_old_value_frozenset() -> None:
+    """An empty frozenset() old_value renders as an empty quoted slot, not 'frozenset()'."""
+    cl, mock_logger = _make_change_logger()
+    cl.log_attribute_update(AttributeUpdate(
+        securable_type=SecurableType.CATALOG,
+        full_name="my_cat",
+        attribute="rfa_destinations",
+        old_value=frozenset(),
+        new_value=frozenset({"alice@x.com"}),
+    ))
+
+    log_line = "\n".join(_info_messages(mock_logger))
+    # Empty old value renders as '' (quoted empty slot in the diff line)
+    assert "'' ->" in log_line
+    assert "frozenset()" not in log_line
+    assert "set()" not in log_line
+
+
+def test_logger_renders_attribute_update_for_rfa_destinations_attribute() -> None:
+    """The attribute name 'rfa_destinations' appears verbatim in the log line."""
+    cl, mock_logger = _make_change_logger()
+    cl.log_attribute_update(AttributeUpdate(
+        securable_type=SecurableType.CATALOG,
+        full_name="my_cat",
+        attribute="rfa_destinations",
+        old_value=frozenset(),
+        new_value=frozenset({"alice@x.com", "bob@y.com"}),
+    ))
+
+    log_line = "\n".join(_info_messages(mock_logger))
+    assert "rfa_destinations" in log_line
+    # Multi-value still rendered alongside the attribute name
+    assert "alice@x.com" in log_line
+    assert "bob@y.com" in log_line
 
 
 def test_logger_logs_securable_create() -> None:
@@ -432,8 +506,8 @@ def test_logger_includes_securables_in_summary() -> None:
         securable_type=SecurableType.CATALOG,
         full_name="my_catalog",
         attribute="owner",
-        old_value="old_owner",
-        new_value="new_owner",
+        old_value=frozenset({"old_owner"}),
+        new_value=frozenset({"new_owner"}),
     ))
     cl.log_securable_create(Function(
         securable_type=SecurableType.FUNCTION,

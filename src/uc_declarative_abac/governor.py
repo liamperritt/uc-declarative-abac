@@ -134,11 +134,24 @@ def run(
         if enable_taggable_creation else frozenset()
     )
 
-    # 2. Compile desired governed tags up-front so we can scope the rule-set
-    #    fetches inside the parallel block to (actual ∩ desired) — keeps the
-    #    per-tag get_rule_set traffic bounded.
+    # 2. Compile desired up-front so we can scope downstream fetches:
+    #    - governed tags name set → rule-set fetches restricted to (actual ∩ desired)
+    #    - securable attributes/securables → rfa_targets restricted to securables that
+    #      actually declare ``rfa_destinations`` in config (gated by the
+    #      taggable-management flag, since RFA is a managed attribute)
     desired_governed_tags = compile_desired_governed_tags(config)
     desired_governed_tag_names = {gt.name for gt in desired_governed_tags}
+    desired_attributes = compile_desired_attributes(config)
+    desired_securables = compile_desired_securables(config)
+    rfa_targets: set[tuple[SecurableType, str]] = (
+        {
+            (a.securable_type, a.full_name)
+            for a in desired_attributes
+            if a.rfa_destinations is not None
+        }
+        if enable_taggable_management
+        else set()
+    )
 
     # 3. Parallel initial fetch (securables, tags, privileges, and principals concurrently)
     uc_helper = UnityCatalogHelper(workspace_client, warehouse_id)
@@ -150,7 +163,9 @@ def run(
     # domain (for policy matching against on-disk tag state when tag management is off).
     need_actual_tags = enable_tag_management or enable_privilege_management
     with ThreadPoolExecutor() as pool:
-        actual_securables_f = pool.submit(uc_helper.fetch_actual_securables, catalog_names)
+        actual_securables_f = pool.submit(
+            uc_helper.fetch_actual_securables, catalog_names, rfa_targets,
+        )
         actual_policies_f = pool.submit(uc_helper.fetch_actual_policies, config)
         actual_governed_tags_f = pool.submit(
             ws_helper.fetch_actual_governed_tags, desired_governed_tag_names,
@@ -170,9 +185,24 @@ def run(
     # 3. Construct the shared PrincipalResolver now that ws_helper cache is populated.
     resolver = PrincipalResolver(ws_helper)
 
-    # 4. Securables workflow (before tags and privileges)
-    desired_attributes = compile_desired_attributes(config)
-    desired_securables = compile_desired_securables(config)
+    # 4. Governed tags workflow (account-level tag policies — must run before
+    # catalog-scoped tag assignments, so new tag keys exist before SET TAGS).
+    # desired_governed_tags was compiled at the start to scope the rule-set fetch.
+    governed_tag_diff = compute_governed_tag_diff(
+        desired_governed_tags, actual_governed_tags,
+        resolver, change_logger,
+        enable_deletion=enable_governed_tag_deletion,
+    )
+    # Union of declared governed tag names (desired from config + actual on UC).
+    # Used by the policies/privileges compilers to reject references to tag keys
+    # that aren't governed — desired-only covers in-flight creations, actual-only
+    # covers already-deployed tags the config doesn't redeclare.
+    governed_tag_names = {
+        t.name for t in desired_governed_tags | actual_governed_tags
+    }
+
+    # 5. Securables workflow (before tags and privileges) — desired sides were
+    # compiled up-front; here we apply taggable-management scoping.
     # Drop non-function attribute updates whose catalog isn't in scope — the
     # engine must not touch catalog/schema/table/volume owners outside the
     # taggable-management scope. Function attributes flow through because
@@ -191,23 +221,7 @@ def run(
         change_logger.log_section_header("Securables")
     execute_securable_diff(uc_helper, securable_diff, change_logger, dry_run=dry_run)
 
-    # 4. Governed tags workflow (account-level tag policies — must run before
-    # catalog-scoped tag assignments, so new tag keys exist before SET TAGS).
-    # desired_governed_tags was compiled at the start to scope the rule-set fetch.
-    governed_tag_diff = compute_governed_tag_diff(
-        desired_governed_tags, actual_governed_tags,
-        resolver, change_logger,
-        enable_deletion=enable_governed_tag_deletion,
-    )
-    # Union of declared governed tag names (desired from config + actual on UC).
-    # Used by the policies/privileges compilers to reject references to tag keys
-    # that aren't governed — desired-only covers in-flight creations, actual-only
-    # covers already-deployed tags the config doesn't redeclare.
-    governed_tag_names = {
-        t.name for t in desired_governed_tags | actual_governed_tags
-    }
-
-    # 5. Tags workflow
+    # 6. Tags workflow
     if enable_tag_management:
         desired_tags = compile_desired_tags(config)
         in_scope_desired_tags = {
@@ -231,7 +245,7 @@ def run(
         # its policies against the on-disk tag state to stay honest.
         tags_for_privilege_matching = actual_tags
 
-    # 6. Policies workflow (mask/filter)
+    # 7. Policies workflow (mask/filter)
     desired_policies = compile_desired_policies(
         config, governed_tag_names, change_logger,
     )
@@ -239,7 +253,7 @@ def run(
         desired_policies, actual_policies, resolver, change_logger,
     )
 
-    # 7. Privileges workflow
+    # 8. Privileges workflow
     if enable_privilege_management:
         compiled_privileges = compile_desired_privileges(
             config, tags_for_privilege_matching, governed_tag_names, change_logger,
@@ -257,7 +271,7 @@ def run(
     else:
         privilege_diff = PrivilegeDiff()
 
-    # 8. Log and execute (or dry-run)
+    # 9. Log and execute (or dry-run)
     if governed_tag_diff.to_create or governed_tag_diff.to_update or governed_tag_diff.to_delete:
         change_logger.log_section_header("Governed tags")
     execute_governed_tag_diff(

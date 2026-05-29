@@ -134,7 +134,7 @@ Swap `DATABRICKS_TOKEN` for `DATABRICKS_CLIENT_ID` + `DATABRICKS_CLIENT_SECRET` 
 - **Owners** — set or update owners on catalogs, schemas, tables, volumes, and functions.
 - **Comments** — manage descriptions on UC objects (except for tables and columns due to UC view limitations).
 - **Tags** — key-value or valueless tags (using `~`) applied to any object.
-- **RFA emails** — configure where access requests are sent for governed objects.
+- **RFA destinations** — configure where access requests are sent for governed objects.
 
 ### Principal naming conventions
 
@@ -187,7 +187,7 @@ Cross-catalog reusable definitions (typically ABAC policies and shared functions
 
 #### Catalog definitions
 
-Catalog definitions capture the canonical shape of a catalog — its tags, owner, RFA emails, catalog-level policies, and the list of schemas it contains. Key convention: `<catalog_name>`. A catalog definition composes schemas and policies via `$ref`/`$defs` entries; a resource catalog then references the whole definition and overrides only what differs between environments (commonly just `name` and a few tags).
+Catalog definitions capture the canonical shape of a catalog — its tags, owner, RFA destinations, catalog-level policies, and the list of schemas it contains. Key convention: `<catalog_name>`. A catalog definition composes schemas and policies via `$ref`/`$defs` entries; a resource catalog then references the whole definition and overrides only what differs between environments (commonly just `name` and a few tags).
 
 ```yaml
 # definitions/catalogs/operations/operations.yaml
@@ -198,7 +198,8 @@ definitions:
       comment: Operations catalog
       owner: data_platform_team
       location: s3://operations-managed/operations  # optional managed location, set at CREATE only
-      rfa_email: data-governance@company.com
+      rfa_destinations:
+        - data-governance@company.com
       policies:
         - $defs/policies/abac|grant_use_catalog
         - $defs/policies/abac|mask_pii_email
@@ -218,7 +219,7 @@ resources:
 
 #### Schema definitions
 
-Schema definitions capture the shape of a schema: name, comment, owner, tags, policies, and RFA (Request For Access) emails. Key convention: `<catalog_name>|<schema_name>` (e.g. `operations|sales`, `operations|landing`). Each schema definition lists the **tables**, **volumes**, **functions**, and/or **policies** it contains as `$ref`/`$defs` entries. A catalog definition references which schemas to include; the engine creates each schema and its listed children inside the owning catalog.
+Schema definitions capture the shape of a schema: name, comment, owner, tags, policies, and RFA (Request For Access) destinations. Key convention: `<catalog_name>|<schema_name>` (e.g. `operations|sales`, `operations|landing`). Each schema definition lists the **tables**, **volumes**, **functions**, and/or **policies** it contains as `$ref`/`$defs` entries. A catalog definition references which schemas to include; the engine creates each schema and its listed children inside the owning catalog.
 
 ```yaml
 # definitions/operations/schemas/sales/sales.yaml
@@ -242,7 +243,8 @@ definitions:
       name: hr
       comment: HR data (restricted)
       owner: hr_analytics
-      rfa_email: hr-access@company.com
+      rfa_destinations:
+        - hr-access@company.com
       tags:
         people: ~
 
@@ -304,7 +306,8 @@ definitions:
       tags:
         classification: internal
         sales: ~
-      rfa_email: sales-data@company.com
+      rfa_destinations:
+        - sales-data@company.com
       policies:
         - $ref: $defs/policies/shared|mask_pii_email
 
@@ -336,7 +339,7 @@ Column-level fields:
 - **`type`** — the column data type (optional). If provided and the table does not yet exist, the framework will attempt to create it with the specified column types.
 - **`tags`** — key-value or valueless tags applied to the column. These can be matched by ABAC policy definitions.
 
-Table-level fields (in addition to the common fields `name`, `comment`, `owner`, `tags`, `rfa_email`):
+Table-level fields (in addition to the common fields `name`, `comment`, `owner`, `tags`, `rfa_destinations`):
 - **`columns`** — list of column-level configurations (see above).
 - **`policies`** — list of policy `$ref`/`$defs` entries or inline policies scoped to this table.
 - **`location`** — external storage location (URI). Setting `location` on a new table makes it an external table; the LOCATION clause is included in `CREATE TABLE`. External location is **immutable after creation**.
@@ -631,7 +634,7 @@ resources:
 
 ### Overrides
 
-Any `$ref` entry can include additional fields alongside the reference. These fields override the corresponding values from the definition, letting you customise a single instance without modifying the shared definition. For example, you can override `owner`, `rfa_email`, `comment`, `tags`, or `function` on a per-catalog or per-resource basis. Unspecified fields fall back to the definition.
+Any `$ref` entry can include additional fields alongside the reference. These fields override the corresponding values from the definition, letting you customise a single instance without modifying the shared definition. For example, you can override `owner`, `rfa_destinations`, `comment`, `tags`, or `function` on a per-catalog or per-resource basis. Unspecified fields fall back to the definition.
 
 Overrides also support nested references — you can nest `$ref` entries within an override to further customise child objects. For example, overriding a schema's `tables` list with specific table references that themselves carry overrides:
 
@@ -744,6 +747,7 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 - **Function creation** — creates new functions via `CREATE FUNCTION` SQL with parameters and return expression (no `RETURNS` clause; UC infers the type)
 - **Function replacement** — replaces existing functions whose parameters or definition have changed via `CREATE OR REPLACE FUNCTION` SQL
 - **Single state query** — `fetch_actual_securables` combines attributes and function definitions in one UNION ALL query with `collect_list`/`sort_array`/`transform` aggregation for function parameters and table columns
+- **RFA destinations** — per-securable Request-For-Access notification targets declared via the `rfa_destinations` field on any catalog/schema/table/volume/function. Each entry is classified at config-load via regex: email addresses, `http(s)://` URLs, or canonical Databricks notification-destination UUIDs; any other shape raises a config error listing every offender. Actual state is fetched per declared target via `WorkspaceClient.rfa.get_access_request_destinations` (parallel fanout, 404 treated as empty); diffs compare by destination id only (set-shaped, order-insensitive), and updates post via `update_access_request_destinations(..., update_mask="destinations")`. Gated by `--enable-taggable-management`. `rfa_destinations` is rejected on columns.
 
 #### Tags domain
 - **Tag compilation** — walks catalog → schema → table → column → volume hierarchy, emitting desired tags
@@ -803,7 +807,7 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 - **`information_schema` filtering** — all state queries exclude the `information_schema` schema and its child objects
 - **Privileged-action opt-in flags** — five classes of mutation are gated behind explicit CLI flags. Each defaults to `false`; if unset, the corresponding actions are **skipped in both dry runs and real runs** — no fetch, no diff, no log section, no SQL. Pass the flag to opt in:
   - `--enable-tag-management` — create/update/remove tag assignments on securables. When off, the privileges compiler still honours grant-policy matches, but it matches against the *actual* on-disk UC tag state rather than the config's desired tags (since the engine is not going to apply the config's tags this run).
-  - `--enable-taggable-management` — update attributes (currently `owner` and `comment`; future: `rfa_email`) on existing taggable securables (catalogs, schemas, tables, volumes). Comment updates on a view's underlying table fail with a logged error (only view owners can update comment). Owner updates on tables whose `table_type` is `MATERIALIZED_VIEW` or `STREAMING_TABLE` fail with a logged error (change ownership on the pipeline instead). Function attributes are always engine-managed independently of this flag.
+  - `--enable-taggable-management` — update attributes (`owner`, `comment`, and `rfa_destinations`) on existing taggable securables (catalogs, schemas, tables, volumes). Comment updates on a view's underlying table fail with a logged error (only view owners can update comment). Owner updates on tables whose `table_type` is `MATERIALIZED_VIEW` or `STREAMING_TABLE` fail with a logged error (change ownership on the pipeline instead). Function attributes are always engine-managed independently of this flag.
   - `--enable-taggable-creation` — create catalogs, schemas, tables, and volumes declared in config but absent from UC. Tables must declare ≥1 column with a `type` string on each (e.g. `type: STRING`); otherwise table creation fails with a `NonexistentSecurableError` explaining the requirement. `comment` and `location` declared on these objects are embedded directly in the `CREATE` statement: `MANAGED LOCATION '…'` for catalogs and schemas, `LOCATION '…'` on `CREATE TABLE` to make it external, and `CREATE EXTERNAL VOLUME … LOCATION '…'` for external volumes. Columns declared in config but missing from a pre-existing table are added via `ALTER TABLE … ADD COLUMN` as long as the column declares a `type`; columns without a `type` fail validation with a hint, just like the table case. By default (flag off), columns missing from a pre-existing table are surfaced as `NonexistentSecurableError` at dry-run, so drift is caught before any SQL runs.
   - `--enable-privilege-management` — grant/revoke privileges via `GRANT`/`REVOKE` SQL.
   - `--enable-governed-tag-deletion` — delete governed tags (account-level tag policies) that exist in UC but are absent from config. **High blast radius — deleting a tag policy orphans every object assigned that tag key across the account.** The engine logs the list of tags slated for deletion and requires an interactive `y`/`yes` confirmation at the terminal before issuing any `delete_tag_policy` call. UC itself decides what happens to objects that reference the deleted tag (typically: orphans them); the engine does not scan for references. Pair with `--force` in non-interactive contexts (see below).
@@ -824,7 +828,6 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 
 ### Not yet implemented
 
-- **Object attributes** — `rfa_email` on securables (`owner` and `comment` are implemented; adding more attributes requires only a field on `SecurableAttributes` and an executor dispatch branch). Enforcement is already gated by `--enable-taggable-management`.
 - **Abstracted privilege names** — `use`, `read`, `edit`, `create` expanding to multiple UC privileges
 
 ---

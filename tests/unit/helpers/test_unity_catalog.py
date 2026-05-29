@@ -1100,6 +1100,177 @@ def test_uc_helper_securables_query_does_not_fetch_column_data_types():
 
 
 # ---------------------------------------------------------------------------
+# UnityCatalogHelper.fetch_actual_securables — rfa_destinations fan-out
+# ---------------------------------------------------------------------------
+
+
+def _make_rfa_response(*ids: str) -> MagicMock:
+    """Build a mock SDK response carrying NotificationDestination-shaped items.
+
+    The differ only reads ``destination_id`` off each destination in the
+    response, so the fakes only need that attribute populated.
+    """
+    response = MagicMock()
+    response.destinations = [MagicMock(destination_id=i) for i in ids]
+    return response
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetch_actual_securables_skips_rfa_fanout_when_targets_none(mock_fetch):
+    """Passing rfa_targets=None must not trigger any RFA SDK fan-out and must leave
+    rfa_destinations as None on every attribute row."""
+    mock_fetch.return_value = [["CATALOG", "my_catalog", "admin", None, None, None, None, None, None]]
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    _, attributes = helper.fetch_actual_securables(["my_catalog"], rfa_targets=None)
+
+    client.rfa.get_access_request_destinations.assert_not_called()
+    for attr in attributes:
+        assert attr.rfa_destinations is None
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetch_actual_securables_skips_rfa_fanout_when_targets_empty(mock_fetch):
+    """An empty rfa_targets set behaves the same as None — no RFA calls fire."""
+    mock_fetch.return_value = [["CATALOG", "my_catalog", "admin", None, None, None, None, None, None]]
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    _, attributes = helper.fetch_actual_securables(["my_catalog"], rfa_targets=set())
+
+    client.rfa.get_access_request_destinations.assert_not_called()
+    for attr in attributes:
+        assert attr.rfa_destinations is None
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetch_actual_securables_fans_out_one_rfa_call_per_target(mock_fetch):
+    """Each (securable_type, full_name) in rfa_targets triggers exactly one
+    get_access_request_destinations SDK call."""
+    mock_fetch.return_value = [
+        ["CATALOG", "my_catalog", "admin", None, None, None, None, None, None],
+        ["SCHEMA", "my_catalog.sales", "schema_owner", None, None, None, None, None, None],
+    ]
+    client = _make_mock_workspace_client()
+    client.rfa.get_access_request_destinations.return_value = _make_rfa_response()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    targets = {
+        (SecurableType.CATALOG, "my_catalog"),
+        (SecurableType.SCHEMA, "my_catalog.sales"),
+    }
+    helper.fetch_actual_securables(["my_catalog"], rfa_targets=targets)
+
+    assert client.rfa.get_access_request_destinations.call_count == 2
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetch_actual_securables_populates_rfa_destinations_on_attribute_rows(mock_fetch):
+    """Fetched destination_ids are stitched onto the matching SecurableAttributes
+    row (matched by securable_type + full_name)."""
+    mock_fetch.return_value = [
+        ["CATALOG", "my_catalog", "admin", None, None, None, None, None, None],
+    ]
+    client = _make_mock_workspace_client()
+    client.rfa.get_access_request_destinations.return_value = _make_rfa_response(
+        "data-gov@example.com", "ops@example.com"
+    )
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    targets = {(SecurableType.CATALOG, "my_catalog")}
+    _, attributes = helper.fetch_actual_securables(["my_catalog"], rfa_targets=targets)
+
+    matching = [
+        a for a in attributes
+        if a.securable_type == SecurableType.CATALOG and a.full_name == "my_catalog"
+    ]
+    assert len(matching) == 1
+    assert matching[0].rfa_destinations == frozenset(
+        {"data-gov@example.com", "ops@example.com"}
+    )
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetch_actual_securables_inserts_attribute_row_for_target_missing_from_sql(mock_fetch):
+    """When rfa_targets references a securable that didn't appear in the SQL
+    result (i.e. doesn't exist yet — about to be created), a fresh
+    SecurableAttributes row carrying the fetched rfa_destinations is inserted
+    so the diff sees an actual-side row."""
+    # SQL returns nothing — the schema does not yet exist in UC.
+    mock_fetch.return_value = []
+    client = _make_mock_workspace_client()
+    client.rfa.get_access_request_destinations.return_value = _make_rfa_response(
+        "https://example.com/access"
+    )
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    targets = {(SecurableType.SCHEMA, "my_catalog.sales")}
+    _, attributes = helper.fetch_actual_securables(["my_catalog"], rfa_targets=targets)
+
+    matching = [
+        a for a in attributes
+        if a.securable_type == SecurableType.SCHEMA and a.full_name == "my_catalog.sales"
+    ]
+    assert len(matching) == 1
+    assert matching[0].rfa_destinations == frozenset({"https://example.com/access"})
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetch_actual_securables_treats_404_as_empty_rfa_destinations(mock_fetch):
+    """A NotFound from get_access_request_destinations must map to an empty
+    frozenset on the affected row rather than aborting the fetch."""
+    from databricks.sdk.errors import NotFound
+
+    mock_fetch.return_value = [
+        ["TABLE", "my_catalog.sales.orders", "table_owner", None, None, None, "[]", None, "MANAGED"],
+    ]
+    client = _make_mock_workspace_client()
+    client.rfa.get_access_request_destinations.side_effect = NotFound("missing")
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    targets = {(SecurableType.TABLE, "my_catalog.sales.orders")}
+    _, attributes = helper.fetch_actual_securables(["my_catalog"], rfa_targets=targets)
+
+    matching = [
+        a for a in attributes
+        if a.securable_type == SecurableType.TABLE and a.full_name == "my_catalog.sales.orders"
+    ]
+    assert len(matching) == 1
+    assert matching[0].rfa_destinations == frozenset()
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetch_actual_securables_preserves_existing_owner_when_merging_rfa(mock_fetch):
+    """Merging RFA destinations onto an existing attribute row must preserve the
+    other governed attributes (owner, comment) parsed from SQL — only
+    rfa_destinations is replaced."""
+    mock_fetch.return_value = [
+        ["CATALOG", "my_catalog", "admin", None, None, None, None, "Prod catalog", None],
+    ]
+    client = _make_mock_workspace_client()
+    client.rfa.get_access_request_destinations.return_value = _make_rfa_response(
+        "data-gov@example.com"
+    )
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    targets = {(SecurableType.CATALOG, "my_catalog")}
+    _, attributes = helper.fetch_actual_securables(["my_catalog"], rfa_targets=targets)
+
+    matching = [
+        a for a in attributes
+        if a.securable_type == SecurableType.CATALOG and a.full_name == "my_catalog"
+    ]
+    assert len(matching) == 1
+    attr = matching[0]
+    assert attr.owner == Principal(
+        principal_type=PrincipalType.UNKNOWN, identifier="admin"
+    )
+    assert attr.comment == "Prod catalog"
+    assert attr.rfa_destinations == frozenset({"data-gov@example.com"})
+
+
+# ---------------------------------------------------------------------------
 # UnityCatalogHelper.update_owner
 # ---------------------------------------------------------------------------
 
@@ -1124,6 +1295,130 @@ def test_uc_helper_update_owner_dispatches_to_function_api():
     client.functions.update.assert_called_once_with(
         "my_catalog.shared.mask_email", owner="new_owner"
     )
+
+
+# ---------------------------------------------------------------------------
+# UnityCatalogHelper.update_rfa_destinations
+# ---------------------------------------------------------------------------
+
+
+def _get_rfa_update_call(client: MagicMock):
+    """Return the kwargs from the most recent update_access_request_destinations call."""
+    return client.rfa.update_access_request_destinations.call_args.kwargs
+
+
+def test_uc_helper_update_rfa_destinations_calls_sdk_with_update_mask_destinations():
+    """update_rfa_destinations passes update_mask='destinations' to the SDK call."""
+    client = MagicMock()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.update_rfa_destinations(
+        SecurableType.CATALOG, "my_catalog", frozenset({"data-gov@example.com"})
+    )
+
+    kwargs = _get_rfa_update_call(client)
+    assert kwargs["update_mask"] == "destinations"
+
+
+def test_uc_helper_update_rfa_destinations_classifies_email_destination_id():
+    """An email destination id is classified as DestinationType.EMAIL on the
+    NotificationDestination passed to the SDK."""
+    from databricks.sdk.service.catalog import DestinationType as SdkDestinationType
+
+    client = MagicMock()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.update_rfa_destinations(
+        SecurableType.CATALOG, "my_catalog", frozenset({"data-gov@example.com"})
+    )
+
+    kwargs = _get_rfa_update_call(client)
+    destinations = kwargs["access_request_destinations"].destinations
+    assert len(destinations) == 1
+    (dest,) = destinations
+    assert dest.destination_id == "data-gov@example.com"
+    assert dest.destination_type == SdkDestinationType.EMAIL
+
+
+def test_uc_helper_update_rfa_destinations_classifies_url_destination_id():
+    """A URL destination id is classified as DestinationType.URL."""
+    from databricks.sdk.service.catalog import DestinationType as SdkDestinationType
+
+    client = MagicMock()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.update_rfa_destinations(
+        SecurableType.SCHEMA, "my_catalog.sales", frozenset({"https://example.com/access"})
+    )
+
+    kwargs = _get_rfa_update_call(client)
+    destinations = kwargs["access_request_destinations"].destinations
+    (dest,) = destinations
+    assert dest.destination_id == "https://example.com/access"
+    assert dest.destination_type == SdkDestinationType.URL
+
+
+def test_uc_helper_update_rfa_destinations_leaves_destination_type_to_generic_webhook_for_guid():
+    """A GUID destination id is sent with destination_type=GENERIC_WEBHOOK — the SDK
+    backend will resolve the type from the registered notification destination."""
+    from databricks.sdk.service.catalog import DestinationType as SdkDestinationType
+
+    client = MagicMock()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    guid = "550e8400-e29b-41d4-a716-446655440000"
+    helper.update_rfa_destinations(
+        SecurableType.TABLE, "my_catalog.sales.orders", frozenset({guid})
+    )
+
+    kwargs = _get_rfa_update_call(client)
+    destinations = kwargs["access_request_destinations"].destinations
+    (dest,) = destinations
+    assert dest.destination_id == guid
+    assert dest.destination_type is SdkDestinationType.GENERIC_WEBHOOK
+
+
+def test_uc_helper_update_rfa_destinations_passes_securable_full_name_and_type():
+    """The AccessRequestDestinations payload carries a Securable with the
+    full_name and SDK SecurableType matching the target."""
+    from databricks.sdk.service.catalog import SecurableType as SdkSecurableType
+
+    client = MagicMock()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.update_rfa_destinations(
+        SecurableType.SCHEMA, "my_catalog.sales", frozenset({"data-gov@example.com"})
+    )
+
+    kwargs = _get_rfa_update_call(client)
+    securable = kwargs["access_request_destinations"].securable
+    assert securable.full_name == "my_catalog.sales"
+    assert securable.type == SdkSecurableType.SCHEMA
+
+    # Also check the set of destination_ids passed matches the input (loose
+    # behavioural check — list order is unspecified for a frozenset input).
+    sent_ids = {d.destination_id for d in kwargs["access_request_destinations"].destinations}
+    assert sent_ids == {"data-gov@example.com"}
+
+
+def test_uc_helper_update_rfa_destinations_handles_function_securable_type():
+    """SecurableType.FUNCTION maps to the SDK's FUNCTION enum value on the
+    Securable payload."""
+    from databricks.sdk.service.catalog import SecurableType as SdkSecurableType
+
+    client = MagicMock()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.update_rfa_destinations(
+        SecurableType.FUNCTION,
+        "my_catalog.shared.mask_email",
+        frozenset({"data-gov@example.com"}),
+    )
+
+    kwargs = _get_rfa_update_call(client)
+    securable = kwargs["access_request_destinations"].securable
+    assert securable.full_name == "my_catalog.shared.mask_email"
+    assert securable.type == SdkSecurableType.FUNCTION
 
 
 # ---------------------------------------------------------------------------

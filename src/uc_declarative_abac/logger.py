@@ -197,7 +197,25 @@ class ChangeLogger:
     # ------------------------------------------------------------------
 
     def _display_value(self, value: object) -> str:
-        """Return a display-friendly string for an attribute value."""
+        """Return a display-friendly string for an AttributeUpdate value.
+
+        ``value`` is a ``frozenset[str] | frozenset[Principal]``:
+
+        - empty → empty string (matches the legacy "no value" rendering)
+        - single Principal → its display name
+        - single string → the string itself
+        - multi-element → sorted, comma-separated list of names / strings
+        """
+        if isinstance(value, (frozenset, set)):
+            if not value:
+                return ""
+            if len(value) == 1:
+                only = next(iter(value))
+                return only.name if isinstance(only, Principal) else str(only)
+            rendered = sorted(
+                v.name if isinstance(v, Principal) else str(v) for v in value
+            )
+            return ", ".join(rendered)
         if isinstance(value, Principal):
             return value.name
         return str(value)

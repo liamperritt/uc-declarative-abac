@@ -297,7 +297,7 @@ def test_policy_executor_includes_comment_when_set():
     diff = PolicyDiff(to_create={_make_policy(comment="Mask email PII")})
 
     (sql,) = execute_policy_diff(uc_helper, diff, ChangeLogger())
-    _assert_sql_contains(sql, "COMMENT 'Mask email PII'")
+    _assert_sql_contains(sql, 'COMMENT "Mask email PII"')
 
 
 def test_policy_executor_omits_comment_clause_when_unset():
@@ -313,7 +313,7 @@ def test_policy_executor_escapes_single_quotes_in_comment():
     diff = PolicyDiff(to_create={_make_policy(comment="It's broken")})
 
     (sql,) = execute_policy_diff(uc_helper, diff, ChangeLogger())
-    assert "COMMENT 'It\\'s broken'" in sql
+    assert '''COMMENT "It\\'s broken"''' in sql
 
 
 def test_policy_executor_comment_appears_between_on_and_body():
