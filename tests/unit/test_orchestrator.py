@@ -7,6 +7,7 @@ import pytest
 
 from uc_declarative_abac.orchestrator import run
 from uc_declarative_abac.utils import (
+    DisallowedTagValueError,
     ExecutionBatchError,
     PrincipalValidationError,
     UngovernedTagError,
@@ -1801,6 +1802,82 @@ def test_orchestrator_raises_ungoverned_tag_error_when_grant_policy_references_u
         f"Expected at least one UngovernedTagError, got: {exc_info.value.errors}"
     )
     assert any("ungoverned_key" in str(e.exception) for e in ungoverned_errors)
+
+
+def _config_with_disallowed_tag_value() -> dict:
+    """Config: governed tag uc_gov_env allows {dev,prod}; catalog assigns 'bogus'."""
+    return {
+        "resources": {
+            "governed_tags": {
+                "uc_gov_env": {"allowed_values": ["dev", "prod"]},
+            },
+            "catalogs": {
+                "my_catalog": {
+                    "tags": {"uc_gov_env": "bogus"},
+                }
+            }
+        }
+    }
+
+
+def test_orchestrator_raises_disallowed_tag_value_error_when_tag_value_not_in_allowed_values(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """A securable tag whose value violates a governed tag's allowed_values
+    surfaces as a DisallowedTagValueError inside the final ExecutionBatchError.
+    The offending tag is dropped from the diff so UC is not asked to SET it."""
+    config = _config_with_disallowed_tag_value()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+    mock_workspace_client.tag_policies.list_tag_policies.return_value = iter([])
+
+    with pytest.raises(ExecutionBatchError) as exc_info:
+        _run_all_enabled(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+        )
+
+    disallowed_errors = [
+        e for e in exc_info.value.errors
+        if isinstance(e.exception, DisallowedTagValueError)
+    ]
+    assert len(disallowed_errors) >= 1, (
+        f"Expected at least one DisallowedTagValueError, got: {exc_info.value.errors}"
+    )
+    combined = " ".join(str(e.exception) for e in disallowed_errors)
+    assert "uc_gov_env" in combined
+    assert "bogus" in combined
+
+
+def test_orchestrator_raises_disallowed_tag_value_error_in_dry_run(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """The same validation fires in dry_run mode — config errors must surface
+    before the user attempts an actual deploy."""
+    config = _config_with_disallowed_tag_value()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+    mock_workspace_client.tag_policies.list_tag_policies.return_value = iter([])
+
+    with pytest.raises(ExecutionBatchError) as exc_info:
+        _run_all_enabled(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            dry_run=True,
+        )
+
+    disallowed_errors = [
+        e for e in exc_info.value.errors
+        if isinstance(e.exception, DisallowedTagValueError)
+    ]
+    assert len(disallowed_errors) >= 1, (
+        f"Expected at least one DisallowedTagValueError in dry_run, "
+        f"got: {exc_info.value.errors}"
+    )
 
 
 # ---------------------------------------------------------------------------

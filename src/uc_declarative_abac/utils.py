@@ -130,6 +130,13 @@ class UngovernedTagError(OrchestratorError):
     checked — values are not validated."""
 
 
+class DisallowedTagValueError(OrchestratorError):
+    """Raised when a securable tag assignment uses a governed tag key but the
+    assigned value is not in the governed tag's ``allowed_values``. A governed
+    tag with empty ``allowed_values`` accepts any value and does not trigger
+    this error."""
+
+
 class DuplicateServicePrincipalError(OrchestratorError):
     """Raised when two service principals share the same display name."""
 

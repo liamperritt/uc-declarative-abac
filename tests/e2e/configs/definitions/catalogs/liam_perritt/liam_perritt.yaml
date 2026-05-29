@@ -9,7 +9,7 @@ definitions:
         - b4843c77-437e-4f49-ba24-a7fc1306b96b
       tags:
         uc_gov_env: test
-        uc_gov_managed_by: uc_declarative_abac
+        uc_gov_managed_by: invalid
       policies:
         - $ref: $defs/policies/abac|grant_use_catalog
         - $ref: $defs/policies/abac|grant_catalog_read

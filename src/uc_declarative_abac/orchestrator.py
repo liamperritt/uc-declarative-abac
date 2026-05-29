@@ -214,13 +214,14 @@ def run(
         resolver, change_logger,
         enable_deletion=enable_governed_tag_deletion,
     )
-    # Union of declared governed tag names (desired from config + actual on UC).
-    # Used by the policies/privileges compilers to reject references to tag keys
-    # that aren't governed — desired-only covers in-flight creations, actual-only
+    # Union of declared governed tags (desired from config + actual on UC).
+    # The names are used by the policies/privileges compilers to reject references
+    # to tag keys that aren't governed; the full objects are used by the tags
+    # compiler to validate that each securable tag's value is in the governed
+    # tag's allowed_values. Desired-only covers in-flight creations, actual-only
     # covers already-deployed tags the config doesn't redeclare.
-    governed_tag_names = {
-        t.name for t in desired_governed_tags | actual_governed_tags
-    }
+    governed_tags = desired_governed_tags | actual_governed_tags
+    governed_tag_names = {t.name for t in governed_tags}
 
     # 5. Securables workflow (before tags and privileges) — desired sides were
     # compiled up-front; here we apply taggable-management scoping.
@@ -238,13 +239,9 @@ def run(
         creation_in_scope_catalogs=taggable_creation_scope,
     )
 
-    if securable_diff.securables_to_create or securable_diff.securables_to_replace or securable_diff.attributes_to_update:
-        change_logger.log_section_header("Securables")
-    execute_securable_diff(uc_helper, securable_diff, change_logger, dry_run=dry_run)
-
     # 6. Tags workflow
     if enable_tag_management:
-        desired_tags = compile_desired_tags(config)
+        desired_tags = compile_desired_tags(config, governed_tags, change_logger)
         in_scope_desired_tags = {
             t for t in desired_tags if catalog_of(t.securable_full_name) in tag_scope
         }
@@ -298,6 +295,10 @@ def run(
     execute_governed_tag_diff(
         ws_helper, governed_tag_diff, change_logger, dry_run=dry_run, force=force,
     )
+
+    if securable_diff.securables_to_create or securable_diff.securables_to_replace or securable_diff.attributes_to_update:
+        change_logger.log_section_header("Securables")
+    execute_securable_diff(uc_helper, securable_diff, change_logger, dry_run=dry_run)
 
     if tag_diff.to_add or tag_diff.to_update or tag_diff.to_remove:
         change_logger.log_section_header("Tags")
