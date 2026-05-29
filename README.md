@@ -303,11 +303,11 @@ definitions:
       owner: sales_engineering
       comment: Orders fact table
       location: s3://operations-external/sales/orders  # optional external location (immutable; CREATE-only)
+      rfa_destinations:
+        - sales-data@company.com
       tags:
         classification: internal
         sales: ~
-      rfa_destinations:
-        - sales-data@company.com
       policies:
         - $ref: $defs/policies/shared|mask_pii_email
 
