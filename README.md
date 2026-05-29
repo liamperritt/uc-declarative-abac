@@ -429,14 +429,14 @@ definitions:
       comment: Mask email PII from all users except account admins
       type: mask
       function: platform.abac.mask_email_pii
-      to:
-        - account_users
-      except:
-        - pii_viewers
       columns:
         - alias: email
           has_tags:
             pii: email
+      to:
+        - account_users
+      except:
+        - pii_viewers
 
 # definitions/shared/policies/mask_customer_name_pii.yaml
 definitions:
@@ -446,12 +446,6 @@ definitions:
       comment: Mask retail-segment customer names (not commercial-segment customer names) from all users except account admins
       type: mask
       function: platform.abac.mask_retail_segment_customer_names_pii
-      to:
-        - account_users
-      except:
-        - customer_pii_viewers
-      has_tags:
-        domain: customer
       columns:
         - alias: name
           has_tags:
@@ -460,6 +454,12 @@ definitions:
         - alias: segment
           has_tags:
             segment: '*'
+      to:
+        - account_users
+      except:
+        - customer_pii_viewers
+      has_tags:
+        domain: customer
 
 # definitions/shared/policies/filter_by_region.yaml
 definitions:
@@ -489,10 +489,6 @@ definitions:
             OR (to_region = 'ASIA' AND is_account_group_member('asia_users'))
             OR (to_region = 'MIDDLE EAST' AND is_account_group_member('middle_east_users')
           )
-      to:
-        - account_users
-      except:
-        - account_admins
       has_tags:
         trips: '*'
         sensitivity: high
@@ -503,6 +499,10 @@ definitions:
         - alias: to_region
           has_tags:
             to_region: '*'
+      to:
+        - account_users
+      except:
+        - account_admins
 
 # definitions/shared/policies/grant_read_on_sales.yaml
 definitions:
@@ -513,12 +513,12 @@ definitions:
       type: grant
       privileges:
         - select
+      has_tags:
+        business_area: sales
       to:
         - data_engineers
         - sales_team
         - sp_sales_job_runner
-      has_tags:
-        business_area: sales
       expiry_date: 2026-05-01
 ```
 
