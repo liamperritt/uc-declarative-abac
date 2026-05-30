@@ -105,6 +105,15 @@ def main() -> None:
              "actions. Required in non-interactive CI contexts if any destructive gate "
              "(e.g. --enable-governed-tag-deletion) is set.",
     )
+    parser.add_argument(
+        "--ref-override-strategy",
+        type=str,
+        choices=["merge", "replace"],
+        default="merge",
+        help="How sibling fields on a $ref entry combine with the referenced definition. "
+             "'merge' (default) recursively deep-merges maps and lists; 'replace' shallowly "
+             "replaces top-level keys (legacy behaviour).",
+    )
 
     args = parser.parse_args()
 
@@ -128,6 +137,7 @@ def main() -> None:
         manage_taggables_for_catalogs=args.manage_taggables_for_catalogs,
         create_taggables_for_catalogs=args.create_taggables_for_catalogs,
         force=args.force,
+        ref_override_strategy=args.ref_override_strategy,
     )
 
 

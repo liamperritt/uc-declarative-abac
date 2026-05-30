@@ -9,6 +9,9 @@ definitions:
         - $defs/policies/abac|mask_pii
       tables:
         - $ref: $defs/tables/liam_perritt|lff_sqlserver_bronze|dummy_cdc_sink
+          columns:
+            - name: override
+              type: string
         - $ref: $defs/tables/liam_perritt|lff_sqlserver_bronze|dummy_table_cdc_st
       volumes:
-        - $ref: $defs/volumes/liam_perritt|lff_sqlserver_bronze|test
+        - $defs/volumes/liam_perritt|lff_sqlserver_bronze|test

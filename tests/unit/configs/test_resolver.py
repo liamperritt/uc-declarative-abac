@@ -81,8 +81,8 @@ def test_resolver_applies_override_on_ref():
     assert resolved_schema["comment"] == "Sales schema"
 
 
-def test_resolver_override_replaces_entirely():
-    """Overriding a nested key replaces it entirely — no deep merge."""
+def test_resolver_replace_strategy_behaves_like_legacy_update():
+    """Under override_strategy='replace', overriding a nested key replaces it entirely (legacy behaviour)."""
     definitions = {
         "schemas": {
             "ops|sales": {
@@ -104,11 +104,528 @@ def test_resolver_override_replaces_entirely():
         },
     }
 
+    result = resolve_refs(definitions, resources, override_strategy="replace")
+
+    resolved_tags = result["catalogs"]["main"]["schemas"][0]["tags"]
+    # Under the replace strategy the override replaces the entire tags dict.
+    assert resolved_tags == {"env": "staging"}
+
+
+# ---------------------------------------------------------------------------
+# override_strategy parameter wiring
+# ---------------------------------------------------------------------------
+
+
+def test_resolver_accepts_override_strategy_kwarg():
+    """resolve_refs accepts override_strategy='merge' and override_strategy='replace'."""
+    definitions = {"schemas": {"ops|sales": {"name": "sales"}}}
+    resources = {"catalogs": {"main": {"schemas": [{"$ref": "$defs/schemas/ops|sales"}]}}}
+
+    # Both explicit values should succeed.
+    result_merge = resolve_refs(definitions, resources, override_strategy="merge")
+    result_replace = resolve_refs(definitions, resources, override_strategy="replace")
+    # And the default (no kwarg) should match the merge result — proves default is "merge".
+    result_default = resolve_refs(definitions, resources)
+    assert result_merge == result_default
+    assert "catalogs" in result_replace
+
+
+# ---------------------------------------------------------------------------
+# merge strategy — maps
+# ---------------------------------------------------------------------------
+
+
+def test_resolver_merge_strategy_deep_merges_nested_map():
+    """Override of a nested map merges keys instead of replacing the whole map."""
+    definitions = {
+        "schemas": {
+            "ops|sales": {
+                "name": "sales",
+                "tags": {"domain": "operations", "pii": "true"},
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ops|sales",
+                        "tags": {"pii": "false", "env": "staging"},
+                    },
+                ],
+            },
+        },
+    }
+
     result = resolve_refs(definitions, resources)
 
     resolved_tags = result["catalogs"]["main"]["schemas"][0]["tags"]
-    # The override replaces the entire tags dict; original keys are gone.
-    assert resolved_tags == {"env": "staging"}
+    # domain preserved from definition; pii overridden; env added from override.
+    assert resolved_tags == {"domain": "operations", "pii": "false", "env": "staging"}
+
+
+def test_resolver_merge_strategy_recursively_merges_dict_of_dicts():
+    """A two-level-nested override only touches the keys it specifies; sibling subtrees untouched."""
+    definitions = {
+        "catalogs": {
+            "ops": {
+                "name": "ops",
+                "settings": {
+                    "ingest": {"format": "parquet", "compression": "snappy"},
+                    "query": {"caching": "on", "ttl": "1h"},
+                },
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "ops_test": {
+                "$ref": "$defs/catalogs/ops",
+                "settings": {
+                    "query": {"ttl": "5m"},
+                },
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    settings = result["catalogs"]["ops_test"]["settings"]
+    # Sibling subtree 'ingest' preserved entirely.
+    assert settings["ingest"] == {"format": "parquet", "compression": "snappy"}
+    # 'query.caching' preserved from definition; 'query.ttl' overridden.
+    assert settings["query"] == {"caching": "on", "ttl": "5m"}
+
+
+def test_resolver_merge_strategy_override_leaf_replaces_scalar():
+    """A scalar leaf is replaced wholesale by an override."""
+    definitions = {
+        "schemas": {
+            "ops|sales": {"name": "sales", "comment": "Original"},
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "schemas": [
+                    {"$ref": "$defs/schemas/ops|sales", "comment": "Changed"},
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    schema = result["catalogs"]["main"]["schemas"][0]
+    assert schema["comment"] == "Changed"
+    assert schema["name"] == "sales"
+
+
+def test_resolver_merge_strategy_override_none_replaces_value():
+    """An explicit None in an override replaces the definition value."""
+    definitions = {
+        "schemas": {
+            "ops|sales": {"name": "sales", "comment": "Original"},
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "schemas": [
+                    {"$ref": "$defs/schemas/ops|sales", "comment": None},
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    schema = result["catalogs"]["main"]["schemas"][0]
+    assert schema["comment"] is None
+
+
+# ---------------------------------------------------------------------------
+# merge strategy — lists with identifiers
+# ---------------------------------------------------------------------------
+
+
+def test_resolver_merge_strategy_merges_list_of_dicts_by_name():
+    """A list of dicts with 'name' identifiers is merged item-wise by matching name."""
+    definitions = {
+        "schemas": {
+            "ops|sales": {
+                "name": "sales",
+                "tables": [
+                    {"name": "orders", "comment": "Orders table"},
+                    {"name": "quotes", "comment": "Quotes table"},
+                ],
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ops|sales",
+                        "tables": [
+                            {"name": "quotes", "comment": "TEST quotes"},
+                            {"name": "leads", "comment": "Leads table"},
+                        ],
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    tables = result["catalogs"]["main"]["schemas"][0]["tables"]
+    # orders preserved from definition; quotes merged with override comment; leads appended.
+    table_by_name = {t["name"]: t for t in tables}
+    assert table_by_name["orders"]["comment"] == "Orders table"
+    assert table_by_name["quotes"]["comment"] == "TEST quotes"
+    assert table_by_name["leads"]["comment"] == "Leads table"
+    assert len(tables) == 3
+
+
+def test_resolver_merge_strategy_merges_list_of_refs_by_ref():
+    """A list of {$ref: ...} items on both sides is merged by matching $ref strings."""
+    definitions = {
+        "schemas": {
+            "ops|sales": {
+                "name": "sales",
+                "tables": [
+                    {"$ref": "$defs/tables/ops|sales|orders"},
+                    {"$ref": "$defs/tables/ops|sales|quotes"},
+                ],
+            },
+        },
+        "tables": {
+            "ops|sales|orders": {"name": "orders", "comment": "Orders table"},
+            "ops|sales|quotes": {"name": "quotes", "comment": "Quotes table"},
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ops|sales",
+                        "tables": [
+                            {
+                                "$ref": "$defs/tables/ops|sales|quotes",
+                                "comment": "TEST quotes",
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    tables = result["catalogs"]["main"]["schemas"][0]["tables"]
+    # The two definition refs are preserved; the override-side ref matches 'quotes' by $ref
+    # and contributes a comment override.
+    table_by_name = {t["name"]: t for t in tables}
+    assert "orders" in table_by_name
+    assert table_by_name["orders"]["comment"] == "Orders table"
+    assert table_by_name["quotes"]["comment"] == "TEST quotes"
+    assert len(tables) == 2
+
+
+def test_resolver_merge_strategy_uses_alias_as_identifier_when_no_name():
+    """Items without 'name' but with 'alias' are matched by 'alias'."""
+    definitions = {
+        "schemas": {
+            "ops|sales": {
+                "name": "sales",
+                "columns": [
+                    {"alias": "id", "comment": "Original id"},
+                    {"alias": "total", "comment": "Original total"},
+                ],
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ops|sales",
+                        "columns": [
+                            {"alias": "total", "comment": "Overridden total"},
+                        ],
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    columns = result["catalogs"]["main"]["schemas"][0]["columns"]
+    col_by_alias = {c["alias"]: c for c in columns}
+    assert col_by_alias["id"]["comment"] == "Original id"
+    assert col_by_alias["total"]["comment"] == "Overridden total"
+    assert len(columns) == 2
+
+
+def test_resolver_merge_strategy_prefers_alias_over_ref_as_identifier():
+    """When an item has 'alias' and '$ref' but no 'name', 'alias' is the identifier."""
+    definitions = {
+        "schemas": {
+            "ops|sales": {
+                "name": "sales",
+                "columns": [
+                    {"alias": "id", "comment": "Original"},
+                ],
+            },
+        },
+        "tables": {
+            "ops|sales|template": {"name": "template", "comment": "Template"},
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ops|sales",
+                        "columns": [
+                            {
+                                "$ref": "$defs/tables/ops|sales|template",
+                                "alias": "id",
+                                "comment": "Overridden",
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    columns = result["catalogs"]["main"]["schemas"][0]["columns"]
+    # The override matches the definition's column by alias=id.
+    assert len(columns) == 1
+    assert columns[0]["alias"] == "id"
+    assert columns[0]["comment"] == "Overridden"
+
+
+def test_resolver_merge_strategy_prefers_name_over_ref_as_identifier():
+    """When items carry both 'name' and '$ref', 'name' is the matching identifier."""
+    definitions = {
+        "schemas": {
+            "ops|sales": {
+                "name": "sales",
+                "tables": [
+                    {"name": "orders", "comment": "Original"},
+                ],
+            },
+        },
+        "tables": {
+            "ops|sales|orders_template": {"name": "orders", "comment": "From template"},
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ops|sales",
+                        "tables": [
+                            {
+                                "$ref": "$defs/tables/ops|sales|orders_template",
+                                "name": "orders",
+                                "comment": "Overridden",
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    tables = result["catalogs"]["main"]["schemas"][0]["tables"]
+    # Override identifier is 'name=orders', which matches the definition's table by name.
+    # The override carries a comment override that wins.
+    assert len(tables) == 1
+    assert tables[0]["name"] == "orders"
+    assert tables[0]["comment"] == "Overridden"
+
+
+# ---------------------------------------------------------------------------
+# merge strategy — lists of primitives
+# ---------------------------------------------------------------------------
+
+
+def test_resolver_merge_strategy_unions_lists_of_primitives():
+    """Primitive lists are unioned (definition order first, then new items from override)."""
+    definitions = {
+        "policies": {
+            "shared|grant": {
+                "name": "grant",
+                "privileges": ["SELECT", "USE_SCHEMA"],
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "policies": [
+                    {
+                        "$ref": "$defs/policies/shared|grant",
+                        "privileges": ["SELECT", "MODIFY"],
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    privileges = result["catalogs"]["main"]["policies"][0]["privileges"]
+    # Definition order preserved, MODIFY appended, SELECT deduped.
+    assert privileges == ["SELECT", "USE_SCHEMA", "MODIFY"]
+
+
+def test_resolver_merge_strategy_leaves_primitive_list_unchanged_when_override_empty():
+    """An empty override list leaves the definition's primitive list intact."""
+    definitions = {
+        "policies": {
+            "shared|grant": {
+                "name": "grant",
+                "privileges": ["SELECT", "MODIFY"],
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "policies": [
+                    {"$ref": "$defs/policies/shared|grant", "privileges": []},
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    privileges = result["catalogs"]["main"]["policies"][0]["privileges"]
+    assert privileges == ["SELECT", "MODIFY"]
+
+
+# ---------------------------------------------------------------------------
+# merge strategy — fallback to replace
+# ---------------------------------------------------------------------------
+
+
+def test_resolver_merge_strategy_replaces_list_when_items_lack_identifier():
+    """A list of dicts whose items have no 'name' or '$ref' falls back to replace."""
+    definitions = {
+        "schemas": {
+            "ops|sales": {
+                "name": "sales",
+                "extras": [{"comment": "first"}, {"comment": "second"}],
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ops|sales",
+                        "extras": [{"comment": "only"}],
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    extras = result["catalogs"]["main"]["schemas"][0]["extras"]
+    # No identifiers → override wins entirely.
+    assert extras == [{"comment": "only"}]
+
+
+def test_resolver_merge_strategy_replaces_when_type_mismatch():
+    """A type mismatch between definition value and override value → override wins."""
+    definitions = {
+        "schemas": {
+            "ops|sales": {
+                "name": "sales",
+                # Definition has a dict; override will provide a list.
+                "extras": {"key": "value"},
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ops|sales",
+                        "extras": ["a", "b"],
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    extras = result["catalogs"]["main"]["schemas"][0]["extras"]
+    # Override wins on type mismatch.
+    assert extras == ["a", "b"]
+
+
+# ---------------------------------------------------------------------------
+# Error detection preserved under both strategies
+# ---------------------------------------------------------------------------
+
+
+def test_resolver_merge_strategy_preserves_circular_detection():
+    """Circular $refs raise ResolutionError under both merge and replace strategies."""
+    definitions = {
+        "schemas": {
+            "a": {"name": "a", "tables": [{"$ref": "$defs/tables/b"}]},
+        },
+        "tables": {
+            "b": {"name": "b", "columns": [{"$ref": "$defs/schemas/a"}]},
+        },
+    }
+    resources = {"catalogs": {"main": {"schemas": [{"$ref": "$defs/schemas/a"}]}}}
+
+    with pytest.raises(ResolutionError, match="[Cc]ircular"):
+        resolve_refs(definitions, resources, override_strategy="merge")
+    with pytest.raises(ResolutionError, match="[Cc]ircular"):
+        resolve_refs(definitions, resources, override_strategy="replace")
+
+
+def test_resolver_merge_strategy_preserves_unreferenced_detection():
+    """Unreferenced definitions are detected under both merge and replace strategies."""
+    definitions = {
+        "schemas": {
+            "ops|sales": {"name": "sales"},
+            "ops|hr": {"name": "hr"},
+        },
+    }
+    resources = {
+        "catalogs": {"main": {"schemas": [{"$ref": "$defs/schemas/ops|sales"}]}}
+    }
+    with pytest.raises(UnreferencedDefinitionError, match="ops\\|hr"):
+        resolve_refs(definitions, resources, override_strategy="merge")
+    with pytest.raises(UnreferencedDefinitionError, match="ops\\|hr"):
+        resolve_refs(definitions, resources, override_strategy="replace")
 
 
 # ---------------------------------------------------------------------------

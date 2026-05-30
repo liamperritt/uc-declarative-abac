@@ -653,7 +653,37 @@ resources:
               comment: This table only exists in TEST
 ```
 
-> **Note:** Overrides replace top-level keys in their entirety — they do not merge into nested structures. For example, you cannot override a single tag; you must specify all tags. The same applies to `tables`, `volumes`, `functions`, and any other list or map field.
+By default, overrides **recursively deep-merge** into the definition:
+
+- **Maps merge key-wise.** Override keys take precedence; unspecified keys fall back to the definition. For example, you can override a single tag and the other tags from the definition are preserved.
+- **Lists of identifier-bearing items merge by `name` (or `alias`).** Items in the override that match an item in the definition by identifier are recursively merged with it; unmatched override items are appended; unmatched definition items are preserved. This lets you add a new table to a schema definition's `tables` list, or tweak a single column, without re-listing every existing entry.
+- **Lists of primitives are unioned with dedupe.** Useful for `privileges`, where you want to add `MODIFY` to a definition's `[SELECT]` without dropping `SELECT`.
+- **Other shapes (mixed items, type mismatch, items without identifiers) fall back to replace.** The override wins entirely — there's no sensible way to align items.
+
+If you need the legacy shallow-replacement behaviour (where any override of a list or map replaces it in its entirety), pass `--ref-override-strategy replace` on the CLI. The default is `merge`.
+
+```yaml
+# Definition
+definitions:
+  schemas:
+    operations|sales:
+      name: sales
+      tags: {domain: operations, pii: "true"}
+      tables:
+        - {name: orders, comment: Orders}
+        - {name: quotes, comment: Quotes}
+
+# Resource — override merges, doesn't replace
+resources:
+  catalogs:
+    operations_test:
+      schemas:
+        - $ref: $defs/schemas/operations|sales
+          tags: {pii: "false", env: staging}   # 'domain' preserved; 'pii' updated; 'env' added
+          tables:
+            - {name: quotes, comment: TEST quotes}   # merges with definition's 'quotes'
+            - {name: leads, comment: Leads table}    # appended; 'orders' from def is preserved
+```
 
 ---
 

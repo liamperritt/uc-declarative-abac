@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from typing import Literal
 
 from databricks.sdk import WorkspaceClient
 
@@ -107,6 +108,7 @@ def run(
     manage_taggables_for_catalogs: str = "*",
     create_taggables_for_catalogs: str = "*",
     force: bool = False,
+    ref_override_strategy: Literal["merge", "replace"] = "merge",
 ) -> OrchestratorDiffsResult:
     """Run the full governance pipeline: discover, resolve, compile, diff, apply.
 
@@ -130,7 +132,7 @@ def run(
     # 1. Discover + load + resolve YAML
     paths = discover_yaml_files(config_dir)
     raw_defs, raw_resources = load_raw_configs(paths)
-    resolved = resolve_refs(raw_defs, raw_resources)
+    resolved = resolve_refs(raw_defs, raw_resources, override_strategy=ref_override_strategy)
     consolidated = consolidate_resources(resolved)
     config = ResourcesConfig.model_validate(consolidated)
     catalog_names = list(config.catalogs.keys())
