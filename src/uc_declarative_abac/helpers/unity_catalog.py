@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.errors import NotFound
+from databricks.sdk.errors import InvalidParameterValue, NotFound
 from databricks.sdk.service.catalog import (
     AccessRequestDestinations,
     DestinationType,
@@ -630,8 +630,10 @@ class UnityCatalogHelper:
     ) -> dict[tuple[SecurableType, str], frozenset[str]]:
         """Fan out one ``rfa.get_access_request_destinations`` call per target.
 
-        404s are treated as ``frozenset()`` — the securable either has no
-        configured destinations or doesn't exist yet (about to be created).
+        ``NotFound`` (HTTP 404) and ``InvalidParameterValue`` (HTTP 400) are
+        both treated as ``frozenset()`` — the securable either has no
+        configured destinations or doesn't exist yet (about to be created on
+        this same run; the API surfaces a 400 in that case rather than a 404).
         Other SDK errors propagate (the run will fail rather than silently
         skip an actual-state row that might lead to false diffs).
         """
@@ -651,13 +653,21 @@ class UnityCatalogHelper:
     def _get_rfa_destination_ids(
         self, securable_type: SecurableType, full_name: str,
     ) -> frozenset[str]:
-        """Fetch destination ids for one securable; treat 404 as empty."""
+        """Fetch destination ids for one securable; treat 404/400 as empty.
+
+        Both ``NotFound`` (HTTP 404 — securable exists but has no configured
+        destinations) and ``InvalidParameterValue`` (HTTP 400 — securable
+        doesn't exist yet, e.g. declared in YAML and scheduled for creation
+        on this same run) map to an empty actual-state. The downstream
+        merge/diff/execute pipeline then creates the securable first and
+        attaches destinations in the attribute-update phase.
+        """
         try:
             response = self._client.rfa.get_access_request_destinations(
                 securable_type=securable_type.value.lower(),
                 full_name=full_name,
             )
-        except NotFound:
+        except (NotFound, InvalidParameterValue):
             return frozenset()
         destinations = response.destinations or []
         return frozenset(d.destination_id for d in destinations)
@@ -742,16 +752,31 @@ class UnityCatalogHelper:
     def _list_policies(
         self, securable_type: SecurableType, full_name: str
     ) -> set[Policy]:
-        infos = self._client.policies.list_policies(
-            on_securable_type=securable_type.value,
-            on_securable_fullname=full_name,
-            include_inherited=False,
-        )
+        """List policies attached to one securable; treat 404 as empty.
+
+        ``NotFound`` here means the parent securable doesn't exist yet —
+        e.g., declared in YAML and scheduled for creation on this same run.
+        Mapping to an empty set lets the diff/execute pipeline create the
+        securable first and attach policies in the policies phase. Other
+        SDK errors propagate.
+
+        The SDK's ``list_policies`` returns a lazy paginator: the HTTP
+        request fires on iteration, not on the call. Both the call and
+        the iteration must sit inside the ``try`` block.
+        """
         result: set[Policy] = set()
-        for info in infos:
-            normalised = _normalise_policy_info(info, securable_type, full_name)
-            if normalised is not None:
-                result.add(normalised)
+        try:
+            infos = self._client.policies.list_policies(
+                on_securable_type=securable_type.value,
+                on_securable_fullname=full_name,
+                include_inherited=False,
+            )
+            for info in infos:
+                normalised = _normalise_policy_info(info, securable_type, full_name)
+                if normalised is not None:
+                    result.add(normalised)
+        except NotFound:
+            return set()
         return result
 
     def execute_sql(self, statement: str) -> None:

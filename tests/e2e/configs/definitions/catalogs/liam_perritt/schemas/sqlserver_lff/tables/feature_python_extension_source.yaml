@@ -4,3 +4,15 @@ definitions:
       name: feature_python_extension_source
       tags:
         uc_gov_classification: internal
+      columns:
+        - name: customerID
+          type: bigint
+        - name: first_name
+          type: string
+        - name: last_nam
+          type: string
+        - name: email_address
+          type: string
+        - name: phone_number
+          type: string
+

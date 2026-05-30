@@ -1251,6 +1251,35 @@ def test_uc_helper_fetch_actual_securables_treats_404_as_empty_rfa_destinations(
 
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetch_actual_securables_treats_400_as_empty_rfa_destinations(mock_fetch):
+    """An InvalidParameterValue from get_access_request_destinations must map
+    to an empty frozenset rather than aborting the fetch. The RFA API returns
+    HTTP 400 (not 404) when the securable doesn't yet exist in UC — e.g., a
+    schema declared in YAML and scheduled for creation on this same run."""
+    from databricks.sdk.errors import InvalidParameterValue
+
+    mock_fetch.return_value = [
+        ["TABLE", "my_catalog.sales.orders", "table_owner", None, None, None, "[]", None, "MANAGED"],
+    ]
+    client = _make_mock_workspace_client()
+    client.rfa.get_access_request_destinations.side_effect = InvalidParameterValue(
+        'Securable type: SCHEMA full_name: "my_catalog.not_yet" '
+        "is either not a UC securable or does not exist."
+    )
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    targets = {(SecurableType.SCHEMA, "my_catalog.not_yet")}
+    _, attributes = helper.fetch_actual_securables(["my_catalog"], rfa_targets=targets)
+
+    matching = [
+        a for a in attributes
+        if a.securable_type == SecurableType.SCHEMA and a.full_name == "my_catalog.not_yet"
+    ]
+    assert len(matching) == 1
+    assert matching[0].rfa_destinations == frozenset()
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_fetch_actual_securables_preserves_existing_owner_when_merging_rfa(mock_fetch):
     """Merging RFA destinations onto an existing attribute row must preserve the
     other governed attributes (owner, comment) parsed from SQL — only
@@ -1655,6 +1684,49 @@ def test_uc_helper_fetch_actual_policies_filters_out_unknown_policy_types():
     helper = UnityCatalogHelper(client, WAREHOUSE_ID)
 
     assert helper.fetch_actual_policies(config) == set()
+
+
+def test_uc_helper_fetch_actual_policies_treats_missing_securable_as_no_policies():
+    """A NotFound from list_policies (parent securable doesn't yet exist —
+    e.g., a schema declared in YAML and scheduled for creation on this same
+    run) must map to an empty result for that securable rather than aborting
+    the fetch. Other securables in the fan-out must still be aggregated.
+
+    The real SDK paginator raises lazily — the HTTP request fires on first
+    iteration, not on the call — so this test simulates a generator that
+    raises on first ``next()``."""
+    from databricks.sdk.errors import NotFound
+
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "name": "cat",
+                    "schemas": [
+                        {"name": "missing", "policies": [_mask_policy_dict(name="mp")]},
+                        {"name": "present", "policies": [_mask_policy_dict(name="pp")]},
+                    ],
+                }
+            }
+        }
+    )
+    client = MagicMock()
+
+    def _missing_paginator():
+        raise NotFound("Schema 'cat.missing' does not exist.")
+        yield  # unreachable, but makes this a generator function
+
+    def list_side_effect(*, on_securable_type, on_securable_fullname, **_):
+        if on_securable_fullname == "cat.missing":
+            return _missing_paginator()
+        return iter([_make_column_mask_policy_info()])
+
+    client.policies.list_policies.side_effect = list_side_effect
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    result = helper.fetch_actual_policies(config)
+
+    assert len(result) == 1
 
 
 def test_uc_helper_fetch_actual_policies_caches_result():

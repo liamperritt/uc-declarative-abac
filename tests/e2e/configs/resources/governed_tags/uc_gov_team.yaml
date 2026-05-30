@@ -3,3 +3,7 @@ resources:
     uc_gov_team:
       name: uc_gov_team
       description: Owning team for the tagged securable
+      allowed_values:
+        - platform
+        - data_engineering
+        - bi_analytics
