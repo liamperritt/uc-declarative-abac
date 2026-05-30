@@ -1533,7 +1533,7 @@ def _make_column_mask_policy_info(
     info.column_mask = MagicMock()
     info.column_mask.function_name = function_name
     info.column_mask.on_column = on_column
-    info.column_mask.using = [MagicMock(column=a, constant=None) for a in using_column_aliases]
+    info.column_mask.using = [MagicMock(alias=a, constant=None) for a in using_column_aliases]
     info.row_filter = None
     info.to_principals = list(to_principals)
     info.except_principals = list(except_principals) if except_principals else None
@@ -1566,7 +1566,7 @@ def _make_row_filter_policy_info(
     info.column_mask = None
     info.row_filter = MagicMock()
     info.row_filter.function_name = function_name
-    info.row_filter.using = [MagicMock(column=a, constant=None) for a in using_column_aliases]
+    info.row_filter.using = [MagicMock(alias=a, constant=None) for a in using_column_aliases]
     info.to_principals = list(to_principals)
     info.except_principals = list(except_principals) if except_principals else None
     info.when_condition = when_condition

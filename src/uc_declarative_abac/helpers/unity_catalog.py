@@ -453,7 +453,7 @@ def _normalise_policy_info(
 def _extract_using_columns(using) -> tuple[str, ...]:
     if not using:
         return ()
-    return tuple(arg.column for arg in using if arg.column is not None)
+    return tuple(arg.alias for arg in using if arg.alias is not None)
 
 
 _RFA_KIND_TO_SDK_TYPE: dict[str, DestinationType] = {
