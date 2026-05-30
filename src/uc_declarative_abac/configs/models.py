@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 from typing import Union
 from datetime import date
 from typing import Literal
 
+from databricks.sdk.service.catalog import ColumnTypeName
 from pydantic import AliasChoices, BaseModel, Field, computed_field, field_validator, model_validator
 
 from uc_declarative_abac.types import (
@@ -16,6 +18,10 @@ from uc_declarative_abac.utils import (
     DuplicateResourceError,
     validate_rfa_destinations,
 )
+
+
+_VALID_DATA_TYPE_PREFIXES = frozenset(ct.value for ct in ColumnTypeName)
+_DATA_TYPE_PREFIX_PATTERN = re.compile(r"^([A-Z_][A-Z0-9_]*)")
 
 
 def _coerce_null_tag_values(tags: dict | None) -> dict | None:
@@ -48,6 +54,22 @@ def _validate_double_quote_not_in_comment(comment: str | None) -> str | None:
             'comment must not contain a double-quote (") character'
         )
     return comment
+
+
+def _validate_data_type_prefix(v: str | None) -> str | None:
+    """Reject data_type values whose leading identifier is not a member of
+    ``databricks.sdk.service.catalog.ColumnTypeName``. Matching is
+    case-insensitive and anchored to a token boundary so e.g. ``DECIMAL(10,2)``
+    and ``ARRAY<STRING>`` are accepted but ``STRINGISH`` is not."""
+    if v is None or not isinstance(v, str):
+        return v
+    match = _DATA_TYPE_PREFIX_PATTERN.match(v.upper())
+    if not match or match.group(1) not in _VALID_DATA_TYPE_PREFIXES:
+        raise ValueError(
+            f"data_type {v!r} must start with one of the valid Unity Catalog "
+            f"column types: {', '.join(sorted(_VALID_DATA_TYPE_PREFIXES))}"
+        )
+    return v
 
 
 class PolicyColumnConfig(BaseModel):
@@ -164,6 +186,11 @@ class ParameterConfig(BaseModel):
             return v.upper()
         return v
 
+    @field_validator("data_type", mode="after")
+    @classmethod
+    def _validate_data_type(cls, v: str | None) -> str | None:
+        return _validate_data_type_prefix(v)
+
 
 class BaseSecurableConfig(BaseModel, ABC):
     """Base model for all UC securable configs. Not intended to be instantiated directly."""
@@ -236,6 +263,11 @@ class ColumnConfig(BaseTaggableConfig):
         default=None,
         validation_alias=AliasChoices("data_type", "type"),
     )
+
+    @field_validator("data_type", mode="after")
+    @classmethod
+    def _validate_data_type(cls, v: str | None) -> str | None:
+        return _validate_data_type_prefix(v)
 
     @field_validator("owner", mode="before")
     @classmethod

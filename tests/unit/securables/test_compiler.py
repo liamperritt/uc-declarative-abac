@@ -972,7 +972,7 @@ def test_securables_compiler_plumbs_comment_and_location_onto_table_securable():
                                 "name": "orders",
                                 "comment": "Orders",
                                 "location": "s3://ext/orders",
-                                "columns": [{"name": "id", "type": "BIGINT"}],
+                                "columns": [{"name": "id", "type": "LONG"}],
                             },
                         ],
                     },

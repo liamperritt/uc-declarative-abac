@@ -1082,6 +1082,76 @@ def test_parameter_config_accepts_data_type_alias():
     assert param.data_type == "INT"
 
 
+def test_parameter_config_accepts_parameterised_data_type():
+    """ParameterConfig accepts a data_type with trailing parameters/arguments
+    (e.g. DECIMAL(10,2)) as long as the prefix is a known column type."""
+    param = ParameterConfig.model_validate({"name": "col", "data_type": "decimal(10,2)"})
+    assert param.data_type.startswith("DECIMAL")
+
+
+def test_parameter_config_rejects_unknown_data_type():
+    """ParameterConfig raises a ValidationError when data_type does not start
+    with a value from databricks.sdk.service.catalog.ColumnTypeName."""
+    with pytest.raises(ValidationError) as exc_info:
+        ParameterConfig.model_validate({"name": "col", "data_type": "FOO"})
+    assert "data_type" in str(exc_info.value).lower()
+
+
+def test_parameter_config_rejects_data_type_that_only_shares_a_prefix():
+    """A data_type like 'STRINGISH' must not be accepted just because it
+    happens to start with 'STRING' — the prefix must end on a token boundary."""
+    with pytest.raises(ValidationError):
+        ParameterConfig.model_validate({"name": "col", "data_type": "STRINGISH"})
+
+
+# ---------------------------------------------------------------------------
+# ColumnConfig.data_type validation
+# ---------------------------------------------------------------------------
+
+
+def _column_config_data(data_type):
+    return {
+        "catalogs": {
+            "my_catalog": {
+                "schemas": [
+                    {
+                        "name": "sales",
+                        "tables": [
+                            {
+                                "name": "orders",
+                                "columns": [{"name": "email", "data_type": data_type}],
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+    }
+
+
+def test_column_config_accepts_data_type_case_insensitively():
+    """ColumnConfig accepts a known data_type regardless of letter case."""
+    config = ResourcesConfig.model_validate(_column_config_data("string"))
+    column = config.catalogs["my_catalog"].schemas[0].tables[0].columns[0]
+    assert column.data_type is not None
+
+
+def test_column_config_accepts_parameterised_data_type():
+    """ColumnConfig accepts a data_type with trailing parameters/arguments
+    (e.g. ARRAY<STRING>) as long as the prefix is a known column type."""
+    config = ResourcesConfig.model_validate(_column_config_data("ARRAY<STRING>"))
+    column = config.catalogs["my_catalog"].schemas[0].tables[0].columns[0]
+    assert column.data_type == "ARRAY<STRING>"
+
+
+def test_column_config_rejects_unknown_data_type():
+    """ColumnConfig raises a ValidationError when data_type does not start
+    with a value from databricks.sdk.service.catalog.ColumnTypeName."""
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate(_column_config_data("FOO"))
+    assert "data_type" in str(exc_info.value).lower()
+
+
 # ---------------------------------------------------------------------------
 # FunctionConfig.tags validation
 # ---------------------------------------------------------------------------

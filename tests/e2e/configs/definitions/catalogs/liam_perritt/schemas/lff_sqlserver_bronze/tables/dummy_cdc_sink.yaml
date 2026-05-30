@@ -15,3 +15,5 @@ definitions:
           type: string
           tags:
             uc_gov_pii: address
+        - name: another_column
+          type: long

@@ -6,7 +6,7 @@ definitions:
         uc_gov_classification: internal
       columns:
         - name: customerID
-          type: bigint
+          type: long
         - name: first_name
           type: string
         - name: last_nam
