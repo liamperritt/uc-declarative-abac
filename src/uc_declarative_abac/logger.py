@@ -113,7 +113,7 @@ class ChangeLogger:
 
     def log_banner(self) -> None:
         """Log the opening banner."""
-        title = "UC Declarative ABAC  (dry run)" if self._dry_run else "UC Declarative ABAC "
+        title = "UC Declarative ABAC (dry run)" if self._dry_run else "UC Declarative ABAC"
         self._logger.info("")
         self._logger.info(title)
         self._logger.info("=" * len(title))
