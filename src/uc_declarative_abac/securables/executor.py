@@ -307,7 +307,11 @@ def _run_create_batch(
     dry_run: bool,
     max_workers: int,
 ) -> list[str]:
-    """Execute one depth-bucket of creates in parallel; log/error in input order."""
+    """Execute one depth-bucket of creates in parallel.
+
+    Streams per-item logs via ``on_complete``; returns successful statements
+    in input order via the in-order result returned by ``parallel_for_each``.
+    """
     work_items: list[tuple[Securable, str]] = [
         (info, _build_create_sql(info)) for info in creates
     ]
@@ -317,16 +321,19 @@ def _run_create_batch(
         if not dry_run:
             uc_helper.execute_sql(stmt)
 
-    results = parallel_for_each(work_items, worker, max_workers=max_workers)
-    statements: list[str] = []
-    for (info, stmt), _result, error in results:
+    def on_complete(item: tuple[Securable, str], _result, error) -> None:
+        info, stmt = item
         if error is not None:
             change_logger.log_error(ExecutionError(context=stmt, exception=error))
-            continue
-        if not dry_run:
-            statements.append(stmt)
+            return
         change_logger.log_securable_create(info)
-    return statements
+
+    results = parallel_for_each(
+        work_items, worker, max_workers=max_workers, on_complete=on_complete,
+    )
+    if dry_run:
+        return []
+    return [stmt for (_info, stmt), _result, error in results if error is None]
 
 
 def _run_replace_batch(
@@ -336,7 +343,7 @@ def _run_replace_batch(
     dry_run: bool,
     max_workers: int,
 ) -> list[str]:
-    """Execute the replaces batch in parallel; log/error in input order."""
+    """Execute the replaces batch in parallel; stream logs and return input-order statements."""
     work_items: list[tuple[Securable, str]] = [
         (info, _build_replace_sql(info)) for info in replaces
     ]
@@ -346,16 +353,19 @@ def _run_replace_batch(
         if not dry_run:
             uc_helper.execute_sql(stmt)
 
-    results = parallel_for_each(work_items, worker, max_workers=max_workers)
-    statements: list[str] = []
-    for (info, stmt), _result, error in results:
+    def on_complete(item: tuple[Securable, str], _result, error) -> None:
+        info, stmt = item
         if error is not None:
             change_logger.log_error(ExecutionError(context=stmt, exception=error))
-            continue
-        if not dry_run:
-            statements.append(stmt)
+            return
         change_logger.log_securable_replace(info)
-    return statements
+
+    results = parallel_for_each(
+        work_items, worker, max_workers=max_workers, on_complete=on_complete,
+    )
+    if dry_run:
+        return []
+    return [stmt for (_info, stmt), _result, error in results if error is None]
 
 
 def _attribute_update_stmt(update: AttributeUpdate) -> str | None:
@@ -375,7 +385,7 @@ def _run_attribute_update_batch(
     dry_run: bool,
     max_workers: int,
 ) -> list[str]:
-    """Execute the attribute updates batch in parallel; log/error in input order."""
+    """Execute the attribute updates batch in parallel; stream logs and return input-order statements."""
     work_items: list[tuple[AttributeUpdate, str | None]] = [
         (update, _attribute_update_stmt(update)) for update in updates
     ]
@@ -384,19 +394,25 @@ def _run_attribute_update_batch(
         update, stmt = item
         _run_attribute_update(uc_helper, update, stmt, dry_run)
 
-    results = parallel_for_each(work_items, worker, max_workers=max_workers)
-    statements: list[str] = []
-    for (update, stmt), _result, error in results:
+    def on_complete(item: tuple[AttributeUpdate, str | None], _result, error) -> None:
+        update, stmt = item
         if error is not None:
             change_logger.log_error(ExecutionError(
                 context=_attribute_update_context(update, stmt),
                 exception=error,
             ))
-            continue
-        if stmt is not None and not dry_run:
-            statements.append(stmt)
+            return
         change_logger.log_attribute_update(update)
-    return statements
+
+    results = parallel_for_each(
+        work_items, worker, max_workers=max_workers, on_complete=on_complete,
+    )
+    if dry_run:
+        return []
+    return [
+        stmt for (_update, stmt), _result, error in results
+        if error is None and stmt is not None
+    ]
 
 
 def execute_securable_diff(
@@ -404,7 +420,7 @@ def execute_securable_diff(
     diff: SecurableDiff,
     change_logger: ChangeLogger,
     dry_run: bool = False,
-    max_parallel_changes: int = 16,
+    max_parallel_changes: int = 8,
 ) -> list[str]:
     """Execute securable creates, replaces, and attribute updates from a SecurableDiff.
 

@@ -140,28 +140,31 @@ def _execute_creates(
 ) -> None:
     """Create each governed tag in to_create via the SDK. Logs per-tag and collects errors.
 
-    Per-tag SDK creates run in parallel; the per-tag follow-up (register the
-    returned handle, then update the rule-set for assigners) runs on the main
-    thread so SDK state mutations stay sequential and log ordering remains
-    deterministic.
+    Per-tag SDK creates run in parallel. Logging and the per-tag follow-up
+    (register the returned handle, then update the rule-set for assigners) run
+    via ``on_complete`` on the main thread so SDK state mutations stay
+    sequential and progress streams to the operator.
     """
     work_items = sorted(diff.to_create, key=lambda g: g.name)
-    results = parallel_for_each(
-        work_items,
-        lambda gt: _create_tag_policy_worker(ws_helper, gt, dry_run),
-        max_workers=max_workers,
-    )
-    for gt, created, error in results:
+
+    def on_complete(gt: GovernedTag, created, error) -> None:
         if error is not None:
             change_logger.log_error(ExecutionError(
                 context=f"create_tag_policy({gt.name})", exception=error,
             ))
-            continue
+            return
         if not dry_run and created is not None:
             ws_helper.register_created_tag_policy(created)
             if gt.assigners:
                 _apply_assigners(ws_helper, gt, change_logger)
         change_logger.log_governed_tag_create(gt)
+
+    parallel_for_each(
+        work_items,
+        lambda gt: _create_tag_policy_worker(ws_helper, gt, dry_run),
+        max_workers=max_workers,
+        on_complete=on_complete,
+    )
 
 
 def _update_tag_policy_worker(
@@ -204,21 +207,27 @@ def _execute_updates(
         )
         work_items.append((gt, old, update_mask, assigners_changed))
 
-    results = parallel_for_each(
-        work_items,
-        lambda item: _update_tag_policy_worker(ws_helper, item[0], item[2], dry_run),
-        max_workers=max_workers,
-    )
-    for (gt, old, update_mask, assigners_changed), _result, error in results:
+    def on_complete(
+        item: tuple[GovernedTag, GovernedTag | None, str, bool],
+        _result, error,
+    ) -> None:
+        gt, old, update_mask, assigners_changed = item
         if error is not None:
             change_logger.log_error(ExecutionError(
                 context=f"update_tag_policy({gt.name})", exception=error,
             ))
-            continue
+            return
         if assigners_changed and not dry_run:
             _apply_assigners(ws_helper, gt, change_logger)
         if update_mask or assigners_changed:
             change_logger.log_governed_tag_update(gt, old)
+
+    parallel_for_each(
+        work_items,
+        lambda item: _update_tag_policy_worker(ws_helper, item[0], item[2], dry_run),
+        max_workers=max_workers,
+        on_complete=on_complete,
+    )
 
 
 def _prompt_delete_confirmation(tags: list[GovernedTag]) -> bool:
@@ -268,18 +277,20 @@ def _execute_deletes(
     if not force and not _prompt_delete_confirmation(tags_sorted):
         _logger.info("Governed tag deletion cancelled — aborting run.")
         sys.exit(1)
-    results = parallel_for_each(
-        tags_sorted,
-        lambda gt: ws_helper.delete_tag_policy(gt.name),
-        max_workers=max_workers,
-    )
-    for gt, _result, error in results:
+    def on_complete(gt: GovernedTag, _result, error) -> None:
         if error is not None:
             change_logger.log_error(ExecutionError(
                 context=f"delete_tag_policy({gt.name})", exception=error,
             ))
-            continue
+            return
         change_logger.log_governed_tag_delete(gt)
+
+    parallel_for_each(
+        tags_sorted,
+        lambda gt: ws_helper.delete_tag_policy(gt.name),
+        max_workers=max_workers,
+        on_complete=on_complete,
+    )
 
 
 def execute_governed_tag_diff(
@@ -288,7 +299,7 @@ def execute_governed_tag_diff(
     change_logger: ChangeLogger,
     dry_run: bool = False,
     force: bool = False,
-    max_parallel_changes: int = 16,
+    max_parallel_changes: int = 8,
 ) -> None:
     """Apply a GovernedTagDiff against the account.
 

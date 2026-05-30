@@ -687,6 +687,44 @@ def test_tag_executor_parallel_logs_in_deterministic_order():
     assert change_logger._tags_added == 2
 
 
+def test_tag_executor_logs_each_change_as_worker_finishes():
+    """log_tag_add fires for the fast worker while the slow worker is still running."""
+    import threading
+    import time
+
+    fast_logged_at: list[float] = []
+    slow_started_at: list[float] = []
+
+    def _execute_sql(sql):
+        if "slow" in sql:
+            slow_started_at.append(time.monotonic())
+            time.sleep(0.3)
+
+    uc_helper = MagicMock()
+    uc_helper.execute_sql.side_effect = _execute_sql
+
+    change_logger = MagicMock()
+
+    def _record_fast(tag):
+        if "fast" in tag.securable_full_name:
+            fast_logged_at.append(time.monotonic())
+
+    change_logger.log_tag_add.side_effect = _record_fast
+
+    diff = TagDiff(
+        to_add={
+            SecurableTag(SecurableType.CATALOG, "slow_cat", "env", "p"),
+            SecurableTag(SecurableType.CATALOG, "fast_cat", "env", "p"),
+        },
+    )
+
+    execute_tag_diff(uc_helper, diff, change_logger, max_parallel_changes=4)
+
+    # The fast worker's log_tag_add must have fired before the slow worker finished.
+    assert fast_logged_at and slow_started_at
+    assert fast_logged_at[0] < slow_started_at[0] + 0.25
+
+
 def test_tag_executor_parallel_error_in_one_group_does_not_abort_others():
     """When one parallel SQL call fails, sibling calls still succeed and the failure is logged."""
     uc_helper = MagicMock()

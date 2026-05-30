@@ -13,7 +13,7 @@ definitions:
             - name: override
               type: string
               tags:
-                uc_gov_pii: address
+                uc_gov_pii: name
         - $ref: $defs/tables/liam_perritt|lff_sqlserver_bronze|dummy_table_cdc_st
       volumes:
         - $defs/volumes/liam_perritt|lff_sqlserver_bronze|test

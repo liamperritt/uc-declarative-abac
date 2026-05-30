@@ -136,20 +136,22 @@ def _run_set_tags_batch(
     dry_run: bool,
     max_workers: int,
 ) -> list[str]:
-    """Execute one (sec_type, change_type=set) batch in parallel; log in input order."""
+    """Execute one (sec_type, change_type=set) batch in parallel.
+
+    Per-item logging fires via ``on_complete`` the moment each worker finishes,
+    so progress streams to the operator. The returned ``statements`` list is in
+    input order via the in-order result returned by ``parallel_for_each``.
+    """
     def worker(item: TagWorkItem) -> None:
         _key, _tags, stmt = item
         if not dry_run:
             uc_helper.execute_sql(stmt)
 
-    results = parallel_for_each(work_items, worker, max_workers=max_workers)
-    statements: list[str] = []
-    for (_key, tags, stmt), _result, error in results:
+    def on_complete(item: TagWorkItem, _result, error) -> None:
+        _key, tags, stmt = item
         if error is not None:
             change_logger.log_error(ExecutionError(context=stmt, exception=error))
-            continue
-        if not dry_run:
-            statements.append(stmt)
+            return
         for tag in tags:
             if tag in diff.to_add:
                 change_logger.log_tag_add(tag)
@@ -160,7 +162,13 @@ def _run_set_tags_batch(
                         (tag.securable_type, tag.securable_full_name, tag.tag_name)
                     ),
                 )
-    return statements
+
+    results = parallel_for_each(
+        work_items, worker, max_workers=max_workers, on_complete=on_complete,
+    )
+    if dry_run:
+        return []
+    return [item[2] for item, _result, error in results if error is None]
 
 
 def _run_unset_tags_batch(
@@ -170,23 +178,30 @@ def _run_unset_tags_batch(
     dry_run: bool,
     max_workers: int,
 ) -> list[str]:
-    """Execute one (sec_type, change_type=unset) batch in parallel; log in input order."""
+    """Execute one (sec_type, change_type=unset) batch in parallel.
+
+    Per-item logging fires via ``on_complete`` as each worker finishes;
+    returned ``statements`` list is in input order.
+    """
     def worker(item: TagWorkItem) -> None:
         _key, _tags, stmt = item
         if not dry_run:
             uc_helper.execute_sql(stmt)
 
-    results = parallel_for_each(work_items, worker, max_workers=max_workers)
-    statements: list[str] = []
-    for (_key, tags, stmt), _result, error in results:
+    def on_complete(item: TagWorkItem, _result, error) -> None:
+        _key, tags, stmt = item
         if error is not None:
             change_logger.log_error(ExecutionError(context=stmt, exception=error))
-            continue
-        if not dry_run:
-            statements.append(stmt)
+            return
         for tag in tags:
             change_logger.log_tag_remove(tag)
-    return statements
+
+    results = parallel_for_each(
+        work_items, worker, max_workers=max_workers, on_complete=on_complete,
+    )
+    if dry_run:
+        return []
+    return [item[2] for item, _result, error in results if error is None]
 
 
 def _apply_set_tags(
@@ -268,7 +283,7 @@ def execute_tag_diff(
     governed_tag_names: set[str] | None = None,
     dry_run: bool = False,
     force: bool = False,
-    max_parallel_changes: int = 16,
+    max_parallel_changes: int = 8,
 ) -> list[str]:
     """Generate and execute ALTER SET/UNSET TAGS SQL from a TagDiff.
 

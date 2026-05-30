@@ -74,7 +74,7 @@ The repo ships a composite GitHub Action at `sync/action.yml` so any other repo 
 | `create-taggables-for-catalogs` | no | `'*'` | Comma-separated catalog names to scope creation of missing catalogs/schemas/tables/volumes to (default `'*'` = all configured catalogs). Function creation always flows through. No effect unless `enable-taggable-creation` is set |
 | `enable-governed-tag-deletion` | no | `'false'` | Permit the engine to delete governed tags present in the account but absent from config. Requires interactive confirmation unless `force: 'true'` — in CI you must set `force` or the run errors out |
 | `force` | no | `'false'` | Skip every interactive confirmation prompt and auto-confirm destructive actions. Required in CI when any destructive gate is set |
-| `max-parallel-changes` | no | `'16'` | Max worker threads used per (securable_type, change_type) execution batch. Set to `'1'` to disable parallelism and force sequential execution |
+| `max-parallel-changes` | no | `'8'` | Max worker threads used per (securable_type, change_type) execution batch. Set to `'1'` to disable parallelism and force sequential execution |
 
 **Example workflow in a caller repo** (`.github/workflows/deploy-uc-governance.yml`):
 

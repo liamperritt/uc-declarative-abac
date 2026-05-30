@@ -109,7 +109,7 @@ def run(
     create_taggables_for_catalogs: str = "*",
     force: bool = False,
     ref_override_strategy: Literal["merge", "replace"] = "merge",
-    max_parallel_changes: int = 16,
+    max_parallel_changes: int = 8,
 ) -> OrchestratorDiffsResult:
     """Run the full governance pipeline: discover, resolve, compile, diff, apply.
 

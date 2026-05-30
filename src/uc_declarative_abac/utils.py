@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Callable, Literal, TypeVar
 
@@ -17,12 +17,16 @@ def parallel_for_each(
     work_fn: Callable[[T], R],
     *,
     max_workers: int,
+    on_complete: Callable[[T, R | None, Exception | None], None] | None = None,
 ) -> list[tuple[T, R | None, Exception | None]]:
     """Run ``work_fn`` on each item concurrently.
 
-    Returns ``(item, result, error)`` triples in input order. The caller walks
-    the list and applies logging deterministically — workers never touch shared
-    state, so ``ChangeLogger`` does not need to be thread-safe.
+    The returned list of ``(item, result, error)`` triples is in **input order**,
+    suitable for final aggregation. The optional ``on_complete`` callback fires
+    once per item, **on the main thread**, the moment each worker finishes —
+    use it to stream progress to the operator instead of waiting for the whole
+    batch to drain. Workers themselves never touch shared state, so
+    ``ChangeLogger`` does not need to be thread-safe.
 
     Falls through to sequential iteration when ``max_workers <= 1`` or when
     there is at most one item, avoiding ``ThreadPoolExecutor`` overhead.
@@ -30,16 +34,28 @@ def parallel_for_each(
     if not items:
         return []
     if max_workers <= 1 or len(items) <= 1:
-        return [_invoke(item, work_fn) for item in items]
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = [pool.submit(work_fn, item) for item in items]
         results: list[tuple[T, R | None, Exception | None]] = []
-        for item, future in zip(items, futures):
+        for item in items:
+            triple = _invoke(item, work_fn)
+            if on_complete is not None:
+                on_complete(*triple)
+            results.append(triple)
+        return results
+    by_index: dict[int, tuple[T, R | None, Exception | None]] = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        future_to_idx: dict = {
+            pool.submit(work_fn, item): (idx, item) for idx, item in enumerate(items)
+        }
+        for future in as_completed(future_to_idx):
+            idx, item = future_to_idx[future]
             try:
-                results.append((item, future.result(), None))
+                triple: tuple[T, R | None, Exception | None] = (item, future.result(), None)
             except Exception as exc:
-                results.append((item, None, exc))
-    return results
+                triple = (item, None, exc)
+            if on_complete is not None:
+                on_complete(*triple)
+            by_index[idx] = triple
+    return [by_index[i] for i in range(len(items))]
 
 
 def _invoke(item: T, work_fn: Callable[[T], R]) -> tuple[T, R | None, Exception | None]:

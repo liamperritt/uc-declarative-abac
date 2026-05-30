@@ -82,7 +82,11 @@ def _run_policy_batch(
     dry_run: bool,
     max_workers: int,
 ) -> list[str]:
-    """Execute one (sec_type, change_type) batch of policies in parallel; log in input order."""
+    """Execute one (sec_type, change_type) batch of policies in parallel.
+
+    Streams per-item logs via ``on_complete``; returns successful statements
+    in input order.
+    """
     work_items: list[tuple[Policy, str]] = [
         (policy, _build_policy_sql(policy, or_replace=or_replace)) for policy in policies
     ]
@@ -92,19 +96,22 @@ def _run_policy_batch(
         if not dry_run:
             uc_helper.execute_sql(stmt)
 
-    results = parallel_for_each(work_items, worker, max_workers=max_workers)
-    statements: list[str] = []
-    for (policy, stmt), _result, error in results:
+    def on_complete(item: tuple[Policy, str], _result, error) -> None:
+        policy, stmt = item
         if error is not None:
             change_logger.log_error(ExecutionError(context=stmt, exception=error))
-            continue
-        if not dry_run:
-            statements.append(stmt)
+            return
         if or_replace:
             change_logger.log_policy_replace(policy)
         else:
             change_logger.log_policy_create(policy)
-    return statements
+
+    results = parallel_for_each(
+        work_items, worker, max_workers=max_workers, on_complete=on_complete,
+    )
+    if dry_run:
+        return []
+    return [stmt for (_policy, stmt), _result, error in results if error is None]
 
 
 def execute_policy_diff(
@@ -112,7 +119,7 @@ def execute_policy_diff(
     diff: PolicyDiff,
     change_logger: ChangeLogger,
     dry_run: bool = False,
-    max_parallel_changes: int = 16,
+    max_parallel_changes: int = 8,
 ) -> list[str]:
     """Generate and execute CREATE [OR REPLACE] POLICY SQL from a PolicyDiff.
 

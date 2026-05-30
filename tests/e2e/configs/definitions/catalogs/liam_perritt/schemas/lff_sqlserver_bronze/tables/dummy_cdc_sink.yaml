@@ -10,8 +10,8 @@ definitions:
         - name: data
           type: string
           tags:
-            uc_gov_pii: address
+            uc_gov_pii: name
         - name: new_column
           type: string
           tags:
-            uc_gov_pii: name
+            uc_gov_pii: address

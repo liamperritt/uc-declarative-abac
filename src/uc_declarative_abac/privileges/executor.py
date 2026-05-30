@@ -67,7 +67,10 @@ def _run_privilege_batch(
     dry_run: bool,
     max_workers: int,
 ) -> list[str]:
-    """Execute one (sec_type, change_type) batch of grants or revokes in parallel."""
+    """Execute one (sec_type, change_type) batch of grants or revokes in parallel.
+
+    Streams per-item logs via ``on_complete``; returns successful statements in input order.
+    """
     build_sql = _build_grant_sql if is_grant else _build_revoke_sql
     work_items: list[tuple[SecurablePrivilege, str]] = [
         (priv, build_sql(priv)) for priv in privileges
@@ -78,19 +81,22 @@ def _run_privilege_batch(
         if not dry_run:
             uc_helper.execute_sql(stmt)
 
-    results = parallel_for_each(work_items, worker, max_workers=max_workers)
-    statements: list[str] = []
-    for (priv, stmt), _result, error in results:
+    def on_complete(item: tuple[SecurablePrivilege, str], _result, error) -> None:
+        priv, stmt = item
         if error is not None:
             change_logger.log_error(ExecutionError(context=stmt, exception=error))
-            continue
-        if not dry_run:
-            statements.append(stmt)
+            return
         if is_grant:
             change_logger.log_grant(priv)
         else:
             change_logger.log_revoke(priv)
-    return statements
+
+    results = parallel_for_each(
+        work_items, worker, max_workers=max_workers, on_complete=on_complete,
+    )
+    if dry_run:
+        return []
+    return [stmt for (_priv, stmt), _result, error in results if error is None]
 
 
 def execute_privilege_diff(
@@ -98,7 +104,7 @@ def execute_privilege_diff(
     diff: PrivilegeDiff,
     change_logger: ChangeLogger,
     dry_run: bool = False,
-    max_parallel_changes: int = 16,
+    max_parallel_changes: int = 8,
 ) -> list[str]:
     """Generate and execute GRANT/REVOKE SQL from a PrivilegeDiff.
 

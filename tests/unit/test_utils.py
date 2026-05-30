@@ -232,3 +232,113 @@ def test_utils_parallel_for_each_runs_sequentially_when_max_workers_is_one():
 def test_utils_parallel_for_each_handles_empty_input():
     """An empty input list returns an empty result list."""
     assert parallel_for_each([], lambda x: x, max_workers=4) == []
+
+
+# ---------------------------------------------------------------------------
+# parallel_for_each — on_complete streaming callback
+# ---------------------------------------------------------------------------
+
+
+def test_utils_parallel_for_each_on_complete_fires_per_item():
+    """on_complete fires exactly once per item with the matching (item, result, error) triple."""
+    seen: list[tuple] = []
+
+    def cb(item, result, error):
+        seen.append((item, result, error))
+
+    results = parallel_for_each([1, 2, 3], lambda x: x * 10, max_workers=4, on_complete=cb)
+
+    assert len(seen) == 3
+    assert sorted(seen, key=lambda t: t[0]) == sorted(results, key=lambda t: t[0])
+
+
+def test_utils_parallel_for_each_on_complete_fires_in_completion_order():
+    """Earlier items that sleep longer complete later — callback order tracks completion, not input."""
+    completion_order: list[int] = []
+
+    def work(x: int) -> int:
+        # x=1 sleeps the longest; x=4 sleeps the shortest.
+        time.sleep(0.05 * (5 - x))
+        return x
+
+    def cb(item, _r, _e):
+        completion_order.append(item)
+
+    parallel_for_each([1, 2, 3, 4], work, max_workers=4, on_complete=cb)
+
+    # Fast item completes first, slow item completes last.
+    assert completion_order[0] == 4
+    assert completion_order[-1] == 1
+
+
+def test_utils_parallel_for_each_on_complete_runs_on_main_thread():
+    """on_complete must run on the calling thread, so ChangeLogger stays single-threaded."""
+    main_thread = threading.get_ident()
+    cb_threads: list[int] = []
+
+    parallel_for_each(
+        [1, 2, 3, 4, 5],
+        lambda x: x,
+        max_workers=4,
+        on_complete=lambda _i, _r, _e: cb_threads.append(threading.get_ident()),
+    )
+
+    assert all(t == main_thread for t in cb_threads)
+    assert len(cb_threads) == 5
+
+
+def test_utils_parallel_for_each_on_complete_fires_before_helper_returns():
+    """At least one callback must fire while later workers are still running — proves streaming."""
+    fast_done_at: list[float] = []
+    slow_started_at: list[float] = []
+
+    def work(x: int) -> int:
+        if x == "slow":
+            slow_started_at.append(time.monotonic())
+            time.sleep(0.3)
+        return x
+
+    def cb(item, _r, _e):
+        if item == "fast":
+            fast_done_at.append(time.monotonic())
+
+    parallel_for_each(["slow", "fast"], work, max_workers=2, on_complete=cb)
+
+    # The "fast" callback must fire while the "slow" worker is still mid-sleep,
+    # i.e. fast_done < slow_started + 0.3s sleep.
+    assert fast_done_at and slow_started_at
+    assert fast_done_at[0] < slow_started_at[0] + 0.25
+
+
+def test_utils_parallel_for_each_returns_list_in_input_order_with_callback():
+    """Even when callbacks fire in completion order, the returned list stays in input order."""
+    def work(x: int) -> int:
+        time.sleep(0.05 * (5 - x))
+        return x
+
+    results = parallel_for_each(
+        [1, 2, 3, 4], work, max_workers=4, on_complete=lambda _i, _r, _e: None,
+    )
+
+    assert [item for item, _, _ in results] == [1, 2, 3, 4]
+
+
+def test_utils_parallel_for_each_on_complete_receives_exceptions():
+    """A worker exception surfaces to on_complete as (item, None, exc); other items unaffected."""
+    boom = RuntimeError("boom")
+
+    def work(x: int) -> int:
+        if x == 2:
+            raise boom
+        return x * 10
+
+    seen: list[tuple] = []
+    parallel_for_each(
+        [1, 2, 3], work, max_workers=4,
+        on_complete=lambda i, r, e: seen.append((i, r, e)),
+    )
+
+    by_item = {triple[0]: triple for triple in seen}
+    assert by_item[1] == (1, 10, None)
+    assert by_item[2][0] == 2 and by_item[2][1] is None and isinstance(by_item[2][2], RuntimeError)
+    assert by_item[3] == (3, 30, None)

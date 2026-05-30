@@ -117,9 +117,9 @@ def main() -> None:
     parser.add_argument(
         "--max-parallel-changes",
         type=int,
-        default=16,
+        default=8,
         help="Max worker threads used per (securable_type, change_type) execution batch. "
-             "Default 16. Set to 1 to disable parallelism and force sequential execution.",
+             "Default 8. Set to 1 to disable parallelism and force sequential execution.",
     )
 
     args = parser.parse_args()

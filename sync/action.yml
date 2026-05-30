@@ -104,10 +104,10 @@ inputs:
   max-parallel-changes:
     description: >-
       Max worker threads used per (securable_type, change_type) execution
-      batch. Defaults to "16". Set to "1" to disable parallelism and force
+      batch. Defaults to "8". Set to "1" to disable parallelism and force
       sequential execution.
     required: false
-    default: '16'
+    default: '8'
 
 runs:
   using: composite
