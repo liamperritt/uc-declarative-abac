@@ -3,10 +3,10 @@ definitions:
     abac|mask_pii:
       name: mask_pii
       type: mask
-      comment: Policy for masking columns with PII values via the 'uc_gov_pii' column tag
+      comment: Policy for masking columns with PII values via 'uc_gov_pii' column tag
       function:
         name: fn_mask_pii
-        comment: Function that masks a given PII value
+        comment: Function that masks the given PII value
         parameters:
           - name: pii
             type: string
@@ -17,4 +17,3 @@ definitions:
           uc_gov_pii: '*'
       to:
         - uc_governor_test_team
-        - liam.perritt@databricks.com

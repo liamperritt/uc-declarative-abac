@@ -83,7 +83,7 @@ def compute_securable_diff(
     desired_attrs = _resolve_attribute_owners(desired_attrs, resolver, change_logger)
     actual_attrs = _resolve_attribute_owners(actual_attrs, resolver, change_logger)
 
-    securables_to_create, securables_to_replace = _diff_securables(
+    securables_to_create, securables_to_replace, old_securables = _diff_securables(
         desired_securables, actual_securables
     )
     creatable, blocked = _partition_by_creation_scope(
@@ -125,6 +125,7 @@ def compute_securable_diff(
         attributes_to_update=attributes_to_update,
         securables_to_create=securables_to_create,
         securables_to_replace=securables_to_replace,
+        old_securables=old_securables,
     )
 
 
@@ -164,18 +165,22 @@ def _resolve_attribute_owners(
 def _diff_securables(
     desired: set[Securable],
     actual: set[Securable],
-) -> tuple[list[Securable], list[Securable]]:
-    """Return (to_create, to_replace) lists by keying on (securable_type, full_name).
+) -> tuple[list[Securable], list[Securable], dict[str, Securable]]:
+    """Return (to_create, to_replace, old_securables) by keying on (securable_type, full_name).
 
-    Replacement is function-only: tables, volumes, catalogs, and schemas don't support
-    in-place redefinition today, and a Table with declared columns can't be meaningfully
-    compared to a base ``Securable`` fetched from UC (which lacks column info). Only
-    ``Function`` enters ``to_replace`` when its definition or parameters change.
+    Replacement is function-only today: tables, volumes, catalogs, and schemas don't
+    support in-place redefinition, and a Table with declared columns can't be
+    meaningfully compared to a base ``Securable`` fetched from UC (which lacks column
+    info). ``old_securables`` is typed generically so future replaceable types can be
+    added without reshaping the diff. The matched prior state is captured in
+    ``old_securables`` so the executor can pass it to the logger for a per-field
+    replace diff.
     """
     actual_by_key = {(s.securable_type, s.full_name): s for s in actual}
 
     to_create: list[Securable] = []
     to_replace: list[Securable] = []
+    old_securables: dict[str, Securable] = {}
 
     for desired_sec in desired:
         actual_sec = actual_by_key.get((desired_sec.securable_type, desired_sec.full_name))
@@ -183,8 +188,10 @@ def _diff_securables(
             to_create.append(desired_sec)
         elif isinstance(desired_sec, Function) and desired_sec != actual_sec:
             to_replace.append(desired_sec)
+            if actual_sec is not None:
+                old_securables[desired_sec.full_name] = actual_sec
 
-    return to_create, to_replace
+    return to_create, to_replace, old_securables
 
 
 def _table_creation_blocker(table: Table) -> str | None:

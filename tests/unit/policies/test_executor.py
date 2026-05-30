@@ -85,6 +85,21 @@ def test_policy_executor_emits_create_or_replace_for_to_replace():
     _assert_sql_contains(sql, "CREATE OR REPLACE POLICY", "`mask_pii`")
 
 
+def test_policy_executor_passes_old_policy_to_logger_on_replace():
+    """When a replace executes, diff.old_policies[identity] is threaded into
+    log_policy_replace so the field-level diff can be rendered."""
+    uc_helper = MagicMock()
+    change_logger = MagicMock(spec=ChangeLogger)
+    new = _make_policy(function_name="cat.default.new_fn")
+    old = _make_policy(function_name="cat.default.old_fn")
+    identity = (new.securable_type, new.securable_full_name, new.name)
+    diff = PolicyDiff(to_replace={new}, old_policies={identity: old})
+
+    execute_policy_diff(uc_helper, diff, change_logger)
+
+    change_logger.log_policy_replace.assert_called_once_with(new, old)
+
+
 # ---------------------------------------------------------------------------
 # Securable attachment (ON CATALOG / ON SCHEMA / ON TABLE)
 # ---------------------------------------------------------------------------

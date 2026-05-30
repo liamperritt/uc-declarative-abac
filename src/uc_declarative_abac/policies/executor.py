@@ -76,6 +76,7 @@ def _bucket_by_sec_type(policies: set[Policy]) -> dict[SecurableType, list[Polic
 def _run_policy_batch(
     uc_helper: UnityCatalogHelper,
     policies: list[Policy],
+    old_policies: dict[tuple, Policy],
     *,
     or_replace: bool,
     change_logger: ChangeLogger,
@@ -102,7 +103,10 @@ def _run_policy_batch(
             change_logger.log_error(ExecutionError(context=stmt, exception=error))
             return
         if or_replace:
-            change_logger.log_policy_replace(policy)
+            old = old_policies.get(
+                (policy.securable_type, policy.securable_full_name, policy.name)
+            )
+            change_logger.log_policy_replace(policy, old)
         else:
             change_logger.log_policy_create(policy)
 
@@ -134,7 +138,7 @@ def execute_policy_diff(
     creates_by_type = _bucket_by_sec_type(diff.to_create)
     for sec_type in sorted(creates_by_type, key=lambda t: t.value):
         statements.extend(_run_policy_batch(
-            uc_helper, creates_by_type[sec_type],
+            uc_helper, creates_by_type[sec_type], diff.old_policies,
             or_replace=False,
             change_logger=change_logger, dry_run=dry_run, max_workers=workers,
         ))
@@ -142,7 +146,7 @@ def execute_policy_diff(
     replaces_by_type = _bucket_by_sec_type(diff.to_replace)
     for sec_type in sorted(replaces_by_type, key=lambda t: t.value):
         statements.extend(_run_policy_batch(
-            uc_helper, replaces_by_type[sec_type],
+            uc_helper, replaces_by_type[sec_type], diff.old_policies,
             or_replace=True,
             change_logger=change_logger, dry_run=dry_run, max_workers=workers,
         ))

@@ -42,15 +42,18 @@ def compute_policy_diff(
 
     to_create: set[Policy] = set()
     to_replace: set[Policy] = set()
+    old_policies: dict[tuple, Policy] = {}
 
     for desired_policy in desired_resolved:
-        existing = actual_by_key.get(_identity(desired_policy))
+        identity = _identity(desired_policy)
+        existing = actual_by_key.get(identity)
         if existing is None:
             to_create.add(desired_policy)
         elif existing != desired_policy:
             to_replace.add(desired_policy)
+            old_policies[identity] = existing
 
-    return PolicyDiff(to_create=to_create, to_replace=to_replace)
+    return PolicyDiff(to_create=to_create, to_replace=to_replace, old_policies=old_policies)
 
 
 def _identity(policy: Policy) -> tuple:

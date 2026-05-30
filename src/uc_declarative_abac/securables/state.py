@@ -142,3 +142,4 @@ class SecurableDiff:
     attributes_to_update: list[AttributeUpdate] = field(default_factory=list)
     securables_to_create: list[Securable] = field(default_factory=list)
     securables_to_replace: list[Securable] = field(default_factory=list)
+    old_securables: dict[str, Securable] = field(default_factory=dict)

@@ -217,6 +217,34 @@ def test_securable_differ_ignores_matching_functions():
     assert diff.securables_to_replace == []
 
 
+def test_securable_differ_populates_old_securables_on_replace():
+    """The prior actual-state Function is captured in diff.old_securables, keyed
+    by full_name, so the executor can pass it to the logger for a per-field diff."""
+    actual_func = _make_function(
+        full_name="catalog.schema.my_func",
+        definition="RETURN x",
+    )
+    desired_func = _make_function(
+        full_name="catalog.schema.my_func",
+        definition="RETURN UPPER(x)",
+    )
+
+    diff = compute_securable_diff(
+        set(), set(), {desired_func}, {actual_func}, _resolver(), _change_logger(),
+    )
+
+    assert diff.old_securables["catalog.schema.my_func"] == actual_func
+
+
+def test_securable_differ_old_securables_empty_when_no_replacements():
+    """Pure-create diffs leave diff.old_securables empty."""
+    desired_func = _make_function(full_name="catalog.schema.new_func")
+
+    diff = compute_securable_diff(set(), set(), {desired_func}, set(), _resolver(), _change_logger())
+
+    assert diff.old_securables == {}
+
+
 # ---------------------------------------------------------------------------
 # Create + attribute interaction
 # ---------------------------------------------------------------------------

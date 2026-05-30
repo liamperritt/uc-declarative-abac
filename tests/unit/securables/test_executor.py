@@ -83,6 +83,33 @@ def test_securable_executor_generates_replace_function_sql():
     uc_helper.execute_sql.assert_called_once_with(sql)
 
 
+def test_securable_executor_passes_old_function_to_logger_on_replace():
+    """When a function is replaced, diff.old_securables[full_name] is threaded
+    into log_securable_replace so the field-level diff can be rendered."""
+    uc_helper = MagicMock()
+    change_logger = MagicMock(spec=ChangeLogger)
+    new = Function(
+        securable_type=SecurableType.FUNCTION,
+        full_name="cat.s.fn",
+        parameters=(("c", "STRING"),),
+        definition="UPPER(c)",
+    )
+    old = Function(
+        securable_type=SecurableType.FUNCTION,
+        full_name="cat.s.fn",
+        parameters=(("c", "STRING"),),
+        definition="c",
+    )
+    diff = SecurableDiff(
+        securables_to_replace=[new],
+        old_securables={"cat.s.fn": old},
+    )
+
+    execute_securable_diff(uc_helper, diff, change_logger)
+
+    change_logger.log_securable_replace.assert_called_once_with(new, old)
+
+
 def test_securable_executor_generates_create_function_sql_without_parameters():
     """A Function with no parameters produces empty parens before RETURN."""
     uc_helper = MagicMock()

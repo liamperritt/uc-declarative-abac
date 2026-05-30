@@ -129,3 +129,23 @@ def test_policy_differ_treats_comment_change_as_replace():
 
     diff = compute_policy_diff(desired, actual, _resolver(), _change_logger())
     assert diff.to_replace == desired
+
+
+def test_policy_differ_populates_old_policies_on_replace():
+    """The prior actual-state policy is captured in diff.old_policies, keyed by
+    identity, so the executor can pass it to the logger for a per-field diff."""
+    old = _make_policy(function_name="cat.default.old_fn")
+    new = _make_policy(function_name="cat.default.new_fn")
+    desired = {new}
+    actual = {old}
+
+    diff = compute_policy_diff(desired, actual, _resolver(), _change_logger())
+
+    identity = (new.securable_type, new.securable_full_name, new.name)
+    assert diff.old_policies[identity] == old
+
+
+def test_policy_differ_old_policies_empty_when_no_replacements():
+    """Pure-create diffs leave diff.old_policies empty."""
+    diff = compute_policy_diff({_make_policy()}, set(), _resolver(), _change_logger())
+    assert diff.old_policies == {}

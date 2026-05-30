@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from uc_declarative_abac.privileges import SecurablePrivilege
     from uc_declarative_abac.securables import (
         AttributeUpdate,
+        Function,
         Securable,
     )
     from uc_declarative_abac.tags import SecurableTag
@@ -53,6 +54,77 @@ def _format_principal_delta(
     parts.extend(f"+{p.name}" for p in sorted(added, key=lambda p: p.name))
     parts.extend(f"-{p.name}" for p in sorted(removed, key=lambda p: p.name))
     return ", ".join(parts)
+
+
+def _format_scalar_delta(name: str, old: str | None, new: str | None) -> str | None:
+    """Format a possibly-None scalar field change as ``name: '<old>' -> '<new>'``.
+
+    Returns ``None`` when ``old`` and ``new`` are equal — letting the caller
+    flatten the list of changed-field strings."""
+    if old == new:
+        return None
+    return f"{name}: '{old if old is not None else ''}' -> '{new if new is not None else ''}'"
+
+
+def _format_parameters_value(params: tuple[tuple[str, str], ...]) -> str:
+    """Render a function's parameters tuple as ``(name TYPE, name2 TYPE2)``."""
+    return "(" + ", ".join(f"{n} {t}" for n, t in params) + ")"
+
+
+def _format_function_diff(info: Securable, old: Securable | None) -> str:
+    """Return a pipe-joined per-field diff for a Function replace, or ``''``
+    when ``info`` is not a Function or ``old`` was not supplied. The body
+    (``definition``) is intentionally summarised as ``definition: changed``
+    rather than inlined — multi-line SQL would break the columnar log layout."""
+    from uc_declarative_abac.securables import Function
+    if old is None or not isinstance(info, Function) or not isinstance(old, Function):
+        return ""
+    parts: list[str] = []
+    if info.parameters != old.parameters:
+        parts.append(
+            f"parameters: {_format_parameters_value(old.parameters)} -> "
+            f"{_format_parameters_value(info.parameters)}"
+        )
+    if info.definition != old.definition:
+        parts.append("definition: changed")
+    comment_delta = _format_scalar_delta("comment", old.comment, info.comment)
+    if comment_delta:
+        parts.append(comment_delta)
+    return " | ".join(parts)
+
+
+def _format_policy_diff(new: Policy, old: Policy | None) -> str:
+    """Return a pipe-joined per-field diff for a Policy replace, or ``''`` when
+    ``old`` was not supplied."""
+    if old is None:
+        return ""
+    parts: list[str] = []
+    for field_name in ("function_name", "when_condition", "on_column", "comment"):
+        delta = _format_scalar_delta(
+            field_name, getattr(old, field_name), getattr(new, field_name),
+        )
+        if delta:
+            parts.append(delta)
+    for field_name in ("to_principals", "except_principals"):
+        old_set = frozenset(getattr(old, field_name))
+        new_set = frozenset(getattr(new, field_name))
+        added = new_set - old_set
+        removed = old_set - new_set
+        if added or removed:
+            parts.append(f"{field_name}: {_format_principal_delta(added, removed)}")
+    old_using = frozenset(old.using_columns)
+    new_using = frozenset(new.using_columns)
+    if old_using != new_using:
+        parts.append(
+            f"using_columns: {_format_set_delta(new_using - old_using, old_using - new_using)}"
+        )
+    old_match = frozenset(f"{a}={c}" for a, c in old.match_columns)
+    new_match = frozenset(f"{a}={c}" for a, c in new.match_columns)
+    if old_match != new_match:
+        parts.append(
+            f"match_columns: {_format_set_delta(new_match - old_match, old_match - new_match)}"
+        )
+    return " | ".join(parts)
 
 
 class ChangeLogger:
@@ -240,13 +312,18 @@ class ChangeLogger:
             f"{action_verb} {info.securable_type.value.lower()}",
         ))
 
-    def log_securable_replace(self, info: Securable) -> None:
-        """Log a securable being replaced."""
+    def log_securable_replace(self, info: Securable, old: Securable | None = None) -> None:
+        """Log a securable being replaced. When ``old`` is provided alongside a
+        Function ``info``, the line includes a pipe-joined per-field diff so the
+        reader can see which fields actually changed."""
         self._securables_replaced += 1
         action_verb = "Replace" if self._dry_run else "Replaced"
+        action = f"{action_verb} {info.securable_type.value.lower()}"
+        suffix = _format_function_diff(info, old)
+        if suffix:
+            action = f"{action} ({suffix})"
         self._log_info(_format_change_line(
-            "~", info.securable_type.value, info.full_name,
-            f"{action_verb} {info.securable_type.value.lower()}",
+            "~", info.securable_type.value, info.full_name, action,
         ))
 
     # ------------------------------------------------------------------
@@ -262,13 +339,18 @@ class ChangeLogger:
             f"{action_verb} {policy.policy_type.value} policy '{policy.name}'",
         ))
 
-    def log_policy_replace(self, policy: Policy) -> None:
-        """Log a mask/filter policy being replaced."""
+    def log_policy_replace(self, policy: Policy, old: Policy | None = None) -> None:
+        """Log a mask/filter policy being replaced. When ``old`` is provided,
+        the line includes a pipe-joined per-field diff so the reader can see
+        which fields actually changed."""
         self._policies_replaced += 1
         action_verb = "Replace" if self._dry_run else "Replaced"
+        action = f"{action_verb} {policy.policy_type.value} policy '{policy.name}'"
+        suffix = _format_policy_diff(policy, old)
+        if suffix:
+            action = f"{action} ({suffix})"
         self._log_info(_format_change_line(
-            "~", policy.securable_type.value, policy.securable_full_name,
-            f"{action_verb} {policy.policy_type.value} policy '{policy.name}'",
+            "~", policy.securable_type.value, policy.securable_full_name, action,
         ))
 
     # ------------------------------------------------------------------

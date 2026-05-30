@@ -593,6 +593,198 @@ def test_logger_includes_policies_in_summary() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Field-level diff on replacement
+# ---------------------------------------------------------------------------
+
+
+def _make_function(
+    *,
+    full_name: str = "cat.s.fn",
+    parameters: tuple[tuple[str, str], ...] = (("col", "STRING"),),
+    definition: str = "col",
+    comment: str | None = None,
+) -> Function:
+    return Function(
+        securable_type=SecurableType.FUNCTION,
+        full_name=full_name,
+        parameters=parameters,
+        definition=definition,
+        comment=comment,
+    )
+
+
+def test_logger_securable_replace_shows_changed_comment_only() -> None:
+    """Function replace where only `comment` differs surfaces the comment delta
+    and no other field deltas."""
+    cl, mock_logger = _make_change_logger()
+    new = _make_function(comment="new comment")
+    old = _make_function(comment="old comment")
+
+    cl.log_securable_replace(new, old)
+
+    msg = _info_messages(mock_logger)[0]
+    assert "comment: 'old comment' -> 'new comment'" in msg
+    assert "parameters" not in msg
+    assert "definition" not in msg
+
+
+def test_logger_securable_replace_shows_changed_parameters() -> None:
+    """Function replace with parameter list change renders old -> new parameter signatures."""
+    cl, mock_logger = _make_change_logger()
+    new = _make_function(parameters=(("a", "STRING"), ("b", "INT")))
+    old = _make_function(parameters=(("a", "STRING"),))
+
+    cl.log_securable_replace(new, old)
+
+    msg = _info_messages(mock_logger)[0]
+    assert "parameters: (a STRING) -> (a STRING, b INT)" in msg
+
+
+def test_logger_securable_replace_marks_definition_change_without_inlining_body() -> None:
+    """Function replace where the body changed surfaces only `definition: changed`
+    — the actual SQL body is intentionally NOT inlined to keep log lines short."""
+    cl, mock_logger = _make_change_logger()
+    new = _make_function(definition="UPPER(col)\nWHERE col IS NOT NULL")
+    old = _make_function(definition="col")
+
+    cl.log_securable_replace(new, old)
+
+    msg = _info_messages(mock_logger)[0]
+    assert "definition: changed" in msg
+    assert "UPPER(col)" not in msg
+    assert "col IS NOT NULL" not in msg
+
+
+def test_logger_securable_replace_combines_multiple_field_changes() -> None:
+    """When multiple function fields change, each appears in the suffix joined by `|`."""
+    cl, mock_logger = _make_change_logger()
+    new = _make_function(comment="b", definition="UPPER(col)")
+    old = _make_function(comment="a", definition="col")
+
+    cl.log_securable_replace(new, old)
+
+    msg = _info_messages(mock_logger)[0]
+    assert "definition: changed" in msg
+    assert "comment: 'a' -> 'b'" in msg
+    assert " | " in msg
+
+
+def test_logger_securable_replace_without_old_state_falls_back_to_bare_message() -> None:
+    """Calling log_securable_replace without an `old` argument preserves the
+    original behaviour: just `Replaced function` with no field-diff suffix."""
+    cl, mock_logger = _make_change_logger()
+    new = _make_function()
+
+    cl.log_securable_replace(new)
+
+    msg = _info_messages(mock_logger)[0]
+    assert "Replaced function" in msg
+    assert "(" not in msg.split("Replaced function")[-1]
+
+
+def _make_logger_policy(**overrides) -> Policy:
+    """Factory matching tests/unit/policies/test_differ.py: principals are
+    `Principal` instances so `_format_principal_delta` can read `.name`."""
+    analysts = Principal(PrincipalType.GROUP, identifier="analysts", name="analysts")
+    base = dict(
+        securable_type=SecurableType.TABLE,
+        securable_full_name="cat.s.t",
+        name="mask_pii",
+        policy_type=PolicyType.MASK,
+        function_name="cat.default.fn",
+        to_principals=(analysts,),
+        except_principals=(),
+        when_condition=None,
+        match_columns=(),
+        on_column="c",
+        using_columns=(),
+    )
+    base.update(overrides)
+    return Policy(**base)
+
+
+def test_logger_policy_replace_shows_changed_to_principals() -> None:
+    """A change to to_principals surfaces as a Principal-style set delta."""
+    cl, mock_logger = _make_change_logger()
+    analysts = Principal(PrincipalType.GROUP, identifier="analysts", name="analysts")
+    scientists = Principal(PrincipalType.GROUP, identifier="scientists", name="scientists")
+    new = _make_logger_policy(to_principals=(analysts, scientists))
+    old = _make_logger_policy(to_principals=(analysts,))
+
+    cl.log_policy_replace(new, old)
+
+    msg = _info_messages(mock_logger)[0]
+    assert "to_principals: +scientists" in msg
+    assert "-scientists" not in msg
+
+
+def test_logger_policy_replace_shows_changed_function_name() -> None:
+    """A change to function_name surfaces as a scalar old -> new."""
+    cl, mock_logger = _make_change_logger()
+    new = _make_logger_policy(function_name="cat.default.new_fn")
+    old = _make_logger_policy(function_name="cat.default.old_fn")
+
+    cl.log_policy_replace(new, old)
+
+    msg = _info_messages(mock_logger)[0]
+    assert "function_name: 'cat.default.old_fn' -> 'cat.default.new_fn'" in msg
+
+
+def test_logger_policy_replace_shows_changed_when_condition_handles_none() -> None:
+    """when_condition transitioning from None to a string renders an empty-old scalar delta."""
+    cl, mock_logger = _make_change_logger()
+    new = _make_logger_policy(when_condition="has_tag('env')")
+    old = _make_logger_policy(when_condition=None)
+
+    cl.log_policy_replace(new, old)
+
+    msg = _info_messages(mock_logger)[0]
+    assert "when_condition:" in msg
+    assert "'' -> 'has_tag('env')'" in msg
+
+
+def test_logger_policy_replace_shows_changed_match_columns() -> None:
+    """A match-columns entry whose condition changed surfaces as alias=cond +/-."""
+    cl, mock_logger = _make_change_logger()
+    new = _make_logger_policy(match_columns=(("c", "has_tag_value('pii', 'phone')"),))
+    old = _make_logger_policy(match_columns=(("c", "has_tag_value('pii', 'email')"),))
+
+    cl.log_policy_replace(new, old)
+
+    msg = _info_messages(mock_logger)[0]
+    assert "match_columns:" in msg
+    assert "+c=has_tag_value('pii', 'phone')" in msg
+    assert "-c=has_tag_value('pii', 'email')" in msg
+
+
+def test_logger_policy_replace_combines_multiple_field_changes() -> None:
+    """Two policy fields changed → both appear, pipe-separated."""
+    cl, mock_logger = _make_change_logger()
+    new = _make_logger_policy(function_name="cat.default.new_fn", comment="b")
+    old = _make_logger_policy(function_name="cat.default.old_fn", comment="a")
+
+    cl.log_policy_replace(new, old)
+
+    msg = _info_messages(mock_logger)[0]
+    assert "function_name: 'cat.default.old_fn' -> 'cat.default.new_fn'" in msg
+    assert "comment: 'a' -> 'b'" in msg
+    assert " | " in msg
+
+
+def test_logger_policy_replace_without_old_state_falls_back_to_bare_message() -> None:
+    """Calling log_policy_replace without an `old` argument preserves the original
+    behaviour: just `Replaced mask policy 'name'` with no field-diff suffix."""
+    cl, mock_logger = _make_change_logger()
+    new = _make_logger_policy()
+
+    cl.log_policy_replace(new)
+
+    msg = _info_messages(mock_logger)[0]
+    assert "Replaced mask policy 'mask_pii'" in msg
+    assert "(" not in msg.split("'mask_pii'")[-1]
+
+
+# ---------------------------------------------------------------------------
 # Governed tag logging
 # ---------------------------------------------------------------------------
 

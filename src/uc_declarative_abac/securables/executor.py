@@ -342,6 +342,7 @@ def _run_create_batch(
 def _run_replace_batch(
     uc_helper: UnityCatalogHelper,
     replaces: list[Securable],
+    old_securables: dict[str, Securable],
     change_logger: ChangeLogger,
     dry_run: bool,
     max_workers: int,
@@ -361,7 +362,7 @@ def _run_replace_batch(
         if error is not None:
             change_logger.log_error(ExecutionError(context=stmt, exception=error))
             return
-        change_logger.log_securable_replace(info)
+        change_logger.log_securable_replace(info, old_securables.get(info.full_name))
 
     results = parallel_for_each(
         work_items, worker, max_workers=max_workers, on_complete=on_complete,
@@ -480,7 +481,8 @@ def execute_securable_diff(
         ))
 
     statements.extend(_run_replace_batch(
-        uc_helper, list(diff.securables_to_replace), change_logger, dry_run, workers,
+        uc_helper, list(diff.securables_to_replace), diff.old_securables,
+        change_logger, dry_run, workers,
     ))
 
     attribute_buckets = _bucket_attribute_updates(list(diff.attributes_to_update))
