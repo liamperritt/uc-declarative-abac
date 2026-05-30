@@ -1,10 +1,10 @@
 definitions:
   policies:
-    abac|grant_use_catalog:
+    managed_by|grant_use_catalog:
       type: grant
+      has_tags:
+        uc_gov_managed_by: uc_declarative_abac
       privileges:
         - use_catalog
       to:
         - uc_governor_test_team
-      has_tags:
-        uc_gov_managed_by: uc_declarative_abac

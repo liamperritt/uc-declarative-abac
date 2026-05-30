@@ -1,16 +1,16 @@
 definitions:
   policies:
-    abac|grant_cascade_pipeline:
+    pipeline|grant_cascade_pipeline:
       # Exercises USE_CATALOG / USE_SCHEMA cascading: this policy is attached at
       # the catalog level and matches tables tagged uc_gov_pipeline=lff. SELECT
       # lands on the matched tables, while USE_SCHEMA cascades up to each
       # matched table's parent schema and USE_CATALOG cascades up to the
       # containing catalog.
       type: grant
+      has_tags:
+        uc_gov_pipeline: lff
       privileges:
         - use
         - read
       to:
         - sp_uc_governor_test
-      has_tags:
-        uc_gov_pipeline: lff

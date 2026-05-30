@@ -156,13 +156,13 @@ When specifying principals for `owner`, `to`, `except`, or grant targets, use th
 | **Column masking** | Policy definitions with `type: mask` → engine creates Unity Catalog ABAC masking policies that apply a function to tagged columns. |
 | **Row filtering** | Policy definitions with `type: filter` → engine creates Unity Catalog ABAC row-filter policies using the referenced function. |
 | **GRANTs** | Policy definitions with `type: grant` → engine computes grants from tag mappings and executes the corresponding `GRANT` statements. |
-| **UC objects** | Catalog resources compose schema, table, volume, and function definitions → engine creates/updates them in each target catalog. |
+| **UC objects & tags** | Catalog resources compose schema, table, volume, and function definitions → engine creates/updates/tags them in each target catalog. |
 
 You maintain YAML as the source of truth; the engine turns it into UC objects and permissions.
 
 ## YAML Config Structures
 
-Configs use **dictionaries keyed by definition IDs**. The recommended convention is to use `|`-delimited keys that mirror the Unity Catalog path of the object — e.g. `my_catalog` for a catalog, `my_catalog|sales` for a schema, `my_catalog|sales|orders` for a table. This matches the Databricks Terraform provider's composite resource IDs (e.g. `<metastore_id>|<name>` for UC connections). For reusable, catalog-agnostic definitions (typically policies and shared functions), a `<domain>|<name>` style works well — e.g. `abac|mask_pii`. The `|` delimiter is a convention only and is not enforced by the engine — keys can be any valid YAML string.
+Configs use **dictionaries keyed by definition IDs**. The recommended convention is to use `|`-delimited keys that mirror the Unity Catalog path of the object — e.g. `my_catalog` for a catalog, `my_catalog|sales` for a schema, `my_catalog|sales|orders` for a table. This matches the Databricks Terraform provider's composite resource IDs (e.g. `<metastore_id>|<name>` for UC connections). For reusable, catalog-agnostic definitions (typically policies and shared functions), a `<tag_key/domain>|<name>` style works well — e.g. `pii|mask_pii`. The `|` delimiter is a convention only and is not enforced by the engine — keys can be any valid YAML string.
 
 Key conventions by type:
 
@@ -173,8 +173,8 @@ Key conventions by type:
 | tables | `<catalog_name>\|<schema_name>\|<table_name>` | `operations\|sales\|orders` |
 | volumes | `<catalog_name>\|<schema_name>\|<volume_name>` | `operations\|landing\|raw_events` |
 | functions (catalog-specific) | `<catalog_name>\|<schema_name>\|<function_name>` | `operations\|shared\|mask_pii_email` |
-| functions (cross-catalog, reusable) | `<domain>\|<function_name>` | `abac\|mask_pii` |
-| policies (cross-catalog, reusable) | `<domain>\|<policy_name>` | `abac\|mask_pii_email` |
+| functions (cross-catalog, reusable) | `<tag_key/domain>\|<function_name>` | `pii\|mask_pii` |
+| policies (cross-catalog, reusable) | `<tag_key/domain>>\|<policy_name>` | `pii\|mask_pii_email` |
 
 These keys are the stable identity for each entity and let you reference entities across files via `$defs/<type>/<key>` or `$ref: $defs/<type>/<key>` syntax (inspired by JSON Schema's `$defs` and `$ref` keywords) which also supports selective config overrides (see the **Overrides** section below).
 
@@ -293,7 +293,7 @@ resources:
 
 #### Table definitions
 
-Tables are defined in a flat dictionary under `definitions: tables:`. Key convention: `<logical_catalog/domain>|<schema_name>|<table_name>` (e.g. `operations|sales|orders`).
+Tables are defined in a flat dictionary under `definitions: tables:`. Key convention: `<logical_catalog>|<schema_name>|<table_name>` (e.g. `operations|sales|orders`).
 
 ```yaml
 # definitions/operations/schemas/sales/tables/orders.yaml
@@ -349,7 +349,7 @@ Comments are supported on managed and external tables, but **not on views**. If 
 
 #### Volume definitions
 
-Volumes are defined under `definitions: volumes:`. Key convention: `<logical_catalog/domain>|<schema_name>|<volume_name>` (e.g. `platform|landing|raw_events`).
+Volumes are defined under `definitions: volumes:`. Key convention: `<logical_catalog>|<schema_name>|<volume_name>` (e.g. `platform|landing|raw_events`).
 
 ```yaml
 # definitions/platform/schemas/landing/volumes/raw_events.yaml
@@ -373,7 +373,7 @@ resources:
 
 #### function definitions
 
-Functions are defined under `definitions: functions:`. Key convention: `<logical_catalog/domain>|<schema_name>|<function_name>` (e.g. `platform|shared|mask_pii_email`). ABAC policies can leverage these functions by referencing the function definition inline, or via the fully qualified UC function resource name.
+Functions are defined under `definitions: functions:`. Key convention: `<logical_catalog>|<schema_name>|<function_name>` (e.g. `platform|shared|mask_pii_email`). ABAC policies can leverage these functions by referencing the function definition inline, or via the fully qualified UC function resource name.
 
 ```yaml
 # definitions/platform/schemas/shared/functions/mask_pii_email.yaml
@@ -407,7 +407,7 @@ definitions:
 
 #### Policy definitions
 
-ABAC policies are defined under `definitions: policies:`. Key convention: `<logical_catalog/domain>|<policy_name>` (e.g. `shared|mask_pii_email`). Three types:
+ABAC policies are defined under `definitions: policies:`. Key convention: `<tag_key/domain>|<policy_name>` (e.g. `pii|mask_pii_email`). Three types:
 
 - **`mask`** — applies a function to columns matching a tag; uses `to` / `except` to control who sees masked vs. unmasked data.
 - **`filter`** — applies a row-filter function to tables matching a tag; uses `to` / `except` to control who is filtered.
@@ -431,31 +431,30 @@ Policy fields:
 - **`expiry_date`** — (`grant` type only) ISO 8601 date (`YYYY-MM-DD`) after which the grant is automatically revoked.
 
 ```yaml
-# definitions/shared/policies/mask_email_pii.yaml
+# definitions/sred/policies/pii/mask_email_pii.yaml
 definitions:
   policies:
-    shared|mask_email_pii:
+    pii|mask_email_pii:
       name: mask_email_pii
       comment: Mask email PII from all users except account admins
       type: mask
-      function: platform.abac.mask_email_pii
       column:
         alias: email
         has_tags:
           pii: email
+      function: platform.abac.mask_email_pii
       to:
         - account_users
       except:
         - pii_viewers
 
-# definitions/shared/policies/mask_customer_name_pii.yaml
+# definitions/policies/pii/mask_customer_name_pii.yaml
 definitions:
   policies:
-    shared|mask_retail_segment_customer_names_pii:
+    pii|mask_retail_segment_customer_names_pii:
       name: mask_retail_segment_customer_names_pii
       comment: Mask retail-segment customer names (not commercial-segment customer names) from all users except account admins
       type: mask
-      function: platform.abac.mask_retail_segment_customer_names_pii
       has_tags:
         domain: customer
       columns:
@@ -466,18 +465,29 @@ definitions:
         - alias: segment
           has_tags:
             segment: '*'
+      function: platform.abac.mask_retail_segment_customer_names_pii
       to:
         - account_users
       except:
         - customer_pii_viewers
 
-# definitions/shared/policies/filter_by_region.yaml
+# definitions/policies/trips/filter_trips_by_region.yaml
 definitions:
   policies:
-    shared|filter_trips_by_region:
+    trips|filter_trips_by_region:
       name: filter_trips_by_region
       comment: Users can only see high sensitivity trips to or from their region
       type: filter
+      has_tags:
+        trips: '*'
+        sensitivity: high
+      columns:
+        - alias: from_region
+          has_tags:
+            from_region: '*'
+        - alias: to_region
+          has_tags:
+            to_region: '*'
       function:
         name: to_or_from_region_filter
         parameters:
@@ -499,32 +509,22 @@ definitions:
             OR (to_region = 'ASIA' AND is_account_group_member('asia_users'))
             OR (to_region = 'MIDDLE EAST' AND is_account_group_member('middle_east_users')
           )
-      has_tags:
-        trips: '*'
-        sensitivity: high
-      columns:
-        - alias: from_region
-          has_tags:
-            from_region: '*'
-        - alias: to_region
-          has_tags:
-            to_region: '*'
       to:
         - account_users
       except:
         - account_admins
 
-# definitions/shared/policies/grant_read_on_sales.yaml
+# definitions/policies/business_area/grant_read_on_sales.yaml
 definitions:
   policies:
-    shared|grant_read_on_sales:
+    business_area|grant_read_on_sales:
       name: grant_read_on_sales
       comment: Grant sales team access to sales data (until May 2026)
       type: grant
-      privileges:
-        - select
       has_tags:
         business_area: sales
+      privileges:
+        - select
       to:
         - data_engineers
         - sales_team
@@ -678,10 +678,14 @@ definitions:
   schemas:
     operations|sales:
       name: sales
-      tags: {domain: operations, pii: "true"}
+      tags:
+        domain: operations
+        pii: "true"
       tables:
-        - {name: orders, comment: Orders}
-        - {name: quotes, comment: Quotes}
+        - name: orders
+          comment: Orders table
+        - name: quotes
+          comment: Quotes table
 
 # Resource — override merges, doesn't replace
 resources:
@@ -689,10 +693,14 @@ resources:
     operations_test:
       schemas:
         - $ref: $defs/schemas/operations|sales
-          tags: {pii: "false", env: staging}   # 'domain' preserved; 'pii' updated; 'env' added
+          tags:
+            pii: "false"
+            env: test                     # 'domain' preserved; 'pii' updated; 'env' added
           tables:
-            - {name: quotes, comment: TEST quotes}   # merges with definition's 'quotes'
-            - {name: leads, comment: Leads table}    # appended; 'orders' from def is preserved
+            - name: quotes
+              comment: TEST quotes table  # merges with definition's 'quotes'
+            - name: leads
+            `comment: Leads table         # appended; 'orders' from def is preserved
 ```
 
 ---
@@ -723,17 +731,20 @@ definitions/
 │               │   └── raw_events.yaml
 │               └── CODEOWNERS
 ├── policies/                            # cross-catalog reusable policies
-│   ├── mask_pii.yaml
-│   └── grant_catalog_read.yaml
+│   ├── pii/
+│   │   └── mask_pii.yaml
+│   └── domain/
+│       └── grant_sales_read.yaml
 └── functions/                           # cross-catalog reusable functions (optional)
-    └── mask_pii_email.yaml
+    └── pii/
+        └── mask_pii_email.yaml
 resources/
 ├── catalogs/
 │   ├── operations_prod.yaml             # thin $ref to the catalog definition
 │   └── operations_test.yaml
 └── governed_tags/
     ├── pii.yaml
-    └── sensitivity.yaml
+    └── domain.yaml
 CODEOWNERS
 ```
 

@@ -1,12 +1,12 @@
 definitions:
   policies:
-    abac|grant_catalog_read:
+    team|grant_schema_access:
       type: grant
+      has_tags:
+        uc_gov_team: platform
       privileges:
+        - use_schema
         - read
       to:
         - j.wang@databricks.com
         - liam.perritt@databricks.com
-      has_tags:
-        uc_gov_env: test
-        uc_gov_managed_by: uc_declarative_abac

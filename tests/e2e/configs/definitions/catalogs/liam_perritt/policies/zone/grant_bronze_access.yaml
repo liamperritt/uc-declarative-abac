@@ -1,10 +1,10 @@
 definitions:
   policies:
-    abac|grant_bronze_access:
+    zone|grant_bronze_access:
       type: grant
+      has_tags:
+        uc_gov_zone: bronze
       privileges:
         - use_schema
       to:
         - liam.perritt@databricks.com
-      has_tags:
-        uc_gov_zone: bronze

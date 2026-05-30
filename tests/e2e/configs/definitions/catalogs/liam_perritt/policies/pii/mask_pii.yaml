@@ -1,9 +1,13 @@
 definitions:
   policies:
-    abac|mask_pii:
+    pii|mask_pii:
       name: mask_pii
-      type: mask
       comment: Policy for masking columns with PII values via 'uc_gov_pii' column tag
+      type: mask
+      column:
+        alias: pii
+        has_tags:
+          uc_gov_pii: '*'
       function:
         name: fn_mask_pii
         comment: Function that masks the given PII value
@@ -11,9 +15,5 @@ definitions:
           - name: pii
             type: string
         return: "CONCAT('####', SUBSTRING(pii, -4))"
-      column:
-        alias: pii
-        has_tags:
-          uc_gov_pii: '*'
       to:
         - uc_governor_test_team
