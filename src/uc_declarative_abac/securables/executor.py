@@ -28,9 +28,12 @@ from uc_declarative_abac.principals import (
 from uc_declarative_abac.types import SecurableType
 
 
-# Creation order: a parent must exist before any of its children can be created.
-# Catalogs first, then schemas, then leaf types (tables/volumes/functions).
-_CREATION_DEPTH: dict[SecurableType, int] = {
+# UC hierarchy depth: catalogs at the top, then schemas, then leaf types
+# (tables/volumes/functions), then columns. This topology drives execution
+# ordering both for creates (a parent must exist before its children) and for
+# attribute updates (the engine may need to take ownership of a parent before
+# it can alter children — see _bucket_attribute_updates).
+_SECURABLE_DEPTH: dict[SecurableType, int] = {
     SecurableType.CATALOG: 0,
     SecurableType.SCHEMA: 1,
     SecurableType.TABLE: 2,
@@ -74,7 +77,7 @@ def _creation_sort_key(info: Securable) -> tuple[int, str]:
     order (which traces back to the user's YAML declaration order). Sorting
     columns by their own full_name would silently re-order them alphabetically.
     """
-    depth = _CREATION_DEPTH.get(info.securable_type, 99)
+    depth = _SECURABLE_DEPTH.get(info.securable_type, 99)
     if isinstance(info, Column):
         parent_full_name, _, _ = info.full_name.rpartition(".")
         return (depth, parent_full_name)
@@ -378,14 +381,40 @@ def _attribute_update_stmt(update: AttributeUpdate) -> str | None:
     )
 
 
-def _run_attribute_update_batch(
+def _attribute_update_sort_key(update: AttributeUpdate) -> tuple[int, int]:
+    """Sort key for ordering attribute updates: ``(depth, owner-first)``.
+
+    Depth uses the shared ``_SECURABLE_DEPTH`` topology so catalogs run before
+    schemas, which run before tables/volumes/functions. Within each depth,
+    owner updates sort before other attributes so the engine can take
+    ownership of a securable before altering its other attributes.
+
+    Unknown securable types fall back to depth 99, mirroring
+    ``_creation_sort_key``.
+    """
+    depth = _SECURABLE_DEPTH.get(update.securable_type, 99)
+    owner_priority = 0 if update.attribute == "owner" else 1
+    return (depth, owner_priority)
+
+
+def _bucket_attribute_updates(
+    updates: list[AttributeUpdate],
+) -> dict[tuple[int, int], list[AttributeUpdate]]:
+    """Bucket attribute updates by ``(depth, owner-first)``, preserving input order within each bucket."""
+    by_key: dict[tuple[int, int], list[AttributeUpdate]] = defaultdict(list)
+    for update in updates:
+        by_key[_attribute_update_sort_key(update)].append(update)
+    return by_key
+
+
+def _run_attribute_update_sub_batch(
     uc_helper: UnityCatalogHelper,
     updates: list[AttributeUpdate],
     change_logger: ChangeLogger,
     dry_run: bool,
     max_workers: int,
 ) -> list[str]:
-    """Execute the attribute updates batch in parallel; stream logs and return input-order statements."""
+    """Execute one (depth, owner|other) bucket of attribute updates in parallel; stream logs and return input-order statements."""
     work_items: list[tuple[AttributeUpdate, str | None]] = [
         (update, _attribute_update_stmt(update)) for update in updates
     ]
@@ -425,14 +454,18 @@ def execute_securable_diff(
     """Execute securable creates, replaces, and attribute updates from a SecurableDiff.
 
     Execution order: creates (SQL, parent-first by depth) → replaces (SQL) →
-    attribute updates (SDK call for ``owner``/``rfa_destinations``; SQL ALTER
-    for ``comment``).
+    attribute updates (depth-ordered, owner-first within each depth).
+
+    Attribute updates are split into sub-batches keyed by
+    ``(depth, owner-first)`` and run sequentially in that order — catalogs
+    before schemas before tables/volumes/functions, and within each depth all
+    owner changes complete before any comment/RFA change starts. This lets the
+    engine take ownership of a parent before it tries to alter its children.
 
     Within each depth bucket of creates, and within each of the replaces and
-    attribute-updates phases, items run in parallel up to ``max_parallel_changes``.
-    Cross-depth ordering is preserved (catalog → schema → tables/volumes/functions
-    → columns). Dry-run forces sequential execution so log output is identical to
-    non-parallel mode.
+    attribute-update sub-batches, items run in parallel up to
+    ``max_parallel_changes``. Dry-run forces sequential execution so log
+    output is identical to non-parallel mode.
 
     Returns the list of SQL statements that were successfully executed
     (empty in dry-run mode).
@@ -450,8 +483,10 @@ def execute_securable_diff(
         uc_helper, list(diff.securables_to_replace), change_logger, dry_run, workers,
     ))
 
-    statements.extend(_run_attribute_update_batch(
-        uc_helper, list(diff.attributes_to_update), change_logger, dry_run, workers,
-    ))
+    attribute_buckets = _bucket_attribute_updates(list(diff.attributes_to_update))
+    for sort_key in sorted(attribute_buckets):
+        statements.extend(_run_attribute_update_sub_batch(
+            uc_helper, attribute_buckets[sort_key], change_logger, dry_run, workers,
+        ))
 
     return statements

@@ -1150,3 +1150,375 @@ def test_securable_executor_parallel_error_in_one_create_does_not_abort_depth_ba
     assert len(change_logger.errors) == 1
     assert "sch1" in change_logger.errors[0].context
     assert len(stmts) == 2
+
+
+# ---------------------------------------------------------------------------
+# Attribute update ordering
+# ---------------------------------------------------------------------------
+
+
+def test_securable_executor_runs_catalog_attribute_updates_before_schema_updates():
+    """Catalog-level attribute updates must complete before any schema-level
+    attribute update begins, regardless of the input order in
+    ``attributes_to_update``. We force ``max_parallel_changes=1`` so the call
+    sequence is deterministic, and put the schema update first in the input
+    list to ensure that input order alone cannot satisfy the assertion."""
+    uc_helper = MagicMock()
+
+    # Input order is deliberately schema-first, catalogs after, so that any
+    # implementation that just iterates the input list will fail this test.
+    diff = SecurableDiff(
+        attributes_to_update=[
+            # Schema update — should NOT run until all catalog updates are done.
+            AttributeUpdate(
+                securable_type=SecurableType.SCHEMA,
+                full_name="cat.sales",
+                attribute="owner",
+                old_value=frozenset({"old_owner"}),
+                new_value=frozenset({"new_owner"}),
+            ),
+            # Catalog owner update.
+            AttributeUpdate(
+                securable_type=SecurableType.CATALOG,
+                full_name="cat",
+                attribute="owner",
+                old_value=frozenset({"old_owner"}),
+                new_value=frozenset({"new_owner"}),
+            ),
+            # Catalog comment update (different code path: execute_sql).
+            AttributeUpdate(
+                securable_type=SecurableType.CATALOG,
+                full_name="cat",
+                attribute="comment",
+                old_value=frozenset({"Old"}),
+                new_value=frozenset({"New"}),
+            ),
+        ],
+    )
+
+    execute_securable_diff(uc_helper, diff, ChangeLogger(), max_parallel_changes=1)
+
+    # Walk all calls made on the mock and classify each as targeting either
+    # a CATALOG or a SCHEMA, based on the arguments passed.
+    catalog_indices: list[int] = []
+    schema_indices: list[int] = []
+    observed: list[tuple[int, str, tuple]] = []
+
+    for idx, call in enumerate(uc_helper.mock_calls):
+        name, args, kwargs = call
+        # Skip nested/chained mock calls (e.g. attribute accesses on side effects).
+        if name not in {"update_owner", "execute_sql", "update_rfa_destinations"}:
+            continue
+
+        # Pull a string we can scan for catalog/schema hints out of the call.
+        combined = " ".join(str(a) for a in args) + " " + " ".join(f"{k}={v}" for k, v in kwargs.items())
+        observed.append((idx, name, args))
+
+        # Identify by securable_type if it's an argument; otherwise by the
+        # full_name / SQL contents.
+        if SecurableType.CATALOG in args or "CATALOG" in combined.upper() and "SCHEMA" not in combined.upper():
+            catalog_indices.append(idx)
+        elif SecurableType.SCHEMA in args or "SCHEMA" in combined.upper():
+            schema_indices.append(idx)
+
+    assert catalog_indices, f"Expected catalog-targeting calls; observed: {observed}"
+    assert schema_indices, f"Expected schema-targeting calls; observed: {observed}"
+
+    assert max(catalog_indices) < min(schema_indices), (
+        f"Expected all catalog calls to finish before any schema call begins.\n"
+        f"  catalog indices: {catalog_indices}\n"
+        f"  schema indices:  {schema_indices}\n"
+        f"  observed sequence: {observed}"
+    )
+
+
+# Helper for the ordering tests below: builds a uc_helper MagicMock whose
+# update_owner / execute_sql / update_rfa_destinations methods append a
+# structured record to a list so tests can assert on the call sequence
+# without parsing SQL strings.
+def _recording_uc_helper() -> tuple[MagicMock, list[tuple]]:
+    records: list[tuple] = []
+    uc_helper = MagicMock()
+
+    def _owner(securable_type, full_name, owner):
+        records.append(("owner", securable_type, full_name, owner))
+
+    def _rfa(securable_type, full_name, destinations):
+        records.append(("rfa", securable_type, full_name, destinations))
+
+    def _sql(sql):
+        records.append(("sql", sql))
+
+    uc_helper.update_owner.side_effect = _owner
+    uc_helper.update_rfa_destinations.side_effect = _rfa
+    uc_helper.execute_sql.side_effect = _sql
+    return uc_helper, records
+
+
+def _securable_type_of(record: tuple) -> SecurableType | None:
+    """Return the SecurableType targeted by a recorded call.
+
+    For owner/rfa records the type is the second tuple element. For SQL
+    records (only `comment` updates use SQL) we recover the type from the
+    leading ``COMMENT ON <TYPE>`` token.
+    """
+    if record[0] in {"owner", "rfa"}:
+        return record[1]
+    sql: str = record[1]
+    upper = sql.upper()
+    for st in (SecurableType.CATALOG, SecurableType.SCHEMA, SecurableType.TABLE, SecurableType.VOLUME):
+        if f"COMMENT ON {st.name} " in upper:
+            return st
+    return None
+
+
+def test_securable_executor_runs_schema_attribute_updates_before_tvf_updates():
+    """Schema-level attribute updates must complete before any
+    table/volume/function attribute update begins."""
+    uc_helper, records = _recording_uc_helper()
+
+    # Input order is deliberately TVF-first.
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.TABLE,
+                full_name="cat.sch.t",
+                attribute="owner",
+                old_value=frozenset({"old"}),
+                new_value=frozenset({"new"}),
+            ),
+            AttributeUpdate(
+                securable_type=SecurableType.VOLUME,
+                full_name="cat.sch.v",
+                attribute="owner",
+                old_value=frozenset({"old"}),
+                new_value=frozenset({"new"}),
+            ),
+            AttributeUpdate(
+                securable_type=SecurableType.FUNCTION,
+                full_name="cat.sch.f",
+                attribute="owner",
+                old_value=frozenset({"old"}),
+                new_value=frozenset({"new"}),
+            ),
+            AttributeUpdate(
+                securable_type=SecurableType.SCHEMA,
+                full_name="cat.sch",
+                attribute="owner",
+                old_value=frozenset({"old"}),
+                new_value=frozenset({"new"}),
+            ),
+        ],
+    )
+
+    execute_securable_diff(uc_helper, diff, ChangeLogger(), max_parallel_changes=1)
+
+    schema_idx = [i for i, r in enumerate(records) if _securable_type_of(r) == SecurableType.SCHEMA]
+    tvf_idx = [
+        i for i, r in enumerate(records)
+        if _securable_type_of(r) in {SecurableType.TABLE, SecurableType.VOLUME, SecurableType.FUNCTION}
+    ]
+    assert schema_idx and tvf_idx, f"Expected both schema and TVF calls; got: {records}"
+    assert max(schema_idx) < min(tvf_idx), (
+        f"Expected all schema calls to finish before any TVF call begins.\n"
+        f"  schema indices: {schema_idx}\n"
+        f"  TVF indices:    {tvf_idx}\n"
+        f"  observed:       {records}"
+    )
+
+
+def test_securable_executor_runs_owner_update_before_comment_update_within_same_type():
+    """On the same securable, the owner update must run before the comment update."""
+    uc_helper, records = _recording_uc_helper()
+
+    # Input order is comment-first, owner-second.
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.CATALOG,
+                full_name="cat",
+                attribute="comment",
+                old_value=frozenset({"Old"}),
+                new_value=frozenset({"New"}),
+            ),
+            AttributeUpdate(
+                securable_type=SecurableType.CATALOG,
+                full_name="cat",
+                attribute="owner",
+                old_value=frozenset({"old_owner"}),
+                new_value=frozenset({"new_owner"}),
+            ),
+        ],
+    )
+
+    execute_securable_diff(uc_helper, diff, ChangeLogger(), max_parallel_changes=1)
+
+    owner_idx = [i for i, r in enumerate(records) if r[0] == "owner"]
+    sql_idx = [i for i, r in enumerate(records) if r[0] == "sql"]
+    assert owner_idx and sql_idx, f"Expected both owner and SQL calls; got: {records}"
+    assert max(owner_idx) < min(sql_idx), (
+        f"Owner update must precede comment update on the same securable.\n  records: {records}"
+    )
+
+
+def test_securable_executor_runs_owner_update_before_rfa_update_within_same_type():
+    """On the same securable, the owner update must run before an
+    rfa_destinations update."""
+    uc_helper, records = _recording_uc_helper()
+
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.SCHEMA,
+                full_name="cat.sch",
+                attribute="rfa_destinations",
+                old_value=frozenset(),
+                new_value=frozenset({"dest_a"}),
+            ),
+            AttributeUpdate(
+                securable_type=SecurableType.SCHEMA,
+                full_name="cat.sch",
+                attribute="owner",
+                old_value=frozenset({"old"}),
+                new_value=frozenset({"new"}),
+            ),
+        ],
+    )
+
+    execute_securable_diff(uc_helper, diff, ChangeLogger(), max_parallel_changes=1)
+
+    owner_idx = [i for i, r in enumerate(records) if r[0] == "owner"]
+    rfa_idx = [i for i, r in enumerate(records) if r[0] == "rfa"]
+    assert owner_idx and rfa_idx, f"Expected both owner and rfa calls; got: {records}"
+    assert max(owner_idx) < min(rfa_idx), (
+        f"Owner update must precede rfa update on the same securable.\n  records: {records}"
+    )
+
+
+def test_securable_executor_runs_all_catalog_owners_before_any_catalog_non_owners():
+    """Across multiple catalogs with mixed owner/comment updates, every owner
+    call must complete before any non-owner call begins (within the catalog
+    depth bucket)."""
+    uc_helper, records = _recording_uc_helper()
+
+    # Mixed input order across two catalogs, with comments listed first.
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.CATALOG,
+                full_name="cat_a",
+                attribute="comment",
+                old_value=frozenset({"Old"}),
+                new_value=frozenset({"A"}),
+            ),
+            AttributeUpdate(
+                securable_type=SecurableType.CATALOG,
+                full_name="cat_b",
+                attribute="comment",
+                old_value=frozenset({"Old"}),
+                new_value=frozenset({"B"}),
+            ),
+            AttributeUpdate(
+                securable_type=SecurableType.CATALOG,
+                full_name="cat_a",
+                attribute="owner",
+                old_value=frozenset({"old"}),
+                new_value=frozenset({"new_a"}),
+            ),
+            AttributeUpdate(
+                securable_type=SecurableType.CATALOG,
+                full_name="cat_b",
+                attribute="owner",
+                old_value=frozenset({"old"}),
+                new_value=frozenset({"new_b"}),
+            ),
+        ],
+    )
+
+    execute_securable_diff(uc_helper, diff, ChangeLogger(), max_parallel_changes=1)
+
+    owner_idx = [i for i, r in enumerate(records) if r[0] == "owner"]
+    sql_idx = [i for i, r in enumerate(records) if r[0] == "sql"]
+    assert len(owner_idx) == 2 and len(sql_idx) == 2, f"Unexpected records: {records}"
+    assert max(owner_idx) < min(sql_idx), (
+        f"All catalog owner updates must finish before any catalog comment update.\n"
+        f"  records: {records}"
+    )
+
+
+def test_securable_executor_preserves_input_order_within_a_sub_batch():
+    """Within one (depth, owner|other) sub-batch, items execute in input
+    order (relying on ``parallel_for_each``'s stable scheduling at
+    ``max_workers=1``)."""
+    uc_helper, records = _recording_uc_helper()
+
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.CATALOG,
+                full_name="cat_b",
+                attribute="owner",
+                old_value=frozenset({"old"}),
+                new_value=frozenset({"new_b"}),
+            ),
+            AttributeUpdate(
+                securable_type=SecurableType.CATALOG,
+                full_name="cat_a",
+                attribute="owner",
+                old_value=frozenset({"old"}),
+                new_value=frozenset({"new_a"}),
+            ),
+        ],
+    )
+
+    execute_securable_diff(uc_helper, diff, ChangeLogger(), max_parallel_changes=1)
+
+    # Two owner records, in input order.
+    assert [r[2] for r in records if r[0] == "owner"] == ["cat_b", "cat_a"], (
+        f"Expected owner updates to fire in input order; got: {records}"
+    )
+
+
+def test_securable_executor_continues_after_attribute_error_in_earlier_phase():
+    """A failure in the catalog phase must not abort schema-phase execution;
+    the error is collected on the ChangeLogger and later phases still run."""
+    uc_helper, records = _recording_uc_helper()
+
+    # Override owner side_effect: catalog owner update fails; schema succeeds.
+    def _owner(securable_type, full_name, owner):
+        records.append(("owner", securable_type, full_name, owner))
+        if securable_type == SecurableType.CATALOG:
+            raise RuntimeError("permission denied taking catalog ownership")
+
+    uc_helper.update_owner.side_effect = _owner
+
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.CATALOG,
+                full_name="cat",
+                attribute="owner",
+                old_value=frozenset({"old"}),
+                new_value=frozenset({"new"}),
+            ),
+            AttributeUpdate(
+                securable_type=SecurableType.SCHEMA,
+                full_name="cat.sch",
+                attribute="owner",
+                old_value=frozenset({"old"}),
+                new_value=frozenset({"new"}),
+            ),
+        ],
+    )
+
+    change_logger = ChangeLogger()
+    execute_securable_diff(uc_helper, diff, change_logger, max_parallel_changes=1)
+
+    # Both owner updates were attempted, in catalog-before-schema order.
+    owner_targets = [r[1] for r in records if r[0] == "owner"]
+    assert owner_targets == [SecurableType.CATALOG, SecurableType.SCHEMA], (
+        f"Expected catalog then schema owner attempts; got: {records}"
+    )
+    # The catalog failure was captured rather than re-raised.
+    assert change_logger.has_errors
+    assert len(change_logger.errors) == 1
