@@ -202,8 +202,8 @@ definitions:
       rfa_destinations:
         - data-governance@company.com
       policies:
-        - $defs/policies/abac|grant_use_catalog
-        - $defs/policies/abac|mask_pii_email
+        - $defs/policies/domain|grant_finance_read
+        - $defs/policies/pii|mask_pii_email
       schemas:
         - $defs/schemas/operations|sales
         - $defs/schemas/operations|landing
@@ -233,7 +233,7 @@ definitions:
       tags:
         operations: ~
       policies:
-        - $defs/policies/shared|grant_read_on_sales
+        - $defs/policies/domain|grant_read_on_sales
       tables:
         - $defs/tables/operations|sales|orders
 
@@ -310,7 +310,7 @@ definitions:
         classification: internal
         sales: ~
       policies:
-        - $ref: $defs/policies/shared|mask_pii_email
+        - $ref: $defs/policies/pii|mask_pii_email
 
 # definitions/people/schemas/hr/tables/employees.yaml
 definitions:
@@ -601,7 +601,7 @@ definitions:
       comment: Operations catalog
       owner: data_platform_team
       policies:
-        - $defs/policies/abac|mask_pii_email
+        - $defs/policies/pii|mask_pii_email
       schemas:
         - $defs/schemas/operations_prod|sales
         - $defs/schemas/operations_prod|landing
@@ -637,7 +637,7 @@ resources:
       tags:
         env: prod
       policies:
-        - $defs/policies/abac|mask_pii_email
+        - $defs/policies/pii|mask_pii_email
       schemas:
         - $defs/schemas/operations|sales
 ```
