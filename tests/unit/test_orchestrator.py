@@ -490,6 +490,37 @@ def test_orchestrator_dry_run_does_not_execute_sql(
 # ---------------------------------------------------------------------------
 
 
+def test_orchestrator_threads_max_parallel_changes_to_each_executor(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """run() forwards max_parallel_changes as a kwarg into every domain executor."""
+    config = _catalog_with_tags_and_grants_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    with patch("uc_declarative_abac.orchestrator.execute_tag_diff") as m_tag, \
+         patch("uc_declarative_abac.orchestrator.execute_privilege_diff") as m_priv, \
+         patch("uc_declarative_abac.orchestrator.execute_securable_diff") as m_sec, \
+         patch("uc_declarative_abac.orchestrator.execute_policy_diff") as m_pol, \
+         patch("uc_declarative_abac.orchestrator.execute_governed_tag_diff") as m_gov:
+        _run_all_enabled(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            dry_run=True,
+            max_parallel_changes=7,
+        )
+
+    for mock_executor in (m_tag, m_priv, m_sec, m_pol, m_gov):
+        # Each executor must have been called with max_parallel_changes=7.
+        assert mock_executor.called, f"Expected {mock_executor} to be called"
+        kwargs = mock_executor.call_args.kwargs
+        assert kwargs.get("max_parallel_changes") == 7, (
+            f"{mock_executor}: expected max_parallel_changes=7, got {kwargs.get('max_parallel_changes')}"
+        )
+
+
 def test_orchestrator_fetches_tags_privileges_and_principals_in_parallel(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """Mock delays on fetch methods; total elapsed < sum of delays proves parallelism."""

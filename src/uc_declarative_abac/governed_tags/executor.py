@@ -19,6 +19,7 @@ from uc_declarative_abac.utils import (
     ExecutionError,
     InteractiveConfirmationRequiredError,
     OrchestratorError,
+    parallel_for_each,
 )
 from uc_declarative_abac.principals import (
     ensure_resolved,
@@ -119,26 +120,64 @@ def _apply_assigners(
         ))
 
 
+def _create_tag_policy_worker(
+    ws_helper: WorkspaceHelper,
+    gt: GovernedTag,
+    dry_run: bool,
+) -> object | None:
+    """Worker: create one tag policy via the SDK and return its handle (or None in dry-run)."""
+    if dry_run:
+        return None
+    return ws_helper.create_tag_policy(_to_tag_policy(gt))
+
+
 def _execute_creates(
     ws_helper: WorkspaceHelper,
     diff: GovernedTagDiff,
     change_logger: ChangeLogger,
     dry_run: bool,
+    max_workers: int,
 ) -> None:
-    """Create each governed tag in to_create via the SDK. Logs per-tag and collects errors."""
-    for gt in sorted(diff.to_create, key=lambda g: g.name):
-        if not dry_run:
-            try:
-                created = ws_helper.create_tag_policy(_to_tag_policy(gt))
-            except Exception as exc:
-                change_logger.log_error(ExecutionError(
-                    context=f"create_tag_policy({gt.name})", exception=exc,
-                ))
-                continue
+    """Create each governed tag in to_create via the SDK. Logs per-tag and collects errors.
+
+    Per-tag SDK creates run in parallel; the per-tag follow-up (register the
+    returned handle, then update the rule-set for assigners) runs on the main
+    thread so SDK state mutations stay sequential and log ordering remains
+    deterministic.
+    """
+    work_items = sorted(diff.to_create, key=lambda g: g.name)
+    results = parallel_for_each(
+        work_items,
+        lambda gt: _create_tag_policy_worker(ws_helper, gt, dry_run),
+        max_workers=max_workers,
+    )
+    for gt, created, error in results:
+        if error is not None:
+            change_logger.log_error(ExecutionError(
+                context=f"create_tag_policy({gt.name})", exception=error,
+            ))
+            continue
+        if not dry_run and created is not None:
             ws_helper.register_created_tag_policy(created)
             if gt.assigners:
                 _apply_assigners(ws_helper, gt, change_logger)
         change_logger.log_governed_tag_create(gt)
+
+
+def _update_tag_policy_worker(
+    ws_helper: WorkspaceHelper,
+    gt: GovernedTag,
+    update_mask: str,
+    dry_run: bool,
+) -> None:
+    """Worker: apply the description/values portion of an update via the SDK."""
+    if dry_run or not update_mask:
+        return
+    ws_helper.update_tag_policy(
+        tag_key=gt.name,
+        policy=_to_tag_policy(gt),
+        update_mask=update_mask,
+    )
 
 
 def _execute_updates(
@@ -146,27 +185,36 @@ def _execute_updates(
     diff: GovernedTagDiff,
     change_logger: ChangeLogger,
     dry_run: bool,
+    max_workers: int,
 ) -> None:
     """Update each governed tag in to_update. Description/values changes go via
-    update_tag_policy; assigner changes go via the rule-set API."""
+    update_tag_policy; assigner changes go via the rule-set API.
+
+    The update_tag_policy SDK call runs in parallel across tags; the rule-set
+    read-modify-write runs sequentially on the main thread (it would race
+    against itself in parallel anyway, since adjacent tags rarely share rule
+    sets but the etag dance demands a serialized read-modify-write per tag).
+    """
+    work_items: list[tuple[GovernedTag, GovernedTag | None, str, bool]] = []
     for gt in sorted(diff.to_update, key=lambda g: g.name):
         old = diff.old_values.get(gt.name)
         update_mask = _compute_tag_policy_update_mask(gt, old)
         assigners_changed = gt.assigners != (
             old.assigners if old else frozenset()
         )
-        if update_mask and not dry_run:
-            try:
-                ws_helper.update_tag_policy(
-                    tag_key=gt.name,
-                    policy=_to_tag_policy(gt),
-                    update_mask=update_mask,
-                )
-            except Exception as exc:
-                change_logger.log_error(ExecutionError(
-                    context=f"update_tag_policy({gt.name})", exception=exc,
-                ))
-                continue
+        work_items.append((gt, old, update_mask, assigners_changed))
+
+    results = parallel_for_each(
+        work_items,
+        lambda item: _update_tag_policy_worker(ws_helper, item[0], item[2], dry_run),
+        max_workers=max_workers,
+    )
+    for (gt, old, update_mask, assigners_changed), _result, error in results:
+        if error is not None:
+            change_logger.log_error(ExecutionError(
+                context=f"update_tag_policy({gt.name})", exception=error,
+            ))
+            continue
         if assigners_changed and not dry_run:
             _apply_assigners(ws_helper, gt, change_logger)
         if update_mask or assigners_changed:
@@ -204,8 +252,12 @@ def _execute_deletes(
     change_logger: ChangeLogger,
     dry_run: bool,
     force: bool,
+    max_workers: int,
 ) -> None:
-    """Delete each governed tag in to_delete, gated by interactive confirmation."""
+    """Delete each governed tag in to_delete, gated by interactive confirmation.
+
+    After confirmation, per-tag SDK delete calls run in parallel.
+    """
     if not diff.to_delete:
         return
     tags_sorted = sorted(diff.to_delete, key=lambda g: g.name)
@@ -216,12 +268,15 @@ def _execute_deletes(
     if not force and not _prompt_delete_confirmation(tags_sorted):
         _logger.info("Governed tag deletion cancelled — aborting run.")
         sys.exit(1)
-    for gt in tags_sorted:
-        try:
-            ws_helper.delete_tag_policy(gt.name)
-        except Exception as exc:
+    results = parallel_for_each(
+        tags_sorted,
+        lambda gt: ws_helper.delete_tag_policy(gt.name),
+        max_workers=max_workers,
+    )
+    for gt, _result, error in results:
+        if error is not None:
             change_logger.log_error(ExecutionError(
-                context=f"delete_tag_policy({gt.name})", exception=exc,
+                context=f"delete_tag_policy({gt.name})", exception=error,
             ))
             continue
         change_logger.log_governed_tag_delete(gt)
@@ -233,14 +288,18 @@ def execute_governed_tag_diff(
     change_logger: ChangeLogger,
     dry_run: bool = False,
     force: bool = False,
+    max_parallel_changes: int = 16,
 ) -> None:
     """Apply a GovernedTagDiff against the account.
 
     Creates run first (and immediately set their assigners), then updates
     (description/values via update_tag_policy, assigners via update_rule_set),
-    then deletes (interactive confirmation). Each SDK exception is logged via
-    ``change_logger.log_error`` and the batch continues.
+    then deletes (interactive confirmation). Each change_type forms one parallel
+    batch (up to ``max_parallel_changes`` workers); dry-run forces sequential
+    execution. Each SDK exception is logged via ``change_logger.log_error`` and
+    the batch continues.
     """
-    _execute_creates(ws_helper, diff, change_logger, dry_run)
-    _execute_updates(ws_helper, diff, change_logger, dry_run)
-    _execute_deletes(ws_helper, diff, change_logger, dry_run, force)
+    workers = 1 if dry_run else max_parallel_changes
+    _execute_creates(ws_helper, diff, change_logger, dry_run, workers)
+    _execute_updates(ws_helper, diff, change_logger, dry_run, workers)
+    _execute_deletes(ws_helper, diff, change_logger, dry_run, force, workers)

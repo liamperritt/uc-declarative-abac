@@ -1,10 +1,52 @@
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Literal
+from typing import Callable, Literal, TypeVar
 
 from uc_declarative_abac.types import SecurableType
+
+
+T = TypeVar("T")
+R = TypeVar("R")
+
+
+def parallel_for_each(
+    items: list[T],
+    work_fn: Callable[[T], R],
+    *,
+    max_workers: int,
+) -> list[tuple[T, R | None, Exception | None]]:
+    """Run ``work_fn`` on each item concurrently.
+
+    Returns ``(item, result, error)`` triples in input order. The caller walks
+    the list and applies logging deterministically — workers never touch shared
+    state, so ``ChangeLogger`` does not need to be thread-safe.
+
+    Falls through to sequential iteration when ``max_workers <= 1`` or when
+    there is at most one item, avoiding ``ThreadPoolExecutor`` overhead.
+    """
+    if not items:
+        return []
+    if max_workers <= 1 or len(items) <= 1:
+        return [_invoke(item, work_fn) for item in items]
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [pool.submit(work_fn, item) for item in items]
+        results: list[tuple[T, R | None, Exception | None]] = []
+        for item, future in zip(items, futures):
+            try:
+                results.append((item, future.result(), None))
+            except Exception as exc:
+                results.append((item, None, exc))
+    return results
+
+
+def _invoke(item: T, work_fn: Callable[[T], R]) -> tuple[T, R | None, Exception | None]:
+    try:
+        return (item, work_fn(item), None)
+    except Exception as exc:
+        return (item, None, exc)
 
 
 RfaDestinationKind = Literal["EMAIL", "URL", "GUID"]

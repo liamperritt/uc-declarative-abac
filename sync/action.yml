@@ -101,6 +101,13 @@ inputs:
       is also set.
     required: false
     default: 'false'
+  max-parallel-changes:
+    description: >-
+      Max worker threads used per (securable_type, change_type) execution
+      batch. Defaults to "16". Set to "1" to disable parallelism and force
+      sequential execution.
+    required: false
+    default: '16'
 
 runs:
   using: composite
@@ -136,6 +143,7 @@ runs:
         CREATE_TAGGABLES_FOR_CATALOGS: ${{ inputs.create-taggables-for-catalogs }}
         ENABLE_GOVERNED_TAG_DELETION: ${{ inputs.enable-governed-tag-deletion }}
         FORCE: ${{ inputs.force }}
+        MAX_PARALLEL_CHANGES: ${{ inputs.max-parallel-changes }}
       run: |
         args=(
           --config-dir "$CONFIG_DIR"
@@ -172,4 +180,5 @@ runs:
         if [[ "$FORCE" == "true" ]]; then
           args+=(--force)
         fi
+        args+=(--max-parallel-changes "$MAX_PARALLEL_CHANGES")
         python -m uc_declarative_abac "${args[@]}"

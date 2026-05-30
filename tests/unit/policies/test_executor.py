@@ -334,3 +334,40 @@ def test_policy_executor_comment_appears_between_on_and_body():
     comment_idx = sql.upper().find("COMMENT ")
     mask_idx = sql.upper().find("COLUMN MASK")
     assert on_idx < comment_idx < mask_idx
+
+
+# ---------------------------------------------------------------------------
+# Parallel execution
+# ---------------------------------------------------------------------------
+
+
+def test_policy_executor_parallel_creates_run_as_batch():
+    """Multiple creates run in one (sec_type, change_type) parallel batch."""
+    uc_helper = MagicMock()
+    diff = PolicyDiff(to_create={
+        _make_policy(securable_full_name=f"cat.s.t{i}", name=f"p{i}")
+        for i in range(6)
+    })
+
+    stmts = execute_policy_diff(uc_helper, diff, ChangeLogger(), max_parallel_changes=4)
+
+    assert uc_helper.execute_sql.call_count == 6
+    assert len(stmts) == 6
+
+
+def test_policy_executor_parallel_error_isolated_per_item():
+    """A failing policy create is logged; siblings still execute."""
+    uc_helper = MagicMock()
+    uc_helper.execute_sql.side_effect = lambda sql: (_ for _ in ()).throw(RuntimeError("boom")) if "p1" in sql else None
+    change_logger = ChangeLogger()
+    diff = PolicyDiff(to_create={
+        _make_policy(securable_full_name=f"cat.s.t{i}", name=f"p{i}")
+        for i in range(3)
+    })
+
+    stmts = execute_policy_diff(uc_helper, diff, change_logger, max_parallel_changes=4)
+
+    assert uc_helper.execute_sql.call_count == 3
+    assert len(change_logger.errors) == 1
+    assert "p1" in change_logger.errors[0].context
+    assert len(stmts) == 2

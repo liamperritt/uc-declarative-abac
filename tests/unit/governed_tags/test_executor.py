@@ -505,3 +505,39 @@ def test_governed_tag_executor_logs_error_and_continues_on_rule_set_failure(ws_h
     execute_governed_tag_diff(ws_helper, diff, change_logger, dry_run=False)
 
     assert change_logger.has_errors
+
+
+# ---------------------------------------------------------------------------
+# Parallel execution
+# ---------------------------------------------------------------------------
+
+
+def test_governed_tag_executor_parallel_creates_run_as_batch(ws_helper, change_logger):
+    """Multiple creates run as one parallel batch via the SDK."""
+    ws_helper.create_tag_policy.return_value = MagicMock()
+    diff = GovernedTagDiff(to_create={
+        _gt(f"tag_{i}", "desc", {"v"}) for i in range(5)
+    })
+
+    execute_governed_tag_diff(ws_helper, diff, change_logger, max_parallel_changes=4)
+
+    assert ws_helper.create_tag_policy.call_count == 5
+
+
+def test_governed_tag_executor_parallel_create_error_isolated(ws_helper, change_logger):
+    """A failing create is logged; siblings still proceed."""
+    def _fail_tag_1(policy):
+        if policy.tag_key == "tag_1":
+            raise RuntimeError("boom")
+        return MagicMock()
+
+    ws_helper.create_tag_policy.side_effect = _fail_tag_1
+    diff = GovernedTagDiff(to_create={
+        _gt(f"tag_{i}", "desc", {"v"}) for i in range(3)
+    })
+
+    execute_governed_tag_diff(ws_helper, diff, change_logger, max_parallel_changes=4)
+
+    assert ws_helper.create_tag_policy.call_count == 3
+    assert len(change_logger.errors) == 1
+    assert "tag_1" in change_logger.errors[0].context

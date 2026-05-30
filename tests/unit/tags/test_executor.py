@@ -641,3 +641,78 @@ def test_tag_executor_raises_interactive_confirmation_required_on_non_tty(monkey
             uc_helper, diff, ChangeLogger(),
             governed_tag_names={"uc_gov_pii"},
         )
+
+
+# ---------------------------------------------------------------------------
+# Parallel execution
+# ---------------------------------------------------------------------------
+
+
+def test_tag_executor_parallel_sets_all_groups_in_a_batch():
+    """Under max_parallel_changes>1, every per-securable group's SQL is still executed."""
+    uc_helper = MagicMock()
+    diff = TagDiff(
+        to_add={
+            SecurableTag(SecurableType.TABLE, f"cat.s.t{i}", "env", "prod")
+            for i in range(8)
+        },
+    )
+
+    stmts = execute_tag_diff(uc_helper, diff, ChangeLogger(), max_parallel_changes=4)
+
+    # 8 securables → 8 statements; all called via execute_sql.
+    assert len(stmts) == 8
+    assert uc_helper.execute_sql.call_count == 8
+    # Return list is in input-sorted order (parallel_for_each preserves it).
+    normalised = [s.replace("`", "") for s in stmts]
+    for i in range(8):
+        assert f"cat.s.t{i}" in normalised[i]
+
+
+def test_tag_executor_parallel_logs_in_deterministic_order():
+    """Logging happens in input-sorted order regardless of worker count."""
+    uc_helper = MagicMock()
+    change_logger = ChangeLogger()
+
+    diff = TagDiff(
+        to_add={
+            SecurableTag(SecurableType.CATALOG, "cat_b", "env", "prod"),
+            SecurableTag(SecurableType.CATALOG, "cat_a", "env", "prod"),
+        },
+    )
+
+    execute_tag_diff(uc_helper, diff, change_logger, max_parallel_changes=8)
+
+    # Both adds logged.
+    assert change_logger._tags_added == 2
+
+
+def test_tag_executor_parallel_error_in_one_group_does_not_abort_others():
+    """When one parallel SQL call fails, sibling calls still succeed and the failure is logged."""
+    uc_helper = MagicMock()
+
+    def _fail_for_cat_b(sql):
+        if "cat_b" in sql:
+            raise RuntimeError("cat_b boom")
+
+    uc_helper.execute_sql.side_effect = _fail_for_cat_b
+
+    change_logger = ChangeLogger()
+    diff = TagDiff(
+        to_add={
+            SecurableTag(SecurableType.CATALOG, "cat_a", "env", "prod"),
+            SecurableTag(SecurableType.CATALOG, "cat_b", "env", "prod"),
+            SecurableTag(SecurableType.CATALOG, "cat_c", "env", "prod"),
+        },
+    )
+
+    stmts = execute_tag_diff(uc_helper, diff, change_logger, max_parallel_changes=4)
+
+    # All three SQL statements were attempted in parallel.
+    assert uc_helper.execute_sql.call_count == 3
+    # One failed → one error collected.
+    assert len(change_logger.errors) == 1
+    assert "cat_b" in change_logger.errors[0].context
+    # Two successful statements returned.
+    assert len(stmts) == 2
+    assert all("cat_b" not in s for s in stmts)

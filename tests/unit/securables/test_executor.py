@@ -1030,3 +1030,123 @@ def test_securable_executor_handles_function_securable_type_for_rfa():
 
     assert securable_type_passed == SecurableType.FUNCTION
     assert full_name_passed == "cat.sch.fn"
+
+
+# ---------------------------------------------------------------------------
+# Parallel execution
+# ---------------------------------------------------------------------------
+
+
+def test_securable_executor_creates_run_parent_first_across_depths():
+    """Catalog SQL must execute before schema SQL before table SQL, even under high parallelism."""
+    uc_helper = MagicMock()
+    call_order: list[str] = []
+    uc_helper.execute_sql.side_effect = lambda sql: call_order.append(sql)
+
+    diff = SecurableDiff(
+        securables_to_create=[
+            Securable(securable_type=SecurableType.CATALOG, full_name="cat"),
+            Securable(securable_type=SecurableType.SCHEMA, full_name="cat.sch"),
+            Table(
+                securable_type=SecurableType.TABLE,
+                full_name="cat.sch.tbl",
+                columns=(Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.tbl.id", data_type="INT"),),
+            ),
+        ],
+    )
+
+    execute_securable_diff(uc_helper, diff, ChangeLogger(), max_parallel_changes=16)
+
+    # Find indices of each create statement in the call order.
+    catalog_idx = next(i for i, s in enumerate(call_order) if "CREATE CATALOG" in s)
+    schema_idx = next(i for i, s in enumerate(call_order) if "CREATE SCHEMA" in s)
+    table_idx = next(i for i, s in enumerate(call_order) if "CREATE TABLE" in s)
+    assert catalog_idx < schema_idx < table_idx
+
+
+def test_securable_executor_creates_within_depth_run_in_parallel():
+    """Multiple creates at the same depth are all submitted in one batch."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        securables_to_create=[
+            Securable(securable_type=SecurableType.SCHEMA, full_name=f"cat.sch{i}")
+            for i in range(8)
+        ],
+    )
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger(), max_parallel_changes=4)
+
+    # All 8 schema creates were submitted, all SQL returned.
+    assert uc_helper.execute_sql.call_count == 8
+    assert len(stmts) == 8
+
+
+def test_securable_executor_replace_batch_runs_in_parallel():
+    """Function replaces run as one parallel batch."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        securables_to_replace=[
+            Function(
+                securable_type=SecurableType.FUNCTION,
+                full_name=f"cat.sch.fn_{i}",
+                parameters=(("x", "INT"),),
+                definition="x + 1",
+            )
+            for i in range(4)
+        ],
+    )
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger(), max_parallel_changes=4)
+
+    assert uc_helper.execute_sql.call_count == 4
+    assert len(stmts) == 4
+    assert all("CREATE OR REPLACE FUNCTION" in s for s in stmts)
+
+
+def test_securable_executor_attribute_updates_run_in_parallel():
+    """Comment + RFA + owner attribute updates run together as one parallel batch."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.TABLE,
+                full_name=f"cat.sch.t_{i}",
+                attribute="comment",
+                old_value=frozenset(),
+                new_value=frozenset({f"new comment {i}"}),
+            )
+            for i in range(5)
+        ],
+    )
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger(), max_parallel_changes=4)
+
+    assert uc_helper.execute_sql.call_count == 5
+    assert len(stmts) == 5
+
+
+def test_securable_executor_parallel_error_in_one_create_does_not_abort_depth_batch():
+    """A failing create in a parallel depth batch is logged; siblings still execute."""
+    uc_helper = MagicMock()
+
+    def _fail_for_sch1(sql):
+        if "sch1" in sql:
+            raise RuntimeError("sch1 boom")
+
+    uc_helper.execute_sql.side_effect = _fail_for_sch1
+    change_logger = ChangeLogger()
+
+    diff = SecurableDiff(
+        securables_to_create=[
+            Securable(securable_type=SecurableType.SCHEMA, full_name="cat.sch0"),
+            Securable(securable_type=SecurableType.SCHEMA, full_name="cat.sch1"),
+            Securable(securable_type=SecurableType.SCHEMA, full_name="cat.sch2"),
+        ],
+    )
+
+    stmts = execute_securable_diff(uc_helper, diff, change_logger, max_parallel_changes=4)
+
+    assert uc_helper.execute_sql.call_count == 3
+    assert len(change_logger.errors) == 1
+    assert "sch1" in change_logger.errors[0].context
+    assert len(stmts) == 2

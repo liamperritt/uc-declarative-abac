@@ -114,6 +114,13 @@ def main() -> None:
              "'merge' (default) recursively deep-merges maps and lists; 'replace' shallowly "
              "replaces top-level keys (legacy behaviour).",
     )
+    parser.add_argument(
+        "--max-parallel-changes",
+        type=int,
+        default=16,
+        help="Max worker threads used per (securable_type, change_type) execution batch. "
+             "Default 16. Set to 1 to disable parallelism and force sequential execution.",
+    )
 
     args = parser.parse_args()
 
@@ -138,6 +145,7 @@ def main() -> None:
         create_taggables_for_catalogs=args.create_taggables_for_catalogs,
         force=args.force,
         ref_override_strategy=args.ref_override_strategy,
+        max_parallel_changes=args.max_parallel_changes,
     )
 
 

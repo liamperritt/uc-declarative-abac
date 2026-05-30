@@ -368,3 +368,50 @@ def test_privilege_executor_logs_changes_in_dry_run():
     # Both changes were logged
     assert change_logger._privileges_granted == 1
     assert change_logger._privileges_revoked == 1
+
+
+# ---------------------------------------------------------------------------
+# Parallel execution
+# ---------------------------------------------------------------------------
+
+
+def test_privilege_executor_parallel_grants_run_as_batch():
+    """Multiple grants on the same securable_type run in one parallel batch."""
+    uc_helper = MagicMock()
+    diff = PrivilegeDiff(to_grant={
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name=f"cat.s.t{i}",
+            principal=Principal(PrincipalType.GROUP, "g", "g"),
+            privilege_type=PrivilegeType.SELECT,
+        )
+        for i in range(6)
+    })
+
+    stmts = execute_privilege_diff(uc_helper, diff, ChangeLogger(), max_parallel_changes=4)
+
+    assert uc_helper.execute_sql.call_count == 6
+    assert len(stmts) == 6
+
+
+def test_privilege_executor_parallel_error_isolated_per_item():
+    """A failing GRANT is logged; siblings still execute."""
+    uc_helper = MagicMock()
+    uc_helper.execute_sql.side_effect = lambda sql: (_ for _ in ()).throw(RuntimeError("boom")) if "t1" in sql else None
+    change_logger = ChangeLogger()
+    diff = PrivilegeDiff(to_grant={
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name=f"cat.s.t{i}",
+            principal=Principal(PrincipalType.GROUP, "g", "g"),
+            privilege_type=PrivilegeType.SELECT,
+        )
+        for i in range(3)
+    })
+
+    stmts = execute_privilege_diff(uc_helper, diff, change_logger, max_parallel_changes=4)
+
+    assert uc_helper.execute_sql.call_count == 3
+    assert len(change_logger.errors) == 1
+    assert "t1" in change_logger.errors[0].context
+    assert len(stmts) == 2

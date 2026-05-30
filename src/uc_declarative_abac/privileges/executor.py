@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -8,6 +9,7 @@ if TYPE_CHECKING:
 
 from uc_declarative_abac.utils import (
     ExecutionError,
+    parallel_for_each,
     quote_securable,
 )
 from uc_declarative_abac.principals import ensure_resolved
@@ -15,7 +17,7 @@ from uc_declarative_abac.privileges.state import (
     PrivilegeDiff,
     SecurablePrivilege,
 )
-
+from uc_declarative_abac.types import SecurableType
 
 
 def _build_grant_sql(priv: SecurablePrivilege) -> str:
@@ -40,41 +42,90 @@ def _build_revoke_sql(priv: SecurablePrivilege) -> str:
     )
 
 
+def _privilege_sort_key(priv: SecurablePrivilege) -> tuple:
+    return (priv.securable_type.value, priv.securable_full_name)
+
+
+def _bucket_by_sec_type(
+    privileges: set[SecurablePrivilege],
+) -> dict[SecurableType, list[SecurablePrivilege]]:
+    """Bucket privileges by securable_type for parallel batching."""
+    buckets: dict[SecurableType, list[SecurablePrivilege]] = defaultdict(list)
+    for p in privileges:
+        buckets[p.securable_type].append(p)
+    for sec_type in buckets:
+        buckets[sec_type].sort(key=_privilege_sort_key)
+    return buckets
+
+
+def _run_privilege_batch(
+    uc_helper: UnityCatalogHelper,
+    privileges: list[SecurablePrivilege],
+    *,
+    is_grant: bool,
+    change_logger: ChangeLogger,
+    dry_run: bool,
+    max_workers: int,
+) -> list[str]:
+    """Execute one (sec_type, change_type) batch of grants or revokes in parallel."""
+    build_sql = _build_grant_sql if is_grant else _build_revoke_sql
+    work_items: list[tuple[SecurablePrivilege, str]] = [
+        (priv, build_sql(priv)) for priv in privileges
+    ]
+
+    def worker(item: tuple[SecurablePrivilege, str]) -> None:
+        _priv, stmt = item
+        if not dry_run:
+            uc_helper.execute_sql(stmt)
+
+    results = parallel_for_each(work_items, worker, max_workers=max_workers)
+    statements: list[str] = []
+    for (priv, stmt), _result, error in results:
+        if error is not None:
+            change_logger.log_error(ExecutionError(context=stmt, exception=error))
+            continue
+        if not dry_run:
+            statements.append(stmt)
+        if is_grant:
+            change_logger.log_grant(priv)
+        else:
+            change_logger.log_revoke(priv)
+    return statements
+
+
 def execute_privilege_diff(
     uc_helper: UnityCatalogHelper,
     diff: PrivilegeDiff,
     change_logger: ChangeLogger,
     dry_run: bool = False,
+    max_parallel_changes: int = 16,
 ) -> list[str]:
     """Generate and execute GRANT/REVOKE SQL from a PrivilegeDiff.
 
-    Principal identifiers are read directly from the Principal object
-    on each SecurablePrivilege.
+    Within each (securable_type, change_type) bundle, items run in parallel up to
+    ``max_parallel_changes`` workers. Dry-run forces sequential execution.
+    Principal identifiers are read directly from the Principal object on each
+    SecurablePrivilege.
     Logs each change after successful execution (or unconditionally in dry-run mode).
     Returns the list of SQL statements executed (empty in dry-run mode).
     """
+    workers = 1 if dry_run else max_parallel_changes
     statements: list[str] = []
 
-    for priv in sorted(diff.to_grant, key=lambda p: (p.securable_type.value, p.securable_full_name)):
-        if not dry_run:
-            stmt = _build_grant_sql(priv)
-            try:
-                uc_helper.execute_sql(stmt)
-            except Exception as exc:
-                change_logger.log_error(ExecutionError(context=stmt, exception=exc))
-                continue
-            statements.append(stmt)
-        change_logger.log_grant(priv)
+    grants_by_type = _bucket_by_sec_type(diff.to_grant)
+    for sec_type in sorted(grants_by_type, key=lambda t: t.value):
+        statements.extend(_run_privilege_batch(
+            uc_helper, grants_by_type[sec_type],
+            is_grant=True,
+            change_logger=change_logger, dry_run=dry_run, max_workers=workers,
+        ))
 
-    for priv in sorted(diff.to_revoke, key=lambda p: (p.securable_type.value, p.securable_full_name)):
-        if not dry_run:
-            stmt = _build_revoke_sql(priv)
-            try:
-                uc_helper.execute_sql(stmt)
-            except Exception as exc:
-                change_logger.log_error(ExecutionError(context=stmt, exception=exc))
-                continue
-            statements.append(stmt)
-        change_logger.log_revoke(priv)
+    revokes_by_type = _bucket_by_sec_type(diff.to_revoke)
+    for sec_type in sorted(revokes_by_type, key=lambda t: t.value):
+        statements.extend(_run_privilege_batch(
+            uc_helper, revokes_by_type[sec_type],
+            is_grant=False,
+            change_logger=change_logger, dry_run=dry_run, max_workers=workers,
+        ))
 
     return statements

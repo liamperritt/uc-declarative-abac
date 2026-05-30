@@ -109,6 +109,7 @@ def run(
     create_taggables_for_catalogs: str = "*",
     force: bool = False,
     ref_override_strategy: Literal["merge", "replace"] = "merge",
+    max_parallel_changes: int = 16,
 ) -> OrchestratorDiffsResult:
     """Run the full governance pipeline: discover, resolve, compile, diff, apply.
 
@@ -295,27 +296,39 @@ def run(
     if governed_tag_diff.to_create or governed_tag_diff.to_update or governed_tag_diff.to_delete:
         change_logger.log_section_header("Governed tags")
     execute_governed_tag_diff(
-        ws_helper, governed_tag_diff, change_logger, dry_run=dry_run, force=force,
+        ws_helper, governed_tag_diff, change_logger,
+        dry_run=dry_run, force=force,
+        max_parallel_changes=max_parallel_changes,
     )
 
     if securable_diff.securables_to_create or securable_diff.securables_to_replace or securable_diff.attributes_to_update:
         change_logger.log_section_header("Securables")
-    execute_securable_diff(uc_helper, securable_diff, change_logger, dry_run=dry_run)
+    execute_securable_diff(
+        uc_helper, securable_diff, change_logger,
+        dry_run=dry_run, max_parallel_changes=max_parallel_changes,
+    )
 
     if tag_diff.to_add or tag_diff.to_update or tag_diff.to_remove:
         change_logger.log_section_header("Tags")
     execute_tag_diff(
         uc_helper, tag_diff, change_logger,
         governed_tag_names=governed_tag_names, dry_run=dry_run, force=force,
+        max_parallel_changes=max_parallel_changes,
     )
 
     if policy_diff.to_create or policy_diff.to_replace:
         change_logger.log_section_header("Policies")
-    execute_policy_diff(uc_helper, policy_diff, change_logger, dry_run=dry_run)
+    execute_policy_diff(
+        uc_helper, policy_diff, change_logger,
+        dry_run=dry_run, max_parallel_changes=max_parallel_changes,
+    )
 
     if privilege_diff.to_grant or privilege_diff.to_revoke:
         change_logger.log_section_header("Privileges")
-    execute_privilege_diff(uc_helper, privilege_diff, change_logger, dry_run=dry_run)
+    execute_privilege_diff(
+        uc_helper, privilege_diff, change_logger,
+        dry_run=dry_run, max_parallel_changes=max_parallel_changes,
+    )
 
     change_logger.log_errors_section()
     change_logger.log_summary()

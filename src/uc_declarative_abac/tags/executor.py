@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 from uc_declarative_abac.utils import (
     ExecutionError,
     InteractiveConfirmationRequiredError,
+    parallel_for_each,
     quote_securable,
 )
 from uc_declarative_abac.tags.state import (
@@ -21,6 +22,12 @@ from uc_declarative_abac.tags.state import (
 from uc_declarative_abac.types import SecurableType
 
 _logger = logging.getLogger("uc_declarative_abac")
+
+
+# A unit of work: (group_key, tags_in_group, pre-built SQL statement).
+# Carrying the stmt lets the post-batch logging include it as error context
+# even when the SQL call raises.
+TagWorkItem = tuple[tuple[SecurableType, str], list[SecurableTag], str]
 
 
 def _format_tag_entry(tag: SecurableTag) -> str:
@@ -72,6 +79,16 @@ def _group_by_securable(
     return groups
 
 
+def _partition_groups_by_sec_type(
+    groups: dict[tuple[SecurableType, str], list[SecurableTag]],
+) -> dict[SecurableType, list[tuple[tuple[SecurableType, str], list[SecurableTag]]]]:
+    """Bucket (sec_type, sec_name) groups by securable_type for parallel batching."""
+    buckets: dict[SecurableType, list] = defaultdict(list)
+    for key, tags in groups.items():
+        buckets[key[0]].append((key, tags))
+    return buckets
+
+
 def _partition_governed_removes(
     removes: set[SecurableTag],
     governed_tag_names: set[str],
@@ -111,31 +128,88 @@ def _prompt_remove_confirmation(removes: list[SecurableTag]) -> bool:
     return response.strip().lower() in {"y", "yes"}
 
 
-def _apply_set_tags(
+def _run_set_tags_batch(
     uc_helper: UnityCatalogHelper,
+    work_items: list[TagWorkItem],
     diff: TagDiff,
     change_logger: ChangeLogger,
     dry_run: bool,
+    max_workers: int,
 ) -> list[str]:
-    """Apply adds + updates via ALTER SET TAGS. Returns the executed statements."""
-    statements: list[str] = []
-    set_tags = diff.to_add | diff.to_update
-    for (sec_type, sec_name), tags in sorted(_group_by_securable(set_tags).items()):
+    """Execute one (sec_type, change_type=set) batch in parallel; log in input order."""
+    def worker(item: TagWorkItem) -> None:
+        _key, _tags, stmt = item
         if not dry_run:
-            stmt = _build_set_tags_sql(sec_type, sec_name, tags)
-            try:
-                uc_helper.execute_sql(stmt)
-            except Exception as exc:
-                change_logger.log_error(ExecutionError(context=stmt, exception=exc))
-                continue
+            uc_helper.execute_sql(stmt)
+
+    results = parallel_for_each(work_items, worker, max_workers=max_workers)
+    statements: list[str] = []
+    for (_key, tags, stmt), _result, error in results:
+        if error is not None:
+            change_logger.log_error(ExecutionError(context=stmt, exception=error))
+            continue
+        if not dry_run:
             statements.append(stmt)
         for tag in tags:
             if tag in diff.to_add:
                 change_logger.log_tag_add(tag)
             else:
-                change_logger.log_tag_update(tag, diff.old_values.get(
-                    (tag.securable_type, tag.securable_full_name, tag.tag_name)
-                ))
+                change_logger.log_tag_update(
+                    tag,
+                    diff.old_values.get(
+                        (tag.securable_type, tag.securable_full_name, tag.tag_name)
+                    ),
+                )
+    return statements
+
+
+def _run_unset_tags_batch(
+    uc_helper: UnityCatalogHelper,
+    work_items: list[TagWorkItem],
+    change_logger: ChangeLogger,
+    dry_run: bool,
+    max_workers: int,
+) -> list[str]:
+    """Execute one (sec_type, change_type=unset) batch in parallel; log in input order."""
+    def worker(item: TagWorkItem) -> None:
+        _key, _tags, stmt = item
+        if not dry_run:
+            uc_helper.execute_sql(stmt)
+
+    results = parallel_for_each(work_items, worker, max_workers=max_workers)
+    statements: list[str] = []
+    for (_key, tags, stmt), _result, error in results:
+        if error is not None:
+            change_logger.log_error(ExecutionError(context=stmt, exception=error))
+            continue
+        if not dry_run:
+            statements.append(stmt)
+        for tag in tags:
+            change_logger.log_tag_remove(tag)
+    return statements
+
+
+def _apply_set_tags(
+    uc_helper: UnityCatalogHelper,
+    diff: TagDiff,
+    change_logger: ChangeLogger,
+    dry_run: bool,
+    max_parallel_changes: int,
+) -> list[str]:
+    """Apply adds + updates via ALTER SET TAGS, batched per (securable_type, change_type=set)."""
+    set_tags = diff.to_add | diff.to_update
+    by_type = _partition_groups_by_sec_type(_group_by_securable(set_tags))
+    workers = 1 if dry_run else max_parallel_changes
+    statements: list[str] = []
+    for sec_type in sorted(by_type, key=lambda t: t.value):
+        groups = sorted(by_type[sec_type], key=lambda kv: kv[0][1])
+        work_items: list[TagWorkItem] = [
+            (key, tags, _build_set_tags_sql(key[0], key[1], tags))
+            for key, tags in groups
+        ]
+        statements.extend(
+            _run_set_tags_batch(uc_helper, work_items, diff, change_logger, dry_run, workers)
+        )
     return statements
 
 
@@ -144,20 +218,21 @@ def _apply_unset_tags(
     removes: set[SecurableTag],
     change_logger: ChangeLogger,
     dry_run: bool,
+    max_parallel_changes: int,
 ) -> list[str]:
-    """Apply a set of removals via ALTER UNSET TAGS. Returns the executed statements."""
+    """Apply a set of removals via ALTER UNSET TAGS, batched per (securable_type, change_type=unset)."""
+    by_type = _partition_groups_by_sec_type(_group_by_securable(removes))
+    workers = 1 if dry_run else max_parallel_changes
     statements: list[str] = []
-    for (sec_type, sec_name), tags in sorted(_group_by_securable(removes).items()):
-        if not dry_run:
-            stmt = _build_unset_tags_sql(sec_type, sec_name, tags)
-            try:
-                uc_helper.execute_sql(stmt)
-            except Exception as exc:
-                change_logger.log_error(ExecutionError(context=stmt, exception=exc))
-                continue
-            statements.append(stmt)
-        for tag in tags:
-            change_logger.log_tag_remove(tag)
+    for sec_type in sorted(by_type, key=lambda t: t.value):
+        groups = sorted(by_type[sec_type], key=lambda kv: kv[0][1])
+        work_items: list[TagWorkItem] = [
+            (key, tags, _build_unset_tags_sql(key[0], key[1], tags))
+            for key, tags in groups
+        ]
+        statements.extend(
+            _run_unset_tags_batch(uc_helper, work_items, change_logger, dry_run, workers)
+        )
     return statements
 
 
@@ -193,10 +268,14 @@ def execute_tag_diff(
     governed_tag_names: set[str] | None = None,
     dry_run: bool = False,
     force: bool = False,
+    max_parallel_changes: int = 16,
 ) -> list[str]:
     """Generate and execute ALTER SET/UNSET TAGS SQL from a TagDiff.
 
-    Batches tags per securable where possible.
+    Batches tags per securable where possible, and runs the per-securable
+    SQL statements within each (securable_type, change_type) bundle in parallel
+    (up to ``max_parallel_changes`` workers). Dry-run forces sequential execution
+    so log output is bit-for-bit identical to non-parallel mode.
     Logs each change after successful execution (or unconditionally in dry-run mode).
     Returns the list of SQL statements executed (empty in dry-run mode).
 
@@ -209,13 +288,13 @@ def execute_tag_diff(
     governed_keys = governed_tag_names or set()
     statements: list[str] = []
 
-    statements.extend(_apply_set_tags(uc_helper, diff, change_logger, dry_run))
+    statements.extend(_apply_set_tags(uc_helper, diff, change_logger, dry_run, max_parallel_changes))
 
     governed_removes, nongoverned_removes = _partition_governed_removes(
         diff.to_remove, governed_keys,
     )
-    statements.extend(_apply_unset_tags(uc_helper, nongoverned_removes, change_logger, dry_run))
+    statements.extend(_apply_unset_tags(uc_helper, nongoverned_removes, change_logger, dry_run, max_parallel_changes))
     _confirm_governed_removes_or_exit(governed_removes, dry_run, force)
-    statements.extend(_apply_unset_tags(uc_helper, governed_removes, change_logger, dry_run))
+    statements.extend(_apply_unset_tags(uc_helper, governed_removes, change_logger, dry_run, max_parallel_changes))
 
     return statements

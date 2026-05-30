@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import pytest
 
+import threading
+import time
+
 from uc_declarative_abac.utils import (
     catalog_of,
     classify_rfa_destination,
+    parallel_for_each,
     parse_catalog_filter,
     validate_rfa_destinations,
 )
@@ -168,3 +172,63 @@ def test_utils_validate_rfa_destinations_raises_single_error_for_multiple_offend
     msg = str(exc_info.value)
     assert "bad-one" in msg
     assert "bad-two" in msg
+
+
+# ---------------------------------------------------------------------------
+# parallel_for_each
+# ---------------------------------------------------------------------------
+
+
+def test_utils_parallel_for_each_returns_result_for_success():
+    """A successful work_fn produces (item, result, None) triples."""
+    results = parallel_for_each([1, 2, 3], lambda x: x * 10, max_workers=4)
+    assert results == [(1, 10, None), (2, 20, None), (3, 30, None)]
+
+
+def test_utils_parallel_for_each_preserves_input_order():
+    """Output order matches input order even when faster work_fn calls finish first."""
+    # Earlier items sleep longer; output should still be in input order.
+    def work(x: int) -> int:
+        time.sleep(0.05 * (5 - x))
+        return x
+
+    results = parallel_for_each([1, 2, 3, 4], work, max_workers=4)
+    assert [item for item, _, _ in results] == [1, 2, 3, 4]
+    assert [result for _, result, _ in results] == [1, 2, 3, 4]
+
+
+def test_utils_parallel_for_each_captures_exception_per_item():
+    """One failing work_fn doesn't abort the batch; failure surfaces as (item, None, exc)."""
+    boom = RuntimeError("boom")
+
+    def work(x: int) -> int:
+        if x == 2:
+            raise boom
+        return x * 10
+
+    results = parallel_for_each([1, 2, 3], work, max_workers=4)
+    assert results[0] == (1, 10, None)
+    assert results[1][0] == 2
+    assert results[1][1] is None
+    assert isinstance(results[1][2], RuntimeError)
+    assert str(results[1][2]) == "boom"
+    assert results[2] == (3, 30, None)
+
+
+def test_utils_parallel_for_each_runs_sequentially_when_max_workers_is_one():
+    """max_workers=1 runs in the calling thread (no pool spawned)."""
+    main_thread = threading.get_ident()
+    seen_threads: list[int] = []
+
+    def work(x: int) -> int:
+        seen_threads.append(threading.get_ident())
+        return x
+
+    results = parallel_for_each([1, 2, 3], work, max_workers=1)
+    assert [r for _, r, _ in results] == [1, 2, 3]
+    assert all(t == main_thread for t in seen_threads)
+
+
+def test_utils_parallel_for_each_handles_empty_input():
+    """An empty input list returns an empty result list."""
+    assert parallel_for_each([], lambda x: x, max_workers=4) == []

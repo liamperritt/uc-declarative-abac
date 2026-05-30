@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -8,6 +9,7 @@ if TYPE_CHECKING:
 
 from uc_declarative_abac.utils import (
     ExecutionError,
+    parallel_for_each,
     quote_securable,
 )
 from uc_declarative_abac.policies.state import (
@@ -18,54 +20,11 @@ from uc_declarative_abac.principals import (
     ensure_all_resolved,
     Principal,
 )
-from uc_declarative_abac.types import PolicyType
-
-
-def execute_policy_diff(
-    uc_helper: UnityCatalogHelper,
-    diff: PolicyDiff,
-    change_logger: ChangeLogger,
-    dry_run: bool = False,
-) -> list[str]:
-    """Generate and execute CREATE [OR REPLACE] POLICY SQL from a PolicyDiff.
-
-    Logs each change after successful execution (or unconditionally in dry-run mode).
-    Returns the list of SQL statements executed (empty in dry-run mode).
-    """
-    statements: list[str] = []
-
-    for policy in sorted(diff.to_create, key=_policy_sort_key):
-        if _run_statement(uc_helper, _build_policy_sql(policy, or_replace=False), change_logger, dry_run, statements):
-            change_logger.log_policy_create(policy)
-
-    for policy in sorted(diff.to_replace, key=_policy_sort_key):
-        if _run_statement(uc_helper, _build_policy_sql(policy, or_replace=True), change_logger, dry_run, statements):
-            change_logger.log_policy_replace(policy)
-
-    return statements
+from uc_declarative_abac.types import PolicyType, SecurableType
 
 
 def _policy_sort_key(policy: Policy) -> tuple:
     return (policy.securable_type.value, policy.securable_full_name, policy.name)
-
-
-def _run_statement(
-    uc_helper: UnityCatalogHelper,
-    stmt: str,
-    change_logger: ChangeLogger,
-    dry_run: bool,
-    statements: list[str],
-) -> bool:
-    """Execute the statement unless dry_run. Returns True if logging should proceed."""
-    if dry_run:
-        return True
-    try:
-        uc_helper.execute_sql(stmt)
-    except Exception as exc:
-        change_logger.log_error(ExecutionError(context=stmt, exception=exc))
-        return False
-    statements.append(stmt)
-    return True
 
 
 def _quote_principals(principals: tuple[Principal, ...]) -> str:
@@ -102,3 +61,83 @@ def _build_policy_sql(policy: Policy, or_replace: bool) -> str:
         using = ", ".join(policy.using_columns)
         lines.append(f"USING COLUMNS ({using})")
     return "\n".join(lines)
+
+
+def _bucket_by_sec_type(policies: set[Policy]) -> dict[SecurableType, list[Policy]]:
+    """Bucket policies by securable_type for parallel batching."""
+    buckets: dict[SecurableType, list[Policy]] = defaultdict(list)
+    for p in policies:
+        buckets[p.securable_type].append(p)
+    for sec_type in buckets:
+        buckets[sec_type].sort(key=_policy_sort_key)
+    return buckets
+
+
+def _run_policy_batch(
+    uc_helper: UnityCatalogHelper,
+    policies: list[Policy],
+    *,
+    or_replace: bool,
+    change_logger: ChangeLogger,
+    dry_run: bool,
+    max_workers: int,
+) -> list[str]:
+    """Execute one (sec_type, change_type) batch of policies in parallel; log in input order."""
+    work_items: list[tuple[Policy, str]] = [
+        (policy, _build_policy_sql(policy, or_replace=or_replace)) for policy in policies
+    ]
+
+    def worker(item: tuple[Policy, str]) -> None:
+        _policy, stmt = item
+        if not dry_run:
+            uc_helper.execute_sql(stmt)
+
+    results = parallel_for_each(work_items, worker, max_workers=max_workers)
+    statements: list[str] = []
+    for (policy, stmt), _result, error in results:
+        if error is not None:
+            change_logger.log_error(ExecutionError(context=stmt, exception=error))
+            continue
+        if not dry_run:
+            statements.append(stmt)
+        if or_replace:
+            change_logger.log_policy_replace(policy)
+        else:
+            change_logger.log_policy_create(policy)
+    return statements
+
+
+def execute_policy_diff(
+    uc_helper: UnityCatalogHelper,
+    diff: PolicyDiff,
+    change_logger: ChangeLogger,
+    dry_run: bool = False,
+    max_parallel_changes: int = 16,
+) -> list[str]:
+    """Generate and execute CREATE [OR REPLACE] POLICY SQL from a PolicyDiff.
+
+    Within each (securable_type, change_type) bundle, items run in parallel up to
+    ``max_parallel_changes`` workers. Dry-run forces sequential execution.
+    Logs each change after successful execution (or unconditionally in dry-run mode).
+    Returns the list of SQL statements executed (empty in dry-run mode).
+    """
+    workers = 1 if dry_run else max_parallel_changes
+    statements: list[str] = []
+
+    creates_by_type = _bucket_by_sec_type(diff.to_create)
+    for sec_type in sorted(creates_by_type, key=lambda t: t.value):
+        statements.extend(_run_policy_batch(
+            uc_helper, creates_by_type[sec_type],
+            or_replace=False,
+            change_logger=change_logger, dry_run=dry_run, max_workers=workers,
+        ))
+
+    replaces_by_type = _bucket_by_sec_type(diff.to_replace)
+    for sec_type in sorted(replaces_by_type, key=lambda t: t.value):
+        statements.extend(_run_policy_batch(
+            uc_helper, replaces_by_type[sec_type],
+            or_replace=True,
+            change_logger=change_logger, dry_run=dry_run, max_workers=workers,
+        ))
+
+    return statements

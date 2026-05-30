@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -9,6 +10,7 @@ if TYPE_CHECKING:
 from uc_declarative_abac.utils import (
     ExecutionError,
     OrchestratorError,
+    parallel_for_each,
     quote_securable,
 )
 from uc_declarative_abac.securables.state import (
@@ -241,81 +243,160 @@ def _apply_owner_update(uc_helper: UnityCatalogHelper, update: AttributeUpdate) 
     uc_helper.update_owner(update.securable_type, update.full_name, owner_id)
 
 
-def _execute_sql_attribute_update(
-    uc_helper: UnityCatalogHelper,
-    change_logger: ChangeLogger,
-    dry_run: bool,
-    statements: list[str],
-    stmt: str,
-) -> bool:
-    """Run a SQL-based attribute update (comment). Returns True on success or in dry-run.
-
-    On failure: logs an ExecutionError and returns False. Successful executions
-    append to ``statements`` so the caller can report the issued SQL.
-    """
-    if dry_run:
-        return True
-    try:
-        uc_helper.execute_sql(stmt)
-    except Exception as exc:
-        change_logger.log_error(ExecutionError(context=stmt, exception=exc))
-        return False
-    statements.append(stmt)
-    return True
+def _attribute_update_context(update: AttributeUpdate, stmt: str | None) -> str:
+    """Compose the ExecutionError ``context`` for a failed attribute update."""
+    if stmt is not None:
+        return stmt
+    if update.attribute == "owner":
+        return f"update_owner({update.securable_type.value}, {update.full_name})"
+    if update.attribute == "rfa_destinations":
+        return (
+            f"update_rfa_destinations("
+            f"{update.securable_type.value}, {update.full_name})"
+        )
+    return (
+        f"Unknown attribute {update.attribute!r} on "
+        f"{update.securable_type.value} {update.full_name}"
+    )
 
 
-def _apply_attribute_update(
+def _run_attribute_update(
     uc_helper: UnityCatalogHelper,
     update: AttributeUpdate,
-    change_logger: ChangeLogger,
+    stmt: str | None,
     dry_run: bool,
-    statements: list[str],
-) -> bool:
-    """Dispatch an AttributeUpdate to the right backend (SDK owner update or SQL ALTER)."""
+) -> None:
+    """Worker: perform the SQL/SDK call for one AttributeUpdate.
+
+    ``stmt`` is pre-built for the comment branch (so we can reference it in
+    post-batch error logging); ``None`` for SDK-driven branches.
+    """
+    if dry_run:
+        return
+    if stmt is not None:
+        uc_helper.execute_sql(stmt)
+        return
     match update.attribute:
         case "owner":
-            if dry_run:
-                return True
-            try:
-                _apply_owner_update(uc_helper, update)
-            except Exception as exc:
-                change_logger.log_error(ExecutionError(
-                    context=f"update_owner({update.securable_type.value}, {update.full_name})",
-                    exception=exc,
-                ))
-                return False
-            return True
-        case "comment":
-            new_comment = next(iter(update.new_value))
-            stmt = _build_comment_update_sql(
-                update.securable_type, update.full_name, str(new_comment),
-            )
-            return _execute_sql_attribute_update(
-                uc_helper, change_logger, dry_run, statements, stmt,
-            )
+            _apply_owner_update(uc_helper, update)
         case "rfa_destinations":
-            if dry_run:
-                return True
-            try:
-                uc_helper.update_rfa_destinations(
-                    update.securable_type, update.full_name, update.new_value,
-                )
-            except Exception as exc:
-                change_logger.log_error(ExecutionError(
-                    context=(
-                        f"update_rfa_destinations("
-                        f"{update.securable_type.value}, {update.full_name})"
-                    ),
-                    exception=exc,
-                ))
-                return False
-            return True
+            uc_helper.update_rfa_destinations(
+                update.securable_type, update.full_name, update.new_value,
+            )
         case _:
+            raise OrchestratorError(
+                f"No executor branch for attribute {update.attribute!r}"
+            )
+
+
+def _bucket_creates_by_depth(diff: SecurableDiff) -> dict[int, list[Securable]]:
+    """Bucket creates by depth, preserving the original (depth, sort_key) total order within each bucket."""
+    by_depth: dict[int, list[Securable]] = defaultdict(list)
+    for info in diff.securables_to_create:
+        depth, _ = _creation_sort_key(info)
+        by_depth[depth].append(info)
+    for depth in by_depth:
+        by_depth[depth].sort(key=_creation_sort_key)
+    return by_depth
+
+
+def _run_create_batch(
+    uc_helper: UnityCatalogHelper,
+    creates: list[Securable],
+    change_logger: ChangeLogger,
+    dry_run: bool,
+    max_workers: int,
+) -> list[str]:
+    """Execute one depth-bucket of creates in parallel; log/error in input order."""
+    work_items: list[tuple[Securable, str]] = [
+        (info, _build_create_sql(info)) for info in creates
+    ]
+
+    def worker(item: tuple[Securable, str]) -> None:
+        _info, stmt = item
+        if not dry_run:
+            uc_helper.execute_sql(stmt)
+
+    results = parallel_for_each(work_items, worker, max_workers=max_workers)
+    statements: list[str] = []
+    for (info, stmt), _result, error in results:
+        if error is not None:
+            change_logger.log_error(ExecutionError(context=stmt, exception=error))
+            continue
+        if not dry_run:
+            statements.append(stmt)
+        change_logger.log_securable_create(info)
+    return statements
+
+
+def _run_replace_batch(
+    uc_helper: UnityCatalogHelper,
+    replaces: list[Securable],
+    change_logger: ChangeLogger,
+    dry_run: bool,
+    max_workers: int,
+) -> list[str]:
+    """Execute the replaces batch in parallel; log/error in input order."""
+    work_items: list[tuple[Securable, str]] = [
+        (info, _build_replace_sql(info)) for info in replaces
+    ]
+
+    def worker(item: tuple[Securable, str]) -> None:
+        _info, stmt = item
+        if not dry_run:
+            uc_helper.execute_sql(stmt)
+
+    results = parallel_for_each(work_items, worker, max_workers=max_workers)
+    statements: list[str] = []
+    for (info, stmt), _result, error in results:
+        if error is not None:
+            change_logger.log_error(ExecutionError(context=stmt, exception=error))
+            continue
+        if not dry_run:
+            statements.append(stmt)
+        change_logger.log_securable_replace(info)
+    return statements
+
+
+def _attribute_update_stmt(update: AttributeUpdate) -> str | None:
+    """Pre-build the SQL stmt for attribute updates that use SQL (just ``comment``)."""
+    if update.attribute != "comment":
+        return None
+    new_comment = next(iter(update.new_value))
+    return _build_comment_update_sql(
+        update.securable_type, update.full_name, str(new_comment),
+    )
+
+
+def _run_attribute_update_batch(
+    uc_helper: UnityCatalogHelper,
+    updates: list[AttributeUpdate],
+    change_logger: ChangeLogger,
+    dry_run: bool,
+    max_workers: int,
+) -> list[str]:
+    """Execute the attribute updates batch in parallel; log/error in input order."""
+    work_items: list[tuple[AttributeUpdate, str | None]] = [
+        (update, _attribute_update_stmt(update)) for update in updates
+    ]
+
+    def worker(item: tuple[AttributeUpdate, str | None]) -> None:
+        update, stmt = item
+        _run_attribute_update(uc_helper, update, stmt, dry_run)
+
+    results = parallel_for_each(work_items, worker, max_workers=max_workers)
+    statements: list[str] = []
+    for (update, stmt), _result, error in results:
+        if error is not None:
             change_logger.log_error(ExecutionError(
-                context=f"Unknown attribute {update.attribute!r} on {update.securable_type.value} {update.full_name}",
-                exception=OrchestratorError(f"No executor branch for attribute {update.attribute!r}"),
+                context=_attribute_update_context(update, stmt),
+                exception=error,
             ))
-            return False
+            continue
+        if stmt is not None and not dry_run:
+            statements.append(stmt)
+        change_logger.log_attribute_update(update)
+    return statements
 
 
 def execute_securable_diff(
@@ -323,44 +404,38 @@ def execute_securable_diff(
     diff: SecurableDiff,
     change_logger: ChangeLogger,
     dry_run: bool = False,
+    max_parallel_changes: int = 16,
 ) -> list[str]:
     """Execute securable creates, replaces, and attribute updates from a SecurableDiff.
 
-    Execution order: creates (SQL) -> replaces (SQL) -> attribute updates
-    (SDK call for ``owner``; SQL ALTER for ``comment``).
+    Execution order: creates (SQL, parent-first by depth) → replaces (SQL) →
+    attribute updates (SDK call for ``owner``/``rfa_destinations``; SQL ALTER
+    for ``comment``).
+
+    Within each depth bucket of creates, and within each of the replaces and
+    attribute-updates phases, items run in parallel up to ``max_parallel_changes``.
+    Cross-depth ordering is preserved (catalog → schema → tables/volumes/functions
+    → columns). Dry-run forces sequential execution so log output is identical to
+    non-parallel mode.
+
     Returns the list of SQL statements that were successfully executed
     (empty in dry-run mode).
     """
+    workers = 1 if dry_run else max_parallel_changes
     statements: list[str] = []
 
-    # Creates — sorted parent-first (catalogs before schemas before tables/volumes/functions)
-    for info in sorted(diff.securables_to_create, key=_creation_sort_key):
-        stmt = _build_create_sql(info)
-        if not dry_run:
-            try:
-                uc_helper.execute_sql(stmt)
-            except Exception as exc:
-                change_logger.log_error(ExecutionError(context=stmt, exception=exc))
-                continue
-            statements.append(stmt)
-        change_logger.log_securable_create(info)
+    creates_by_depth = _bucket_creates_by_depth(diff)
+    for depth in sorted(creates_by_depth):
+        statements.extend(_run_create_batch(
+            uc_helper, creates_by_depth[depth], change_logger, dry_run, workers,
+        ))
 
-    # Replaces
-    for info in diff.securables_to_replace:
-        stmt = _build_replace_sql(info)
-        if not dry_run:
-            try:
-                uc_helper.execute_sql(stmt)
-            except Exception as exc:
-                change_logger.log_error(ExecutionError(context=stmt, exception=exc))
-                continue
-            statements.append(stmt)
-        change_logger.log_securable_replace(info)
+    statements.extend(_run_replace_batch(
+        uc_helper, list(diff.securables_to_replace), change_logger, dry_run, workers,
+    ))
 
-    # Attribute updates (SDK for owner; SQL ALTER for comment/location)
-    for update in diff.attributes_to_update:
-        applied = _apply_attribute_update(uc_helper, update, change_logger, dry_run, statements)
-        if applied:
-            change_logger.log_attribute_update(update)
+    statements.extend(_run_attribute_update_batch(
+        uc_helper, list(diff.attributes_to_update), change_logger, dry_run, workers,
+    ))
 
     return statements
