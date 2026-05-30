@@ -8,9 +8,8 @@ definitions:
       # containing catalog.
       type: grant
       privileges:
-        - use_catalog
-        - use_schema
-        - select
+        - use
+        - read
       to:
         - sp_uc_governor_test
       has_tags:

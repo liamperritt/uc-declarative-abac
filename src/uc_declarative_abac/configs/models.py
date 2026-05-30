@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import AliasChoices, BaseModel, Field, computed_field, field_validator, model_validator
 
 from uc_declarative_abac.types import (
+    AbstractedPrivilegeType,
     PolicyType,
     PrivilegeType,
 )
@@ -142,7 +143,7 @@ class FilterPolicyConfig(BaseFgacPolicyConfig):
 
 class GrantPolicyConfig(BasePolicyConfig):
     type: Literal[PolicyType.GRANT] = PolicyType.GRANT
-    privileges: list[PrivilegeType]
+    privileges: list[PrivilegeType | AbstractedPrivilegeType]
     to: list[str]
     expiry_date: date | None = None
 

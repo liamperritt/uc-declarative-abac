@@ -3,7 +3,7 @@ definitions:
     abac|grant_catalog_read:
       type: grant
       privileges:
-        - select
+        - read
       to:
         - j.wang@databricks.com
         - liam.perritt@databricks.com

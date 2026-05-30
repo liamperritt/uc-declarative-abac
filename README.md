@@ -418,7 +418,16 @@ Policy fields:
 - **`except`** — (`mask` and `filter` types only) principals exempted from the policy. Exempted principals see the original unmasked data or unfiltered rows.
 - **`has_tags`** — a tag-match block that scopes the policy to tagged objects (grants scope to securables within the attached level; masks/filters scope to tagged tables). AND semantics across multiple entries. Supports `'*'` wildcard tag values for matching only against the tag key. See the paragraphs below the examples for the full per-type behaviour.
 - **`column`/`columns`** — (`mask` and `filter` types only) a single column, or an ordered list of column slots, each with an `alias` (a local name used to reference the column within this policy) and a `has_tags` block that selects the actual table column by tag. Every column in the list is passed as an argument to the `function` in declaration order, so the list must match the function's parameter signature. For **mask** polciies, the **first** column in the list is the one the mask function is applied to (i.e. it becomes `ON COLUMN <alias>` in the generated SQL) and is also passed as the first argument to the function.
-- **`privileges`** — (`grant` type only) the UC privileges to assign. Supported values: `select`, `modify`, `create_table`, `create_schema`, `create_function`, `create_volume`, `use_catalog`, `use_schema`, `read_volume`, `write_volume`, `execute`, `all_privileges`, `external_use_schema`, `manage`.
+- **`privileges`** — (`grant` type only) the UC privileges to assign. Supported values include the concrete UC privileges (`select`, `modify`, `create_table`, `create_schema`, `create_function`, `create_volume`, `use_catalog`, `use_schema`, `read_volume`, `write_volume`, `execute`, `refresh`, `create_materialized_view`, `create_model`, `create_model_version`, `browse`, `all_privileges`, `external_use_schema`, `manage`) and four shorthand **abstractions** that each expand to a fixed set of UC privileges:
+
+  | Abstraction | Expands to |
+  |---|---|
+  | `read` | `select`, `read_volume`, `execute` |
+  | `edit` | `modify`, `write_volume`, `refresh` |
+  | `use` | `use_catalog`, `use_schema` |
+  | `create` | `create_table`, `create_schema`, `create_function`, `create_volume`, `create_materialized_view`, `create_model`, `create_model_version` |
+
+  Expansion is flat (not securable-type-aware); each expanded privilege then flows through the same compatibility filter and `use_catalog`/`use_schema` cascade as a concrete privilege would. So `read` on a table-matched policy emits `SELECT` (the volume/function-specific entries drop), and `use` on a catalog-attached policy matching a deep child cascades `USE_CATALOG` to the catalog and `USE_SCHEMA` to the containing schema. Abstractions and concrete privileges can be mixed freely in the same list.
 - **`expiry_date`** — (`grant` type only) ISO 8601 date (`YYYY-MM-DD`) after which the grant is automatically revoked.
 
 ```yaml
@@ -800,6 +809,7 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 
 #### Privileges domain
 - **Privilege compilation** — matches grant policies against desired tags with AND semantics, scoped to the policy's attached securable and its children
+- **Abstract privilege names** — `read`, `edit`, `use`, and `create` are accepted in a policy's `privileges:` list as shorthands that expand to a fixed set of concrete UC privileges; the existing compatibility filter and `USE_CATALOG`/`USE_SCHEMA` cascade then apply per emitted privilege
 - **Wildcard tag values** — `has_tags: {k: '*'}` matches any value for tag `k` (presence check); concrete values match exactly
 - **Privilege-securable compatibility** — filters incompatible privilege/securable combinations (e.g. `READ_VOLUME` only on volumes)
 - **USE_CATALOG / USE_SCHEMA cascade** — when a grant policy matches a child securable and lists a USE privilege, the privilege is emitted against the correct parent ancestor (catalog for `USE_CATALOG`, schema for `USE_SCHEMA`) rather than being silently dropped by the compatibility filter. Bounded by policy scope: a schema-attached policy cannot cascade `USE_CATALOG` up to the catalog, and a table-attached policy cannot cascade either USE privilege onto its ancestors
@@ -856,10 +866,6 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
   - `--force` — skip every interactive confirmation prompt and auto-confirm destructive actions. Required in non-interactive CI contexts (GitHub Actions, scripted runs) whenever a destructive gate like `--enable-governed-tag-deletion` is set; if the engine needs to prompt but stdin has no TTY, it aborts with `InteractiveConfirmationRequiredError` directing the user to set this flag. Scope is deliberately broad — future confirmation prompts (e.g. hypothetical securable deletion) will honour it without requiring a new flag.
 
   "Taggables" here means the securable types that support tagging: catalogs, schemas, tables, volumes, and columns. Functions aren't taggable and are managed separately.
-
-### Not yet implemented
-
-- **Abstracted privilege names** — `use`, `read`, `edit`, `create` expanding to multiple UC privileges
 
 ---
 

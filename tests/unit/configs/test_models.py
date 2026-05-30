@@ -118,6 +118,32 @@ def test_grant_policy_config_rejects_missing_privileges():
     assert any("privileges" in str(e["loc"]) for e in errors)
 
 
+def test_grant_policy_config_rejects_unknown_abstraction():
+    """A grant policy with an unknown abstraction string ('delete') in
+    'privileges' raises a validation error — only known concrete privileges
+    and known abstractions are accepted."""
+    data = {
+        "catalogs": {
+            "cat": {
+                "name": "cat",
+                "policies": [
+                    {
+                        "type": "grant",
+                        "privileges": ["delete"],
+                        "to": ["analysts"],
+                        "has_tags": {"domain": "analytics"},
+                    }
+                ],
+            }
+        }
+    }
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate(data)
+
+    errors = exc_info.value.errors()
+    assert any("privileges" in str(e["loc"]) for e in errors)
+
+
 def test_grant_policy_config_rejects_missing_to():
     """A grant policy without 'to' raises a validation error."""
     data = {

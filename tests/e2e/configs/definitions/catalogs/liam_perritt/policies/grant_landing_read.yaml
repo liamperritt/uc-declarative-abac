@@ -3,8 +3,7 @@ definitions:
     abac|grant_landing_read:
       type: grant
       privileges:
-        - select
-        - read_volume
+        - read
       to:
         - uc_governor_test_team
       has_tags:

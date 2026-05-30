@@ -34,6 +34,15 @@ class PrivilegeType(str, Enum):
     BROWSE = "browse"
 
 
+class AbstractedPrivilegeType(str, Enum):
+    """Shorthand for a fixed set of UC privileges. Accepted anywhere a
+    ``PrivilegeType`` is accepted in a grant policy's ``privileges:`` list."""
+    READ = "read"
+    EDIT = "edit"
+    USE = "use"
+    CREATE = "create"
+
+
 class PolicyType(str, Enum):
     GRANT = "grant"
     MASK = "mask"

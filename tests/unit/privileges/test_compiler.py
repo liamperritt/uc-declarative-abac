@@ -1843,3 +1843,630 @@ def test_privilege_compiler_accepts_tag_in_union_of_desired_and_actual_governed_
 
     assert not change_logger.has_errors
     assert any(p.principal.name == "team" for p in result)
+
+
+# ---------------------------------------------------------------------------
+# Abstract privilege expansion
+# ---------------------------------------------------------------------------
+
+
+def test_privilege_compiler_expands_read_abstraction_on_table_match():
+    """A grant policy with privileges: ['read'] applied to a TABLE-tagged match
+    expands to {SELECT, READ_VOLUME, EXECUTE}, then the securable compatibility
+    filter drops READ_VOLUME and EXECUTE (invalid on TABLE), leaving only SELECT."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["read"],
+                            "to": ["team"],
+                            "has_tags": {"sales": None},
+                        }
+                    ],
+                    "schemas": [
+                        {
+                            "name": "default",
+                            "tables": [{"name": "orders"}],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="my_catalog.default.orders",
+            tag_name="sales",
+            tag_value="",
+        ),
+    }
+
+    result = _compile(config, desired_tags)
+
+    assert result == {
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="my_catalog.default.orders",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.SELECT,
+        ),
+    }
+
+
+def test_privilege_compiler_expands_read_abstraction_on_volume_match():
+    """A grant policy with privileges: ['read'] applied to a VOLUME-tagged match
+    expands to {SELECT, READ_VOLUME, EXECUTE}; the VOLUME compatibility filter
+    drops SELECT and EXECUTE, leaving only READ_VOLUME."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["read"],
+                            "to": ["team"],
+                            "has_tags": {"zone": "landing"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.VOLUME,
+            securable_full_name="cat.raw.events",
+            tag_name="zone",
+            tag_value="landing",
+        ),
+    }
+
+    result = _compile(config, desired_tags)
+
+    assert result == {
+        SecurablePrivilege(
+            securable_type=SecurableType.VOLUME,
+            securable_full_name="cat.raw.events",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.READ_VOLUME,
+        ),
+    }
+
+
+def test_privilege_compiler_expands_read_abstraction_on_catalog_match():
+    """A grant policy with privileges: ['read'] applied to a CATALOG-tagged match
+    expands to {SELECT, READ_VOLUME, EXECUTE}, all of which are valid on CATALOG."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["read"],
+                            "to": ["team"],
+                            "has_tags": {"sales": None},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            tag_name="sales",
+            tag_value="",
+        ),
+    }
+
+    result = _compile(config, desired_tags)
+
+    assert result == {
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.SELECT,
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.READ_VOLUME,
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.EXECUTE,
+        ),
+    }
+
+
+def test_privilege_compiler_expands_edit_abstraction_on_schema_match():
+    """A grant policy with privileges: ['edit'] applied to a SCHEMA-tagged match
+    expands to {MODIFY, WRITE_VOLUME, REFRESH}, all of which are valid on SCHEMA."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["edit"],
+                            "to": ["team"],
+                            "has_tags": {"env": "prod"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="cat.sales",
+            tag_name="env",
+            tag_value="prod",
+        ),
+    }
+
+    result = _compile(config, desired_tags)
+
+    assert result == {
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="cat.sales",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.MODIFY,
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="cat.sales",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.WRITE_VOLUME,
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="cat.sales",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.REFRESH,
+        ),
+    }
+
+
+def test_privilege_compiler_expands_use_abstraction_on_tagless_catalog_policy():
+    """A tagless grant policy with privileges: ['use'] applied directly to a catalog
+    expands to {USE_CATALOG, USE_SCHEMA}, both of which are valid on CATALOG."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["use"],
+                            "to": ["team"],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    result = _compile(config, set())
+
+    assert result == {
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.USE_CATALOG,
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.USE_SCHEMA,
+        ),
+    }
+
+
+def test_privilege_compiler_expands_use_abstraction_cascades_from_table_match():
+    """A catalog-attached grant policy with privileges: ['use'] whose tag matches
+    a table cascades USE_CATALOG up to the catalog and USE_SCHEMA up to the
+    containing schema; neither lands on the table itself."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["use"],
+                            "to": ["team"],
+                            "has_tags": {"env": "prod"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="cat.s.t",
+            tag_name="env",
+            tag_value="prod",
+        ),
+    }
+
+    result = _compile(config, desired_tags)
+
+    assert result == {
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.USE_CATALOG,
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="cat.s",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.USE_SCHEMA,
+        ),
+    }
+
+
+def test_privilege_compiler_expands_use_abstraction_dropped_by_scope_when_attached_at_table():
+    """A table-attached grant policy with privileges: ['use'] cascades both
+    USE_CATALOG and USE_SCHEMA to ancestors, but both are outside the table's
+    attachment scope and so are dropped — result is empty."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "schemas": [
+                        {
+                            "name": "s",
+                            "tables": [
+                                {
+                                    "name": "t",
+                                    "tags": {"env": "prod"},
+                                    "policies": [
+                                        {
+                                            "type": "grant",
+                                            "privileges": ["use"],
+                                            "to": ["team"],
+                                            "has_tags": {"env": "prod"},
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="cat.s.t",
+            tag_name="env",
+            tag_value="prod",
+        ),
+    }
+
+    result = _compile(config, desired_tags)
+
+    assert result == set()
+
+
+def test_privilege_compiler_expands_create_abstraction_on_catalog_match():
+    """A grant policy with privileges: ['create'] applied to a CATALOG-tagged
+    match expands to all 7 CREATE_* privileges; all are valid on CATALOG."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["create"],
+                            "to": ["team"],
+                            "has_tags": {"sales": None},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            tag_name="sales",
+            tag_value="",
+        ),
+    }
+
+    result = _compile(config, desired_tags)
+
+    principal = Principal(principal_type=PrincipalType.UNKNOWN, name="team")
+    assert result == {
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            principal=principal,
+            privilege_type=PrivilegeType.CREATE_TABLE,
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            principal=principal,
+            privilege_type=PrivilegeType.CREATE_SCHEMA,
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            principal=principal,
+            privilege_type=PrivilegeType.CREATE_FUNCTION,
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            principal=principal,
+            privilege_type=PrivilegeType.CREATE_VOLUME,
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            principal=principal,
+            privilege_type=PrivilegeType.CREATE_MATERIALIZED_VIEW,
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            principal=principal,
+            privilege_type=PrivilegeType.CREATE_MODEL,
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            principal=principal,
+            privilege_type=PrivilegeType.CREATE_MODEL_VERSION,
+        ),
+    }
+
+
+def test_privilege_compiler_expands_create_abstraction_on_schema_match_drops_create_schema():
+    """A grant policy with privileges: ['create'] applied to a SCHEMA-tagged
+    match expands to all 7 CREATE_* privileges; the SCHEMA compatibility filter
+    drops CREATE_SCHEMA (catalog-only), leaving 6 emitted privileges."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["create"],
+                            "to": ["team"],
+                            "has_tags": {"env": "prod"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="cat.sales",
+            tag_name="env",
+            tag_value="prod",
+        ),
+    }
+
+    result = _compile(config, desired_tags)
+
+    principal = Principal(principal_type=PrincipalType.UNKNOWN, name="team")
+    assert result == {
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="cat.sales",
+            principal=principal,
+            privilege_type=PrivilegeType.CREATE_TABLE,
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="cat.sales",
+            principal=principal,
+            privilege_type=PrivilegeType.CREATE_FUNCTION,
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="cat.sales",
+            principal=principal,
+            privilege_type=PrivilegeType.CREATE_VOLUME,
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="cat.sales",
+            principal=principal,
+            privilege_type=PrivilegeType.CREATE_MATERIALIZED_VIEW,
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="cat.sales",
+            principal=principal,
+            privilege_type=PrivilegeType.CREATE_MODEL,
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="cat.sales",
+            principal=principal,
+            privilege_type=PrivilegeType.CREATE_MODEL_VERSION,
+        ),
+    }
+
+
+def test_privilege_compiler_mixes_abstractions_and_concrete_privileges():
+    """A grant policy with privileges: ['read', 'manage'] applied to a TABLE-tagged
+    match emits SELECT (from 'read', other expansions dropped by TABLE filter) and
+    MANAGE (universal, valid on any securable)."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["read", "manage"],
+                            "to": ["team"],
+                            "has_tags": {"sales": None},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="cat.s.orders",
+            tag_name="sales",
+            tag_value="",
+        ),
+    }
+
+    result = _compile(config, desired_tags)
+
+    assert result == {
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="cat.s.orders",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.SELECT,
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="cat.s.orders",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.MANAGE,
+        ),
+    }
+
+
+def test_privilege_compiler_dedupes_overlapping_abstraction_and_concrete():
+    """A grant policy with privileges: ['read', 'select'] applied to a TABLE-tagged
+    match emits exactly one SELECT — set semantics deduplicate the overlap."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["read", "select"],
+                            "to": ["team"],
+                            "has_tags": {"sales": None},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="cat.s.orders",
+            tag_name="sales",
+            tag_value="",
+        ),
+    }
+
+    result = _compile(config, desired_tags)
+
+    assert result == {
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="cat.s.orders",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.SELECT,
+        ),
+    }
+
+
+def test_privilege_compiler_expands_use_and_read_combination():
+    """A catalog-attached grant policy with privileges: ['use', 'read'] whose tag
+    matches a table emits USE_CATALOG on the catalog, USE_SCHEMA on the schema,
+    and SELECT on the table (other 'read' expansions dropped by TABLE filter)."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["use", "read"],
+                            "to": ["team"],
+                            "has_tags": {"env": "prod"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="cat.s.t",
+            tag_name="env",
+            tag_value="prod",
+        ),
+    }
+
+    result = _compile(config, desired_tags)
+
+    principal = Principal(principal_type=PrincipalType.UNKNOWN, name="team")
+    assert result == {
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            principal=principal,
+            privilege_type=PrivilegeType.USE_CATALOG,
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="cat.s",
+            principal=principal,
+            privilege_type=PrivilegeType.USE_SCHEMA,
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="cat.s.t",
+            principal=principal,
+            privilege_type=PrivilegeType.SELECT,
+        ),
+    }

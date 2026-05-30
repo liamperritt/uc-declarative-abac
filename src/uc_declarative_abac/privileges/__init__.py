@@ -7,8 +7,10 @@ from uc_declarative_abac.privileges.state import (
     PrivilegeDiff,
     SecurablePrivilege,
 )
+from uc_declarative_abac.types import AbstractedPrivilegeType
 
 __all__ = [
+    "AbstractedPrivilegeType",
     "PrivilegeDiff",
     "SecurablePrivilege",
     "compile_desired_privileges",

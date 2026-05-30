@@ -16,6 +16,7 @@ from uc_declarative_abac.principals import Principal
 from uc_declarative_abac.tags import SecurableTag
 from uc_declarative_abac.privileges.state import SecurablePrivilege
 from uc_declarative_abac.types import (
+    AbstractedPrivilegeType,
     PrincipalType,
     PrivilegeType,
     SecurableType,
@@ -60,6 +61,43 @@ SECURABLE_TYPE_PRIVILEGE_MAP: dict[SecurableType, set[PrivilegeType]] = {
     SecurableType.COLUMN: frozenset(),
 }
 
+ABSTRACT_PRIVILEGE_MAP: dict[AbstractedPrivilegeType, frozenset[PrivilegeType]] = {
+    AbstractedPrivilegeType.READ: frozenset({
+        PrivilegeType.SELECT,
+        PrivilegeType.READ_VOLUME,
+        PrivilegeType.EXECUTE,
+    }),
+    AbstractedPrivilegeType.EDIT: frozenset({
+        PrivilegeType.MODIFY,
+        PrivilegeType.WRITE_VOLUME,
+        PrivilegeType.REFRESH,
+    }),
+    AbstractedPrivilegeType.USE: frozenset({
+        PrivilegeType.USE_CATALOG,
+        PrivilegeType.USE_SCHEMA,
+    }),
+    AbstractedPrivilegeType.CREATE: frozenset({
+        PrivilegeType.CREATE_TABLE,
+        PrivilegeType.CREATE_SCHEMA,
+        PrivilegeType.CREATE_FUNCTION,
+        PrivilegeType.CREATE_VOLUME,
+        PrivilegeType.CREATE_MATERIALIZED_VIEW,
+        PrivilegeType.CREATE_MODEL,
+        PrivilegeType.CREATE_MODEL_VERSION,
+    }),
+}
+
+
+def _expand_privilege(
+    item: PrivilegeType | AbstractedPrivilegeType,
+) -> frozenset[PrivilegeType]:
+    """Return the concrete UC privileges represented by ``item``.
+
+    A ``PrivilegeType`` expands to a singleton; an ``AbstractedPrivilegeType``
+    expands to its mapped set."""
+    if isinstance(item, AbstractedPrivilegeType):
+        return ABSTRACT_PRIVILEGE_MAP[item]
+    return frozenset({item})
 
 
 def compile_desired_privileges(
@@ -218,21 +256,22 @@ def _emit_privileges(
     is applied against the resolved target type."""
     result: set[SecurablePrivilege] = set()
     for principal_name in policy.to:
-        for privilege in policy.privileges:
-            target_type, target_full_name = _target_for_privilege(privilege, sec_type, full_name)
-            if not _is_within_scope(target_full_name, policy):
-                continue
-            allowed = SECURABLE_TYPE_PRIVILEGE_MAP.get(target_type)
-            if allowed is not None and privilege not in allowed:
-                continue
-            result.add(
-                SecurablePrivilege(
-                    securable_type=target_type,
-                    securable_full_name=target_full_name,
-                    principal=Principal(principal_type=PrincipalType.UNKNOWN, name=principal_name),
-                    privilege_type=privilege,
+        for entry in policy.privileges:
+            for privilege in _expand_privilege(entry):
+                target_type, target_full_name = _target_for_privilege(privilege, sec_type, full_name)
+                if not _is_within_scope(target_full_name, policy):
+                    continue
+                allowed = SECURABLE_TYPE_PRIVILEGE_MAP.get(target_type)
+                if allowed is not None and privilege not in allowed:
+                    continue
+                result.add(
+                    SecurablePrivilege(
+                        securable_type=target_type,
+                        securable_full_name=target_full_name,
+                        principal=Principal(principal_type=PrincipalType.UNKNOWN, name=principal_name),
+                        privilege_type=privilege,
+                    )
                 )
-            )
     return result
 
 

@@ -4,9 +4,7 @@ definitions:
       type: grant
       privileges:
         - use_schema
-        - select
-        - execute
-        - read_volume
+        - read
       to:
         - j.wang@databricks.com
         - liam.perritt@databricks.com

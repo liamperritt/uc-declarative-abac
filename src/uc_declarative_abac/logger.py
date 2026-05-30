@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 _default_logger = logging.getLogger("uc_declarative_abac")
 
 # Column widths for aligned output
-_TYPE_WIDTH = 12  # len("GOVERNED_TAG") — longest SecurableType value
+_TYPE_WIDTH = 8
 _NAME_WIDTH = 36
 
 
