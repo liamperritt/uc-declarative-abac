@@ -53,7 +53,7 @@ Resolution precedence matches the SDK's unified-auth chain: explicit `--profile`
 
 ### GitHub Action
 
-The repo ships a composite GitHub Action at `sync/action.yml` so any other repo that stores its governance YAML in Git can reconcile Unity Catalog on every push / PR / schedule without installing the package or scripting a Python run. Reference it as `liam-perritt/uc-declarative-abac/sync@<ref>` (where `<ref>` is a tag, branch, or commit SHA).
+The repo ships a composite GitHub Action at `deploy/action.yml` so any other repo that stores its governance YAML in Git can reconcile Unity Catalog on every push / PR / schedule without installing the package or scripting a Python run. Reference it as `liamperritt/uc-declarative-abac/deploy@<ref>` (where `<ref>` is a tag, branch, or commit SHA).
 
 **Inputs:**
 
@@ -79,7 +79,7 @@ The repo ships a composite GitHub Action at `sync/action.yml` so any other repo 
 **Example workflow in a caller repo** (`.github/workflows/deploy-uc-governance.yml`):
 
 ```yaml
-name: Sync UC governance
+name: Deploy UC governance
 on:
   pull_request:
     paths: ['configs/**']
@@ -92,13 +92,13 @@ on:
     - cron: '0 7 * * *'   # ~5–6pm Sydney time — re-sync to catch any drift introduced during the day
 
 jobs:
-  sync:
+  deploy:
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: <github-org>/uc-declarative-abac/sync@v1
+      - uses: <github-org>/uc-declarative-abac/deploy@v1
         with:
           config-dir: configs/
           warehouse-id: ${{ vars.DATABRICKS_WAREHOUSE_ID }}
@@ -852,7 +852,7 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 
 #### Infrastructure
 - **CLI** (`python -m uc_declarative_abac`) — required: `--config-dir`, `--warehouse-id`. Optional: `--profile` (CLI profile name from `~/.databrickscfg`; omit to use unified auth via env vars / default profile / metadata service — see the [Authentication](#authentication) section), `--dry-run`, `--use-workspace-scim`, the five opt-in mutation flags (`--enable-tag-management`, `--enable-taggable-management`, `--enable-taggable-creation`, `--enable-privilege-management`, `--enable-governed-tag-deletion`), their per-catalog scopes (`--manage-tags-for-catalogs`, `--manage-privileges-for-catalogs`, `--manage-taggables-for-catalogs`, `--create-taggables-for-catalogs` — each defaults to `*` and is a no-op unless its paired enable flag is set), and `--force` (skip interactive confirmations) — all described below.
-- **GitHub Action** — reusable composite action at `sync/action.yml`; caller repos invoke it as `liam-perritt/uc-declarative-abac/sync@<ref>` to reconcile their own YAML configs against UC on push / PR / schedule (see the [GitHub Action](#github-action) section)
+- **GitHub Action** — reusable composite action at `deploy/action.yml`; caller repos invoke it as `liamperritt/uc-declarative-abac/deploy@<ref>` to reconcile their own YAML configs against UC on push / PR / schedule (see the [GitHub Action](#github-action) section)
 - **Hybrid SQL polling** — `wait_timeout=50s` with `on_wait_timeout=CONTINUE` and 10s polling for long-running queries
 - **External links** — fetches SQL results via external link URLs for large result sets
 - **Parallel state fetch** — securables, tags, privileges, policies, governed tags, and principals are fetched concurrently

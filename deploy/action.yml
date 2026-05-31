@@ -1,5 +1,5 @@
-name: UC Declarative ABAC Sync
-description: Sync Unity Catalog ABAC governance with declarative YAML configs.
+name: Deploy UC Declarative ABAC
+description: Deploy Unity Catalog Attribute-Based Access Control configuration.
 author: Liam Perritt
 branding:
   icon: shield
