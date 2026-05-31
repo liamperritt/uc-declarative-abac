@@ -485,8 +485,12 @@ def test_securable_executor_orders_creations_parent_first():
 # ---------------------------------------------------------------------------
 
 
-def test_securable_executor_builds_alter_table_add_column_sql_for_column():
-    """A standalone Column in securables_to_create produces ALTER TABLE ADD COLUMN SQL."""
+def test_securable_executor_builds_alter_table_add_columns_sql_for_column():
+    """A standalone Column in securables_to_create produces ALTER TABLE ADD COLUMNS SQL.
+
+    Uses the plural-with-parens form uniformly — including for the single-column
+    case — so column adds always flow through one builder and one SQL path.
+    """
     uc_helper = MagicMock()
     column = Column(
         securable_type=SecurableType.COLUMN,
@@ -499,14 +503,15 @@ def test_securable_executor_builds_alter_table_add_column_sql_for_column():
 
     assert len(stmts) == 1
     sql = stmts[0]
-    _assert_sql_contains(sql, "ALTER TABLE", "ADD COLUMN", "cat.sch.orders", "email", "STRING")
+    _assert_sql_contains(sql, "ALTER TABLE", "ADD COLUMNS", "cat.sch.orders", "email", "STRING")
     # Backtick quoting on parent table and column name.
     assert "`cat`.`sch`.`orders`" in sql
     assert "`email`" in sql
 
 
-def test_securable_executor_emits_one_alter_per_column():
-    """Multiple Column entries each produce their own ALTER TABLE ADD COLUMN statement."""
+def test_securable_executor_emits_one_alter_per_parent_table():
+    """Multiple Column entries on the same parent table are batched into one
+    ALTER TABLE ADD COLUMNS statement — one Delta commit per table, not per column."""
     uc_helper = MagicMock()
     diff = SecurableDiff(
         securables_to_create=[
@@ -517,17 +522,18 @@ def test_securable_executor_emits_one_alter_per_column():
 
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
 
-    assert len(stmts) == 2
-    assert all("ALTER TABLE" in s.upper() and "ADD COLUMN" in s.upper() for s in stmts)
-    sql_blob = " ".join(stmts)
-    assert "email" in sql_blob and "STRING" in sql_blob
-    assert "amount" in sql_blob and "DECIMAL(18,2)" in sql_blob
+    assert len(stmts) == 1
+    sql = stmts[0]
+    assert "ALTER TABLE" in sql.upper() and "ADD COLUMNS" in sql.upper()
+    # Both column defs ride in the single statement.
+    assert "`email` STRING" in sql
+    assert "`amount` DECIMAL(18,2)" in sql
 
 
 def test_securable_executor_preserves_column_declaration_order_within_a_table():
-    """Multiple Columns for the same parent table are emitted in their input-list
-    order — not alphabetised by column name. The list order ultimately reflects
-    the user's YAML declaration order."""
+    """Multiple Columns for the same parent table appear in the batched ALTER
+    in their input-list order — not alphabetised by column name. The list order
+    ultimately reflects the user's YAML declaration order."""
     uc_helper = MagicMock()
     diff = SecurableDiff(
         securables_to_create=[
@@ -539,13 +545,23 @@ def test_securable_executor_preserves_column_declaration_order_within_a_table():
 
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
 
-    column_names = [s.split("ADD COLUMN `")[1].split("`")[0] for s in stmts]
-    assert column_names == ["zebra", "apple", "mango"]
+    assert len(stmts) == 1
+    sql = stmts[0]
+    idx_zebra = sql.find("`zebra`")
+    idx_apple = sql.find("`apple`")
+    idx_mango = sql.find("`mango`")
+    assert idx_zebra != -1 and idx_apple != -1 and idx_mango != -1, (
+        f"Expected each column to appear in: {sql}"
+    )
+    assert idx_zebra < idx_apple < idx_mango, (
+        f"Expected declaration order zebra < apple < mango in: {sql}"
+    )
 
 
 def test_securable_executor_groups_columns_by_parent_table_in_order():
-    """Across multiple parent tables, columns are grouped together by parent;
-    within each parent, the input-list order is preserved."""
+    """Across multiple parent tables, columns destined for each parent are
+    batched into one ALTER per parent. Within each parent's batch, input-list
+    order is preserved."""
     uc_helper = MagicMock()
     diff = SecurableDiff(
         securables_to_create=[
@@ -559,21 +575,20 @@ def test_securable_executor_groups_columns_by_parent_table_in_order():
 
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
 
-    column_names = [s.split("ADD COLUMN `")[1].split("`")[0] for s in stmts]
-    # t1 columns appear together (in their input order: b then a),
-    # then t2 columns together (x then y). Cross-table grouping protects
-    # against parent-table interleaving — the SQL DDL is per-table anyway.
-    t1_indices = [i for i, name in enumerate(column_names) if name in ("b", "a")]
-    t2_indices = [i for i, name in enumerate(column_names) if name in ("x", "y")]
-    assert max(t1_indices) < min(t2_indices) or max(t2_indices) < min(t1_indices), (
-        f"Expected per-table grouping; got {column_names}"
+    # Two parents → two batched ALTERs.
+    assert len(stmts) == 2
+    t1_stmt = next(s for s in stmts if "`t1`" in s)
+    t2_stmt = next(s for s in stmts if "`t2`" in s)
+    # Within each parent's batch, columns appear in input order.
+    assert t1_stmt.find("`b`") < t1_stmt.find("`a`"), (
+        f"Expected b before a in t1 batch: {t1_stmt}"
     )
-    # Within each parent, input order is preserved.
-    assert column_names[t1_indices[0]] == "b" and column_names[t1_indices[1]] == "a"
-    assert column_names[t2_indices[0]] == "x" and column_names[t2_indices[1]] == "y"
+    assert t2_stmt.find("`x`") < t2_stmt.find("`y`"), (
+        f"Expected x before y in t2 batch: {t2_stmt}"
+    )
 
 
-def test_securable_executor_alter_table_add_column_targets_parent_table():
+def test_securable_executor_alter_table_add_columns_targets_parent_table():
     """The column's parent table (everything up to the last '.') is the ALTER TABLE target."""
     uc_helper = MagicMock()
     column = Column(
@@ -592,7 +607,7 @@ def test_securable_executor_alter_table_add_column_targets_parent_table():
 
 
 def test_securable_executor_skips_alter_table_in_dry_run():
-    """In dry-run mode, ALTER TABLE ADD COLUMN is not invoked on the SDK."""
+    """In dry-run mode, ALTER TABLE ADD COLUMNS is not invoked on the SDK."""
     uc_helper = MagicMock()
     column = Column(
         securable_type=SecurableType.COLUMN,
@@ -606,22 +621,32 @@ def test_securable_executor_skips_alter_table_in_dry_run():
     uc_helper.execute_sql.assert_not_called()
 
 
-def test_securable_executor_logs_error_and_continues_on_alter_table_failure():
-    """An exception during one ALTER TABLE ADD COLUMN does not abort subsequent columns."""
+def test_securable_executor_logs_error_and_continues_on_other_tables_after_batch_failure():
+    """A failing parent-table batch is logged once; batches for other parent tables
+    still run. (Same-table failure atomicity is the trade-off of batching: a bad
+    column type in one parent fails the whole parent's batch.)"""
     uc_helper = MagicMock()
-    uc_helper.execute_sql.side_effect = [Exception("boom"), None]
+
+    def _fail_for_orders(sql):
+        if "orders" in sql:
+            raise Exception("boom")
+
+    uc_helper.execute_sql.side_effect = _fail_for_orders
     cl = ChangeLogger()
     diff = SecurableDiff(
         securables_to_create=[
             Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.fail", data_type="STRING"),
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.succeed", data_type="STRING"),
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.invoices.ok", data_type="STRING"),
         ],
     )
 
     execute_securable_diff(uc_helper, diff, cl)
 
+    # Both parents' batches were attempted (one ALTER per parent).
     assert uc_helper.execute_sql.call_count == 2
-    assert cl.has_errors
+    # One error for the failing parent's batch; the other parent succeeded.
+    assert len(cl.errors) == 1
+    assert "orders" in cl.errors[0].context
 
 
 def test_securable_executor_orders_columns_after_their_parent_table():
@@ -641,6 +666,143 @@ def test_securable_executor_orders_columns_after_their_parent_table():
     idx_table = next(i for i, s in enumerate(stmts) if "CREATE TABLE" in s.upper())
     idx_alter = next(i for i, s in enumerate(stmts) if "ALTER TABLE" in s.upper())
     assert idx_table < idx_alter
+
+
+def test_securable_executor_batches_column_creates_per_parent_table():
+    """Three columns on one parent table produce exactly one ALTER TABLE ADD COLUMNS (...)
+    listing all three column definitions in declaration order."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        securables_to_create=[
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.id", data_type="BIGINT"),
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.email", data_type="STRING"),
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.amount", data_type="DECIMAL(18,2)"),
+        ],
+    )
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    sql = stmts[0]
+    upper = sql.upper()
+    assert "ALTER TABLE" in upper
+    # Plural — batched form.
+    assert "ADD COLUMNS" in upper
+    # Parent table is backtick-quoted.
+    assert "`cat`.`sch`.`orders`" in sql
+    # All three columns appear in declaration order.
+    idx_id = sql.find("`id` BIGINT")
+    idx_email = sql.find("`email` STRING")
+    idx_amount = sql.find("`amount` DECIMAL(18,2)")
+    assert idx_id != -1 and idx_email != -1 and idx_amount != -1, (
+        f"Expected each column definition to appear in: {sql}"
+    )
+    assert idx_id < idx_email < idx_amount, (
+        f"Expected declaration order id < email < amount in: {sql}"
+    )
+    assert uc_helper.execute_sql.call_count == 1
+
+
+def test_securable_executor_runs_column_batches_for_different_tables_in_parallel():
+    """Column batches for different parent tables run concurrently up to
+    max_parallel_changes; within a single parent's batch only one ALTER runs
+    at a time (because there is only one ALTER per parent)."""
+    import threading
+    import time
+
+    uc_helper = MagicMock()
+
+    active = 0
+    max_active = 0
+    lock = threading.Lock()
+
+    def _probe(sql):
+        nonlocal active, max_active
+        with lock:
+            active += 1
+            if active > max_active:
+                max_active = active
+        # Sleep so workers genuinely overlap.
+        time.sleep(0.02)
+        with lock:
+            active -= 1
+
+    uc_helper.execute_sql.side_effect = _probe
+
+    # 4 parent tables, 2 columns each = 8 columns total, but expect 4 ALTERs.
+    diff = SecurableDiff(
+        securables_to_create=[
+            Column(securable_type=SecurableType.COLUMN, full_name=f"cat.sch.t{t}.c{c}", data_type="STRING")
+            for t in range(4)
+            for c in range(2)
+        ],
+    )
+
+    execute_securable_diff(uc_helper, diff, ChangeLogger(), max_parallel_changes=4)
+
+    # One ALTER per parent — 4 parents, so 4 SQL calls.
+    assert uc_helper.execute_sql.call_count == 4
+    # Cross-table parallelism survives batching.
+    assert max_active >= 2, (
+        f"Expected concurrent execution across parent-table batches; observed max_active={max_active}"
+    )
+
+
+def test_securable_executor_logs_each_column_create_on_batched_success():
+    """When a parent-table batch succeeds, every column inside the batch is logged
+    individually via log_securable_create — the operator sees a per-column success
+    record even though only one ALTER runs."""
+    uc_helper = MagicMock()
+    columns = [
+        Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.id", data_type="BIGINT"),
+        Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.email", data_type="STRING"),
+        Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.amount", data_type="DECIMAL(18,2)"),
+    ]
+    diff = SecurableDiff(securables_to_create=list(columns))
+    change_logger = MagicMock(spec=ChangeLogger)
+
+    execute_securable_diff(uc_helper, diff, change_logger)
+
+    # Only one ALTER runs (batched) but every column is still logged individually.
+    assert uc_helper.execute_sql.call_count == 1
+    assert change_logger.log_securable_create.call_count == 3
+    logged_full_names = {call.args[0].full_name for call in change_logger.log_securable_create.call_args_list}
+    assert logged_full_names == {c.full_name for c in columns}
+
+
+def test_securable_executor_logs_one_error_per_failed_table_batch():
+    """If a parent-table batch fails, one ExecutionError is logged for that batch
+    and the other parent's batch still runs to completion."""
+    uc_helper = MagicMock()
+
+    def _fail_for_t1(sql):
+        if "t1" in sql:
+            raise RuntimeError("t1 boom")
+
+    uc_helper.execute_sql.side_effect = _fail_for_t1
+    change_logger = ChangeLogger()
+
+    diff = SecurableDiff(
+        securables_to_create=[
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.t1.a", data_type="STRING"),
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.t1.b", data_type="STRING"),
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.t2.x", data_type="STRING"),
+            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.t2.y", data_type="STRING"),
+        ],
+    )
+
+    execute_securable_diff(uc_helper, diff, change_logger)
+
+    # Both parent batches attempted — one ALTER per parent.
+    assert uc_helper.execute_sql.call_count == 2
+    # Exactly one ExecutionError for the failing batch.
+    assert len(change_logger.errors) == 1
+    assert change_logger.has_errors is True
+    failed_context = change_logger.errors[0].context
+    # The failing batch's SQL referenced t1 and listed both of its columns —
+    # proving the batch was the unit of failure.
+    assert "t1" in failed_context
+    assert "a" in failed_context and "b" in failed_context
 
 
 # ---------------------------------------------------------------------------

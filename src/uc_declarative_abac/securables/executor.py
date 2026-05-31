@@ -91,8 +91,6 @@ def _build_create_sql(info: Securable) -> str:
             return _build_create_function_sql(info)
         case Table():
             return _build_create_table_sql(info)
-        case Column():
-            return _build_alter_table_add_column_sql(info)
         case Securable(securable_type=SecurableType.CATALOG):
             return _build_create_catalog_sql(info)
         case Securable(securable_type=SecurableType.SCHEMA):
@@ -162,14 +160,33 @@ def _build_create_table_sql(info: Table) -> str:
     )
 
 
-def _build_alter_table_add_column_sql(info: Column) -> str:
-    """``ALTER TABLE <parent> ADD COLUMN `<name>` <TYPE>`` — adds a single column to
-    an existing table. The differ has already validated that ``data_type`` is set
-    before a Column reaches this builder."""
-    parent_full_name, _, column_name = info.full_name.rpartition(".")
+def _group_columns_by_parent(columns: list[Column]) -> list[tuple[str, list[Column]]]:
+    """Group columns by parent table FQN, preserving the input list's order
+    both for parent-group ordering and for column order within a group.
+
+    The caller relies on this stable ordering: parents appear in the order
+    their first column was seen; within each parent, columns appear in
+    declaration order.
+    """
+    groups: dict[str, list[Column]] = {}
+    for col in columns:
+        parent, _, _ = col.full_name.rpartition(".")
+        groups.setdefault(parent, []).append(col)
+    return list(groups.items())
+
+
+def _build_alter_table_add_columns_sql(parent_full_name: str, columns: list[Column]) -> str:
+    """``ALTER TABLE <parent> ADD COLUMNS (`c1` T1, `c2` T2, ...)`` — adds one or
+    more columns to an existing table in a single atomic Delta commit. Batching
+    eliminates ``DELTA_METADATA_CHANGED`` conflicts between concurrent ADD
+    COLUMN operations on the same table. The differ has already validated that
+    every column's ``data_type`` is set before they reach this builder."""
+    column_defs = ", ".join(
+        f"`{c.full_name.rpartition('.')[-1]}` {c.data_type}" for c in columns
+    )
     return (
         f"ALTER TABLE {quote_securable(parent_full_name)} "
-        f"ADD COLUMN `{column_name}` {info.data_type}"
+        f"ADD COLUMNS ({column_defs})"
     )
 
 
@@ -303,6 +320,48 @@ def _bucket_creates_by_depth(diff: SecurableDiff) -> dict[int, list[Securable]]:
     return by_depth
 
 
+def _run_column_create_batch(
+    uc_helper: UnityCatalogHelper,
+    columns: list[Column],
+    change_logger: ChangeLogger,
+    dry_run: bool,
+    max_workers: int,
+) -> list[str]:
+    """Execute column adds as one ALTER per parent table, in parallel across tables.
+
+    Same-table ADD COLUMNs cannot run concurrently against Delta (every commit
+    bumps the table's metadata version, so two parallel ADDs collide with
+    ``DELTA_METADATA_CHANGED``). This batches every column destined for the
+    same parent into a single ALTER, preserving the operator's per-column log
+    granularity while eliminating the conflict.
+    """
+    groups = _group_columns_by_parent(columns)
+    work_items: list[tuple[str, list[Column], str]] = [
+        (parent, cols, _build_alter_table_add_columns_sql(parent, cols))
+        for parent, cols in groups
+    ]
+
+    def worker(item: tuple[str, list[Column], str]) -> None:
+        _parent, _cols, stmt = item
+        if not dry_run:
+            uc_helper.execute_sql(stmt)
+
+    def on_complete(item: tuple[str, list[Column], str], _result, error) -> None:
+        _parent, cols, stmt = item
+        if error is not None:
+            change_logger.log_error(ExecutionError(context=stmt, exception=error))
+            return
+        for col in cols:
+            change_logger.log_securable_create(col)
+
+    results = parallel_for_each(
+        work_items, worker, max_workers=max_workers, on_complete=on_complete,
+    )
+    if dry_run:
+        return []
+    return [stmt for (_p, _c, stmt), _r, error in results if error is None]
+
+
 def _run_create_batch(
     uc_helper: UnityCatalogHelper,
     creates: list[Securable],
@@ -312,9 +371,20 @@ def _run_create_batch(
 ) -> list[str]:
     """Execute one depth-bucket of creates in parallel.
 
-    Streams per-item logs via ``on_complete``; returns successful statements
-    in input order via the in-order result returned by ``parallel_for_each``.
+    Columns are batched per parent table (one ALTER per parent) to avoid
+    Delta metadata-commit conflicts; all other securable types run as
+    one-securable-per-statement.
     """
+    if creates and isinstance(creates[0], Column):
+        # Re-narrow for type checkers; at depth 3 every item is a Column.
+        return _run_column_create_batch(
+            uc_helper,
+            [c for c in creates if isinstance(c, Column)],
+            change_logger,
+            dry_run,
+            max_workers,
+        )
+
     work_items: list[tuple[Securable, str]] = [
         (info, _build_create_sql(info)) for info in creates
     ]
