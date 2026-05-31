@@ -337,6 +337,52 @@ def test_resolver_merge_strategy_merges_list_of_refs_by_ref():
     assert len(tables) == 2
 
 
+def test_resolver_merge_strategy_preserves_both_refs_when_ref_identifiers_differ():
+    """When list items on both sides carry $ref identifiers but the refs differ, both are preserved (no replacement)."""
+    definitions = {
+        "schemas": {
+            "ops|sales": {
+                "name": "sales",
+                "tables": [
+                    {"$ref": "$defs/tables/ops|sales|orders"},
+                    {"$ref": "$defs/tables/ops|sales|quotes"},
+                ],
+            },
+        },
+        "tables": {
+            "ops|sales|orders": {"name": "orders", "comment": "Orders table"},
+            "ops|sales|quotes": {"name": "quotes", "comment": "Quotes table"},
+            "ops|sales|leads": {"name": "leads", "comment": "Leads table"},
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ops|sales",
+                        "tables": [
+                            {"$ref": "$defs/tables/ops|sales|leads"},
+                        ],
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    tables = result["catalogs"]["main"]["schemas"][0]["tables"]
+    # The override's $ref doesn't match either definition $ref, so it's appended without
+    # displacing the definition's refs. All three resolve independently in the post-merge pass.
+    table_by_name = {t["name"]: t for t in tables}
+    assert set(table_by_name) == {"orders", "quotes", "leads"}
+    assert table_by_name["orders"]["comment"] == "Orders table"
+    assert table_by_name["quotes"]["comment"] == "Quotes table"
+    assert table_by_name["leads"]["comment"] == "Leads table"
+    assert len(tables) == 3
+
+
 def test_resolver_merge_strategy_uses_alias_as_identifier_when_no_name():
     """Items without 'name' but with 'alias' are matched by 'alias'."""
     definitions = {
@@ -459,6 +505,168 @@ def test_resolver_merge_strategy_prefers_name_over_ref_as_identifier():
     assert len(tables) == 1
     assert tables[0]["name"] == "orders"
     assert tables[0]["comment"] == "Overridden"
+
+
+# ---------------------------------------------------------------------------
+# merge strategy — lists containing inline $defs/... strings
+# ---------------------------------------------------------------------------
+
+
+def test_resolver_merge_strategy_appends_inline_defs_string_to_definition_list():
+    """An override list with an inline $defs/... string appends the resolved item to the definition list."""
+    definitions = {
+        "columns": {
+            "region": {"name": "region", "type": "string"},
+        },
+        "tables": {
+            "ops|sales|orders": {
+                "name": "orders",
+                "columns": [
+                    {"name": "id", "type": "bigint"},
+                    {"name": "total", "type": "decimal"},
+                ],
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "tables": [
+                    {
+                        "$ref": "$defs/tables/ops|sales|orders",
+                        "columns": ["$defs/columns/region"],
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    columns = result["catalogs"]["main"]["tables"][0]["columns"]
+    # The original two columns from the definition are preserved, and the inline-string
+    # override resolves to the region column and is appended at the end.
+    assert [c["name"] for c in columns] == ["id", "total", "region"]
+    assert columns[2]["type"] == "string"
+
+
+def test_resolver_merge_strategy_merges_inline_defs_string_into_list_when_definition_uses_inline_defs_strings():
+    """When both sides use inline $defs/... string shorthand, the lists merge by resolved name."""
+    definitions = {
+        "columns": {
+            "id": {"name": "id", "type": "bigint"},
+            "total": {"name": "total", "type": "decimal"},
+            "region": {"name": "region", "type": "string"},
+        },
+        "tables": {
+            "ops|sales|orders": {
+                "name": "orders",
+                "columns": [
+                    "$defs/columns/id",
+                    "$defs/columns/total",
+                ],
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "tables": [
+                    {
+                        "$ref": "$defs/tables/ops|sales|orders",
+                        "columns": ["$defs/columns/region"],
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    columns = result["catalogs"]["main"]["tables"][0]["columns"]
+    assert [c["name"] for c in columns] == ["id", "total", "region"]
+    assert all(isinstance(c, dict) for c in columns)
+
+
+def test_resolver_merge_strategy_resolves_inline_defs_string_nested_in_sub_dict_list():
+    """An inline $defs/... string inside a list field nested under a sub-dict is pre-resolved correctly."""
+    definitions = {
+        "columns": {
+            "region": {"name": "region", "type": "string"},
+        },
+        "schemas": {
+            "ops|sales": {
+                "name": "sales",
+                "metadata": {
+                    "default_columns": [
+                        {"name": "id", "type": "bigint"},
+                        {"name": "total", "type": "decimal"},
+                    ],
+                },
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ops|sales",
+                        "metadata": {
+                            "default_columns": ["$defs/columns/region"],
+                        },
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    cols = result["catalogs"]["main"]["schemas"][0]["metadata"]["default_columns"]
+    # The inline-string override sits inside `metadata.default_columns`; the resolver must
+    # walk into the sub-dict to pre-resolve it so the list merge sees dicts on both sides
+    # and appends `region` to the inherited columns instead of replacing them.
+    assert [c["name"] for c in cols] == ["id", "total", "region"]
+
+
+def test_resolver_merge_strategy_resolved_override_can_merge_onto_matching_definition_column():
+    """An inline-string override that resolves to a same-name column merges, preserving definition-only fields."""
+    definitions = {
+        "columns": {
+            "total_alt": {"name": "total", "comment": "Overridden"},
+        },
+        "tables": {
+            "ops|sales|orders": {
+                "name": "orders",
+                "columns": [
+                    {"name": "total", "type": "decimal", "comment": "Original"},
+                ],
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "tables": [
+                    {
+                        "$ref": "$defs/tables/ops|sales|orders",
+                        "columns": ["$defs/columns/total_alt"],
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    columns = result["catalogs"]["main"]["tables"][0]["columns"]
+    # By-name merge against the definition's total column: comment is overridden,
+    # but `type` (which only exists on the definition side) is preserved.
+    assert len(columns) == 1
+    assert columns[0]["name"] == "total"
+    assert columns[0]["comment"] == "Overridden"
+    assert columns[0]["type"] == "decimal"
 
 
 # ---------------------------------------------------------------------------

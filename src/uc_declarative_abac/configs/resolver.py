@@ -207,6 +207,43 @@ def _resolve_dict(
     }
 
 
+def _resolve_inline_defs_strings(
+    definitions: dict,
+    node: Any,
+    referenced: set[str],
+    visited: set[str],
+    override_strategy: OverrideStrategy,
+) -> Any:
+    """Recursively resolve only inline ``$defs/...`` strings; leave ``$ref`` dicts intact.
+
+    A bare ``$defs/...`` string carries no sibling identifier keys, so its merge
+    identity can only come from the dict it resolves to. Pre-resolving these strings
+    on both sides of a merge lets ``_merge_lists`` see concrete dicts and align
+    items by ``name`` / ``alias`` as intended — without this, an override like
+    ``columns: [$defs/columns/region]`` against a definition list of dicts would
+    hit the shape-mismatch fallback in ``_merge_lists`` and replace the whole list.
+
+    ``$ref`` dicts are intentionally NOT pre-resolved here: their sibling keys
+    (``alias``, ``name``) are the *intended* merge identifier as written in YAML,
+    so the merge must see them before the ``$ref`` is expanded.
+    """
+    if isinstance(node, dict):
+        if "$ref" in node:
+            return node
+        return {
+            key: _resolve_inline_defs_strings(definitions, value, referenced, visited, override_strategy)
+            for key, value in node.items()
+        }
+    if isinstance(node, list):
+        return [
+            _resolve_inline_defs_strings(definitions, item, referenced, visited, override_strategy)
+            for item in node
+        ]
+    if isinstance(node, str) and node.startswith("$defs/"):
+        return _resolve_inline_defs_string(definitions, node, referenced, visited, override_strategy)
+    return node
+
+
 def _resolve_ref(
     definitions: dict,
     node: dict,
@@ -214,7 +251,15 @@ def _resolve_ref(
     visited: set[str],
     override_strategy: OverrideStrategy,
 ) -> dict:
-    """Look up a $ref, apply overrides, and recursively resolve the result."""
+    """Look up a $ref, apply overrides, and recursively resolve the result.
+
+    Inline ``$defs/...`` strings on both sides are pre-resolved before merging so
+    that list fields using the catalog-style shorthand still merge by identifier
+    (e.g. ``columns: [$defs/columns/region]`` appends to the definition's column
+    list instead of replacing it). ``$ref`` dicts with sibling keys are deferred
+    to the post-merge resolution pass so explicit ``alias`` / ``name`` siblings
+    drive identifier matching as intended.
+    """
     ref_path = node["$ref"]
     if ref_path in visited:
         raise ResolutionError(f"Circular $ref detected: {ref_path}")
@@ -222,8 +267,11 @@ def _resolve_ref(
     referenced.add(ref_path)
     definition = _lookup_definition(definitions, ref_path)
     resolved = copy.deepcopy(definition)
+    resolved = _resolve_inline_defs_strings(definitions, resolved, referenced, visited, override_strategy)
 
     overrides = {k: v for k, v in node.items() if k != "$ref"}
+    overrides = _resolve_inline_defs_strings(definitions, overrides, referenced, visited, override_strategy)
+
     if override_strategy == "replace":
         resolved.update(overrides)
     else:
