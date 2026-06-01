@@ -512,8 +512,8 @@ def test_orchestrator_threads_max_parallel_changes_to_each_executor(
             max_parallel_changes=7,
         )
 
-    for mock_executor in (m_tag, m_priv, m_sec, m_pol, m_gov):
-        # Each executor must have been called with max_parallel_changes=7.
+    for mock_executor in (m_tag, m_priv, m_sec, m_pol):
+        # Each executor (except gov'd tags) must have been called with max_parallel_changes=7.
         assert mock_executor.called, f"Expected {mock_executor} to be called"
         kwargs = mock_executor.call_args.kwargs
         assert kwargs.get("max_parallel_changes") == 7, (

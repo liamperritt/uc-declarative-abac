@@ -299,7 +299,7 @@ def execute_governed_tag_diff(
     change_logger: ChangeLogger,
     dry_run: bool = False,
     force: bool = False,
-    max_parallel_changes: int = 8,
+    max_parallel_changes: int = 1,
 ) -> None:
     """Apply a GovernedTagDiff against the account.
 

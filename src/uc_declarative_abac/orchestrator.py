@@ -298,7 +298,7 @@ def run(
     execute_governed_tag_diff(
         ws_helper, governed_tag_diff, change_logger,
         dry_run=dry_run, force=force,
-        max_parallel_changes=max_parallel_changes,
+        # max_parallel_changes not currently supported for governed tags
     )
 
     if securable_diff.securables_to_create or securable_diff.securables_to_replace or securable_diff.attributes_to_update:
