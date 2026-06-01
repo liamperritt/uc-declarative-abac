@@ -8,7 +8,7 @@ Prerequisites:
   - Databricks CLI profile 'field-eng-east' configured
   - Catalog 'liam_perritt' accessible
   - Warehouse 'e9a9c8bab075bb70' available
-  - Principals exist: group 'uc_declarative_abac_test_team', user 'j.wang@databricks.com',
+  - Principals exist: group 'uc_declarative_abac_test_team', user 'liam.perritt@databricks.com',
     service principal 'sp_uc_declarative_abac_test'
 
 Run with:
@@ -72,10 +72,10 @@ EXPECTED_PRIVILEGES = {
     # Catalog-level policy: USE_CATALOG to test group (matches uc_gov_managed_by=uc_declarative_abac)
     SecurablePrivilege(SecurableType.CATALOG, "liam_perritt", Principal(PrincipalType.GROUP, "uc_governor_test_team", "uc_governor_test_team"), PrivilegeType.USE_CATALOG),
     # Catalog-level policy: SELECT to test user (AND semantics — matches both uc_gov_env=test AND uc_gov_managed_by=uc_declarative_abac)
-    SecurablePrivilege(SecurableType.CATALOG, "liam_perritt", Principal(PrincipalType.USER, "j.wang@databricks.com", "j.wang@databricks.com"), PrivilegeType.SELECT),
+    SecurablePrivilege(SecurableType.CATALOG, "liam_perritt", Principal(PrincipalType.USER, "liam.perritt@databricks.com", "liam.perritt@databricks.com"), PrivilegeType.SELECT),
     # Schema-level policy on default: USE_SCHEMA + SELECT to test user (matches uc_gov_team=platform)
-    SecurablePrivilege(SecurableType.SCHEMA, "liam_perritt.default", Principal(PrincipalType.USER, "j.wang@databricks.com", "j.wang@databricks.com"), PrivilegeType.USE_SCHEMA),
-    SecurablePrivilege(SecurableType.SCHEMA, "liam_perritt.default", Principal(PrincipalType.USER, "j.wang@databricks.com", "j.wang@databricks.com"), PrivilegeType.SELECT),
+    SecurablePrivilege(SecurableType.SCHEMA, "liam_perritt.default", Principal(PrincipalType.USER, "liam.perritt@databricks.com", "liam.perritt@databricks.com"), PrivilegeType.USE_SCHEMA),
+    SecurablePrivilege(SecurableType.SCHEMA, "liam_perritt.default", Principal(PrincipalType.USER, "liam.perritt@databricks.com", "liam.perritt@databricks.com"), PrivilegeType.SELECT),
     # Schema-level policy on lff_sqlserver_bronze: USE_SCHEMA to test SP (matches uc_gov_zone=bronze)
     SecurablePrivilege(SecurableType.SCHEMA, "liam_perritt.lff_sqlserver_bronze", Principal(PrincipalType.SERVICE_PRINCIPAL, "72a5956b-8469-4c26-b414-bfc1a7e279c4", "sp_uc_governor_test"), PrivilegeType.USE_SCHEMA),
     # Table-level policy on dummy_cdc_sink: SELECT to test group (matches uc_gov_pipeline=lff)

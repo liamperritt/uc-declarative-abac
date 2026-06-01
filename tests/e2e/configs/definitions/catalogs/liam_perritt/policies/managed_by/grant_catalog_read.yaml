@@ -8,5 +8,4 @@ definitions:
       privileges:
         - read
       to:
-        - j.wang@databricks.com
         - liam.perritt@databricks.com
