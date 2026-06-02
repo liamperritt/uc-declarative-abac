@@ -84,6 +84,14 @@ inputs:
       is set.
     required: false
     default: '*'
+  retain-tag-prefixes:
+    description: >-
+      Comma-separated tag-key prefixes that must never be removed from
+      securables, even when absent from config (the engine may still add/update
+      them). Defaults to "class." to protect UC auto data classification tags.
+      Set to an empty string to allow removing any unconfigured tag.
+    required: false
+    default: 'class.'
   enable-governed-tag-deletion:
     description: >-
       If "true", permit the engine to delete governed tags (account-level tag
@@ -141,6 +149,7 @@ runs:
         MANAGE_PRIVILEGES_FOR_CATALOGS: ${{ inputs.manage-privileges-for-catalogs }}
         MANAGE_TAGGABLES_FOR_CATALOGS: ${{ inputs.manage-taggables-for-catalogs }}
         CREATE_TAGGABLES_FOR_CATALOGS: ${{ inputs.create-taggables-for-catalogs }}
+        RETAIN_TAG_PREFIXES: ${{ inputs.retain-tag-prefixes }}
         ENABLE_GOVERNED_TAG_DELETION: ${{ inputs.enable-governed-tag-deletion }}
         FORCE: ${{ inputs.force }}
         MAX_PARALLEL_CHANGES: ${{ inputs.max-parallel-changes }}
@@ -174,6 +183,7 @@ runs:
         args+=(--manage-privileges-for-catalogs "$MANAGE_PRIVILEGES_FOR_CATALOGS")
         args+=(--manage-taggables-for-catalogs "$MANAGE_TAGGABLES_FOR_CATALOGS")
         args+=(--create-taggables-for-catalogs "$CREATE_TAGGABLES_FOR_CATALOGS")
+        args+=(--retain-tag-prefixes "$RETAIN_TAG_PREFIXES")
         if [[ "$ENABLE_GOVERNED_TAG_DELETION" == "true" ]]; then
           args+=(--enable-governed-tag-deletion)
         fi

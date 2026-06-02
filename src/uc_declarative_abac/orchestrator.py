@@ -52,6 +52,7 @@ from uc_declarative_abac.tags import (
     compile_desired_tags,
     compute_tag_diff,
     execute_tag_diff,
+    filter_retained_removals,
     TagDiff,
 )
 from uc_declarative_abac.types import SecurableType
@@ -107,6 +108,7 @@ def run(
     manage_privileges_for_catalogs: str = "*",
     manage_taggables_for_catalogs: str = "*",
     create_taggables_for_catalogs: str = "*",
+    retain_tag_prefixes: str = "class.",
     force: bool = False,
     ref_override_strategy: Literal["merge", "replace"] = "merge",
     max_parallel_changes: int = 8,
@@ -129,6 +131,12 @@ def run(
     A filter has no effect unless its paired ``enable_*`` flag is set. Unknown
     catalog names raise ``ValueError`` early. Function securables are never
     catalog-filtered — they're engine-managed and flow through all scopes.
+
+    ``retain_tag_prefixes`` is a comma-separated list of tag-key prefixes the
+    engine must never remove from securables, even when those tags are absent
+    from config (it may still add/update them). Defaults to ``"class."`` to
+    protect UC auto data classification tags. An empty string allows the engine
+    to remove any unconfigured tag.
     """
     # 1. Discover + load + resolve YAML
     paths = discover_yaml_files(config_dir)
@@ -156,6 +164,11 @@ def run(
     taggable_creation_scope = (
         parse_catalog_filter(create_taggables_for_catalogs, catalog_names)
         if enable_taggable_creation else frozenset()
+    )
+    # Tag-key prefixes whose tags are never removed (only added/updated). Empty
+    # string ⇒ no retention. Defaults to "class." to protect auto-classification.
+    retain_prefixes = frozenset(
+        p.strip() for p in retain_tag_prefixes.split(",") if p.strip()
     )
 
     # 2. Compile desired up-front so we can scope downstream fetches:
@@ -255,6 +268,12 @@ def run(
             t for t in actual_tags if catalog_of(t.securable_full_name) not in tag_scope
         }
         tag_diff = compute_tag_diff(in_scope_desired_tags, in_scope_actual_tags)
+        tag_diff, retained_tags = filter_retained_removals(tag_diff, retain_prefixes)
+        if retained_tags:
+            _logger.info(
+                f"  Retaining {len(retained_tags)} unconfigured tag(s) matching "
+                f"prefix(es) {sorted(retain_prefixes)} — these will not be removed"
+            )
         # Post-run tag state used by the privileges compiler: in-scope catalogs
         # reflect the desired (about to be applied); out-of-scope reflect actual
         # (left untouched this run).

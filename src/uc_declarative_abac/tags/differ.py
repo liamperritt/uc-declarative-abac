@@ -6,6 +6,37 @@ from uc_declarative_abac.tags.state import (
 )
 
 
+def filter_retained_removals(
+    diff: TagDiff, retain_prefixes: frozenset[str],
+) -> tuple[TagDiff, set[SecurableTag]]:
+    """Strip removals whose tag key starts with any retained prefix.
+
+    Returns a new ``TagDiff`` whose ``to_remove`` excludes any tag whose
+    ``tag_name`` starts with one of ``retain_prefixes``, together with the set
+    of tags that were retained. ``to_add``, ``to_update`` and ``old_values`` are
+    carried through untouched — retention only blocks removals, never additions
+    or updates. An empty ``retain_prefixes`` is a no-op (the diff is returned
+    unchanged and nothing is retained).
+    """
+    if not retain_prefixes:
+        return diff, set()
+
+    retained = {
+        tag for tag in diff.to_remove
+        if any(tag.tag_name.startswith(prefix) for prefix in retain_prefixes)
+    }
+    if not retained:
+        return diff, set()
+
+    new_diff = TagDiff(
+        to_add=diff.to_add,
+        to_update=diff.to_update,
+        to_remove=diff.to_remove - retained,
+        old_values=diff.old_values,
+    )
+    return new_diff, retained
+
+
 def compute_tag_diff(desired: set[SecurableTag], actual: set[SecurableTag]) -> TagDiff:
     """Compute the diff between desired and actual tags.
 

@@ -72,6 +72,7 @@ The repo ships a composite GitHub Action at `deploy/action.yml` so any other rep
 | `manage-privileges-for-catalogs` | no | `'*'` | Comma-separated catalog names to scope privilege management to (default `'*'` = all configured catalogs). No effect unless `enable-privilege-management` is set |
 | `manage-taggables-for-catalogs` | no | `'*'` | Comma-separated catalog names to scope taggable attribute updates (e.g. owner) to (default `'*'` = all configured catalogs). Function attributes always flow through. No effect unless `enable-taggable-management` is set |
 | `create-taggables-for-catalogs` | no | `'*'` | Comma-separated catalog names to scope creation of missing catalogs/schemas/tables/volumes to (default `'*'` = all configured catalogs). Function creation always flows through. No effect unless `enable-taggable-creation` is set |
+| `retain-tag-prefixes` | no | `'class.'` | Comma-separated tag-key prefixes the engine must never remove from securables, even when absent from config (it may still add/update them). Defaults to `'class.'` to protect UC auto data classification tags. Set to an empty string to allow removing any unconfigured tag |
 | `enable-governed-tag-deletion` | no | `'false'` | Permit the engine to delete governed tags present in the account but absent from config. Requires interactive confirmation unless `force: 'true'` — in CI you must set `force` or the run errors out |
 | `force` | no | `'false'` | Skip every interactive confirmation prompt and auto-confirm destructive actions. Required in CI when any destructive gate is set |
 | `max-parallel-changes` | no | `'8'` | Max worker threads used per (securable_type, change_type) execution batch. Set to `'1'` to disable parallelism and force sequential execution |
@@ -864,7 +865,7 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
   - `--enable-privilege-management` — grant/revoke privileges via `GRANT`/`REVOKE` SQL.
   - `--enable-governed-tag-deletion` — delete governed tags (account-level tag policies) that exist in UC but are absent from config. **High blast radius — deleting a tag policy orphans every object assigned that tag key across the account.** The engine logs the list of tags slated for deletion and requires an interactive `y`/`yes` confirmation at the terminal before issuing any `delete_tag_policy` call. UC itself decides what happens to objects that reference the deleted tag (typically: orphans them); the engine does not scan for references. Pair with `--force` in non-interactive contexts (see below).
 
-  **Per-catalog filtering for the four `--enable-...` flags above:**
+  **Scoping filters for the four `--enable-...` flags above:**
 
   Each of the four management gates above (`tag`, `privilege`, `taggable-management`, `taggable-creation`) accepts a companion `--*-for-catalogs` flag that scopes the gate to a comma-separated list of catalog names. Each defaults to `'*'` (all configured catalogs). A filter is a no-op unless its paired `--enable-...` flag is also set. Unknown catalog names raise `ValueError` early. Function securables are never catalog-filtered — functions are engine-managed and flow through every scope.
 
@@ -872,6 +873,7 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
   - `--manage-privileges-for-catalogs <cat_a,cat_b>` — scope of `--enable-privilege-management`. Grants/revokes are only emitted for in-scope catalogs.
   - `--manage-taggables-for-catalogs <cat_a,cat_b>` — scope of `--enable-taggable-management`. Non-function attribute updates (e.g. `owner`) are only emitted for in-scope catalogs.
   - `--create-taggables-for-catalogs <cat_a,cat_b>` — scope of `--enable-taggable-creation`. Out-of-scope missing securables surface as `NonexistentSecurableError` instead of being created.
+  - `--retain-tag-prefixes <prefix_a,prefix_b>` — comma-separated tag-key prefixes the engine must never remove from securables, even when those tags are absent from config (it may still add/update them). Defaults to `class.`, so tags applied by UC's auto data classification (e.g. `class.phone_number`) are preserved across runs. Pass an empty string (`--retain-tag-prefixes ""`) to override the default and allow the engine to remove any unconfigured tag. No effect unless `--enable-tag-management` is set.
 
   **Auxiliary flag:**
   - `--force` — skip every interactive confirmation prompt and auto-confirm destructive actions. Required in non-interactive CI contexts (GitHub Actions, scripted runs) whenever a destructive gate like `--enable-governed-tag-deletion` is set; if the engine needs to prompt but stdin has no TTY, it aborts with `InteractiveConfirmationRequiredError` directing the user to set this flag. Scope is deliberately broad — future confirmation prompts (e.g. hypothetical securable deletion) will honour it without requiring a new flag.

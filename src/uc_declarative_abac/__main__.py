@@ -90,6 +90,15 @@ def main() -> None:
         help="Comma-separated catalog names to scope creation of missing catalogs/schemas/tables/volumes to (default '*' = all configured catalogs). Function creation always flows through. No effect unless --enable-taggable-creation is set.",
     )
     parser.add_argument(
+        "--retain-tag-prefixes",
+        type=str,
+        default="class.",
+        help="Comma-separated tag-key prefixes that must never be removed from securables, "
+             "even when absent from config (the engine may still add/update them). Defaults "
+             "to 'class.' to protect UC auto data classification tags. Pass an empty string "
+             "to allow removing any unconfigured tag.",
+    )
+    parser.add_argument(
         "--enable-governed-tag-deletion",
         action="store_true",
         default=False,
@@ -143,6 +152,7 @@ def main() -> None:
         manage_privileges_for_catalogs=args.manage_privileges_for_catalogs,
         manage_taggables_for_catalogs=args.manage_taggables_for_catalogs,
         create_taggables_for_catalogs=args.create_taggables_for_catalogs,
+        retain_tag_prefixes=args.retain_tag_prefixes,
         force=args.force,
         ref_override_strategy=args.ref_override_strategy,
         max_parallel_changes=args.max_parallel_changes,

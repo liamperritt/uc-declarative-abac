@@ -16,6 +16,7 @@ definitions:
         - name: batch_table
           tags:
             uc_gov_classification: internal
+            class.name: ~
         - name: test_table
           tags:
             uc_gov_classification: internal
