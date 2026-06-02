@@ -49,7 +49,7 @@ Resolution precedence matches the SDK's unified-auth chain: explicit `--profile`
 > **Required permissions.** Whichever identity the engine authenticates as (typically a service principal for automation) must hold:
 > - **Workspace admin** on the target workspace — needed to execute SQL on the configured warehouse and manage UC object owners.
 > - **Metastore admin** on the target metastore — needed to create/alter catalogs, schemas, tables, volumes, functions, tags, grants, masks, and filters.
-> - **Governed tag manager** on the account — needed to create and update account-level governed tags (tag policies) under `resources.governed_tags`.
+> - **Governed tag creator/manager** on the account — needed to create and update account-level governed tags (tag policies) under `resources.governed_tags`.
 
 ### GitHub Action
 
@@ -77,10 +77,10 @@ The repo ships a composite GitHub Action at `deploy/action.yml` so any other rep
 | `force` | no | `'false'` | Skip every interactive confirmation prompt and auto-confirm destructive actions. Required in CI when any destructive gate is set |
 | `max-parallel-changes` | no | `'8'` | Max worker threads used per (securable_type, change_type) execution batch. Set to `'1'` to disable parallelism and force sequential execution |
 
-**Example workflow in a caller repo** (`.github/workflows/deploy-uc-governance.yml`):
+**Example workflow in a caller repo** (`.github/workflows/deploy-uc-abac-governance.yml`):
 
 ```yaml
-name: Deploy UC governance
+name: Deploy UC ABAC governance
 on:
   pull_request:
     paths: ['configs/**']
@@ -99,7 +99,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: <github-org>/uc-declarative-abac/deploy@v1
+      - uses: liamperritt/uc-declarative-abac/deploy@v0.1.0
         with:
           config-dir: configs/
           warehouse-id: ${{ vars.DATABRICKS_WAREHOUSE_ID }}
