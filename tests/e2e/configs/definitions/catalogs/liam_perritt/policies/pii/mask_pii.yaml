@@ -6,8 +6,9 @@ definitions:
       type: mask
       column:
         alias: pii
-        has_tags:
+        has_any_of_tags:
           uc_gov_pii: '*'
+          uc_gov_pipeline: lff
       function:
         name: fn_mask_pii
         comment: Function that masks the given PII value
@@ -16,4 +17,4 @@ definitions:
             type: string
         return: "CONCAT('####', SUBSTRING(pii, -4))"
       to:
-        - uc_governor_test_team
+        - account users

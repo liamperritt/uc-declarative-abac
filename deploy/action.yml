@@ -28,6 +28,8 @@ inputs:
     description: >-
       If "true", fetch principals from the workspace SCIM API instead of the account
       SCIM proxy. This can be useful for limited test runs against a test workspace.
+      In this mode the account-level system groups "account users" and "account admins"
+      are automatically included, since the workspace SCIM API does not surface them.
     required: false
     default: 'false'
   enable-tag-management:

@@ -74,7 +74,21 @@ def _validate_data_type_prefix(v: str | None) -> str | None:
 
 class PolicyColumnConfig(BaseModel):
     alias: str
-    has_tags: dict[str, str]
+    has_tags: dict[str, str] | None = None
+    has_any_of_tags: dict[str, str] | None = None
+
+    @field_validator("has_tags", "has_any_of_tags", mode="before")
+    @classmethod
+    def _coerce_null_tags(cls, v: dict) -> dict:
+        return _coerce_null_tag_values(v)
+
+    @model_validator(mode="after")
+    def _require_a_tag_match(self) -> "PolicyColumnConfig":
+        if not self.has_tags and not self.has_any_of_tags:
+            raise ValueError(
+                "policy column must specify 'has_tags' or 'has_any_of_tags'"
+            )
+        return self
 
 
 class BasePolicyConfig(BaseModel, ABC):
@@ -85,9 +99,10 @@ class BasePolicyConfig(BaseModel, ABC):
     name: str | None = None
     type: PolicyType
     has_tags: dict[str, str] | None = None
+    has_any_of_tags: dict[str, str] | None = None
     comment: str | None = None
 
-    @field_validator("has_tags", mode="before")
+    @field_validator("has_tags", "has_any_of_tags", mode="before")
     @classmethod
     def _coerce_null_tags(cls, v: dict) -> dict:
         return _coerce_null_tag_values(v)
@@ -132,7 +147,8 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
         column = data["column"]
         if not isinstance(column, dict):
             raise ValueError(
-                "'column' must be a mapping with 'alias' and 'has_tags' fields"
+                "'column' must be a mapping with an 'alias' and "
+                "'has_tags' or 'has_any_of_tags'"
             )
         return {**{k: v for k, v in data.items() if k != "column"}, "columns": [column]}
 

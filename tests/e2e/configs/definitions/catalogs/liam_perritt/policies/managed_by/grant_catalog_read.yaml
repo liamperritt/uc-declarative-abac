@@ -2,7 +2,7 @@ definitions:
   policies:
     managed_by|grant_catalog_read:
       type: grant
-      has_tags:
+      has_any_of_tags:
         uc_gov_managed_by: uc_declarative_abac
         uc_gov_env: test
       privileges:

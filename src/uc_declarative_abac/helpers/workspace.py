@@ -22,6 +22,11 @@ _logger = logging.getLogger("uc_declarative_abac")
 
 _SCIM_PAGE_SIZE = 100
 
+# Account-level system groups that the workspace SCIM API does not surface (they
+# exist only at the account level) but are near-universally useful as policy
+# targets. Appended to the fetched groups in workspace-SCIM mode.
+_ACCOUNT_SYSTEM_GROUPS = frozenset({"account users", "account admins"})
+
 # Account Access Control Proxy ASSIGN role on tag policies.
 # TBD: verify in integration testing; the SDK does not export a constant for
 # this role name. If the API rejects it, call
@@ -140,7 +145,9 @@ class WorkspaceHelper:
             sps = sps_f.result()
 
         self._users = {user.user_name for user in users}
-        self._groups = {group.display_name for group in groups}
+        # The workspace SCIM API does not surface account-level system groups, so
+        # add them — they are near-universally useful as policy targets.
+        self._groups = {group.display_name for group in groups} | _ACCOUNT_SYSTEM_GROUPS
         self._build_sp_map([
             {"displayName": sp.display_name, "applicationId": sp.application_id}
             for sp in sps

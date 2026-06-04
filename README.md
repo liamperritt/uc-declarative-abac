@@ -63,7 +63,7 @@ The repo ships a composite GitHub Action at `deploy/action.yml` so any other rep
 | `warehouse-id` | yes | — | SQL warehouse ID used to execute UC queries |
 | `profile` | no | `''` | Databricks CLI profile name from `~/.databrickscfg`; omit to use env-based auth (see the [Authentication](#authentication) table) |
 | `dry-run` | no | `'false'` | Print planned changes without executing when `'true'` |
-| `use-workspace-scim` | no | `'false'` | Fetch principals from the workspace SCIM API instead of the account SCIM proxy when `'true'` |
+| `use-workspace-scim` | no | `'false'` | Fetch principals from the workspace SCIM API instead of the account SCIM proxy when `'true'`. The account-level system groups `account users` and `account admins` are automatically included, since the workspace SCIM API does not surface them |
 | `enable-tag-management` | no | `'false'` | Permit the engine to create/update/remove tag assignments on securables |
 | `enable-privilege-management` | no | `'false'` | Permit the engine to `GRANT`/`REVOKE` privileges |
 | `enable-taggable-management` | no | `'false'` | Permit the engine to update attributes (owner, etc.) on existing catalogs/schemas/tables/volumes |
@@ -99,7 +99,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: liamperritt/uc-declarative-abac/deploy@v0.1.0
+      - uses: liamperritt/uc-declarative-abac/deploy@v0.2.0
         with:
           config-dir: configs/
           warehouse-id: ${{ vars.DATABRICKS_WAREHOUSE_ID }}
@@ -418,7 +418,8 @@ Policy fields:
 - **`to`** — the principals the policy is applied to (e.g. who sees the masked value, who gets the row filter applied, or who receives the grant).
 - **`except`** — (`mask` and `filter` types only) principals exempted from the policy. Exempted principals see the original unmasked data or unfiltered rows.
 - **`has_tags`** — a tag-match block that scopes the policy to tagged objects (grants scope to securables within the attached level; masks/filters scope to tagged tables). AND semantics across multiple entries. Supports `'*'` wildcard tag values for matching only against the tag key. See the paragraphs below the examples for the full per-type behaviour.
-- **`column`/`columns`** — (`mask` and `filter` types only) a single column, or an ordered list of column slots, each with an `alias` (a local name used to reference the column within this policy) and a `has_tags` block that selects the actual table column by tag. Every column in the list is passed as an argument to the `function` in declaration order, so the list must match the function's parameter signature. For **mask** polciies, the **first** column in the list is the one the mask function is applied to (i.e. it becomes `ON COLUMN <alias>` in the generated SQL) and is also passed as the first argument to the function.
+- **`has_any_of_tags`** — the same as `has_tags`, but with **OR** semantics: an object matches if it carries **any one** of the listed tags. Supports the same `'*'` wildcard values. May be specified on its own or alongside `has_tags`; when both are present they combine as **AND-of-groups** — an object must match **all** `has_tags` **and** at least one `has_any_of_tags`. Available on all three policy types.
+- **`column`/`columns`** — (`mask` and `filter` types only) a single column, or an ordered list of column slots, each with an `alias` (a local name used to reference the column within this policy) and a `has_tags` and/or `has_any_of_tags` block that selects the actual table column by tag (at least one of the two is required per column). Every column in the list is passed as an argument to the `function` in declaration order, so the list must match the function's parameter signature. For **mask** polciies, the **first** column in the list is the one the mask function is applied to (i.e. it becomes `ON COLUMN <alias>` in the generated SQL) and is also passed as the first argument to the function.
 - **`privileges`** — (`grant` type only) the UC privileges to assign. Supported values include the concrete UC privileges (`select`, `modify`, `create_table`, `create_schema`, `create_function`, `create_volume`, `use_catalog`, `use_schema`, `read_volume`, `write_volume`, `execute`, `refresh`, `create_materialized_view`, `create_model`, `create_model_version`, `browse`, `all_privileges`, `external_use_schema`, `manage`) and four shorthand **abstractions** that each expand to a fixed set of UC privileges:
 
   | Abstraction | Expands to |
@@ -533,11 +534,11 @@ definitions:
       expiry_date: 2026-05-01
 ```
 
-For **grant** policies attached at a given level, the optional `has_tags` property is scoped to match only the tagged objects within that level — a policy on a schema only matches the schema and the tables and volumes within that schema; a policy on a table only matches that table. If multiple tags are specified, the policy is only applied to objects that match **all** of the listed tags (AND semantics). Omitting the `has_tags` property for a **grant** policy applies the privileges directly on the object to which the policy is attached.
+For **grant** policies attached at a given level, the optional `has_tags` property is scoped to match only the tagged objects within that level — a policy on a schema only matches the schema and the tables and volumes within that schema; a policy on a table only matches that table. If multiple tags are specified, the policy is only applied to objects that match **all** of the listed tags (AND semantics). Use `has_any_of_tags` instead to match objects that carry **any one** of the listed tags (OR semantics); specifying both restricts to objects matching all `has_tags` **and** at least one `has_any_of_tags`. Omitting both tag-match properties for a **grant** policy applies the privileges directly on the object to which the policy is attached.
 
 For **grant** policies that list `use_catalog` or `use_schema`, the privilege is emitted against the correct parent securable rather than the tag-matched child — a `use_catalog` privilege on a policy matching a schema, table, or volume is emitted on the containing catalog, and a `use_schema` privilege on a policy matching a table or volume is emitted on the containing schema. This cascade is bounded by the policy's attachment level: a policy attached at a schema cannot hand out `use_catalog` on its parent catalog, and a policy attached at a table cannot hand out `use_catalog` or `use_schema` on its ancestors — those targets are outside the policy's scope and are dropped. To grant traverse privileges above the attachment level, attach a separate grant policy at that higher level (or use a tagless catalog-level policy).
 
-If a **mask** or **filter** policy specifies the optional `has_tags` property, this matches against tagged **tables** only. Use the mandatory `columns.[*].has_tags` to match against tagged columns that you want to use for row filtering logic, or that you want to apply column masking to. Similarly, if multiple tags are specified, the policy will only be applied to tables/columns that have **all** tags present (AND semantics). The values of the tagged column are passed as a single parameter to the specified function.
+If a **mask** or **filter** policy specifies the optional `has_tags` property, this matches against tagged **tables** only. Use the mandatory `columns.[*]` tag-match (`has_tags` and/or `has_any_of_tags`) to match against tagged columns that you want to use for row filtering logic, or that you want to apply column masking to. As above, multiple `has_tags` entries require **all** tags to be present (AND semantics), while `has_any_of_tags` matches tables/columns carrying **any one** of the listed tags (OR semantics); the two combine as AND-of-groups when both are given. The values of the tagged column are passed as a single parameter to the specified function.
 
 For mask and filter policies, the `function` property can either be the fully qualified name of an existing UC function (string), or an inline function definition. When defining an inline function, the function resource will be deployed into the same catalog and schema as the policy. If the policy is attached at the catalog level, then the inline function will be deployed to the `default` schema of that catalog. If this results in duplicate functions with identical names, the framework will raise an error. If several policies reference a single reusable function definition as an inline function via `$defs/functions/<fn_name>`, then make sure to override the function `name` field as necessary to avoid a "Duplicate functions" error.
 
@@ -832,7 +833,7 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 
 #### Principal management
 - **Account SCIM proxy** (default) — fetches all account-level principals via `/api/2.0/account/scim/v2/` endpoints with pagination
-- **Workspace SCIM** (optional `--use-workspace-scim`) — fetches workspace-level principals via SDK
+- **Workspace SCIM** (optional `--use-workspace-scim`) — fetches workspace-level principals via SDK, automatically including the account-level system groups `account users` and `account admins` (which the workspace SCIM API does not surface)
 - **Centralised resolution** — `PrincipalResolver` (in `uc_declarative_abac.principals`) bridges YAML display names with UC identifiers. Service principals appear in config by display name but in UC system tables / SDK responses as `application_id`; the resolver normalises both sides to the same `Principal` object so diffs compare correctly across all domains
 - **Per-domain integration** — each domain's `compute_*_diff` accepts the shared `PrincipalResolver` and `ChangeLogger` and resolves principals internally on both desired and actual state before diffing
 - **Runtime guards** — `ensure_resolved(p)` / `ensure_all_resolved(iterable)` assert the resolved invariant at the executor boundary before SQL emission

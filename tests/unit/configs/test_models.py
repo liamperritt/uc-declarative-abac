@@ -330,6 +330,151 @@ def test_grant_policy_config_converts_null_tag_values_to_empty_string():
 
 
 # ---------------------------------------------------------------------------
+# has_any_of_tags (OR semantics)
+# ---------------------------------------------------------------------------
+
+
+def test_grant_policy_config_accepts_has_any_of_tags():
+    """A grant policy may specify has_any_of_tags alongside (or instead of) has_tags."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["team"],
+                            "has_any_of_tags": {"zone": "landing", "env": "prod"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    policy = config.catalogs["my_catalog"].policies[0]
+    assert policy.has_any_of_tags == {"zone": "landing", "env": "prod"}
+
+
+def test_grant_policy_config_converts_null_has_any_of_tags_values_to_empty_string():
+    """has_any_of_tags entries with None values are coerced to empty strings."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["team"],
+                            "has_any_of_tags": {"env": "prod", "operations": None},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    policy = config.catalogs["my_catalog"].policies[0]
+    assert policy.has_any_of_tags["env"] == "prod"
+    assert policy.has_any_of_tags["operations"] == ""
+
+
+def test_grant_policy_config_defaults_has_any_of_tags_to_none():
+    """A grant policy without has_any_of_tags defaults the field to None."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["team"],
+                            "has_tags": {"env": "prod"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    assert config.catalogs["cat"].policies[0].has_any_of_tags is None
+
+
+def test_mask_policy_column_accepts_has_any_of_tags_without_has_tags():
+    """A mask policy column may match with has_any_of_tags alone (has_tags omitted)."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "schemas": [
+                        {
+                            "name": "s",
+                            "tables": [
+                                {
+                                    "name": "t",
+                                    "policies": [
+                                        {
+                                            "name": "p",
+                                            "type": "mask",
+                                            "function": "cat.s.fn",
+                                            "to": ["team"],
+                                            "columns": [
+                                                {
+                                                    "alias": "c",
+                                                    "has_any_of_tags": {
+                                                        "pii": "email",
+                                                        "pii_alt": "ssn",
+                                                    },
+                                                }
+                                            ],
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    column = config.catalogs["cat"].schemas[0].tables[0].policies[0].columns[0]
+    assert column.has_tags is None
+    assert column.has_any_of_tags == {"pii": "email", "pii_alt": "ssn"}
+
+
+def test_mask_policy_column_rejects_neither_tag_field():
+    """A policy column with neither has_tags nor has_any_of_tags is rejected."""
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {
+                    "cat": {
+                        "schemas": [
+                            {
+                                "name": "s",
+                                "tables": [
+                                    {
+                                        "name": "t",
+                                        "policies": [
+                                            {
+                                                "name": "p",
+                                                "type": "mask",
+                                                "function": "cat.s.fn",
+                                                "to": ["team"],
+                                                "columns": [{"alias": "c"}],
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                }
+            }
+        )
+
+
+# ---------------------------------------------------------------------------
 # Expiry date
 # ---------------------------------------------------------------------------
 

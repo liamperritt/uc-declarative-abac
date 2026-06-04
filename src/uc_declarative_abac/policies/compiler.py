@@ -100,11 +100,11 @@ def _ungoverned_tag_keys(
     """Collect every tag key the policy references (policy-level + per-column)
     that is not in ``governed_tag_names``."""
     referenced: set[str] = set()
-    if policy.has_tags:
-        referenced |= set(policy.has_tags.keys())
+    referenced |= set(policy.has_tags or {})
+    referenced |= set(policy.has_any_of_tags or {})
     for col in policy.columns or []:
-        if col.has_tags:
-            referenced |= set(col.has_tags.keys())
+        referenced |= set(col.has_tags or {})
+        referenced |= set(col.has_any_of_tags or {})
     return referenced - governed_tag_names
 
 
@@ -127,7 +127,7 @@ def _build_policy(
         except_principals=tuple(
             Principal(principal_type=PrincipalType.UNKNOWN, name=n) for n in (policy.exceptions or [])
         ),
-        when_condition=_render_when(policy.has_tags),
+        when_condition=_render_when(policy.has_tags, policy.has_any_of_tags),
         match_columns=match_columns,
         on_column=on_column,
         using_columns=using_columns,
@@ -135,14 +135,28 @@ def _build_policy(
     )
 
 
-def _render_when(has_tags: dict[str, str] | None) -> str | None:
-    if not has_tags:
+def _render_when(
+    has_tags: dict[str, str] | None,
+    has_any_of_tags: dict[str, str] | None,
+) -> str | None:
+    return _render_match_expr(has_tags, has_any_of_tags)
+
+
+def _render_match_expr(
+    has_tags: dict[str, str] | None,
+    has_any_of_tags: dict[str, str] | None,
+) -> str | None:
+    """Combine the AND group (``has_tags``) and the OR group (``has_any_of_tags``)
+    into one boolean tag expression. AND atoms come first (sorted by key); the OR
+    group is appended last, parenthesised when it has more than one atom. Returns
+    None when both groups are empty."""
+    parts = [_render_tag_atom(k, v) for k, v in sorted((has_tags or {}).items())]
+    or_atoms = [_render_tag_atom(k, v) for k, v in sorted((has_any_of_tags or {}).items())]
+    if or_atoms:
+        or_expr = " OR ".join(or_atoms)
+        parts.append(f"({or_expr})" if len(or_atoms) > 1 else or_expr)
+    if not parts:
         return None
-    return _render_tag_expr(has_tags)
-
-
-def _render_tag_expr(tags: dict[str, str]) -> str:
-    parts = [_render_tag_atom(k, v) for k, v in sorted(tags.items())]
     return " AND ".join(parts)
 
 
@@ -158,7 +172,7 @@ def _build_match_columns(
     if not columns:
         return ()
     return tuple(
-        (col.alias, _render_tag_expr(col.has_tags or {}))
+        (col.alias, _render_match_expr(col.has_tags, col.has_any_of_tags) or "")
         for col in columns
     )
 

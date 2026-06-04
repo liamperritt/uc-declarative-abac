@@ -241,6 +241,103 @@ def test_policy_compiler_when_is_none_when_has_tags_empty():
 
 
 # ---------------------------------------------------------------------------
+# has_any_of_tags → WHEN clause (OR semantics)
+# ---------------------------------------------------------------------------
+
+
+def test_policy_compiler_renders_single_has_any_of_tags_without_parens():
+    """A single has_any_of_tags entry renders as a bare atom (no parentheses)."""
+    policy_dict = _fgac_policy(has_any_of_tags={"domain": "sales"})
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.when_condition == "has_tag_value('domain', 'sales')"
+
+
+def test_policy_compiler_joins_multiple_has_any_of_tags_with_or():
+    """Multiple has_any_of_tags entries are OR-joined (sorted by key) and parenthesised."""
+    policy_dict = _fgac_policy(has_any_of_tags={"b_tag": "v2", "a_tag": "v1"})
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.when_condition == (
+        "(has_tag_value('a_tag', 'v1') OR has_tag_value('b_tag', 'v2'))"
+    )
+
+
+def test_policy_compiler_renders_has_any_of_tags_with_wildcard():
+    """has_any_of_tags value '*' renders as has_tag(k) (presence only)."""
+    policy_dict = _fgac_policy(has_any_of_tags={"geo": "*", "domain": "sales"})
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.when_condition == (
+        "(has_tag_value('domain', 'sales') OR has_tag('geo'))"
+    )
+
+
+def test_policy_compiler_combines_has_tags_and_has_any_of_tags_with_and():
+    """has_tags (AND group) and has_any_of_tags (parenthesised OR group) combine
+    with AND, AND atoms first."""
+    policy_dict = _fgac_policy(
+        has_tags={"b_tag": "v2", "a_tag": "v1"},
+        has_any_of_tags={"geo": "us", "domain": "sales"},
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.when_condition == (
+        "has_tag_value('a_tag', 'v1') AND has_tag_value('b_tag', 'v2') "
+        "AND (has_tag_value('domain', 'sales') OR has_tag_value('geo', 'us'))"
+    )
+
+
+def test_policy_compiler_columns_match_uses_or_for_has_any_of_tags():
+    """A column with has_any_of_tags OR-joins them in the MATCH COLUMNS condition."""
+    policy_dict = _fgac_policy(
+        columns=[
+            {"alias": "c", "has_any_of_tags": {"b": "v2", "a": "v1"}},
+        ],
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.match_columns == (
+        ("c", "(has_tag_value('a', 'v1') OR has_tag_value('b', 'v2'))"),
+    )
+
+
+def test_policy_compiler_logs_error_when_has_any_of_tags_references_ungoverned_tag():
+    """An ungoverned tag key in has_any_of_tags is detected and logged."""
+    policy_dict = _fgac_policy(has_any_of_tags={"ungoverned_key": "x"})
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+    change_logger = _change_logger()
+
+    result = _compile(config, governed_tag_names={"pii"}, change_logger=change_logger)
+
+    assert change_logger.has_errors
+    exceptions = [e.exception for e in change_logger.errors]
+    assert any(isinstance(e, UngovernedTagError) for e in exceptions)
+    combined = " ".join(str(e) for e in exceptions) + " ".join(
+        e.context for e in change_logger.errors
+    )
+    assert "ungoverned_key" in combined
+    assert result == set()
+
+
+# ---------------------------------------------------------------------------
 # columns → MATCH COLUMNS, on_column, using_columns
 # ---------------------------------------------------------------------------
 

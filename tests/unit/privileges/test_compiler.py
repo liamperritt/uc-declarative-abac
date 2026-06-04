@@ -168,6 +168,118 @@ def test_privilege_compiler_policy_uses_and_semantics_for_multiple_tags():
     }
 
 
+def test_privilege_compiler_policy_uses_or_semantics_for_has_any_of_tags():
+    """A policy with has_any_of_tags: {a: x, b: y} matches an object carrying
+    EITHER tag (OR semantics)."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["team"],
+                            "has_any_of_tags": {"a": "x", "b": "y"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        # table_a has only tag a — should match
+        SecurableTag(SecurableType.TABLE, "cat.s.table_a", "a", "x"),
+        # table_b has only tag b — should match
+        SecurableTag(SecurableType.TABLE, "cat.s.table_b", "b", "y"),
+        # table_none has neither matching tag — should NOT match
+        SecurableTag(SecurableType.TABLE, "cat.s.table_none", "b", "z"),
+    }
+
+    result = _compile(config, desired_tags)
+
+    matched_names = {p.securable_full_name for p in result}
+    assert matched_names == {"cat.s.table_a", "cat.s.table_b"}
+
+
+def test_privilege_compiler_combines_has_tags_and_has_any_of_tags_with_and():
+    """A policy with both fields requires ALL has_tags AND at least one
+    has_any_of_tags (AND-of-groups)."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["team"],
+                            "has_tags": {"env": "prod"},
+                            "has_any_of_tags": {"zone": "landing", "domain": "sales"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        # match: env=prod AND one of the OR group
+        SecurableTag(SecurableType.TABLE, "cat.s.match", "env", "prod"),
+        SecurableTag(SecurableType.TABLE, "cat.s.match", "zone", "landing"),
+        # no match: has the OR tag but missing required env=prod
+        SecurableTag(SecurableType.TABLE, "cat.s.no_env", "zone", "landing"),
+        # no match: has env=prod but none of the OR group
+        SecurableTag(SecurableType.TABLE, "cat.s.no_or", "env", "prod"),
+    }
+
+    result = _compile(config, desired_tags)
+
+    matched_names = {p.securable_full_name for p in result}
+    assert matched_names == {"cat.s.match"}
+
+
+def test_privilege_compiler_skips_grant_policy_with_ungoverned_has_any_of_tags():
+    """An ungoverned tag key in has_any_of_tags drops the policy and logs an error."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["team"],
+                            "has_any_of_tags": {"ungoverned_key": "*"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    desired_tags = {
+        SecurableTag(SecurableType.TABLE, "cat.s.t", "ungoverned_key", "whatever"),
+    }
+    change_logger = _change_logger()
+
+    result = _compile(
+        config,
+        desired_tags,
+        governed_tag_names={"env"},
+        change_logger=change_logger,
+    )
+
+    assert change_logger.has_errors
+    exceptions = [e.exception for e in change_logger.errors]
+    assert any(isinstance(e, UngovernedTagError) for e in exceptions)
+    combined = " ".join(str(e) for e in exceptions) + " ".join(
+        e.context for e in change_logger.errors
+    )
+    assert "ungoverned_key" in combined
+    assert result == set()
+
+
 def test_privilege_compiler_policy_skips_objects_without_matching_tags():
     """Objects without matching tags produce no privileges."""
     config = ResourcesConfig.model_validate(
@@ -1725,6 +1837,91 @@ def test_privilege_compiler_does_not_emit_privileges_on_columns():
     assert column_privileges == set(), (
         f"Expected no COLUMN-targeted privileges, got: {column_privileges}"
     )
+
+
+def test_privilege_compiler_ignores_column_tags_for_use_catalog_and_use_schema_cascade():
+    """Column-level tags are ignored completely by the privileges domain. A grant
+    policy whose tag matches only a COLUMN emits nothing — not even the
+    USE_CATALOG / USE_SCHEMA traverse grants that would otherwise cascade to the
+    column's ancestor catalog and schema."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["use_catalog", "use_schema", "select"],
+                            "to": ["analysts"],
+                            "has_tags": {"pii": "email"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    # The matching tag exists ONLY on a column.
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.COLUMN,
+            securable_full_name="cat.sales.orders.email",
+            tag_name="pii",
+            tag_value="email",
+        ),
+    }
+
+    result = _compile(config, desired_tags)
+
+    assert result == set(), (
+        f"Expected no privileges from a column-only tag match, got: {result}"
+    )
+
+
+def test_privilege_compiler_ignores_column_tags_but_still_matches_sibling_table():
+    """Excluding columns from matching is column-specific: a table carrying the
+    same tag still matches and grants normally, while the column contributes
+    nothing."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["analysts"],
+                            "has_tags": {"pii": "email"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.COLUMN,
+            securable_full_name="cat.sales.orders.email",
+            tag_name="pii",
+            tag_value="email",
+        ),
+        SecurableTag(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="cat.sales.orders",
+            tag_name="pii",
+            tag_value="email",
+        ),
+    }
+
+    result = _compile(config, desired_tags)
+
+    assert result == {
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="cat.sales.orders",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="analysts"),
+            privilege_type=PrivilegeType.SELECT,
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------

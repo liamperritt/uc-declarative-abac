@@ -3,3 +3,5 @@ resources:
     uc_gov_pipeline:
       name: uc_gov_pipeline
       description: Pipeline that produces or owns the tagged securable
+      allowed_values:
+        - lff

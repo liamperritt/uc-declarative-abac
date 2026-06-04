@@ -52,12 +52,11 @@ SECURABLE_TYPE_PRIVILEGE_MAP: dict[SecurableType, set[PrivilegeType]] = {
     SecurableType.SCHEMA: _SCHEMA_PRIVILEGES | _UNIVERSAL_PRIVILEGES,
     SecurableType.TABLE: _TABLE_PRIVILEGES | _UNIVERSAL_PRIVILEGES,
     SecurableType.VOLUME: _VOLUME_PRIVILEGES | _UNIVERSAL_PRIVILEGES,
-    # Unity Catalog does not support column-level GRANT/REVOKE. An empty set
-    # causes the compatibility filter in _emit_privileges to drop every
-    # privilege targeted at a COLUMN, so policies that tag-match a column
-    # contribute no column-level entries to the desired-privileges set. (The
-    # cascade rule still re-routes USE_CATALOG / USE_SCHEMA to the column's
-    # ancestor catalog / schema before this filter runs.)
+    # Unity Catalog does not support column-level GRANT/REVOKE. Column tags are
+    # excluded upstream in _build_tag_index, so a COLUMN securable never reaches
+    # matching or this map. This empty set is kept as a defensive guard: were a
+    # COLUMN target ever to appear, the compatibility filter in _emit_privileges
+    # would drop every privilege targeted at it.
     SecurableType.COLUMN: frozenset(),
 }
 
@@ -109,12 +108,16 @@ def compile_desired_privileges(
 ) -> set[SecurablePrivilege]:
     """Compute desired privileges by matching grant policies against desired tags.
 
-    For each grant policy, finds objects whose tags are a superset of the
-    policy's tags (AND semantics, exact value match). Emits a SecurablePrivilege
-    (with unresolved Principal) for each (matching_object, principal, privilege_type).
+    For each grant policy, finds objects matching the policy's tag predicate:
+    every ``has_tags`` entry must be present (AND semantics) and at least one
+    ``has_any_of_tags`` entry must be present (OR semantics) when that field is
+    set. When both are given they combine as AND-of-groups. Values match exactly,
+    except ``'*'`` which matches any value. Emits a SecurablePrivilege (with
+    unresolved Principal) for each (matching_object, principal, privilege_type).
 
-    Every tag key referenced by a grant policy's ``has_tags`` must appear in
-    ``governed_tag_names`` (the union of desired + actual governed tag names).
+    Every tag key referenced by a grant policy's ``has_tags`` or
+    ``has_any_of_tags`` must appear in ``governed_tag_names`` (the union of
+    desired + actual governed tag names).
     Policies that reference an ungoverned key are skipped (no privileges
     emitted) and an ``UngovernedTagError`` is logged on ``change_logger`` for
     every offender.
@@ -142,7 +145,8 @@ def _drop_policies_with_ungoverned_tags(
     For each dropped policy, log one error per ungoverned key."""
     kept: list[GrantPolicyConfig] = []
     for policy in policies:
-        ungoverned = sorted(set(policy.has_tags or {}) - governed_tag_names)
+        referenced = set(policy.has_tags or {}) | set(policy.has_any_of_tags or {})
+        ungoverned = sorted(referenced - governed_tag_names)
         if not ungoverned:
             kept.append(policy)
             continue
@@ -165,9 +169,17 @@ def _drop_policies_with_ungoverned_tags(
 def _build_tag_index(
     desired_tags: set[SecurableTag],
 ) -> dict[str, tuple[SecurableType, set[tuple[str, str | None]]]]:
-    """Build a mapping from securable_full_name to (type, set of (tag_name, tag_value))."""
+    """Build a mapping from securable_full_name to (type, set of (tag_name, tag_value)).
+
+    Column-level tags are ignored entirely by the privileges domain — UC has no
+    column-level GRANT, and a column tag must not cause any grant (including
+    USE_CATALOG / USE_SCHEMA traverse grants) to be emitted on its ancestors. So
+    COLUMN securables are excluded here and never participate in policy matching.
+    """
     grouped: dict[str, list[SecurableTag]] = defaultdict(list)
     for tag in desired_tags:
+        if tag.securable_type == SecurableType.COLUMN:
+            continue
         grouped[tag.securable_full_name].append(tag)
 
     return {
@@ -287,7 +299,7 @@ def _match_policies(
     """
     result: set[SecurablePrivilege] = set()
     for policy in policies:
-        if not policy.has_tags:
+        if not policy.has_tags and not policy.has_any_of_tags:
             # Tagless policy — grant directly to the attached securable
             sec_type = _policy_securable_type(policy)
             result |= _emit_privileges(sec_type, policy.parent_full_name, policy)
@@ -297,10 +309,24 @@ def _match_policies(
         for full_name, (sec_type, actual_tags) in tag_index.items():
             if not _is_within_scope(full_name, policy):
                 continue
-            if not _tags_match(policy.has_tags, actual_tags):
+            if not _policy_tags_match(policy, actual_tags):
                 continue
             result |= _emit_privileges(sec_type, full_name, policy)
     return result
+
+
+def _policy_tags_match(
+    policy: GrantPolicyConfig,
+    actual_tags: set[tuple[str, str | None]],
+) -> bool:
+    """Return True iff the object satisfies the policy's tag predicate:
+    all ``has_tags`` (AND) and at least one ``has_any_of_tags`` (OR) when set.
+    Combining both fields is AND-of-groups."""
+    if policy.has_tags and not _tags_match(policy.has_tags, actual_tags):
+        return False
+    if policy.has_any_of_tags and not _tags_match_any(policy.has_any_of_tags, actual_tags):
+        return False
+    return True
 
 
 def _tags_match(
@@ -321,3 +347,20 @@ def _tags_match(
         if actual_by_key[key] != required_value:
             return False
     return True
+
+
+def _tags_match_any(
+    required: dict[str, str],
+    actual_tags: set[tuple[str, str | None]],
+) -> bool:
+    """Return True iff at least one required tag is present on the object (OR
+    semantics). A required value of '*' matches any value for that key; any other
+    value must equal the actual value exactly.
+    """
+    actual_by_key = {key: value for key, value in actual_tags}
+    for key, required_value in required.items():
+        if key not in actual_by_key:
+            continue
+        if required_value == _TAG_VALUE_WILDCARD or actual_by_key[key] == required_value:
+            return True
+    return False

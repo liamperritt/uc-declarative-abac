@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from uc_declarative_abac.helpers import WorkspaceHelper
+from uc_declarative_abac.types import PrincipalType
 from uc_declarative_abac.utils import (
     DuplicateServicePrincipalError,
     PrincipalValidationError,
@@ -449,6 +450,64 @@ def test_workspace_helper_uses_sdk_list_when_scope_is_workspace() -> None:
     # Principals should be found
     assert helper.validate_principal("jane@co.com")
     assert helper.validate_principal("data_engineers")
+
+
+def test_workspace_helper_appends_account_system_groups_in_workspace_scim() -> None:
+    """In workspace-SCIM mode the account-level system groups 'account users' and
+    'account admins' are always available, even when the workspace SCIM API
+    returns no groups (it does not surface them)."""
+    client = MagicMock()
+    client.users.list.return_value = []
+    client.groups.list.return_value = []
+    client.service_principals.list.return_value = []
+
+    helper = WorkspaceHelper(client, use_workspace_scim=True)
+    helper.fetch_principals()
+
+    for group_name in ("account users", "account admins"):
+        resolved = helper.resolve_by_name(group_name)
+        assert resolved.principal_type == PrincipalType.GROUP
+        assert resolved.name == group_name
+        assert resolved.identifier == group_name
+
+
+def test_workspace_helper_does_not_duplicate_account_system_group_in_workspace_scim() -> None:
+    """If the workspace SCIM API already returns a system group, it is present
+    exactly once alongside the normal workspace groups."""
+    client = MagicMock()
+    client.users.list.return_value = []
+
+    returned = MagicMock()
+    returned.display_name = "account users"
+    normal = MagicMock()
+    normal.display_name = "data_engineers"
+    client.groups.list.return_value = [returned, normal]
+    client.service_principals.list.return_value = []
+
+    helper = WorkspaceHelper(client, use_workspace_scim=True)
+    helper.fetch_principals()
+
+    principals = helper.get_principals()
+    assert principals["account users"].principal_type == PrincipalType.GROUP
+    assert principals["account admins"].principal_type == PrincipalType.GROUP
+    assert principals["data_engineers"].principal_type == PrincipalType.GROUP
+    group_names = [name for name, p in principals.items() if p.principal_type == PrincipalType.GROUP]
+    assert group_names.count("account users") == 1
+
+
+def test_workspace_helper_does_not_synthesize_account_system_groups_in_account_scim() -> None:
+    """In the default account-SCIM mode the helper does not synthesize the system
+    groups — the account SCIM proxy already returns every account group, so only
+    what the proxy returns is present."""
+    client = _make_workspace_client(
+        groups=[_make_group("data_engineers")],
+    )
+    helper = WorkspaceHelper(client)  # account SCIM (default)
+    helper.fetch_principals()
+
+    assert helper.validate_principal("data_engineers") is True
+    assert helper.validate_principal("account users") is False
+    assert helper.validate_principal("account admins") is False
 
 
 # ---------------------------------------------------------------------------

@@ -39,7 +39,7 @@ def main() -> None:
     parser.add_argument(
         "--use-workspace-scim",
         action="store_true",
-        help="Fetch principals from the workspace SCIM API instead of the account SCIM proxy (default: account)",
+        help="Fetch principals from the workspace SCIM API instead of the account SCIM proxy (default: account). The 'account users' and 'account admins' system groups are automatically included, since the workspace SCIM API does not surface them",
     )
     parser.add_argument(
         "--enable-tag-management",
