@@ -415,7 +415,7 @@ ABAC policies are defined under `definitions: policies:`. Key convention: `<tag_
 - **`grant`** — assigns privileges on objects matching a tag to listed principals; supports `expiry_date`.
 
 Policy fields:
-- **`to`** — the principals the policy is applied to (e.g. who sees the masked value, who gets the row filter applied, or who receives the grant).
+- **`to`** — the principals the policy is applied to (e.g. who sees the masked value, who gets the row filter applied, or who receives the grant). For **`mask`** and **`filter`** policies this is optional and defaults to `account users` (the all-users system group) when omitted; for **`grant`** policies it is required.
 - **`except`** — (`mask` and `filter` types only) principals exempted from the policy. Exempted principals see the original unmasked data or unfiltered rows.
 - **`has_tags`** — a tag-match block that scopes the policy to tagged objects (grants scope to securables within the attached level; masks/filters scope to tagged tables). AND semantics across multiple entries. Supports `'*'` wildcard tag values for matching only against the tag key. See the paragraphs below the examples for the full per-type behaviour.
 - **`has_any_of_tags`** — the same as `has_tags`, but with **OR** semantics: an object matches if it carries **any one** of the listed tags. Supports the same `'*'` wildcard values. May be specified on its own or alongside `has_tags`; when both are present they combine as **AND-of-groups** — an object must match **all** `has_tags` **and** at least one `has_any_of_tags`. Available on all three policy types.

@@ -23,6 +23,10 @@ from uc_declarative_abac.utils import (
 _VALID_DATA_TYPE_PREFIXES = frozenset(ct.value for ct in ColumnTypeName)
 _DATA_TYPE_PREFIX_PATTERN = re.compile(r"^([A-Z_][A-Z0-9_]*)")
 
+# Default principals for a mask/filter (FGAC) policy when 'to' is not provided —
+# the Databricks all-users system group.
+_DEFAULT_FGAC_TO = ("account users",)
+
 
 def _coerce_null_tag_values(tags: dict | None) -> dict | None:
     """Replace None tag values with empty strings."""
@@ -130,9 +134,16 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
     name: str
     type: Union[Literal[PolicyType.MASK], Literal[PolicyType.FILTER]]
     function: str
-    to: list[str]
+    to: list[str] = Field(default_factory=lambda: list(_DEFAULT_FGAC_TO))
     exceptions: list[str] | None = Field(default=None, alias="except")
     columns: list[PolicyColumnConfig] | None = None
+
+    @field_validator("to", mode="before")
+    @classmethod
+    def _default_to_when_null(cls, v):
+        """An explicit null 'to' falls back to the default (the default_factory
+        only covers the omitted-key case)."""
+        return list(_DEFAULT_FGAC_TO) if v is None else v
 
     @model_validator(mode="before")
     @classmethod

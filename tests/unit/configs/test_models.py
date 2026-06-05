@@ -168,6 +168,93 @@ def test_grant_policy_config_rejects_missing_to():
 
 
 # ---------------------------------------------------------------------------
+# FGAC policy 'to' default
+# ---------------------------------------------------------------------------
+
+
+def _fgac_policy_in_table(policy: dict) -> dict:
+    """Wrap a single FGAC policy dict in a minimal resources config (table-attached)."""
+    return {
+        "catalogs": {
+            "cat": {
+                "name": "cat",
+                "schemas": [
+                    {
+                        "name": "s",
+                        "tables": [{"name": "t", "policies": [policy]}],
+                    }
+                ],
+            }
+        }
+    }
+
+
+def test_mask_policy_config_defaults_to_account_users_when_to_omitted():
+    """A mask policy that omits 'to' defaults it to ['account users']."""
+    config = ResourcesConfig.model_validate(
+        _fgac_policy_in_table(
+            {
+                "name": "p",
+                "type": "mask",
+                "function": "cat.s.fn",
+                "columns": [{"alias": "c", "has_tags": {"pii": "email"}}],
+            }
+        )
+    )
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert policy.to == ["account users"]
+
+
+def test_filter_policy_config_defaults_to_account_users_when_to_omitted():
+    """A filter policy that omits 'to' defaults it to ['account users']."""
+    config = ResourcesConfig.model_validate(
+        _fgac_policy_in_table(
+            {
+                "name": "p",
+                "type": "filter",
+                "function": "cat.s.fn",
+            }
+        )
+    )
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert policy.to == ["account users"]
+
+
+def test_fgac_policy_config_defaults_to_account_users_when_to_is_null():
+    """A mask policy with an explicit null 'to' falls back to ['account users']."""
+    config = ResourcesConfig.model_validate(
+        _fgac_policy_in_table(
+            {
+                "name": "p",
+                "type": "mask",
+                "function": "cat.s.fn",
+                "to": None,
+                "columns": [{"alias": "c", "has_tags": {"pii": "email"}}],
+            }
+        )
+    )
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert policy.to == ["account users"]
+
+
+def test_fgac_policy_config_preserves_explicit_to():
+    """An explicitly provided 'to' is preserved, not overwritten by the default."""
+    config = ResourcesConfig.model_validate(
+        _fgac_policy_in_table(
+            {
+                "name": "p",
+                "type": "mask",
+                "function": "cat.s.fn",
+                "to": ["analysts"],
+                "columns": [{"alias": "c", "has_tags": {"pii": "email"}}],
+            }
+        )
+    )
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert policy.to == ["analysts"]
+
+
+# ---------------------------------------------------------------------------
 # CatalogConfig
 # ---------------------------------------------------------------------------
 
