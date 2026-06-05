@@ -422,6 +422,23 @@ def test_policy_compiler_columns_match_uses_and_joined_when_multiple_has_tags():
 
 
 # ---------------------------------------------------------------------------
+# Partial function-name qualification
+# ---------------------------------------------------------------------------
+
+
+def test_policy_compiler_qualifies_partial_function_name():
+    """A policy configured with a bare function name compiles to a fully-qualified
+    function_name using the policy's own catalog/schema."""
+    policy_dict = _fgac_policy(function="mask_fn")
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.function_name == "cat.s.mask_fn"
+
+
+# ---------------------------------------------------------------------------
 # Constant columns
 # ---------------------------------------------------------------------------
 

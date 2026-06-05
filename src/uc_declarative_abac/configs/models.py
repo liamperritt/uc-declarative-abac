@@ -88,6 +88,20 @@ def _validate_data_type_prefix(v: str | None) -> str | None:
     return v
 
 
+def _qualify_function_name(function: str, catalog_name: str, schema_name: str | None) -> str:
+    """Complete a partially-qualified UC function name from the policy's own
+    catalog/schema. 2+ dots → already qualified (unchanged); 1 dot (``schema.fn``)
+    → prepend catalog; 0 dots (bare ``fn``) → prepend catalog.schema. A bare name
+    on a catalog-level policy (no schema) falls back to the ``default`` schema,
+    mirroring where inline catalog-level functions are deployed."""
+    dots = function.count(".")
+    if dots >= 2:
+        return function
+    if dots == 1:
+        return f"{catalog_name}.{function}"
+    return f"{catalog_name}.{schema_name or 'default'}.{function}"
+
+
 class PolicyColumnAliasConfig(BaseModel):
     alias: str
     has_tags: dict[str, str] | None = None
@@ -174,6 +188,16 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
         """An explicit null 'to' falls back to the default (the default_factory
         only covers the omitted-key case)."""
         return list(_DEFAULT_FGAC_TO) if v is None else v
+
+    @model_validator(mode="after")
+    def _qualify_function(self) -> "BaseFgacPolicyConfig":
+        """Complete a partially-qualified ``function`` from the policy's own
+        catalog/schema so a policy definition can be reused across environment
+        catalogs without a ref override."""
+        self.function = _qualify_function_name(
+            self.function, self.catalog_name, self.schema_name
+        )
+        return self
 
     @model_validator(mode="before")
     @classmethod

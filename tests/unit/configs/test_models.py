@@ -1667,6 +1667,57 @@ def test_mask_policy_config_accepts_singular_constant_column():
     assert resolved.columns[0].constant == "EU"
 
 
+# ---------------------------------------------------------------------------
+# Partial function-name qualification
+# ---------------------------------------------------------------------------
+
+
+def _catalog_level_fgac_policy(function: str) -> dict:
+    """A filter policy attached directly at the catalog level (no schema)."""
+    return {
+        "catalogs": {
+            "cat": {
+                "name": "cat",
+                "policies": [{"name": "p", "type": "filter", "function": function}],
+            }
+        }
+    }
+
+
+@pytest.mark.parametrize("policy_type", ["mask", "filter"])
+@pytest.mark.parametrize(
+    "given, expected",
+    [
+        ("fn", "cat.s.fn"),           # bare → catalog.schema.fn
+        ("myschema.fn", "cat.myschema.fn"),  # schema.fn → catalog.schema.fn
+        ("cat.s.fn", "cat.s.fn"),     # already qualified → unchanged
+    ],
+)
+def test_fgac_policy_config_qualifies_partial_function_name(policy_type, given, expected):
+    """A partially-qualified function is completed from the policy's own
+    catalog/schema; a fully-qualified name is preserved."""
+    data = _mask_or_filter_policy_catalog(policy_type, function=given)
+    config = ResourcesConfig.model_validate(data)
+
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert policy.function == expected
+
+
+def test_fgac_policy_config_qualifies_schema_dotted_function_at_catalog_level():
+    """A catalog-level policy with a 'schema.fn' function qualifies against its catalog."""
+    config = ResourcesConfig.model_validate(_catalog_level_fgac_policy("s.fn"))
+
+    assert config.catalogs["cat"].policies[0].function == "cat.s.fn"
+
+
+def test_fgac_policy_config_qualifies_bare_function_at_catalog_level_to_default_schema():
+    """A catalog-level policy has no schema to prepend, so a bare function name
+    falls back to the catalog's 'default' schema."""
+    config = ResourcesConfig.model_validate(_catalog_level_fgac_policy("fn"))
+
+    assert config.catalogs["cat"].policies[0].function == "cat.default.fn"
+
+
 def test_mask_policy_config_accepts_single_column_via_column_alias():
     """A MaskPolicyConfig given a singular 'column' dict is normalised to columns=[<dict>]."""
     data = _mask_or_filter_policy_catalog("mask")
