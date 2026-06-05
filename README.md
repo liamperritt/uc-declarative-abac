@@ -473,10 +473,10 @@ definitions:
       except:
         - customer_pii_viewers
 
-# definitions/policies/trips/filter_trips_by_region.yaml
+# definitions/policies/region/filter_trips_by_region.yaml
 definitions:
   policies:
-    trips|filter_trips_by_region:
+    region|filter_trips_by_region:
       name: filter_trips_by_region
       comment: Users can only see high sensitivity trips to or from their region
       type: filter
