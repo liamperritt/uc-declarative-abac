@@ -567,7 +567,7 @@ resources:
         - address
         - drivers_license
       assigners:
-        - account_users
+        - account users
 
 # resources/governed_tags/classification.yaml
 resources:
