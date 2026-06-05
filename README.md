@@ -446,7 +446,7 @@ definitions:
           pii: email
       function: platform.abac.mask_email_pii
       to:
-        - account_users
+        - account users
       except:
         - pii_viewers
 
@@ -469,7 +469,7 @@ definitions:
             segment: '*'
       function: platform.abac.mask_retail_segment_customer_names_pii
       to:
-        - account_users
+        - account users
       except:
         - customer_pii_viewers
 
@@ -512,9 +512,9 @@ definitions:
             OR (to_region = 'MIDDLE EAST' AND is_account_group_member('middle_east_users')
           )
       to:
-        - account_users
+        - account users
       except:
-        - account_admins
+        - account admins
 
 # definitions/policies/business_area/grant_read_on_sales.yaml
 definitions:
