@@ -2,12 +2,24 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
-from typing import Union
-from datetime import date
+from typing import Annotated, Union
+from datetime import date, datetime
 from typing import Literal
 
 from databricks.sdk.service.catalog import ColumnTypeName
-from pydantic import AliasChoices, BaseModel, Field, computed_field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    Field,
+    Strict,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from uc_declarative_abac.types import (
     AbstractedPrivilegeType,
@@ -42,8 +54,8 @@ def _check_duplicate_names(
     for ``key``. Defaults to the 'name' key so existing call sites are unchanged."""
     seen: set[str] = set()
     for item in items:
-        if isinstance(item, dict):
-            name = item.get(key, "")
+        if isinstance(item, dict) and key in item:
+            name = item[key]
             if name in seen:
                 raise DuplicateResourceError(
                     f"Duplicate {child_label} name '{name}' in {parent_label}"
@@ -76,7 +88,7 @@ def _validate_data_type_prefix(v: str | None) -> str | None:
     return v
 
 
-class PolicyColumnConfig(BaseModel):
+class PolicyColumnAliasConfig(BaseModel):
     alias: str
     has_tags: dict[str, str] | None = None
     has_any_of_tags: dict[str, str] | None = None
@@ -87,12 +99,30 @@ class PolicyColumnConfig(BaseModel):
         return _coerce_null_tag_values(v)
 
     @model_validator(mode="after")
-    def _require_a_tag_match(self) -> "PolicyColumnConfig":
+    def _require_a_tag_match(self) -> "PolicyColumnAliasConfig":
         if not self.has_tags and not self.has_any_of_tags:
             raise ValueError(
                 "policy column must specify 'has_tags' or 'has_any_of_tags'"
             )
         return self
+
+
+# A constant column value, preserving its native YAML-parsed type.
+PolicyColumnConstantValue = Union[
+    StrictBool,
+    StrictInt,
+    StrictFloat,
+    Annotated[datetime, Strict()],
+    Annotated[date, Strict()],
+    StrictStr,
+]
+
+
+class PolicyColumnConstantConfig(BaseModel):
+    constant: PolicyColumnConstantValue
+
+
+PolicyColumnConfig = Union[PolicyColumnAliasConfig, PolicyColumnConstantConfig]
 
 
 class BasePolicyConfig(BaseModel, ABC):
@@ -158,8 +188,8 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
         column = data["column"]
         if not isinstance(column, dict):
             raise ValueError(
-                "'column' must be a mapping with an 'alias' and "
-                "'has_tags' or 'has_any_of_tags'"
+                "'column' must be a mapping — either an 'alias' with "
+                "'has_tags'/'has_any_of_tags', or a 'constant'"
             )
         return {**{k: v for k, v in data.items() if k != "column"}, "columns": [column]}
 
@@ -183,6 +213,15 @@ class MaskPolicyConfig(BaseFgacPolicyConfig):
     def _require_at_least_one_column(self) -> "MaskPolicyConfig":
         if not self.columns:
             raise ValueError("Mask policies must define at least one column")
+        return self
+
+    @model_validator(mode="after")
+    def _require_first_column_is_alias(self) -> "MaskPolicyConfig":
+        if self.columns and not isinstance(self.columns[0], PolicyColumnAliasConfig):
+            raise ValueError(
+                "The first column of a mask policy must be a column alias, "
+                "not a constant (it is the column being masked)"
+            )
         return self
 
 

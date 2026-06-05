@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from datetime import date, datetime
+
+import pytest
+
 from uc_declarative_abac.configs import ResourcesConfig
 from uc_declarative_abac.utils import UngovernedTagError
 from uc_declarative_abac.logger import ChangeLogger
@@ -415,6 +419,141 @@ def test_policy_compiler_columns_match_uses_and_joined_when_multiple_has_tags():
     assert policy.match_columns == (
         ("c", "has_tag_value('a', 'v1') AND has_tag_value('b', 'v2')"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Constant columns
+# ---------------------------------------------------------------------------
+
+
+def test_policy_compiler_mask_constant_column_goes_to_using_as_quoted_string():
+    """A constant column on a mask policy renders into using_columns as a quoted
+    SQL string and is excluded from on_column and match_columns."""
+    policy_dict = _fgac_policy(
+        columns=[
+            {"alias": "email", "has_tags": {"pii": "email"}},
+            {"constant": "REDACTED"},
+        ],
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.on_column == "email"
+    assert policy.using_columns == ("'REDACTED'",)
+    assert policy.match_columns == (
+        ("email", "has_tag_value('pii', 'email')"),
+    )
+
+
+def test_policy_compiler_filter_constant_column_goes_to_using():
+    """A filter policy renders constant columns into using_columns (alias + constant),
+    in declaration order, with no on_column."""
+    policy_dict = _fgac_policy(
+        type="filter",
+        function="cat.default.filter_fn",
+        columns=[
+            {"alias": "region", "has_tags": {"geo": "*"}},
+            {"constant": "EU"},
+        ],
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.on_column is None
+    assert policy.using_columns == ("region", "'EU'")
+    assert policy.match_columns == (
+        ("region", "has_tag('geo')"),
+    )
+
+
+@pytest.mark.parametrize(
+    "constant_value, expected_token",
+    [
+        (True, "TRUE"),
+        (False, "FALSE"),
+        (42, "42"),
+        (3.14, "3.14"),
+        ("REDACTED", "'REDACTED'"),
+        ("42", "'42'"),  # a quoted/string value stays a string
+        # Dates/timestamps render as plain quoted strings — USING COLUMNS does not
+        # accept typed-literal constructors (DATE '...'); the function param casts.
+        (date(2026, 6, 5), "'2026-06-05'"),
+        (datetime(2026, 6, 5, 12, 30, 0), "'2026-06-05 12:30:00'"),
+    ],
+)
+def test_policy_compiler_renders_constant_column_by_type(constant_value, expected_token):
+    """A constant column is rendered as the SQL literal matching its Python type."""
+    policy_dict = _fgac_policy(
+        columns=[
+            {"alias": "email", "has_tags": {"pii": "email"}},
+            {"constant": constant_value},
+        ],
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.using_columns == (expected_token,)
+
+
+def test_policy_compiler_renders_tz_aware_datetime_dropping_timezone():
+    """A timezone-aware datetime constant renders the wall-clock time, dropping tz."""
+    from datetime import timezone
+
+    policy_dict = _fgac_policy(
+        columns=[
+            {"alias": "email", "has_tags": {"pii": "email"}},
+            {"constant": datetime(2026, 6, 5, 12, 30, 0, tzinfo=timezone.utc)},
+        ],
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.using_columns == ("'2026-06-05 12:30:00'",)
+
+
+def test_policy_compiler_constant_column_single_quote_is_escaped():
+    """A constant value containing a single quote is escaped by doubling."""
+    policy_dict = _fgac_policy(
+        columns=[
+            {"alias": "email", "has_tags": {"pii": "email"}},
+            {"constant": "it's"},
+        ],
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.using_columns == ("'it''s'",)
+
+
+def test_policy_compiler_constant_column_does_not_break_ungoverned_tag_check():
+    """A policy mixing a governed-tag alias column with a constant compiles cleanly
+    (the constant is ignored by tag-governance validation)."""
+    policy_dict = _fgac_policy(
+        columns=[
+            {"alias": "email", "has_tags": {"pii": "email"}},
+            {"constant": "REDACTED"},
+        ],
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+    change_logger = _change_logger()
+
+    result = _compile(config, governed_tag_names={"pii"}, change_logger=change_logger)
+
+    assert not change_logger.has_errors
+    (policy,) = result
+    assert policy.using_columns == ("'REDACTED'",)
 
 
 # ---------------------------------------------------------------------------

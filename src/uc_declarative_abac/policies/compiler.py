@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from datetime import date, datetime
+
 from uc_declarative_abac.configs import (
     BaseFgacPolicyConfig,
+    PolicyColumnAliasConfig,
     PolicyColumnConfig,
+    PolicyColumnConstantConfig,
     ResourcesConfig,
 )
 from uc_declarative_abac.utils import (
@@ -103,8 +107,9 @@ def _ungoverned_tag_keys(
     referenced |= set(policy.has_tags or {})
     referenced |= set(policy.has_any_of_tags or {})
     for col in policy.columns or []:
-        referenced |= set(col.has_tags or {})
-        referenced |= set(col.has_any_of_tags or {})
+        if isinstance(col, PolicyColumnAliasConfig):
+            referenced |= set(col.has_tags or {})
+            referenced |= set(col.has_any_of_tags or {})
     return referenced - governed_tag_names
 
 
@@ -169,20 +174,65 @@ def _render_tag_atom(key: str, value: str) -> str:
 def _build_match_columns(
     columns: list[PolicyColumnConfig] | None,
 ) -> tuple[tuple[str, str], ...]:
+    """Build the MATCH COLUMNS entries. Only alias columns are tag-matched;
+    constant columns contribute no entry."""
     if not columns:
         return ()
     return tuple(
         (col.alias, _render_match_expr(col.has_tags, col.has_any_of_tags) or "")
         for col in columns
+        if isinstance(col, PolicyColumnAliasConfig)
     )
+
+
+def _render_sql_constant(value: bool | int | float | str | date | datetime) -> str:
+    """Render a constant column value as a SQL literal for the USING COLUMNS clause.
+
+    That clause only accepts plain literals (strings, numbers, booleans) and column
+    references — NOT typed-literal constructors like ``DATE '...'`` (which the parser
+    reads as a column identifier followed by extra input). So dates and timestamps are
+    rendered as plain single-quoted strings; the target function's parameter type drives
+    any cast. Timestamps drop their timezone.
+
+    bool → TRUE/FALSE, int/float → bare numeric, datetime → '2026-01-01 12:30:00',
+    date → '2026-01-01', str → escaped single-quoted string.
+    Order matters: bool is a subclass of int, and datetime of date.
+    """
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, (int, float)):
+        return repr(value)
+    if isinstance(value, datetime):
+        text = value.strftime("%Y-%m-%d %H:%M:%S")
+    elif isinstance(value, date):
+        text = value.isoformat()
+    else:
+        text = value
+    escaped = text.replace("'", "''")
+    return f"'{escaped}'"
+
+
+def _using_token(col: PolicyColumnConfig) -> str:
+    """The token a column contributes to USING COLUMNS — a SQL literal for a
+    constant column, or the column alias otherwise."""
+    if isinstance(col, PolicyColumnConstantConfig):
+        return _render_sql_constant(col.constant)
+    return col.alias
 
 
 def _split_columns(
     policy: BaseFgacPolicyConfig,
     columns: list[PolicyColumnConfig] | None,
 ) -> tuple[str | None, tuple[str, ...]]:
+    """Split columns into (on_column, using_columns), preserving declaration order.
+
+    For MASK the first column is the masked column (ON COLUMN) and is always an
+    alias (enforced by config validation); the rest become USING COLUMNS args.
+    For FILTER there is no ON COLUMN and all columns become USING args. Constant
+    columns are rendered as SQL literals.
+    """
     if not columns:
         return None, ()
     if policy.type == PolicyType.MASK:
-        return columns[0].alias, tuple(col.alias for col in columns[1:])
-    return None, tuple(col.alias for col in columns)
+        return columns[0].alias, tuple(_using_token(col) for col in columns[1:])
+    return None, tuple(_using_token(col) for col in columns)

@@ -163,6 +163,24 @@ def test_policy_executor_column_mask_includes_using_when_extra_columns():
     _assert_sql_contains(sql, "ON COLUMN c_ssn", "USING COLUMNS (c_region)")
 
 
+def test_policy_executor_column_mask_renders_constant_using_token_verbatim():
+    """A pre-rendered constant token in using_columns is emitted verbatim alongside
+    column aliases."""
+    uc_helper = MagicMock()
+    diff = PolicyDiff(
+        to_create={
+            _make_policy(
+                match_columns=(("email", "has_column_tag_value('pii', 'email')"),),
+                on_column="email",
+                using_columns=("domain", "'REDACTED'"),
+            )
+        }
+    )
+
+    (sql,) = execute_policy_diff(uc_helper, diff, ChangeLogger())
+    _assert_sql_contains(sql, "ON COLUMN email", "USING COLUMNS (domain, 'REDACTED')")
+
+
 def test_policy_executor_column_mask_omits_using_when_no_extras():
     uc_helper = MagicMock()
     diff = PolicyDiff(to_create={_make_policy()})

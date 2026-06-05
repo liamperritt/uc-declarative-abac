@@ -419,7 +419,9 @@ Policy fields:
 - **`except`** — (`mask` and `filter` types only) principals exempted from the policy. Exempted principals see the original unmasked data or unfiltered rows.
 - **`has_tags`** — a tag-match block that scopes the policy to tagged objects (grants scope to securables within the attached level; masks/filters scope to tagged tables). AND semantics across multiple entries. Supports `'*'` wildcard tag values for matching only against the tag key. See the paragraphs below the examples for the full per-type behaviour.
 - **`has_any_of_tags`** — the same as `has_tags`, but with **OR** semantics: an object matches if it carries **any one** of the listed tags. Supports the same `'*'` wildcard values. May be specified on its own or alongside `has_tags`; when both are present they combine as **AND-of-groups** — an object must match **all** `has_tags` **and** at least one `has_any_of_tags`. Available on all three policy types.
-- **`column`/`columns`** — (`mask` and `filter` types only) a single column, or an ordered list of column slots, each with an `alias` (a local name used to reference the column within this policy) and a `has_tags` and/or `has_any_of_tags` block that selects the actual table column by tag (at least one of the two is required per column). Every column in the list is passed as an argument to the `function` in declaration order, so the list must match the function's parameter signature. For **mask** polciies, the **first** column in the list is the one the mask function is applied to (i.e. it becomes `ON COLUMN <alias>` in the generated SQL) and is also passed as the first argument to the function.
+- **`column`/`columns`** — (`mask` and `filter` types only) a single column, or an ordered list of column slots. Every slot is passed as an argument to the `function` in declaration order, so the list must match the function's parameter signature. A slot is one of two kinds:
+  - **alias column** — has an `alias` (a local name used to reference the column within this policy) and a `has_tags` and/or `has_any_of_tags` block that selects the actual table column by tag (at least one of the two is required). For **mask** policies, the **first** column in the list must be an alias column — it is the one the mask function is applied to (i.e. it becomes `ON COLUMN <alias>` in the generated SQL) and is also passed as the first argument to the function.
+  - **constant column** — has a single `constant: <value>` and no tags. It is passed to the function as a constant rather than a table column, which is useful for parameterising a shared masking/filtering function per policy (e.g. a per-policy replacement value).
 - **`privileges`** — (`grant` type only) the UC privileges to assign. Supported values include the concrete UC privileges (`select`, `modify`, `create_table`, `create_schema`, `create_function`, `create_volume`, `use_catalog`, `use_schema`, `read_volume`, `write_volume`, `execute`, `refresh`, `create_materialized_view`, `create_model`, `create_model_version`, `browse`, `all_privileges`, `external_use_schema`, `manage`) and four shorthand **abstractions** that each expand to a fixed set of UC privileges:
 
   | Abstraction | Expands to |
@@ -472,6 +474,24 @@ definitions:
         - account users
       except:
         - customer_pii_viewers
+
+# definitions/policies/pii/mask_with_fixed_value.yaml
+# A shared mask function reused across policies, parameterised by a constant
+# replacement value. The first column (alias) is the masked column; the constant
+# is passed as the second function argument and rendered as 'REDACTED' in SQL.
+definitions:
+  policies:
+    pii|mask_email_redacted:
+      name: mask_email_redacted
+      type: mask
+      columns:
+        - alias: email
+          has_tags:
+            pii: email
+        - constant: REDACTED
+      function: platform.abac.mask_with_value
+      to:
+        - account users
 
 # definitions/policies/region/filter_trips_by_region.yaml
 definitions:

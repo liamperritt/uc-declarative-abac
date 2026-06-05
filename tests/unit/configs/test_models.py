@@ -1551,6 +1551,122 @@ def test_filter_policy_rejects_duplicate_column_aliases():
         ResourcesConfig.model_validate(data)
 
 
+# ---------------------------------------------------------------------------
+# Constant columns
+# ---------------------------------------------------------------------------
+
+
+def test_mask_policy_config_accepts_trailing_constant_column():
+    """A mask policy may have a constant column after the first alias column."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "email", "has_tags": {"pii": "email"}},
+            {"constant": "REDACTED"},
+        ],
+    )
+    config = ResourcesConfig.model_validate(data)
+
+    columns = config.catalogs["cat"].schemas[0].tables[0].policies[0].columns
+    assert columns[0].alias == "email"
+    assert columns[1].constant == "REDACTED"
+
+
+def test_filter_policy_config_accepts_constant_column():
+    """A filter policy may include a constant column."""
+    data = _mask_or_filter_policy_catalog(
+        "filter",
+        columns=[
+            {"alias": "region", "has_tags": {"geo": "*"}},
+            {"constant": "EU"},
+        ],
+    )
+    config = ResourcesConfig.model_validate(data)
+
+    columns = config.catalogs["cat"].schemas[0].tables[0].policies[0].columns
+    assert columns[1].constant == "EU"
+
+
+def test_mask_policy_config_rejects_leading_constant_column():
+    """A mask policy whose first column is a constant is rejected — the masked
+    column must be an alias."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"constant": "REDACTED"},
+            {"alias": "email", "has_tags": {"pii": "email"}},
+        ],
+    )
+    with pytest.raises(ValidationError, match="alias"):
+        ResourcesConfig.model_validate(data)
+
+
+def test_fgac_policy_allows_multiple_constant_columns():
+    """Multiple constant columns do not trigger a false duplicate-alias error."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "email", "has_tags": {"pii": "email"}},
+            {"constant": "REDACTED"},
+            {"constant": "REDACTED"},
+        ],
+    )
+    config = ResourcesConfig.model_validate(data)
+
+    columns = config.catalogs["cat"].schemas[0].tables[0].policies[0].columns
+    assert [getattr(c, "constant", None) for c in columns[1:]] == ["REDACTED", "REDACTED"]
+
+
+def test_policy_column_constant_preserves_native_types():
+    """Non-string constant values keep their native Python type (not coerced to str)."""
+    from datetime import date
+
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "email", "has_tags": {"pii": "email"}},
+            {"constant": 42},
+            {"constant": True},
+            {"constant": date(2026, 6, 5)},
+            {"constant": "42"},
+        ],
+    )
+    config = ResourcesConfig.model_validate(data)
+
+    columns = config.catalogs["cat"].schemas[0].tables[0].policies[0].columns
+    assert columns[1].constant == 42 and not isinstance(columns[1].constant, bool)
+    assert columns[2].constant is True
+    assert columns[3].constant == date(2026, 6, 5)
+    assert columns[4].constant == "42" and isinstance(columns[4].constant, str)
+
+
+def test_policy_column_constant_rejects_null():
+    """A bare null constant is a config error (no concrete value provided)."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "email", "has_tags": {"pii": "email"}},
+            {"constant": None},
+        ],
+    )
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate(data)
+
+
+def test_mask_policy_config_accepts_singular_constant_column():
+    """A singular 'column' shorthand also normalises a constant column."""
+    data = _mask_or_filter_policy_catalog("filter")
+    policy = data["catalogs"]["cat"]["schemas"][0]["tables"][0]["policies"][0]
+    policy.pop("columns")
+    policy["column"] = {"constant": "EU"}
+
+    config = ResourcesConfig.model_validate(data)
+
+    resolved = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert len(resolved.columns) == 1
+    assert resolved.columns[0].constant == "EU"
+
+
 def test_mask_policy_config_accepts_single_column_via_column_alias():
     """A MaskPolicyConfig given a singular 'column' dict is normalised to columns=[<dict>]."""
     data = _mask_or_filter_policy_catalog("mask")

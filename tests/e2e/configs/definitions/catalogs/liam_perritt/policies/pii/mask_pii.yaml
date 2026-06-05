@@ -4,17 +4,20 @@ definitions:
       name: mask_pii
       comment: Policy for masking columns with PII values via 'uc_gov_pii' column tag
       type: mask
-      column:
-        alias: pii
-        has_any_of_tags:
-          uc_gov_pii: '*'
-          uc_gov_pipeline: lff
+      columns:
+        - alias: pii
+          has_any_of_tags:
+            uc_gov_pii: '*'
+            uc_gov_pipeline: lff
+        - constant: '####'
       function:
         name: fn_mask_pii
         comment: Function that masks the given PII value
         parameters:
           - name: pii
             type: string
-        return: "CONCAT('####', SUBSTRING(pii, -4))"
+          - name: mask_value
+            type: string
+        return: "CONCAT(mask_value, SUBSTRING(pii, -4))"
       to:
         - account users
