@@ -793,6 +793,42 @@ def test_uc_helper_securables_query_is_valid_sql():
     assert "'my_catalog'" in sql
 
 
+def test_uc_helper_securables_query_excludes_double_underscore_prefixed_securables():
+    """Hidden, Databricks-managed securables whose name (or any ancestor name)
+    starts with '__' are filtered out via substring(..., 1, 2) != '__' on every
+    name component of all five arms — so a '__' catalog/schema also drops its
+    descendants."""
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.fetch_actual_securables(["my_catalog"])
+
+    sql = _get_executed_sql(client)
+    # Still valid SQL after adding the predicates.
+    _parse_sql(sql)
+
+    lowered = sql.lower()
+    expected_predicates = [
+        "substring(catalog_name, 1, 2) != '__'",      # CATALOG + SCHEMA arms
+        "substring(schema_name, 1, 2) != '__'",       # SCHEMA arm
+        "substring(t.table_catalog, 1, 2) != '__'",   # TABLE arm
+        "substring(t.table_schema, 1, 2) != '__'",
+        "substring(t.table_name, 1, 2) != '__'",
+        "substring(volume_catalog, 1, 2) != '__'",    # VOLUME arm
+        "substring(volume_schema, 1, 2) != '__'",
+        "substring(volume_name, 1, 2) != '__'",
+        "substring(r.specific_catalog, 1, 2) != '__'",  # FUNCTION arm
+        "substring(r.specific_schema, 1, 2) != '__'",
+        "substring(r.specific_name, 1, 2) != '__'",
+    ]
+    for predicate in expected_predicates:
+        assert predicate in lowered, f"Expected predicate {predicate!r} in SQL: {sql}"
+
+    # Every name component across all five arms is covered:
+    # 1 (catalog) + 2 (schema) + 3 (table) + 3 (volume) + 3 (function) = 12.
+    assert lowered.count("!= '__'") == 12
+
+
 def test_uc_helper_returns_empty_securables_for_empty_catalog_list():
     """Passing an empty catalog list returns empty sets without executing any SQL."""
     client = _make_mock_workspace_client()

@@ -238,6 +238,15 @@ def _build_securables_query(catalog_names: list[str]) -> str:
     ``location`` is intentionally **not** fetched — it is a creation-only
     attribute (see ``compile_desired_securables``); the engine never diffs or
     alters it.
+
+    Every arm excludes the ``information_schema`` schema and any securable whose
+    name — or the name of an ancestor catalog/schema — starts with ``__`` (the
+    ``substring(..., 1, 2) != '__'`` predicates). These are internal, hidden,
+    Databricks-managed system securables (e.g. predictive-optimization
+    materializations) that must never appear in a diff; filtering every name
+    component means a ``__``-prefixed catalog or schema also drops its
+    descendants. (``substring`` is used rather than ``startswith`` — the latter
+    is not reliably available as a SQL function across DBSQL warehouse channels.)
     """
     in_clause = _build_catalog_in_clause(catalog_names)
     parts = [
@@ -245,14 +254,16 @@ def _build_securables_query(catalog_names: list[str]) -> str:
         f"catalog_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, NULL AS columns, "
         f"comment AS comment, NULL AS table_type "
         f"FROM system.information_schema.catalogs "
-        f"WHERE catalog_name IN {in_clause}",
+        f"WHERE catalog_name IN {in_clause} "
+        f"AND substring(catalog_name, 1, 2) != '__'",
 
         f"SELECT 'SCHEMA' AS securable_type, "
         f"concat(catalog_name, '.', schema_name) AS full_name, "
         f"schema_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, NULL AS columns, "
         f"comment AS comment, NULL AS table_type "
         f"FROM system.information_schema.schemata "
-        f"WHERE catalog_name IN {in_clause} AND schema_name != 'information_schema'",
+        f"WHERE catalog_name IN {in_clause} AND schema_name != 'information_schema' "
+        f"AND substring(catalog_name, 1, 2) != '__' AND substring(schema_name, 1, 2) != '__'",
 
         f"SELECT 'TABLE' AS securable_type, "
         f"concat(t.table_catalog, '.', t.table_schema, '.', t.table_name) AS full_name, "
@@ -265,6 +276,7 @@ def _build_securables_query(catalog_names: list[str]) -> str:
         f"AND t.table_schema = c.table_schema "
         f"AND t.table_name = c.table_name "
         f"WHERE t.table_catalog IN {in_clause} AND t.table_schema != 'information_schema' "
+        f"AND substring(t.table_catalog, 1, 2) != '__' AND substring(t.table_schema, 1, 2) != '__' AND substring(t.table_name, 1, 2) != '__' "
         f"GROUP BY t.table_catalog, t.table_schema, t.table_name, t.table_owner, t.comment, t.table_type",
 
         f"SELECT 'VOLUME' AS securable_type, "
@@ -272,7 +284,8 @@ def _build_securables_query(catalog_names: list[str]) -> str:
         f"volume_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, NULL AS columns, "
         f"comment AS comment, NULL AS table_type "
         f"FROM system.information_schema.volumes "
-        f"WHERE volume_catalog IN {in_clause} AND volume_schema != 'information_schema'",
+        f"WHERE volume_catalog IN {in_clause} AND volume_schema != 'information_schema' "
+        f"AND substring(volume_catalog, 1, 2) != '__' AND substring(volume_schema, 1, 2) != '__' AND substring(volume_name, 1, 2) != '__'",
 
         f"SELECT 'FUNCTION' AS securable_type, "
         f"concat(r.specific_catalog, '.', r.specific_schema, '.', r.specific_name) AS full_name, "
@@ -287,6 +300,7 @@ def _build_securables_query(catalog_names: list[str]) -> str:
         f"AND r.specific_schema = p.specific_schema "
         f"AND r.specific_name = p.specific_name "
         f"WHERE r.specific_catalog IN {in_clause} AND r.routine_type = 'FUNCTION' AND r.specific_schema != 'information_schema' "
+        f"AND substring(r.specific_catalog, 1, 2) != '__' AND substring(r.specific_schema, 1, 2) != '__' AND substring(r.specific_name, 1, 2) != '__' "
         f"GROUP BY r.specific_catalog, r.specific_schema, r.specific_name, r.routine_owner, r.routine_definition, r.comment",
     ]
     return " UNION ALL ".join(parts)
@@ -459,7 +473,7 @@ def _extract_using_columns(using) -> tuple[str, ...]:
 _RFA_KIND_TO_SDK_TYPE: dict[str, DestinationType] = {
     "EMAIL": DestinationType.EMAIL,
     "URL": DestinationType.URL,
-    "GUID": DestinationType.GENERIC_WEBHOOK,  # GUIDs leave destination_type unset; the RFA API infers it.
+    "GUID": DestinationType.GENERIC_WEBHOOK,
 }
 
 
