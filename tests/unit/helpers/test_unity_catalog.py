@@ -1696,6 +1696,42 @@ def test_uc_helper_fetch_actual_policies_normalises_column_mask():
     )
 
 
+def test_uc_helper_fetch_actual_policies_preserves_constant_using_columns():
+    """Constant (non-column) USING COLUMNS arguments are kept verbatim and in
+    declaration order. Previously they were dropped (only column aliases survived),
+    so a policy with a constant arg looked different from the desired state on every
+    run and was perpetually replaced."""
+    config = _config_with_policy("table")
+    client = MagicMock()
+    info = _make_column_mask_policy_info()
+    # USING COLUMNS (domain, '####') — a column reference followed by a constant.
+    info.column_mask.using = [
+        MagicMock(alias="domain", constant=None),
+        MagicMock(alias=None, constant="'####'"),
+    ]
+    client.policies.list_policies.return_value = iter([info])
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    (policy,) = helper.fetch_actual_policies(config)
+    assert policy.using_columns == ("domain", "'####'")
+
+
+def test_uc_helper_fetch_actual_policies_preserves_constant_using_columns_in_row_filter():
+    """The same constant preservation applies to row-filter policies."""
+    config = _config_with_policy("table", type="filter", function="cat.default.filter_fn")
+    client = MagicMock()
+    info = _make_row_filter_policy_info()
+    info.row_filter.using = [
+        MagicMock(alias="region", constant=None),
+        MagicMock(alias=None, constant="'EU'"),
+    ]
+    client.policies.list_policies.return_value = iter([info])
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    (policy,) = helper.fetch_actual_policies(config)
+    assert policy.using_columns == ("region", "'EU'")
+
+
 def test_uc_helper_fetch_actual_policies_normalises_row_filter():
     config = _config_with_policy("table", type="filter", function="cat.default.filter_fn")
     client = MagicMock()

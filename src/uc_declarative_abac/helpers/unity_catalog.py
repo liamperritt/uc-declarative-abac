@@ -465,9 +465,20 @@ def _normalise_policy_info(
 
 
 def _extract_using_columns(using) -> tuple[str, ...]:
+    """Project each USING COLUMNS function argument to its token, preserving
+    declaration order. A column reference contributes its ``alias``; a constant
+    contributes its ``constant`` literal verbatim (e.g. ``'####'``) — the same
+    text the compiler emits, so constant args don't look changed on every run.
+    """
     if not using:
         return ()
-    return tuple(arg.alias for arg in using if arg.alias is not None)
+    tokens: list[str] = []
+    for arg in using:
+        if arg.alias is not None:
+            tokens.append(arg.alias)
+        elif arg.constant is not None:
+            tokens.append(arg.constant)
+    return tuple(tokens)
 
 
 _RFA_KIND_TO_SDK_TYPE: dict[str, DestinationType] = {
