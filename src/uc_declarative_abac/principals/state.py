@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from uc_declarative_abac.types import PrincipalType
 
@@ -26,6 +26,7 @@ class Principal:
     principal_type: PrincipalType
     identifier: str = ""
     name: str = ""
+    groups: frozenset[str] = field(default=frozenset(), compare=False)  # Not currently used
 
     def __post_init__(self) -> None:
         if not self.name and not self.identifier:

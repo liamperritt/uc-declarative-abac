@@ -242,11 +242,9 @@ def _build_securables_query(catalog_names: list[str]) -> str:
     Every arm excludes the ``information_schema`` schema and any securable whose
     name — or the name of an ancestor catalog/schema — starts with ``__`` (the
     ``substring(..., 1, 2) != '__'`` predicates). These are internal, hidden,
-    Databricks-managed system securables (e.g. predictive-optimization
-    materializations) that must never appear in a diff; filtering every name
-    component means a ``__``-prefixed catalog or schema also drops its
-    descendants. (``substring`` is used rather than ``startswith`` — the latter
-    is not reliably available as a SQL function across DBSQL warehouse channels.)
+    Databricks-managed system securables (e.g. SDP materializations) that must
+    never appear in a diff; filtering every name component means a
+    ``__``-prefixed catalog or schema also drops its descendants.
     """
     in_clause = _build_catalog_in_clause(catalog_names)
     parts = [
