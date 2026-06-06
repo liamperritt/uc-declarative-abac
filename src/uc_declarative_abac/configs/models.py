@@ -8,6 +8,7 @@ from typing import Literal
 
 from databricks.sdk.service.catalog import ColumnTypeName
 from pydantic import (
+    AfterValidator,
     AliasChoices,
     BaseModel,
     Field,
@@ -100,6 +101,24 @@ def _qualify_function_name(function: str, catalog_name: str, schema_name: str | 
     if dots == 1:
         return f"{catalog_name}.{function}"
     return f"{catalog_name}.{schema_name or 'default'}.{function}"
+
+
+def _reject_double_underscore_name(name: str) -> str:
+    """Reject securable names that start with ``__``. That prefix is reserved for
+    internal, hidden, Databricks-managed system securables (which the engine also
+    excludes from actual state), so it must never be declared in config."""
+    if name.startswith("__"):
+        raise ValueError(
+            f"securable name '{name}' must not start with '__' — that prefix is "
+            f"reserved for internal, Databricks-managed system securables"
+        )
+    return name
+
+
+# A securable name that may not start with the reserved ``__`` prefix. Applied to
+# catalogs/schemas/tables/volumes/functions via BaseSecurableConfig; columns opt
+# out by redeclaring ``name`` as a plain ``str``.
+SecurableName = Annotated[str, AfterValidator(_reject_double_underscore_name)]
 
 
 class PolicyColumnAliasConfig(BaseModel):
@@ -284,7 +303,7 @@ class ParameterConfig(BaseModel):
 
 class BaseSecurableConfig(BaseModel, ABC):
     """Base model for all UC securable configs. Not intended to be instantiated directly."""
-    name: str
+    name: SecurableName
     owner: str | None = None
     comment: str | None = None
     tags: dict[str, str] | None = None
@@ -346,6 +365,8 @@ class FunctionConfig(BaseSecurableConfig):
 
 
 class ColumnConfig(BaseTaggableConfig):
+    # Columns are exempt from the '__' securable-name restriction
+    name: str
     catalog_name: str
     schema_name: str
     table_name: str

@@ -2083,3 +2083,66 @@ def test_column_config_rejects_rfa_destinations_entirely():
         })
     rendered = str(exc_info.value).lower()
     assert "rfa_destinations" in rendered or "not supported on columns" in rendered
+
+
+# ---------------------------------------------------------------------------
+# Securable name '__' prefix rejection (reserved for hidden system securables)
+# ---------------------------------------------------------------------------
+
+
+def test_resources_config_rejects_catalog_name_with_double_underscore():
+    """A catalog whose name starts with '__' is rejected."""
+    with pytest.raises(ValidationError, match="__"):
+        ResourcesConfig.model_validate({"catalogs": {"__hidden": {}}})
+
+
+def test_resources_config_rejects_schema_name_with_double_underscore():
+    """A schema whose name starts with '__' is rejected."""
+    with pytest.raises(ValidationError, match="__"):
+        ResourcesConfig.model_validate(
+            {"catalogs": {"cat": {"schemas": [{"name": "__hidden"}]}}}
+        )
+
+
+def test_resources_config_rejects_table_name_with_double_underscore():
+    """A table whose name starts with '__' is rejected."""
+    with pytest.raises(ValidationError, match="__"):
+        ResourcesConfig.model_validate(
+            {"catalogs": {"cat": {"schemas": [{"name": "s", "tables": [{"name": "__t"}]}]}}}
+        )
+
+
+def test_resources_config_rejects_volume_name_with_double_underscore():
+    """A volume whose name starts with '__' is rejected."""
+    with pytest.raises(ValidationError, match="__"):
+        ResourcesConfig.model_validate(
+            {"catalogs": {"cat": {"schemas": [{"name": "s", "volumes": [{"name": "__v"}]}]}}}
+        )
+
+
+def test_resources_config_rejects_function_name_with_double_underscore():
+    """A function whose name starts with '__' is rejected."""
+    with pytest.raises(ValidationError, match="__"):
+        ResourcesConfig.model_validate(
+            {"catalogs": {"cat": {"schemas": [
+                {"name": "s", "functions": [{"name": "__fn", "return": "1"}]}
+            ]}}}
+        )
+
+
+def test_resources_config_allows_column_name_with_double_underscore():
+    """Columns are exempt from the '__' securable-name restriction."""
+    config = ResourcesConfig.model_validate(
+        {"catalogs": {"cat": {"schemas": [
+            {"name": "s", "tables": [{"name": "t", "columns": [{"name": "__c"}]}]}
+        ]}}}
+    )
+    assert config.catalogs["cat"].schemas[0].tables[0].columns[0].name == "__c"
+
+
+def test_resources_config_allows_single_underscore_securable_name():
+    """A single leading underscore is allowed — only '__' is reserved."""
+    config = ResourcesConfig.model_validate(
+        {"catalogs": {"cat": {"schemas": [{"name": "_staging"}]}}}
+    )
+    assert config.catalogs["cat"].schemas[0].name == "_staging"
