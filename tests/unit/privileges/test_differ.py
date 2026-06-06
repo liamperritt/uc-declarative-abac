@@ -24,8 +24,70 @@ def _resolver() -> PrincipalResolver:
     return PrincipalResolver(MagicMock())
 
 
+def _failing_resolver() -> PrincipalResolver:
+    """A resolver whose ws_helper raises PrincipalValidationError for any lookup —
+    used to exercise the unresolvable-principal paths."""
+    from uc_declarative_abac.utils import PrincipalValidationError
+
+    ws_helper = MagicMock()
+    ws_helper.resolve_by_name.side_effect = lambda n: (_ for _ in ()).throw(
+        PrincipalValidationError(f"Principal not found: {n}")
+    )
+    ws_helper.resolve_by_identifier.side_effect = lambda i: (_ for _ in ()).throw(
+        PrincipalValidationError(f"Principal not found by identifier: {i}")
+    )
+    return PrincipalResolver(ws_helper)
+
+
 def _change_logger() -> ChangeLogger:
     return ChangeLogger()
+
+
+# ---------------------------------------------------------------------------
+# Unresolvable principals: actual-side is a non-fatal warning, desired-side fatal
+# ---------------------------------------------------------------------------
+
+
+def test_privilege_differ_actual_side_unresolvable_principal_is_warning_not_error():
+    """A privilege in ACTUAL state whose identifier-only principal (e.g. a
+    Databricks system service principal) cannot be resolved is dropped from
+    to_revoke and logged as a non-fatal warning — the run does not fail."""
+    actual = {
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="liam_perritt.lff_sqlserver_bronze",
+            principal=Principal(
+                PrincipalType.UNKNOWN, identifier="dd4ded68-9a65-4df9-ad70-832718d36e10"
+            ),
+            privilege_type=PrivilegeType.USE_SCHEMA,
+        ),
+    }
+    change_logger = _change_logger()
+
+    diff = compute_privilege_diff(set(), actual, _failing_resolver(), change_logger)
+
+    assert diff.to_revoke == set()
+    assert change_logger.has_errors is False
+    assert len(change_logger.warnings) == 1
+
+
+def test_privilege_differ_desired_side_unresolvable_principal_is_error():
+    """A privilege in DESIRED state (config) whose name-only principal cannot be
+    resolved is dropped from to_grant and logged as a fatal error."""
+    desired = {
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="cat.sales",
+            principal=Principal(PrincipalType.UNKNOWN, name="typo_group"),
+            privilege_type=PrivilegeType.USE_SCHEMA,
+        ),
+    }
+    change_logger = _change_logger()
+
+    diff = compute_privilege_diff(desired, set(), _failing_resolver(), change_logger)
+
+    assert diff.to_grant == set()
+    assert change_logger.has_errors is True
 
 
 # ---------------------------------------------------------------------------

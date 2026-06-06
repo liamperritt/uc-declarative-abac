@@ -12,7 +12,6 @@ if TYPE_CHECKING:
     from uc_declarative_abac.privileges import SecurablePrivilege
     from uc_declarative_abac.securables import (
         AttributeUpdate,
-        Function,
         Securable,
     )
     from uc_declarative_abac.tags import SecurableTag
@@ -158,6 +157,7 @@ class ChangeLogger:
         self._governed_tag_assigners_granted = 0
         self._governed_tag_assigners_revoked = 0
         self._errors: list[ExecutionError] = []
+        self._warnings: list[ExecutionError] = []
 
     @property
     def errors(self) -> list[ExecutionError]:
@@ -165,14 +165,27 @@ class ChangeLogger:
         return list(self._errors)
 
     @property
+    def warnings(self) -> list[ExecutionError]:
+        """Return all collected non-fatal warnings."""
+        return list(self._warnings)
+
+    @property
     def has_errors(self) -> bool:
-        """Return True if any execution errors have been collected."""
+        """Return True if any (fatal) execution errors have been collected.
+
+        Warnings are deliberately excluded — they do not fail the run."""
         return len(self._errors) > 0
 
     def log_error(self, error: ExecutionError) -> None:
         """Collect an execution error (displayed later via log_errors_section)."""
         self._errors.append(error)
         self._logger.error(f"  ! Error: {error.context}: {error.exception}")
+
+    def log_warning(self, warning: ExecutionError) -> None:
+        """Collect a non-fatal warning. Unlike log_error, this does not set
+        has_errors, so a warning-only run still succeeds."""
+        self._warnings.append(warning)
+        self._logger.warning(f"  ~ Warning: {warning.context}: {warning.exception}")
 
     def log_summary(self) -> None:
         """Log a summary of all changes recorded so far."""
@@ -452,7 +465,12 @@ class ChangeLogger:
     # ------------------------------------------------------------------
 
     def log_errors_section(self) -> None:
-        """Log collected errors as a dedicated section."""
+        """Log collected errors and non-fatal warnings as dedicated sections."""
+        if self._warnings:
+            self.log_section_header("Warnings")
+            for warning in self._warnings:
+                self._logger.info(f"  ~ {warning.context}: {warning.exception}")
+            self._logger.info("")
         if not self._errors:
             return
         self.log_section_header("Errors")
@@ -526,6 +544,8 @@ class ChangeLogger:
             sections.append("Policies: " + ", ".join(policy_parts))
         if priv_parts:
             sections.append("Privileges: " + ", ".join(priv_parts))
+        if self._warnings:
+            sections.append(f"Warnings: {len(self._warnings)} skipped")
         if self._errors:
             sections.append(f"Errors: {len(self._errors)} failed")
 
@@ -587,6 +607,8 @@ class ChangeLogger:
             sections.append("Policies: " + ", ".join(policy_parts))
         if priv_parts:
             sections.append("Privileges: " + ", ".join(priv_parts))
+        if self._warnings:
+            sections.append(f"Warnings: {len(self._warnings)} skipped")
 
         if sections:
             return " | ".join(sections) + " (dry run — no changes applied)"

@@ -310,6 +310,34 @@ def test_change_logger_has_errors_returns_false_when_no_errors() -> None:
     assert cl.has_errors is False
 
 
+def test_change_logger_log_warning_is_non_fatal() -> None:
+    """log_warning() collects a warning that does NOT set has_errors and is
+    surfaced separately from errors."""
+    cl, _ = _make_change_logger()
+    warning = _make_execution_error(statement="Resolve principal for USE_SCHEMA on SCHEMA c.s")
+
+    cl.log_warning(warning)
+
+    assert cl.has_errors is False
+    assert cl.errors == []
+    assert cl.warnings == [warning]
+
+
+def test_change_logger_summary_includes_warning_count() -> None:
+    """Summary reports the warning count when warnings have been logged, without
+    reporting any failures."""
+    cl, mock_logger = _make_change_logger()
+    cl.log_tag_add(_make_tag(tag_name="a"))
+    cl.log_warning(_make_execution_error(statement="skip1"))
+    cl.log_warning(_make_execution_error(statement="skip2"))
+
+    cl.log_summary()
+
+    summary = _info_messages(mock_logger)[-1].lower()
+    assert "2" in summary and "warning" in summary
+    assert "failed" not in summary
+
+
 def test_change_logger_has_errors_returns_true_after_error_logged() -> None:
     """has_errors is True after at least one error is logged."""
     cl, _ = _make_change_logger()

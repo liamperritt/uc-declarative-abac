@@ -10,11 +10,11 @@ from uc_declarative_abac.governed_tags.state import (
     GovernedTag,
     GovernedTagDiff,
 )
-from uc_declarative_abac.utils import (
-    ExecutionError,
-    PrincipalValidationError,
+from uc_declarative_abac.utils import PrincipalValidationError
+from uc_declarative_abac.principals import (
+    log_principal_resolution_failure,
+    Principal,
 )
-from uc_declarative_abac.principals import Principal
 
 
 
@@ -26,21 +26,24 @@ def _resolve_governed_tag_assigners(
     """Return a new GovernedTag with each principal in ``assigners``
     resolved against the workspace.
 
-    Principals that fail to resolve are logged once via
-    ``change_logger.log_error`` and dropped from the tag's assigners
-    — consistent with the privileges differ. Dropping (rather than aborting)
-    means an unresolvable principal won't trigger a phantom grant/revoke on
-    every run; the operator surfaces the error and fixes the config.
+    Principals that fail to resolve are logged and dropped from the tag's
+    assigners — consistent with the privileges differ. Dropping (rather than
+    aborting) means an unresolvable principal won't trigger a phantom
+    grant/revoke on every run. Actual-state (UC-side) principals route to a
+    non-fatal warning; config-side principals route to a fatal error (see
+    log_principal_resolution_failure).
     """
     resolved: set[Principal] = set()
     for principal in tag.assigners:
         try:
             resolved.add(resolver.resolve_principal(principal))
         except PrincipalValidationError as exc:
-            change_logger.log_error(ExecutionError(
-                context=f"Resolve principal for ASSIGN on GOVERNED_TAG {tag.name}",
-                exception=exc,
-            ))
+            log_principal_resolution_failure(
+                change_logger,
+                f"Resolve principal for ASSIGN on GOVERNED_TAG {tag.name}",
+                principal,
+                exc,
+            )
             continue
     return GovernedTag(
         name=tag.name,

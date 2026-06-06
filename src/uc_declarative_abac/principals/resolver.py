@@ -4,9 +4,11 @@ from typing import TYPE_CHECKING, Iterable
 
 if TYPE_CHECKING:
     from uc_declarative_abac.helpers import WorkspaceHelper
+    from uc_declarative_abac.logger import ChangeLogger
 
 from uc_declarative_abac.principals.state import Principal
 from uc_declarative_abac.utils import (
+    ExecutionError,
     OrchestratorError,
     PrincipalValidationError,
 )
@@ -53,6 +55,29 @@ class PrincipalResolver:
         if failures:
             raise PrincipalValidationError(_format_batch_failure(failures))
         return resolved
+
+
+def log_principal_resolution_failure(
+    change_logger: "ChangeLogger",
+    context: str,
+    principal: Principal,
+    exc: PrincipalValidationError,
+) -> None:
+    """Route a principal-resolution failure to the change logger.
+
+    Actual-state (UC-side, identifier-only) principals are logged as non-fatal
+    warnings: they aren't part of the config and can't be acted on — e.g.
+    Databricks-managed system/application service principals (predictive
+    optimization, scheduled dashboard refresh) that appear in system tables but
+    aren't returned by SCIM. They are dropped from the diff without failing the
+    run. Config-side (desired) failures — which carry a display name — remain
+    fatal errors so config typos still surface loudly.
+    """
+    error = ExecutionError(context=context, exception=exc)
+    if principal.identifier and not principal.name:
+        change_logger.log_warning(error)
+    else:
+        change_logger.log_error(error)
 
 
 def ensure_resolved(principal: Principal) -> Principal:

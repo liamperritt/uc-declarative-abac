@@ -225,6 +225,26 @@ def test_governed_tag_differ_resolves_actual_principals_via_identifier():
     assert diff.to_create == set()
 
 
+def test_governed_tag_differ_actual_side_unresolvable_assigner_is_warning():
+    """An actual-state assigner (identifier-only, e.g. a Databricks system service
+    principal) that can't be resolved is dropped and logged as a non-fatal warning,
+    not a fatal error."""
+    desired = {_gt("pii", "PII", {"name"}, assigners=set())}
+    actual = {_gt(
+        "pii", "PII", {"name"},
+        assigners={Principal(PrincipalType.UNKNOWN, identifier="dd4ded68-9a65-4df9-ad70-832718d36e10")},
+    )}
+    resolver = _resolver()  # nothing resolves
+    change_logger = ChangeLogger()
+
+    diff = compute_governed_tag_diff(desired, actual, resolver, change_logger)
+
+    assert diff.to_create == set()
+    assert diff.to_update == set()
+    assert change_logger.has_errors is False
+    assert len(change_logger.warnings) == 1
+
+
 def test_governed_tag_differ_drops_unresolvable_principal_and_logs_error():
     """A principal that can't be resolved is dropped from the tag's assigners
     and logged via change_logger.log_error — it never produces a phantom diff."""

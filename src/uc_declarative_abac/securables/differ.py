@@ -7,6 +7,7 @@ if TYPE_CHECKING:
     from uc_declarative_abac.logger import ChangeLogger
     from uc_declarative_abac.principals import PrincipalResolver
 
+from uc_declarative_abac.principals import log_principal_resolution_failure
 from uc_declarative_abac.securables.state import (
     AttributeUpdate,
     Column,
@@ -152,10 +153,12 @@ def _resolve_attribute_owners(
         try:
             resolved_owner = resolver.resolve_principal(attr.owner)
         except PrincipalValidationError as exc:
-            change_logger.log_error(ExecutionError(
-                context=f"Resolve owner for {attr.securable_type.value} {attr.full_name}",
-                exception=exc,
-            ))
+            log_principal_resolution_failure(
+                change_logger,
+                f"Resolve owner for {attr.securable_type.value} {attr.full_name}",
+                attr.owner,
+                exc,
+            )
             result.add(dataclasses.replace(attr, owner=None))
             continue
         result.add(dataclasses.replace(attr, owner=resolved_owner))

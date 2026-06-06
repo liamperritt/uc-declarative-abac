@@ -59,9 +59,9 @@ A single frozen dataclass at `src/uc_declarative_abac/principals/state.py` repre
 
 `Principal.identifier` and `.name` default to the empty string. An unresolved Principal from config has `name` truthy and `identifier` empty; an unresolved Principal from UC state is the reverse. The resolver picks its lookup direction by checking which field is truthy.
 
-Unknown principals are collected as `ExecutionError(PrincipalValidationError)` on `ChangeLogger` and excluded from the diff; they do not abort the run.
+Unknown principals are excluded from the diff and logged via `principals.log_principal_resolution_failure(...)`, which routes by origin: **config-side** (desired) failures — the Principal carries a `name` — are fatal `ExecutionError`s (a YAML typo must fail the run); **actual-state** (UC-side) failures — the Principal carries only an `identifier` — are non-fatal **warnings** (`ChangeLogger.log_warning`, not counted by `has_errors`), so the run still succeeds. This is deliberate: Databricks-managed system/application service principals (predictive optimization, scheduled dashboard refresh) appear in the system tables as `application_id` UUIDs, aren't returned by SCIM, and can't be acted on — they must not fail deployments. Either way the affected row is dropped from the diff.
 
-The privileges, securables, and policies differs all follow this pattern — see the private `_resolve_*` function at the bottom of each `<domain>/differ.py`. No separate per-domain `resolver.py` modules exist.
+The privileges, securables, and governed-tags differs all follow this pattern — see the private `_resolve_*` function at the bottom of each `<domain>/differ.py`. (Policy `to`/`except` principals are always config-side, so the policies differ keeps fatal-error semantics.) No separate per-domain `resolver.py` modules exist.
 
 ## YAML config conventions
 

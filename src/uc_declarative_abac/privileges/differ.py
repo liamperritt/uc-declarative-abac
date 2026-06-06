@@ -6,14 +6,12 @@ if TYPE_CHECKING:
     from uc_declarative_abac.logger import ChangeLogger
     from uc_declarative_abac.principals import PrincipalResolver
 
+from uc_declarative_abac.principals import log_principal_resolution_failure
 from uc_declarative_abac.privileges.state import (
     PrivilegeDiff,
     SecurablePrivilege,
 )
-from uc_declarative_abac.utils import (
-    ExecutionError,
-    PrincipalValidationError,
-)
+from uc_declarative_abac.utils import PrincipalValidationError
 
 
 
@@ -48,18 +46,22 @@ def _resolve_privileges(
 ) -> set[SecurablePrivilege]:
     """Resolve the principal on each SecurablePrivilege.
 
-    Privileges whose principal cannot be resolved are logged once via
-    change_logger.log_error and excluded from the result.
+    Privileges whose principal cannot be resolved are logged and excluded from
+    the result. Actual-state (UC-side) principals route to a non-fatal warning;
+    config-side principals route to a fatal error (see
+    log_principal_resolution_failure).
     """
     result: set[SecurablePrivilege] = set()
     for priv in unresolved:
         try:
             resolved_principal = resolver.resolve_principal(priv.principal)
         except PrincipalValidationError as exc:
-            change_logger.log_error(ExecutionError(
-                context=f"Resolve principal for {priv.privilege_type.value.upper()} on {priv.securable_type.value} {priv.securable_full_name}",
-                exception=exc,
-            ))
+            log_principal_resolution_failure(
+                change_logger,
+                f"Resolve principal for {priv.privilege_type.value.upper()} on {priv.securable_type.value} {priv.securable_full_name}",
+                priv.principal,
+                exc,
+            )
             continue
         result.add(SecurablePrivilege(
             securable_type=priv.securable_type,

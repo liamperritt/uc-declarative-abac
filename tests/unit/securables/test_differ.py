@@ -98,6 +98,35 @@ def test_securable_differ_detects_owner_change():
     ]
 
 
+def test_securable_differ_actual_side_unresolvable_owner_is_warning():
+    """An actual-state owner (identifier-only, e.g. a Databricks system service
+    principal) that can't be resolved is cleared and logged as a non-fatal warning,
+    not a fatal error — so it doesn't fail the run."""
+    from uc_declarative_abac.utils import PrincipalValidationError
+
+    ws_helper = MagicMock()
+    ws_helper.resolve_by_identifier.side_effect = lambda i: (_ for _ in ()).throw(
+        PrincipalValidationError(f"Principal not found by identifier: {i}")
+    )
+    resolver = PrincipalResolver(ws_helper)
+    change_logger = _change_logger()
+
+    actual_attrs = {
+        SecurableAttributes(
+            securable_type=SecurableType.SCHEMA,
+            full_name="liam_perritt.lff_sqlserver_bronze",
+            owner=Principal(
+                PrincipalType.UNKNOWN, identifier="dd4ded68-9a65-4df9-ad70-832718d36e10"
+            ),
+        )
+    }
+
+    compute_securable_diff(set(), actual_attrs, set(), set(), resolver, change_logger)
+
+    assert change_logger.has_errors is False
+    assert len(change_logger.warnings) == 1
+
+
 def test_securable_differ_ignores_matching_owners():
     """Identical owners produce no attribute updates."""
     attrs = {
