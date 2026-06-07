@@ -271,6 +271,39 @@ def test_uc_helper_tags_query_groups_by_securable_columns_per_arm():
     assert "group by catalog_name, schema_name, table_name, column_name" in sql
 
 
+def test_uc_helper_tags_query_excludes_double_underscore_prefixed_securables():
+    """Tags on hidden, Databricks-managed securables whose name (or any ancestor
+    name) starts with '__' are filtered out via substring(..., 1, 2) != '__'. Every
+    name component of every arm is covered EXCEPT the COLUMN arm's column_name —
+    columns may legitimately be '__'-prefixed, so their tags are preserved as long
+    as the parent catalog/schema/table is not itself hidden."""
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.fetch_actual_tags(["my_catalog"])
+
+    sql = _get_executed_sql(client)
+    # Still valid SQL after adding the predicates.
+    _parse_sql(sql)
+
+    lowered = sql.lower()
+    expected_predicates = [
+        "substring(catalog_name, 1, 2) != '__'",     # CATALOG/SCHEMA/TABLE/VOLUME/COLUMN arms
+        "substring(schema_name, 1, 2) != '__'",       # all arms except CATALOG
+        "substring(table_name, 1, 2) != '__'",        # TABLE + COLUMN arms
+        "substring(volume_name, 1, 2) != '__'",       # VOLUME arm
+    ]
+    for predicate in expected_predicates:
+        assert predicate in lowered, f"Expected predicate {predicate!r} in SQL: {sql}"
+
+    # The COLUMN arm's leaf column name is exempt — columns may start with '__'.
+    assert "substring(column_name, 1, 2) != '__'" not in lowered
+
+    # Name components covered:
+    #   catalog(1) + schema(2) + table(3) + volume(3) + column(3, no column_name) = 12.
+    assert lowered.count("!= '__'") == 12
+
+
 # ---------------------------------------------------------------------------
 # UnityCatalogHelper.fetch_actual_privileges
 # ---------------------------------------------------------------------------
@@ -389,6 +422,38 @@ def test_uc_helper_privileges_query_is_valid_sql():
 
     # Catalog name should appear in WHERE clause
     assert "'my_catalog'" in sql
+
+
+def test_uc_helper_privileges_query_excludes_double_underscore_prefixed_securables():
+    """Privileges on hidden, Databricks-managed securables whose name (or any
+    ancestor name) starts with '__' are filtered out via substring(..., 1, 2) != '__'
+    on every name component of all four arms — matching the securables fetch."""
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.fetch_actual_privileges(["my_catalog"])
+
+    sql = _get_executed_sql(client)
+    # Still valid SQL after adding the predicates.
+    _parse_sql(sql)
+
+    lowered = sql.lower()
+    expected_predicates = [
+        "substring(catalog_name, 1, 2) != '__'",       # CATALOG + SCHEMA arms
+        "substring(schema_name, 1, 2) != '__'",        # SCHEMA arm
+        "substring(table_catalog, 1, 2) != '__'",      # TABLE arm
+        "substring(table_schema, 1, 2) != '__'",
+        "substring(table_name, 1, 2) != '__'",
+        "substring(volume_catalog, 1, 2) != '__'",     # VOLUME arm
+        "substring(volume_schema, 1, 2) != '__'",
+        "substring(volume_name, 1, 2) != '__'",
+    ]
+    for predicate in expected_predicates:
+        assert predicate in lowered, f"Expected predicate {predicate!r} in SQL: {sql}"
+
+    # Every name component across all four arms is covered:
+    # 1 (catalog) + 2 (schema) + 3 (table) + 3 (volume) = 9.
+    assert lowered.count("!= '__'") == 9
 
 
 # ---------------------------------------------------------------------------

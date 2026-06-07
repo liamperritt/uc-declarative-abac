@@ -67,6 +67,14 @@ def _build_catalog_in_clause(catalog_names: list[str]) -> str:
     return f"({quoted})"
 
 
+def _build_double_underscore_filter(name_columns: list[str]) -> str:
+    """Build the AND-chained predicate that excludes securables whose name — or any
+    ancestor's name — starts with ``__`` (hidden, Databricks-managed system
+    securables, e.g. SDP materializations). Returns a clause fragment beginning with
+    `` AND `` ready to append to an existing WHERE, or `''` if no columns are given."""
+    return "".join(f" AND substring({col}, 1, 2) != '__'" for col in name_columns)
+
+
 def _build_tags_query(catalog_names: list[str]) -> str:
     """Build a UNION ALL query across all tag system tables for the given catalogs.
 
@@ -76,38 +84,47 @@ def _build_tags_query(catalog_names: list[str]) -> str:
     link transfer/parse cost — from one row per tag down to one row per securable.
     """
     in_clause = _build_catalog_in_clause(catalog_names)
+    # Each arm carries the name components to exclude when '__'-prefixed. The COLUMN
+    # arm deliberately omits ``column_name`` — columns may legitimately start with
+    # ``__``, so their tags are kept as long as the parent table/schema/catalog isn't
+    # itself hidden.
     arms = {
-        "catalog_tags": ("CATALOG", "catalog_name", "catalog_name", False),
+        "catalog_tags": ("CATALOG", "catalog_name", "catalog_name", False, ["catalog_name"]),
         "schema_tags": (
             "SCHEMA",
             "concat(catalog_name, '.', schema_name)",
             "catalog_name, schema_name",
             True,
+            ["catalog_name", "schema_name"],
         ),
         "table_tags": (
             "TABLE",
             "concat(catalog_name, '.', schema_name, '.', table_name)",
             "catalog_name, schema_name, table_name",
             True,
+            ["catalog_name", "schema_name", "table_name"],
         ),
         "volume_tags": (
             "VOLUME",
             "concat(catalog_name, '.', schema_name, '.', volume_name)",
             "catalog_name, schema_name, volume_name",
             True,
+            ["catalog_name", "schema_name", "volume_name"],
         ),
         "column_tags": (
             "COLUMN",
             "concat(catalog_name, '.', schema_name, '.', table_name, '.', column_name)",
             "catalog_name, schema_name, table_name, column_name",
             True,
+            ["catalog_name", "schema_name", "table_name"],
         ),
     }
     parts = []
-    for table, (sec_type, full_name_expr, group_by_cols, has_schema) in arms.items():
+    for table, (sec_type, full_name_expr, group_by_cols, has_schema, name_cols) in arms.items():
         where = f"catalog_name IN {in_clause}"
         if has_schema:
             where += " AND schema_name != 'information_schema'"
+        where += _build_double_underscore_filter(name_cols)
         parts.append(
             f"SELECT '{sec_type}' AS securable_type, "
             f"{full_name_expr} AS securable_full_name, "
@@ -126,25 +143,29 @@ def _build_privileges_query(catalog_names: list[str]) -> str:
         f"SELECT 'CATALOG' AS securable_type, catalog_name AS securable_full_name, "
         f"grantee, privilege_type "
         f"FROM system.information_schema.catalog_privileges "
-        f"WHERE catalog_name IN {in_clause} AND inherited_from = 'NONE'",
+        f"WHERE catalog_name IN {in_clause} AND inherited_from = 'NONE'"
+        f"{_build_double_underscore_filter(['catalog_name'])}",
 
         f"SELECT 'SCHEMA' AS securable_type, "
         f"concat(catalog_name, '.', schema_name) AS securable_full_name, "
         f"grantee, privilege_type "
         f"FROM system.information_schema.schema_privileges "
-        f"WHERE catalog_name IN {in_clause} AND inherited_from = 'NONE' AND schema_name != 'information_schema'",
+        f"WHERE catalog_name IN {in_clause} AND inherited_from = 'NONE' AND schema_name != 'information_schema'"
+        f"{_build_double_underscore_filter(['catalog_name', 'schema_name'])}",
 
         f"SELECT 'TABLE' AS securable_type, "
         f"concat(table_catalog, '.', table_schema, '.', table_name) AS securable_full_name, "
         f"grantee, privilege_type "
         f"FROM system.information_schema.table_privileges "
-        f"WHERE table_catalog IN {in_clause} AND inherited_from = 'NONE' AND table_schema != 'information_schema'",
+        f"WHERE table_catalog IN {in_clause} AND inherited_from = 'NONE' AND table_schema != 'information_schema'"
+        f"{_build_double_underscore_filter(['table_catalog', 'table_schema', 'table_name'])}",
 
         f"SELECT 'VOLUME' AS securable_type, "
         f"concat(volume_catalog, '.', volume_schema, '.', volume_name) AS securable_full_name, "
         f"grantee, privilege_type "
         f"FROM system.information_schema.volume_privileges "
-        f"WHERE volume_catalog IN {in_clause} AND inherited_from = 'NONE' AND volume_schema != 'information_schema'",
+        f"WHERE volume_catalog IN {in_clause} AND inherited_from = 'NONE' AND volume_schema != 'information_schema'"
+        f"{_build_double_underscore_filter(['volume_catalog', 'volume_schema', 'volume_name'])}",
     ]
     inner = " UNION ALL ".join(parts)
     return f"SELECT securable_type, securable_full_name, grantee, privilege_type FROM ({inner})"
@@ -252,16 +273,16 @@ def _build_securables_query(catalog_names: list[str]) -> str:
         f"catalog_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, NULL AS columns, "
         f"comment AS comment, NULL AS table_type "
         f"FROM system.information_schema.catalogs "
-        f"WHERE catalog_name IN {in_clause} "
-        f"AND substring(catalog_name, 1, 2) != '__'",
+        f"WHERE catalog_name IN {in_clause}"
+        f"{_build_double_underscore_filter(['catalog_name'])}",
 
         f"SELECT 'SCHEMA' AS securable_type, "
         f"concat(catalog_name, '.', schema_name) AS full_name, "
         f"schema_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, NULL AS columns, "
         f"comment AS comment, NULL AS table_type "
         f"FROM system.information_schema.schemata "
-        f"WHERE catalog_name IN {in_clause} AND schema_name != 'information_schema' "
-        f"AND substring(catalog_name, 1, 2) != '__' AND substring(schema_name, 1, 2) != '__'",
+        f"WHERE catalog_name IN {in_clause} AND schema_name != 'information_schema'"
+        f"{_build_double_underscore_filter(['catalog_name', 'schema_name'])}",
 
         f"SELECT 'TABLE' AS securable_type, "
         f"concat(t.table_catalog, '.', t.table_schema, '.', t.table_name) AS full_name, "
@@ -273,8 +294,8 @@ def _build_securables_query(catalog_names: list[str]) -> str:
         f"ON t.table_catalog = c.table_catalog "
         f"AND t.table_schema = c.table_schema "
         f"AND t.table_name = c.table_name "
-        f"WHERE t.table_catalog IN {in_clause} AND t.table_schema != 'information_schema' "
-        f"AND substring(t.table_catalog, 1, 2) != '__' AND substring(t.table_schema, 1, 2) != '__' AND substring(t.table_name, 1, 2) != '__' "
+        f"WHERE t.table_catalog IN {in_clause} AND t.table_schema != 'information_schema'"
+        f"{_build_double_underscore_filter(['t.table_catalog', 't.table_schema', 't.table_name'])} "
         f"GROUP BY t.table_catalog, t.table_schema, t.table_name, t.table_owner, t.comment, t.table_type",
 
         f"SELECT 'VOLUME' AS securable_type, "
@@ -282,8 +303,8 @@ def _build_securables_query(catalog_names: list[str]) -> str:
         f"volume_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, NULL AS columns, "
         f"comment AS comment, NULL AS table_type "
         f"FROM system.information_schema.volumes "
-        f"WHERE volume_catalog IN {in_clause} AND volume_schema != 'information_schema' "
-        f"AND substring(volume_catalog, 1, 2) != '__' AND substring(volume_schema, 1, 2) != '__' AND substring(volume_name, 1, 2) != '__'",
+        f"WHERE volume_catalog IN {in_clause} AND volume_schema != 'information_schema'"
+        f"{_build_double_underscore_filter(['volume_catalog', 'volume_schema', 'volume_name'])}",
 
         f"SELECT 'FUNCTION' AS securable_type, "
         f"concat(r.specific_catalog, '.', r.specific_schema, '.', r.specific_name) AS full_name, "
@@ -297,8 +318,8 @@ def _build_securables_query(catalog_names: list[str]) -> str:
         f"ON r.specific_catalog = p.specific_catalog "
         f"AND r.specific_schema = p.specific_schema "
         f"AND r.specific_name = p.specific_name "
-        f"WHERE r.specific_catalog IN {in_clause} AND r.routine_type = 'FUNCTION' AND r.specific_schema != 'information_schema' "
-        f"AND substring(r.specific_catalog, 1, 2) != '__' AND substring(r.specific_schema, 1, 2) != '__' AND substring(r.specific_name, 1, 2) != '__' "
+        f"WHERE r.specific_catalog IN {in_clause} AND r.routine_type = 'FUNCTION' AND r.specific_schema != 'information_schema'"
+        f"{_build_double_underscore_filter(['r.specific_catalog', 'r.specific_schema', 'r.specific_name'])} "
         f"GROUP BY r.specific_catalog, r.specific_schema, r.specific_name, r.routine_owner, r.routine_definition, r.comment",
     ]
     return " UNION ALL ".join(parts)

@@ -185,7 +185,7 @@ class ChangeLogger:
         """Collect a non-fatal warning. Unlike log_error, this does not set
         has_errors, so a warning-only run still succeeds."""
         self._warnings.append(warning)
-        self._logger.warning(f"  ~ Warning: {warning.context}: {warning.exception}")
+        self._logger.warning(f"  ! Warning: {warning.context}: {warning.exception}")
 
     def log_summary(self) -> None:
         """Log a summary of all changes recorded so far."""
@@ -469,7 +469,7 @@ class ChangeLogger:
         if self._warnings:
             self.log_section_header("Warnings")
             for warning in self._warnings:
-                self._logger.info(f"  ~ {warning.context}: {warning.exception}")
+                self._logger.info(f"  ! Warning: {warning.context}: {warning.exception}")
             self._logger.info("")
         if not self._errors:
             return

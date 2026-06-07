@@ -338,6 +338,32 @@ def test_change_logger_summary_includes_warning_count() -> None:
     assert "failed" not in summary
 
 
+def test_change_logger_log_warning_uses_warning_prefix_not_tilde() -> None:
+    """Warnings are prefixed with '! Warning' (not '~', which is reserved for
+    update/replace change lines)."""
+    cl, mock_logger = _make_change_logger()
+
+    cl.log_warning(_make_execution_error(statement="resolve principal foo"))
+
+    emitted = " ".join(
+        c.args[0] for c in mock_logger.warning.call_args_list if c.args
+    )
+    assert "! Warning" in emitted
+    assert "~" not in emitted
+
+
+def test_change_logger_warnings_section_uses_warning_prefix_not_tilde() -> None:
+    """The Warnings section detail lines are prefixed with '! Warning', never '~'."""
+    cl, mock_logger = _make_change_logger()
+    cl.log_warning(_make_execution_error(statement="resolve principal bar"))
+
+    cl.log_errors_section()
+
+    section = "\n".join(_info_messages(mock_logger))
+    assert "! Warning" in section
+    assert "~" not in section
+
+
 def test_change_logger_has_errors_returns_true_after_error_logged() -> None:
     """has_errors is True after at least one error is logged."""
     cl, _ = _make_change_logger()
