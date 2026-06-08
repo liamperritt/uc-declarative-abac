@@ -22,6 +22,7 @@ def _resolve_governed_tag_assigners(
     tag: GovernedTag,
     resolver: PrincipalResolver,
     change_logger: ChangeLogger,
+    ignore_unresolvable: frozenset[str] = frozenset(),
 ) -> GovernedTag:
     """Return a new GovernedTag with each principal in ``assigners``
     resolved against the workspace.
@@ -30,7 +31,8 @@ def _resolve_governed_tag_assigners(
     assigners — consistent with the privileges differ. Dropping (rather than
     aborting) means an unresolvable principal won't trigger a phantom
     grant/revoke on every run. Actual-state (UC-side) principals route to a
-    non-fatal warning; config-side principals route to a fatal error (see
+    non-fatal warning (suppressed when the identifier is in
+    ``ignore_unresolvable``); config-side principals route to a fatal error (see
     log_principal_resolution_failure).
     """
     resolved: set[Principal] = set()
@@ -43,6 +45,7 @@ def _resolve_governed_tag_assigners(
                 f"Resolve principal for ASSIGN on GOVERNED_TAG {tag.name}",
                 principal,
                 exc,
+                ignore_unresolvable,
             )
             continue
     return GovernedTag(
@@ -59,6 +62,7 @@ def compute_governed_tag_diff(
     resolver: PrincipalResolver,
     change_logger: ChangeLogger,
     enable_deletion: bool = False,
+    ignore_unresolvable: frozenset[str] = frozenset(),
 ) -> GovernedTagDiff:
     """Compute create / update / delete diff between desired and actual governed tags.
 
@@ -68,12 +72,14 @@ def compute_governed_tag_diff(
     are left alone by default. When ``enable_deletion=True``, they flow into
     ``to_delete`` so the executor can issue ``delete_tag_policy`` calls — gated
     by interactive confirmation or ``--force`` at the orchestrator boundary.
+    ``ignore_unresolvable`` silences the resolution-failure warning for the
+    listed actual-state assigner identifiers (the assigner is still dropped).
     """
     desired_resolved = {
-        _resolve_governed_tag_assigners(t, resolver, change_logger) for t in desired
+        _resolve_governed_tag_assigners(t, resolver, change_logger, ignore_unresolvable) for t in desired
     }
     actual_resolved = {
-        _resolve_governed_tag_assigners(t, resolver, change_logger) for t in actual
+        _resolve_governed_tag_assigners(t, resolver, change_logger, ignore_unresolvable) for t in actual
     }
 
     desired_by_name = {gt.name: gt for gt in desired_resolved}

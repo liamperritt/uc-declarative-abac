@@ -20,6 +20,7 @@ def compute_privilege_diff(
     actual: set[SecurablePrivilege],
     resolver: PrincipalResolver,
     change_logger: ChangeLogger,
+    ignore_unresolvable: frozenset[str] = frozenset(),
 ) -> PrivilegeDiff:
     """Compute the diff between desired and actual privileges.
 
@@ -27,12 +28,14 @@ def compute_privilege_diff(
     compare correctly (UC stores service principals by application_id, config
     references them by display name). Privileges whose principal fails to
     resolve are logged via change_logger and excluded from the diff.
+    ``ignore_unresolvable`` silences the resolution-failure warning for the
+    listed actual-state identifiers (the row is still dropped).
 
     - to_grant: desired privileges not in actual
     - to_revoke: actual privileges not in desired
     """
-    desired_resolved = _resolve_privileges(desired, resolver, change_logger)
-    actual_resolved = _resolve_privileges(actual, resolver, change_logger)
+    desired_resolved = _resolve_privileges(desired, resolver, change_logger, ignore_unresolvable)
+    actual_resolved = _resolve_privileges(actual, resolver, change_logger, ignore_unresolvable)
     return PrivilegeDiff(
         to_grant=desired_resolved - actual_resolved,
         to_revoke=actual_resolved - desired_resolved,
@@ -43,13 +46,14 @@ def _resolve_privileges(
     unresolved: set[SecurablePrivilege],
     resolver: PrincipalResolver,
     change_logger: ChangeLogger,
+    ignore_unresolvable: frozenset[str] = frozenset(),
 ) -> set[SecurablePrivilege]:
     """Resolve the principal on each SecurablePrivilege.
 
     Privileges whose principal cannot be resolved are logged and excluded from
-    the result. Actual-state (UC-side) principals route to a non-fatal warning;
-    config-side principals route to a fatal error (see
-    log_principal_resolution_failure).
+    the result. Actual-state (UC-side) principals route to a non-fatal warning
+    (suppressed when the identifier is in ``ignore_unresolvable``); config-side
+    principals route to a fatal error (see log_principal_resolution_failure).
     """
     result: set[SecurablePrivilege] = set()
     for priv in unresolved:
@@ -61,6 +65,7 @@ def _resolve_privileges(
                 f"Resolve principal for {priv.privilege_type.value.upper()} on {priv.securable_type.value} {priv.securable_full_name}",
                 priv.principal,
                 exc,
+                ignore_unresolvable,
             )
             continue
         result.add(SecurablePrivilege(

@@ -71,6 +71,63 @@ def test_privilege_differ_actual_side_unresolvable_principal_is_warning_not_erro
     assert len(change_logger.warnings) == 1
 
 
+def test_privilege_differ_suppresses_warning_for_ignored_unresolvable_principal():
+    """An unresolvable actual-state principal whose identifier is in
+    ignore_unresolvable is still dropped from to_revoke, but its resolution-failure
+    warning is suppressed."""
+    ignored_id = "dd4ded68-9a65-4df9-ad70-832718d36e10"
+    actual = {
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="liam_perritt.lff_sqlserver_bronze",
+            principal=Principal(PrincipalType.UNKNOWN, identifier=ignored_id),
+            privilege_type=PrivilegeType.USE_SCHEMA,
+        ),
+    }
+    change_logger = _change_logger()
+
+    diff = compute_privilege_diff(
+        set(), actual, _failing_resolver(), change_logger,
+        ignore_unresolvable=frozenset({ignored_id}),
+    )
+
+    assert diff.to_revoke == set()
+    assert change_logger.has_errors is False
+    assert change_logger.warnings == []
+
+
+def test_privilege_differ_resolvable_ignored_principal_still_processed():
+    """A principal listed in ignore_unresolvable that DOES resolve is unaffected —
+    it resolves normally and its privilege still flows into the diff (to_revoke
+    here, since it's in actual but not desired)."""
+    listed_id = "app-id-123"
+    resolved = Principal(PrincipalType.SERVICE_PRINCIPAL, identifier=listed_id, name="sp_sales")
+    ws_helper = MagicMock()
+    ws_helper.resolve_by_identifier.return_value = resolved
+    resolver = PrincipalResolver(ws_helper)
+
+    actual = {
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="cat.sales",
+            principal=Principal(PrincipalType.UNKNOWN, identifier=listed_id),
+            privilege_type=PrivilegeType.USE_SCHEMA,
+        ),
+    }
+    change_logger = _change_logger()
+
+    diff = compute_privilege_diff(
+        set(), actual, resolver, change_logger,
+        ignore_unresolvable=frozenset({listed_id}),
+    )
+
+    assert len(diff.to_revoke) == 1
+    revoked = next(iter(diff.to_revoke))
+    assert revoked.principal == resolved
+    assert change_logger.has_errors is False
+    assert change_logger.warnings == []
+
+
 def test_privilege_differ_desired_side_unresolvable_principal_is_error():
     """A privilege in DESIRED state (config) whose name-only principal cannot be
     resolved is dropped from to_grant and logged as a fatal error."""

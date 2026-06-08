@@ -127,6 +127,38 @@ def test_securable_differ_actual_side_unresolvable_owner_is_warning():
     assert len(change_logger.warnings) == 1
 
 
+def test_securable_differ_suppresses_warning_for_ignored_unresolvable_owner():
+    """An unresolvable actual-state owner whose identifier is in ignore_unresolvable
+    has its owner cleared (as for any unresolvable owner) but its resolution-failure
+    warning is suppressed."""
+    from uc_declarative_abac.utils import PrincipalValidationError
+
+    ignored_id = "dd4ded68-9a65-4df9-ad70-832718d36e10"
+    ws_helper = MagicMock()
+    ws_helper.resolve_by_identifier.side_effect = lambda i: (_ for _ in ()).throw(
+        PrincipalValidationError(f"Principal not found by identifier: {i}")
+    )
+    resolver = PrincipalResolver(ws_helper)
+    change_logger = _change_logger()
+
+    actual_attrs = {
+        SecurableAttributes(
+            securable_type=SecurableType.SCHEMA,
+            full_name="liam_perritt.lff_sqlserver_bronze",
+            owner=Principal(PrincipalType.UNKNOWN, identifier=ignored_id),
+        )
+    }
+
+    diff = compute_securable_diff(
+        set(), actual_attrs, set(), set(), resolver, change_logger,
+        ignore_unresolvable=frozenset({ignored_id}),
+    )
+
+    assert change_logger.has_errors is False
+    assert change_logger.warnings == []
+    assert diff.attributes_to_update == []
+
+
 def test_securable_differ_ignores_matching_owners():
     """Identical owners produce no attribute updates."""
     attrs = {

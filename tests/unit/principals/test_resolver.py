@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from uc_declarative_abac.helpers import WorkspaceHelper
+from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.utils import (
     OrchestratorError,
     PrincipalValidationError,
@@ -12,6 +13,7 @@ from uc_declarative_abac.utils import (
 from uc_declarative_abac.principals import (
     ensure_all_resolved,
     ensure_resolved,
+    log_principal_resolution_failure,
     Principal,
     PrincipalResolver,
 )
@@ -238,3 +240,52 @@ def test_ensure_all_resolved_raises_on_first_unresolved():
     unresolved = Principal(principal_type=PrincipalType.UNKNOWN, name="b")
     with pytest.raises(OrchestratorError):
         ensure_all_resolved([resolved, unresolved])
+
+
+# ---------------------------------------------------------------------------
+# log_principal_resolution_failure
+# ---------------------------------------------------------------------------
+
+
+def test_log_principal_resolution_failure_warns_for_actual_side_failure():
+    """An actual-state (identifier-only) failure not in the ignore set logs one
+    non-fatal warning."""
+    change_logger = ChangeLogger()
+    principal = Principal(PrincipalType.UNKNOWN, identifier="app-id-123")
+
+    log_principal_resolution_failure(
+        change_logger, "Resolve X", principal, PrincipalValidationError("nope"),
+    )
+
+    assert change_logger.has_errors is False
+    assert len(change_logger.warnings) == 1
+
+
+def test_log_principal_resolution_failure_suppresses_warning_for_ignored_identifier():
+    """When the failing actual-state identifier is in ignore_unresolvable, no
+    warning (and no error) is logged."""
+    change_logger = ChangeLogger()
+    principal = Principal(PrincipalType.UNKNOWN, identifier="app-id-123")
+
+    log_principal_resolution_failure(
+        change_logger, "Resolve X", principal, PrincipalValidationError("nope"),
+        frozenset({"app-id-123"}),
+    )
+
+    assert change_logger.has_errors is False
+    assert change_logger.warnings == []
+
+
+def test_log_principal_resolution_failure_config_side_always_errors():
+    """A config-side (name-only) failure is a fatal error regardless of the
+    ignore set."""
+    change_logger = ChangeLogger()
+    principal = Principal(PrincipalType.UNKNOWN, name="typo_group")
+
+    log_principal_resolution_failure(
+        change_logger, "Resolve X", principal, PrincipalValidationError("nope"),
+        frozenset({"typo_group"}),
+    )
+
+    assert change_logger.has_errors is True
+    assert change_logger.warnings == []

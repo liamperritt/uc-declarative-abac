@@ -99,6 +99,16 @@ def main() -> None:
              "to allow removing any unconfigured tag.",
     )
     parser.add_argument(
+        "--ignore-unresolvable-principals",
+        type=str,
+        default="",
+        help="Comma-separated list of actual-state principal identifiers — usernames for users, "
+             "application_ids for service principals, display names for groups — whose "
+             "resolution-failure warning should be suppressed. Primarily for "
+             "Databricks-managed system service principals that appear in system tables but aren't "
+             "resolvable via SCIM, which otherwise log a warning every run. Empty by default.",
+    )
+    parser.add_argument(
         "--enable-governed-tag-deletion",
         action="store_true",
         default=False,
@@ -148,6 +158,7 @@ def main() -> None:
         enable_taggable_creation=args.enable_taggable_creation,
         enable_privilege_management=args.enable_privilege_management,
         enable_governed_tag_deletion=args.enable_governed_tag_deletion,
+        ignore_unresolvable_principals=args.ignore_unresolvable_principals,
         manage_tags_for_catalogs=args.manage_tags_for_catalogs,
         manage_privileges_for_catalogs=args.manage_privileges_for_catalogs,
         manage_taggables_for_catalogs=args.manage_taggables_for_catalogs,

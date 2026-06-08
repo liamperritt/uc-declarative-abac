@@ -104,6 +104,7 @@ def run(
     enable_taggable_creation: bool = False,
     enable_privilege_management: bool = False,
     enable_governed_tag_deletion: bool = False,
+    ignore_unresolvable_principals: str = "",
     manage_tags_for_catalogs: str = "*",
     manage_privileges_for_catalogs: str = "*",
     manage_taggables_for_catalogs: str = "*",
@@ -137,6 +138,14 @@ def run(
     from config (it may still add/update them). Defaults to ``"class."`` to
     protect UC auto data classification tags. An empty string allows the engine
     to remove any unconfigured tag.
+
+    ``ignore_unresolvable_principals`` is a comma-separated list of actual-state
+    (UC-side) principal identifiers — usernames, service-principal
+    application_ids, or group display names — whose resolution-failure warning is
+    suppressed across the privileges, securables (owner), and governed-tags
+    (assigners) domains. Primarily for Databricks-managed
+    system service principals that appear in system tables but aren't resolvable
+    via SCIM. Empty by default.
     """
     # 1. Discover + load + resolve YAML
     paths = discover_yaml_files(config_dir)
@@ -169,6 +178,13 @@ def run(
     # string ⇒ no retention. Defaults to "class." to protect auto-classification.
     retain_prefixes = frozenset(
         p.strip() for p in retain_tag_prefixes.split(",") if p.strip()
+    )
+    # Actual-state (UC-side) identifiers whose resolution-failure warning is
+    # suppressed across the privileges, securables (owner), and governed-tags
+    # (assigners) domains. Matched by identifier only; resolvable principals are
+    # unaffected. Empty by default ⇒ all unresolvable-principal warnings emitted.
+    ignore_unresolvable = frozenset(
+        p.strip() for p in ignore_unresolvable_principals.split(",") if p.strip()
     )
 
     # 2. Compile desired up-front so we can scope downstream fetches:
@@ -229,6 +245,7 @@ def run(
         desired_governed_tags, actual_governed_tags,
         resolver, change_logger,
         enable_deletion=enable_governed_tag_deletion,
+        ignore_unresolvable=ignore_unresolvable,
     )
     # Union of declared governed tags (desired from config + actual on UC).
     # The names are used by the policies/privileges compilers to reject references
@@ -253,6 +270,7 @@ def run(
         desired_attributes, actual_attributes, desired_securables, actual_securables,
         resolver, change_logger,
         creation_in_scope_catalogs=taggable_creation_scope,
+        ignore_unresolvable=ignore_unresolvable,
     )
 
     # 6. Tags workflow
@@ -307,6 +325,7 @@ def run(
         }
         privilege_diff = compute_privilege_diff(
             in_scope_compiled_privileges, in_scope_actual_privileges, resolver, change_logger,
+            ignore_unresolvable=ignore_unresolvable,
         )
     else:
         privilege_diff = PrivilegeDiff()

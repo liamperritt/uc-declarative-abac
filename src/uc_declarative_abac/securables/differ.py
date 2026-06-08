@@ -63,13 +63,17 @@ def compute_securable_diff(
     resolver: PrincipalResolver,
     change_logger: ChangeLogger,
     creation_in_scope_catalogs: frozenset[str] = frozenset(),
+    ignore_unresolvable: frozenset[str] = frozenset(),
 ) -> SecurableDiff:
     """Compute the diff between desired and actual securable state.
 
     Resolves owner Principals on both sides before diffing. Owner-resolution
     failures are logged via change_logger and clear the owner field on the
     affected row (the SecurableAttributes itself is retained so the securable's
-    create/replace info isn't lost).
+    create/replace info isn't lost). ``ignore_unresolvable`` silences the
+    resolution-failure warning for the listed actual-state identifiers (the owner
+    is still cleared) — used for unresolvable Databricks-managed system service
+    principals that own securables.
 
     Non-function securables declared in config but absent from UC are created
     only if their catalog is in ``creation_in_scope_catalogs``; out-of-scope
@@ -81,8 +85,8 @@ def compute_securable_diff(
     as errors (with a hint explaining the requirement) and dropped, surfacing
     later via ``ExecutionBatchError``.
     """
-    desired_attrs = _resolve_attribute_owners(desired_attrs, resolver, change_logger)
-    actual_attrs = _resolve_attribute_owners(actual_attrs, resolver, change_logger)
+    desired_attrs = _resolve_attribute_owners(desired_attrs, resolver, change_logger, ignore_unresolvable)
+    actual_attrs = _resolve_attribute_owners(actual_attrs, resolver, change_logger, ignore_unresolvable)
 
     securables_to_create, securables_to_replace, old_securables = _diff_securables(
         desired_securables, actual_securables
@@ -134,11 +138,14 @@ def _resolve_attribute_owners(
     unresolved: set[SecurableAttributes],
     resolver: PrincipalResolver,
     change_logger: ChangeLogger,
+    ignore_unresolvable: frozenset[str] = frozenset(),
 ) -> set[SecurableAttributes]:
     """Resolve owner Principals on a set of SecurableAttributes.
 
     On failure, clears the owner field but retains the SecurableAttributes —
-    dropping it would lose the securable's create/replace info.
+    dropping it would lose the securable's create/replace info. The
+    resolution-failure warning is suppressed for owners whose identifier is in
+    ``ignore_unresolvable`` (the owner is still cleared).
 
     Uses ``dataclasses.replace`` so every non-owner field (``comment``,
     ``rfa_destinations``, …) on the input survives owner resolution.
@@ -158,6 +165,7 @@ def _resolve_attribute_owners(
                 f"Resolve owner for {attr.securable_type.value} {attr.full_name}",
                 attr.owner,
                 exc,
+                ignore_unresolvable,
             )
             result.add(dataclasses.replace(attr, owner=None))
             continue

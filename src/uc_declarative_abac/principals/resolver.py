@@ -62,6 +62,7 @@ def log_principal_resolution_failure(
     context: str,
     principal: Principal,
     exc: PrincipalValidationError,
+    ignore_unresolvable: frozenset[str] = frozenset(),
 ) -> None:
     """Route a principal-resolution failure to the change logger.
 
@@ -72,9 +73,18 @@ def log_principal_resolution_failure(
     aren't returned by SCIM. They are dropped from the diff without failing the
     run. Config-side (desired) failures — which carry a display name — remain
     fatal errors so config typos still surface loudly.
+
+    ``ignore_unresolvable`` is the set of actual-state identifiers from
+    ``--ignore-unresolvable-principals`` whose resolution-failure warning should
+    be silenced. It affects only the warning (actual-state) branch — the row is
+    still dropped from the diff, just without the log line. Config-side failures
+    stay fatal regardless (the set holds identifiers; config principals carry a
+    name and never match).
     """
     error = ExecutionError(context=context, exception=exc)
     if principal.identifier and not principal.name:
+        if principal.identifier in ignore_unresolvable:
+            return
         change_logger.log_warning(error)
     else:
         change_logger.log_error(error)

@@ -245,6 +245,30 @@ def test_governed_tag_differ_actual_side_unresolvable_assigner_is_warning():
     assert len(change_logger.warnings) == 1
 
 
+def test_governed_tag_differ_suppresses_warning_for_ignored_unresolvable_assigner():
+    """An unresolvable actual-state assigner whose identifier is in
+    ignore_unresolvable is still dropped from the tag's assigners, but its
+    resolution-failure warning is suppressed."""
+    ignored_id = "dd4ded68-9a65-4df9-ad70-832718d36e10"
+    desired = {_gt("pii", "PII", {"name"}, assigners=set())}
+    actual = {_gt(
+        "pii", "PII", {"name"},
+        assigners={Principal(PrincipalType.UNKNOWN, identifier=ignored_id)},
+    )}
+    resolver = _resolver()  # nothing resolves
+    change_logger = ChangeLogger()
+
+    diff = compute_governed_tag_diff(
+        desired, actual, resolver, change_logger,
+        ignore_unresolvable=frozenset({ignored_id}),
+    )
+
+    assert diff.to_create == set()
+    assert diff.to_update == set()
+    assert change_logger.has_errors is False
+    assert change_logger.warnings == []
+
+
 def test_governed_tag_differ_drops_unresolvable_principal_and_logs_error():
     """A principal that can't be resolved is dropped from the tag's assigners
     and logged via change_logger.log_error — it never produces a phantom diff."""

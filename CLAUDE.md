@@ -63,6 +63,10 @@ Unknown principals are excluded from the diff and logged via `principals.log_pri
 
 The privileges, securables, and governed-tags differs all follow this pattern — see the private `_resolve_*` function at the bottom of each `<domain>/differ.py`. (Policy `to`/`except` principals are always config-side, so the policies differ keeps fatal-error semantics.) No separate per-domain `resolver.py` modules exist.
 
+#### Ignoring unresolvable principals (`--ignore-unresolvable-principals`)
+
+The `--ignore-unresolvable-principals` CLI flag (orchestrator param `ignore_unresolvable_principals`, parsed to a standalone `frozenset[str]` named `ignore_unresolvable`) **only suppresses the non-fatal resolution-failure warning** for the listed actual-state identifiers — it changes nothing about resolution itself. A listed principal that resolves is processed exactly as usual; only when it fails to resolve is the warning silenced (the row is dropped from the diff either way, as it always was for unresolvable principals). The check lives **inside `log_principal_resolution_failure`** (`principals/resolver.py`): in the actual-state (identifier-only) warning branch, if `principal.identifier in ignore_unresolvable` it returns without logging; config-side (name) failures stay fatal `ExecutionError`s regardless. The set is a plain parameter threaded `run()` → `compute_*_diff(..., ignore_unresolvable)` → `_resolve_*(..., ignore_unresolvable)` → `log_principal_resolution_failure(..., ignore_unresolvable)` for the privileges, securables (owner), and governed-tags (assigners) domains. It is **not** state on `PrincipalResolver` (the resolver has no knowledge of ignoring). Tags reference no principals; policies are excluded (their resolution is fatal and uses a different log path).
+
 ## YAML config conventions
 
 ### Definition IDs
