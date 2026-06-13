@@ -168,6 +168,31 @@ def test_grant_policy_config_rejects_missing_to():
     assert any("to" in str(e["loc"]) for e in errors)
 
 
+def test_grant_policy_config_rejects_missing_name():
+    """A grant policy without 'name' raises a validation error — name is
+    required on every policy type."""
+    data = {
+        "catalogs": {
+            "cat": {
+                "name": "cat",
+                "policies": [
+                    {
+                        "type": "grant",
+                        "privileges": ["select"],
+                        "to": ["analysts"],
+                        "has_tags": {"domain": "analytics"},
+                    }
+                ],
+            }
+        }
+    }
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate(data)
+
+    errors = exc_info.value.errors()
+    assert any("name" in str(e["loc"]) for e in errors)
+
+
 # ---------------------------------------------------------------------------
 # FGAC policy 'to' default
 # ---------------------------------------------------------------------------
@@ -324,6 +349,7 @@ def test_schema_config_accepts_policies():
                         "name": "sales",
                         "policies": [
                             {
+                                "name": "g1",
                                 "type": "grant",
                                 "privileges": ["select"],
                                 "to": ["analysts"],
@@ -354,6 +380,7 @@ def test_table_config_accepts_policies():
                                 "name": "orders",
                                 "policies": [
                                     {
+                                        "name": "g1",
                                         "type": "grant",
                                         "privileges": ["modify"],
                                         "to": ["writers"],
@@ -402,6 +429,7 @@ def test_grant_policy_config_converts_null_tag_values_to_empty_string():
                 "my_catalog": {
                     "policies": [
                         {
+                            "name": "g1",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
@@ -430,6 +458,7 @@ def test_grant_policy_config_accepts_has_any_of_tags():
                 "my_catalog": {
                     "policies": [
                         {
+                            "name": "g1",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
@@ -452,6 +481,7 @@ def test_grant_policy_config_converts_null_has_any_of_tags_values_to_empty_strin
                 "my_catalog": {
                     "policies": [
                         {
+                            "name": "g1",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
@@ -475,6 +505,7 @@ def test_grant_policy_config_defaults_has_any_of_tags_to_none():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g1",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
@@ -577,6 +608,7 @@ def test_grant_policy_config_accepts_expiry_date():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g1",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
@@ -600,6 +632,7 @@ def test_grant_policy_config_defaults_expiry_date_to_none():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g1",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
@@ -681,7 +714,7 @@ def test_catalog_config_injects_catalog_name_into_policies():
         "catalogs": {
             "my_catalog": {
                 "policies": [
-                    {"type": "grant", "privileges": ["select"], "to": ["team"], "tags": {"env": "prod"}}
+                    {"name": "g1", "type": "grant", "privileges": ["select"], "to": ["team"], "tags": {"env": "prod"}}
                 ]
             }
         }
@@ -699,7 +732,7 @@ def test_schema_config_injects_names_into_policies():
                     {
                         "name": "sales",
                         "policies": [
-                            {"type": "grant", "privileges": ["select"], "to": ["team"], "tags": {"env": "prod"}}
+                            {"name": "g1", "type": "grant", "privileges": ["select"], "to": ["team"], "tags": {"env": "prod"}}
                         ],
                     }
                 ]
@@ -918,6 +951,45 @@ def test_catalog_config_allows_same_name_in_different_parents():
         }
     })
     assert len(config.catalogs["my_cat"].schemas) == 2
+
+
+def test_table_config_rejects_duplicate_policy_names():
+    """Two policies sharing a name on one table raise DuplicateResourceError —
+    the namespace spans all policy types (a grant and a mask cannot share a name)."""
+    with pytest.raises(DuplicateResourceError):
+        ResourcesConfig.model_validate({
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "policies": [
+                                        {
+                                            "name": "dup",
+                                            "type": "grant",
+                                            "privileges": ["select"],
+                                            "to": ["analysts"],
+                                            "has_tags": {"domain": "analytics"},
+                                        },
+                                        {
+                                            "name": "dup",
+                                            "type": "mask",
+                                            "function": "my_cat.sales.fn",
+                                            "columns": [
+                                                {"alias": "c", "has_tags": {"pii": "email"}}
+                                            ],
+                                        },
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        })
 
 
 # ---------------------------------------------------------------------------

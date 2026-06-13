@@ -95,6 +95,8 @@ Any `$ref` entry can include additional fields that override the definition. Uns
 
 Optional on resources. If omitted, the dictionary key is used as the UC object name.
 
+This key-derivation applies only to securables (catalogs/schemas/tables/volumes/functions), which are keyed dicts. **Policies are lists, not keyed dicts**, so a policy `name` is never derived from a key — it is **required on every policy type** (mask, filter, grant) and must be set explicitly. Policy names must also be unique among the policies attached to the same securable (enforced by `_check_duplicate_names` in `configs/models.py`).
+
 ## Table definitions — security model
 
 Two approaches to RLS/CLS, which can coexist:

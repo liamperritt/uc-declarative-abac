@@ -58,6 +58,7 @@ def test_privilege_compiler_computes_privileges_from_policy():
                 "my_catalog": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["select", "modify"],
                             "to": ["analysts", "engineers"],
@@ -122,6 +123,7 @@ def test_privilege_compiler_policy_uses_and_semantics_for_multiple_tags():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
@@ -177,6 +179,7 @@ def test_privilege_compiler_policy_uses_or_semantics_for_has_any_of_tags():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
@@ -212,6 +215,7 @@ def test_privilege_compiler_combines_has_tags_and_has_any_of_tags_with_and():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
@@ -248,6 +252,7 @@ def test_privilege_compiler_skips_grant_policy_with_ungoverned_has_any_of_tags()
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
@@ -288,6 +293,7 @@ def test_privilege_compiler_policy_skips_objects_without_matching_tags():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
@@ -321,12 +327,14 @@ def test_privilege_compiler_handles_multiple_policies_per_catalog():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g1",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["readers"],
                             "has_tags": {"public": None},
                         },
                         {
+                            "name": "g2",
                             "type": "grant",
                             "privileges": ["modify"],
                             "to": ["writers"],
@@ -414,6 +422,7 @@ def test_privilege_compiler_matches_schema_level_policy():
                             "tags": {"team": "data"},
                             "policies": [
                                 {
+                                    "name": "g",
                                     "type": "grant",
                                     "privileges": ["select"],
                                     "to": ["data_engineers"],
@@ -461,6 +470,7 @@ def test_privilege_compiler_matches_table_level_policy():
                                     "tags": {"sales": None},
                                     "policies": [
                                         {
+                                            "name": "g",
                                             "type": "grant",
                                             "privileges": ["modify"],
                                             "to": ["sales_team"],
@@ -503,6 +513,7 @@ def test_privilege_compiler_collects_policies_from_all_levels():
                 "my_catalog": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["use_catalog"],
                             "to": ["all_users"],
@@ -514,6 +525,7 @@ def test_privilege_compiler_collects_policies_from_all_levels():
                             "name": "sales",
                             "policies": [
                                 {
+                                    "name": "g",
                                     "type": "grant",
                                     "privileges": ["select"],
                                     "to": ["data_engineers"],
@@ -525,6 +537,7 @@ def test_privilege_compiler_collects_policies_from_all_levels():
                                     "name": "orders",
                                     "policies": [
                                         {
+                                            "name": "g",
                                             "type": "grant",
                                             "privileges": ["modify"],
                                             "to": ["sales_team"],
@@ -600,6 +613,7 @@ def test_privilege_compiler_matches_against_desired_tags():
                     "tags": {"env": "prod"},
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
@@ -640,6 +654,7 @@ def test_privilege_compiler_emits_securable_privileges_with_unresolved_principal
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["my_team"],
@@ -684,6 +699,7 @@ def test_privilege_compiler_filters_incompatible_privilege_for_volume():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["select", "read_volume"],
                             "to": ["team"],
@@ -726,6 +742,7 @@ def test_privilege_compiler_allows_select_on_table():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["select", "read_volume"],
                             "to": ["team"],
@@ -768,6 +785,7 @@ def test_privilege_compiler_allows_all_privileges_on_any_securable():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["all_privileges"],
                             "to": ["team"],
@@ -813,6 +831,7 @@ def test_privilege_compiler_excludes_expired_policy():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
@@ -849,6 +868,7 @@ def test_privilege_compiler_includes_active_policy():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
@@ -885,6 +905,7 @@ def test_privilege_compiler_includes_policy_with_no_expiry():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
@@ -923,6 +944,7 @@ def test_privilege_compiler_grants_directly_when_policy_has_no_tags():
                 "my_cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["use_catalog"],
                             "to": ["team"],
@@ -955,6 +977,7 @@ def test_privilege_compiler_grants_directly_to_schema_when_policy_has_no_tags():
                             "name": "sales",
                             "policies": [
                                 {
+                                    "name": "g",
                                     "type": "grant",
                                     "privileges": ["use_schema"],
                                     "to": ["team"],
@@ -996,6 +1019,7 @@ def test_privilege_compiler_scopes_policy_to_attached_securable():
                             "name": "sales",
                             "policies": [
                                 {
+                                    "name": "g",
                                     "type": "grant",
                                     "privileges": ["select"],
                                     "to": ["team"],
@@ -1057,6 +1081,7 @@ def test_privilege_compiler_scopes_catalog_policy_to_all_children():
                 "my_cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
@@ -1123,6 +1148,7 @@ def test_privilege_compiler_and_semantics_with_scoped_policy():
                             "name": "sales",
                             "policies": [
                                 {
+                                    "name": "g",
                                     "type": "grant",
                                     "privileges": ["select"],
                                     "to": ["team"],
@@ -1195,6 +1221,7 @@ def test_privilege_compiler_wildcard_matches_any_tag_value():
                 "my_cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
@@ -1245,6 +1272,7 @@ def test_privilege_compiler_wildcard_combines_with_concrete_tags():
                 "my_cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
@@ -1285,6 +1313,7 @@ def test_privilege_compiler_cascades_use_catalog_up_to_parent_when_match_is_sche
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["use_catalog"],
                             "to": ["team"],
@@ -1322,6 +1351,7 @@ def test_privilege_compiler_cascades_use_catalog_up_to_parent_when_match_is_tabl
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["use_catalog"],
                             "to": ["team"],
@@ -1359,6 +1389,7 @@ def test_privilege_compiler_cascades_use_catalog_up_to_parent_when_match_is_volu
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["use_catalog"],
                             "to": ["team"],
@@ -1395,6 +1426,7 @@ def test_privilege_compiler_cascades_use_schema_up_to_parent_when_match_is_table
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["use_schema"],
                             "to": ["team"],
@@ -1431,6 +1463,7 @@ def test_privilege_compiler_cascades_use_schema_up_to_parent_when_match_is_volum
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["use_schema"],
                             "to": ["team"],
@@ -1467,6 +1500,7 @@ def test_privilege_compiler_emits_use_catalog_on_catalog_when_match_is_catalog()
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["use_catalog"],
                             "to": ["team"],
@@ -1499,6 +1533,7 @@ def test_privilege_compiler_emits_use_schema_on_schema_when_match_is_schema():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["use_schema"],
                             "to": ["team"],
@@ -1532,6 +1567,7 @@ def test_privilege_compiler_emits_use_schema_on_catalog_when_match_is_catalog():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["use_schema"],
                             "to": ["team"],
@@ -1564,6 +1600,7 @@ def test_privilege_compiler_deduplicates_cascaded_use_catalog_when_many_children
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["use_catalog"],
                             "to": ["team"],
@@ -1599,6 +1636,7 @@ def test_privilege_compiler_deduplicates_cascaded_use_schema_when_many_tables_ma
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["use_schema"],
                             "to": ["team"],
@@ -1634,6 +1672,7 @@ def test_privilege_compiler_emits_select_on_table_and_cascades_use_catalog_and_u
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["select", "use_catalog", "use_schema"],
                             "to": ["team"],
@@ -1686,6 +1725,7 @@ def test_privilege_compiler_drops_use_catalog_when_policy_attached_at_table_leve
                                     "name": "orders",
                                     "policies": [
                                         {
+                                            "name": "g",
                                             "type": "grant",
                                             "privileges": ["select", "use_catalog", "use_schema"],
                                             "to": ["team"],
@@ -1727,6 +1767,7 @@ def test_privilege_compiler_drops_use_catalog_when_policy_attached_at_schema_lev
                             "name": "sales",
                             "policies": [
                                 {
+                                    "name": "g",
                                     "type": "grant",
                                     "privileges": ["select", "use_catalog", "use_schema"],
                                     "to": ["team"],
@@ -1769,6 +1810,7 @@ def test_privilege_compiler_cascades_use_catalog_for_each_principal_when_policy_
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["use_catalog"],
                             "to": ["analysts", "engineers", "auditors"],
@@ -1810,6 +1852,7 @@ def test_privilege_compiler_does_not_emit_privileges_on_columns():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["select", "modify"],
                             "to": ["analysts"],
@@ -1850,6 +1893,7 @@ def test_privilege_compiler_ignores_column_tags_for_use_catalog_and_use_schema_c
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["use_catalog", "use_schema", "select"],
                             "to": ["analysts"],
@@ -1887,6 +1931,7 @@ def test_privilege_compiler_ignores_column_tags_but_still_matches_sibling_table(
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["analysts"],
@@ -1938,6 +1983,7 @@ def test_privilege_compiler_logs_error_when_grant_policy_tag_is_ungoverned():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
@@ -1975,12 +2021,14 @@ def test_privilege_compiler_skips_grant_policy_with_ungoverned_tag():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g1",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["bad_team"],
                             "has_tags": {"ungoverned_key": "*"},
                         },
                         {
+                            "name": "g2",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["good_team"],
@@ -2016,6 +2064,7 @@ def test_privilege_compiler_accepts_tag_in_union_of_desired_and_actual_governed_
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
@@ -2057,6 +2106,7 @@ def test_privilege_compiler_expands_read_abstraction_on_table_match():
                 "my_catalog": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["read"],
                             "to": ["team"],
@@ -2105,6 +2155,7 @@ def test_privilege_compiler_expands_read_abstraction_on_volume_match():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["read"],
                             "to": ["team"],
@@ -2146,6 +2197,7 @@ def test_privilege_compiler_expands_read_abstraction_on_catalog_match():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["read"],
                             "to": ["team"],
@@ -2199,6 +2251,7 @@ def test_privilege_compiler_expands_edit_abstraction_on_schema_match():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["edit"],
                             "to": ["team"],
@@ -2252,6 +2305,7 @@ def test_privilege_compiler_expands_use_abstraction_on_tagless_catalog_policy():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["use"],
                             "to": ["team"],
@@ -2290,6 +2344,7 @@ def test_privilege_compiler_expands_use_abstraction_cascades_from_table_match():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["use"],
                             "to": ["team"],
@@ -2345,6 +2400,7 @@ def test_privilege_compiler_expands_use_abstraction_dropped_by_scope_when_attach
                                     "tags": {"env": "prod"},
                                     "policies": [
                                         {
+                                            "name": "g",
                                             "type": "grant",
                                             "privileges": ["use"],
                                             "to": ["team"],
@@ -2383,6 +2439,7 @@ def test_privilege_compiler_expands_create_abstraction_on_catalog_match():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["create"],
                             "to": ["team"],
@@ -2462,6 +2519,7 @@ def test_privilege_compiler_expands_create_abstraction_on_schema_match_drops_cre
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["create"],
                             "to": ["team"],
@@ -2535,6 +2593,7 @@ def test_privilege_compiler_mixes_abstractions_and_concrete_privileges():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["read", "manage"],
                             "to": ["team"],
@@ -2582,6 +2641,7 @@ def test_privilege_compiler_dedupes_overlapping_abstraction_and_concrete():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["read", "select"],
                             "to": ["team"],
@@ -2624,6 +2684,7 @@ def test_privilege_compiler_expands_use_and_read_combination():
                 "cat": {
                     "policies": [
                         {
+                            "name": "g",
                             "type": "grant",
                             "privileges": ["use", "read"],
                             "to": ["team"],
@@ -2679,6 +2740,7 @@ def _scope_config(policy_for: str | None) -> ResourcesConfig:
     restricted to a securable type via 'for'. The catalog has a schema and a
     nested table, both of which carry the tag in the fixtures below."""
     policy = {
+        "name": "g",
         "type": "grant",
         "privileges": ["manage"],  # valid on every securable type
         "to": ["analysts"],

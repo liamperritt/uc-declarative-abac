@@ -127,6 +127,17 @@ def _reject_double_underscore_name(name: str) -> str:
 SecurableName = Annotated[str, AfterValidator(_reject_double_underscore_name)]
 
 
+# A constant column value, preserving its native YAML-parsed type.
+PolicyColumnConstantValue = Union[
+    StrictBool,
+    StrictInt,
+    StrictFloat,
+    Annotated[datetime, Strict()],
+    Annotated[date, Strict()],
+    StrictStr,
+]
+
+
 class PolicyColumnAliasConfig(BaseModel):
     alias: str
     has_tags: dict[str, str] | None = None
@@ -146,17 +157,6 @@ class PolicyColumnAliasConfig(BaseModel):
         return self
 
 
-# A constant column value, preserving its native YAML-parsed type.
-PolicyColumnConstantValue = Union[
-    StrictBool,
-    StrictInt,
-    StrictFloat,
-    Annotated[datetime, Strict()],
-    Annotated[date, Strict()],
-    StrictStr,
-]
-
-
 class PolicyColumnConstantConfig(BaseModel):
     constant: PolicyColumnConstantValue
 
@@ -169,7 +169,7 @@ class BasePolicyConfig(BaseModel, ABC):
     catalog_name: str
     schema_name: str | None = None
     table_name: str | None = None
-    name: str | None = None
+    name: str
     type: PolicyType
     has_tags: dict[str, str] | None = None
     has_any_of_tags: dict[str, str] | None = None
@@ -217,7 +217,6 @@ class BasePolicyConfig(BaseModel, ABC):
 
 class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
     """Base model for Fine-Grained Access Control (FGAC) policy configs. Not intended to be instantiated directly."""
-    name: str
     type: Union[Literal[PolicyType.MASK], Literal[PolicyType.FILTER]]
     function: str
     to: list[str] = Field(default_factory=lambda: list(_DEFAULT_FGAC_TO))
@@ -489,6 +488,11 @@ class TableConfig(BaseTaggableConfig):
             "column",
             f"table '{table_name}'",
         )
+        _check_duplicate_names(
+            data.get("policies", []) or [],
+            "policy",
+            f"table '{table_name}'",
+        )
         for policy_dict in data.get("policies", []) or []:
             if isinstance(policy_dict, dict):
                 policy_dict.setdefault("catalog_name", catalog_name)
@@ -546,6 +550,11 @@ class SchemaConfig(BaseTaggableConfig):
             "function",
             f"schema '{schema_name}'",
         )
+        _check_duplicate_names(
+            data.get("policies", []) or [],
+            "policy",
+            f"schema '{schema_name}'",
+        )
         for policy_dict in data.get("policies", []) or []:
             if isinstance(policy_dict, dict):
                 policy_dict.setdefault("catalog_name", catalog_name)
@@ -585,6 +594,11 @@ class CatalogConfig(BaseTaggableConfig):
         _check_duplicate_names(
             data.get("schemas", []) or [],
             "schema",
+            f"catalog '{catalog_name}'",
+        )
+        _check_duplicate_names(
+            data.get("policies", []) or [],
+            "policy",
             f"catalog '{catalog_name}'",
         )
         for schema_dict in data.get("schemas", []) or []:

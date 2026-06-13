@@ -68,6 +68,7 @@ def _catalog_with_grant_policy_config() -> dict:
                     ],
                     "policies": [
                         {
+                            "name": "g1",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["data_engineers"],
@@ -96,6 +97,7 @@ def _catalog_with_tags_and_grants_config() -> dict:
                     ],
                     "policies": [
                         {
+                            "name": "g1",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["data_engineers"],
@@ -642,12 +644,14 @@ def _catalog_with_two_grant_policies_config() -> dict:
                     ],
                     "policies": [
                         {
+                            "name": "g1",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["data_engineers"],
                             "has_tags": {"team": "data"},
                         },
                         {
+                            "name": "g2",
                             "type": "grant",
                             "privileges": ["modify"],
                             "to": ["ghost_team"],
@@ -1140,6 +1144,7 @@ def test_orchestrator_privileges_use_actual_tags_when_tag_management_disabled(
                 "my_catalog": {
                     "policies": [
                         {
+                            "name": "g1",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["data_engineers"],
@@ -1188,6 +1193,7 @@ def test_orchestrator_privileges_use_config_tags_when_tag_management_enabled(
                     "tags": {"env": "prod"},
                     "policies": [
                         {
+                            "name": "g1",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["data_engineers"],
@@ -1396,6 +1402,7 @@ def _two_catalog_grants_config() -> dict:
                     "tags": {"env": "prod"},
                     "policies": [
                         {
+                            "name": "g1",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["data_engineers"],
@@ -1407,6 +1414,7 @@ def _two_catalog_grants_config() -> dict:
                     "tags": {"env": "prod"},
                     "policies": [
                         {
+                            "name": "g1",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["data_engineers"],
@@ -1801,6 +1809,7 @@ def test_orchestrator_raises_ungoverned_tag_error_when_grant_policy_references_u
                 "my_catalog": {
                     "policies": [
                         {
+                            "name": "g1",
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["data_engineers"],
