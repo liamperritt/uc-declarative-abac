@@ -8,6 +8,7 @@ from uc_declarative_abac.configs import (
     ParameterConfig,
     ResourcesConfig,
 )
+from uc_declarative_abac.types import SecurableType
 from uc_declarative_abac.utils import DuplicateResourceError
 
 
@@ -2146,3 +2147,157 @@ def test_resources_config_allows_single_underscore_securable_name():
         {"catalogs": {"cat": {"schemas": [{"name": "_staging"}]}}}
     )
     assert config.catalogs["cat"].schemas[0].name == "_staging"
+
+
+# ---------------------------------------------------------------------------
+# Policy 'for' (for_securable_type)
+# ---------------------------------------------------------------------------
+
+
+def _grant_policy_in_catalog(policy: dict) -> dict:
+    """Wrap a single grant policy dict in a minimal catalog-attached config."""
+    return {"catalogs": {"cat": {"name": "cat", "policies": [policy]}}}
+
+
+def test_policy_config_normalises_for_securable_type_case():
+    """'for' accepts any case and resolves to the canonical SecurableType."""
+    config = ResourcesConfig.model_validate(
+        _grant_policy_in_catalog({
+            "name": "g", "type": "grant", "privileges": ["use_schema"],
+            "to": ["analysts"], "for": "Schema",
+        })
+    )
+    assert config.catalogs["cat"].policies[0].for_securable_type == SecurableType.SCHEMA
+
+
+@pytest.mark.parametrize(
+    "plural,expected",
+    [
+        ("tables", SecurableType.TABLE),
+        ("schemas", SecurableType.SCHEMA),
+        ("catalogs", SecurableType.CATALOG),
+        ("volumes", SecurableType.VOLUME),
+    ],
+)
+def test_policy_config_normalises_for_securable_type_plural(plural, expected):
+    """'for' accepts trailing-'s' plurals and resolves them to the singular type.
+
+    Uses 'manage' as the privilege since it is valid for every securable type."""
+    config = ResourcesConfig.model_validate(
+        _grant_policy_in_catalog({
+            "name": "g", "type": "grant", "privileges": ["manage"],
+            "to": ["analysts"], "for": plural,
+        })
+    )
+    assert config.catalogs["cat"].policies[0].for_securable_type == expected
+
+
+def test_grant_policy_config_allows_all_privileges_when_for_omitted():
+    """With 'for' omitted, any privilege list is accepted (no type constraint)."""
+    config = ResourcesConfig.model_validate(
+        _grant_policy_in_catalog({
+            "name": "g", "type": "grant",
+            "privileges": ["select", "read_volume", "use_catalog"],
+            "to": ["analysts"],
+        })
+    )
+    assert config.catalogs["cat"].policies[0].for_securable_type is None
+
+
+def test_grant_policy_config_accepts_privileges_matching_for_securable_type():
+    """Privileges applicable to the 'for' type validate successfully."""
+    config = ResourcesConfig.model_validate(
+        _grant_policy_in_catalog({
+            "name": "g", "type": "grant",
+            "privileges": ["read_volume", "write_volume"],
+            "to": ["analysts"], "for": "volume",
+        })
+    )
+    assert config.catalogs["cat"].policies[0].for_securable_type == SecurableType.VOLUME
+
+
+def test_grant_policy_config_rejects_privileges_mismatching_for_securable_type():
+    """A privilege not applicable to the 'for' type raises a validation error."""
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate(
+            _grant_policy_in_catalog({
+                "name": "g", "type": "grant", "privileges": ["select"],
+                "to": ["analysts"], "for": "volume",
+            })
+        )
+    assert "volume" in str(exc_info.value).lower()
+
+
+def test_grant_policy_config_accepts_abstraction_with_partial_overlap():
+    """An abstraction validates when at least one expanded privilege applies
+    (read -> read_volume is applicable to volume)."""
+    config = ResourcesConfig.model_validate(
+        _grant_policy_in_catalog({
+            "name": "g", "type": "grant", "privileges": ["read"],
+            "to": ["analysts"], "for": "volume",
+        })
+    )
+    assert config.catalogs["cat"].policies[0].for_securable_type == SecurableType.VOLUME
+
+
+def test_grant_policy_config_rejects_abstraction_with_no_overlap():
+    """An abstraction fails when none of its expanded privileges apply
+    (use -> use_catalog/use_schema, neither applicable to table)."""
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate(
+            _grant_policy_in_catalog({
+                "name": "g", "type": "grant", "privileges": ["use"],
+                "to": ["analysts"], "for": "table",
+            })
+        )
+
+
+def test_grant_policy_config_rejects_unsupported_for_securable_type():
+    """A securable type with no grantable privileges (e.g. function) is rejected
+    cleanly rather than crashing."""
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate(
+            _grant_policy_in_catalog({
+                "name": "g", "type": "grant", "privileges": ["execute"],
+                "to": ["analysts"], "for": "function",
+            })
+        )
+
+
+def test_mask_policy_config_accepts_for_table_aliases():
+    """A mask policy accepts 'for' written as a case-variant or plural of table."""
+    for value in ("Table", "tables", "TABLE"):
+        config = ResourcesConfig.model_validate(
+            _fgac_policy_in_table({
+                "name": "p", "type": "mask", "function": "cat.s.fn",
+                "columns": [{"alias": "c", "has_tags": {"pii": "email"}}],
+                "for": value,
+            })
+        )
+        policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+        assert policy.for_securable_type == SecurableType.TABLE
+
+
+def test_mask_policy_config_rejects_non_table_for():
+    """A mask policy may only target TABLE; any other 'for' is rejected."""
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate(
+            _fgac_policy_in_table({
+                "name": "p", "type": "mask", "function": "cat.s.fn",
+                "columns": [{"alias": "c", "has_tags": {"pii": "email"}}],
+                "for": "schema",
+            })
+        )
+
+
+def test_fgac_policy_config_allows_null_for():
+    """An explicit 'for: null' is accepted on an FGAC policy (coalesced to TABLE
+    downstream by the compiler)."""
+    config = ResourcesConfig.model_validate(
+        _fgac_policy_in_table({
+            "name": "p", "type": "mask", "function": "cat.s.fn",
+            "columns": [{"alias": "c", "has_tags": {"pii": "email"}}],
+            "for": None,
+        })
+    )
+    assert config.catalogs["cat"].schemas[0].tables[0].policies[0].for_securable_type is None

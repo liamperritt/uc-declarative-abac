@@ -54,3 +54,66 @@ class PrincipalType(str, Enum):
     GROUP = "GROUP"
     SERVICE_PRINCIPAL = "SERVICE_PRINCIPAL"
     UNKNOWN = "UNKNOWN"  # marks an unresolved Principal
+
+
+# Privileges valid for each securable type. Higher-level securables inherit
+# all privileges from lower levels. Unknown privileges are allowed on all types.
+_TABLE_PRIVILEGES = {PrivilegeType.SELECT, PrivilegeType.MODIFY}
+_VOLUME_PRIVILEGES = {PrivilegeType.READ_VOLUME, PrivilegeType.WRITE_VOLUME}
+_SCHEMA_PRIVILEGES = (
+    _TABLE_PRIVILEGES
+    | _VOLUME_PRIVILEGES
+    | {
+        PrivilegeType.USE_SCHEMA,
+        PrivilegeType.CREATE_TABLE,
+        PrivilegeType.CREATE_FUNCTION,
+        PrivilegeType.CREATE_VOLUME,
+        PrivilegeType.EXECUTE,
+        PrivilegeType.EXTERNAL_USE_SCHEMA,
+        PrivilegeType.CREATE_MATERIALIZED_VIEW,
+        PrivilegeType.REFRESH,
+        PrivilegeType.CREATE_MODEL,
+        PrivilegeType.CREATE_MODEL_VERSION,
+    }
+)
+_CATALOG_PRIVILEGES = _SCHEMA_PRIVILEGES | {PrivilegeType.USE_CATALOG, PrivilegeType.CREATE_SCHEMA, PrivilegeType.BROWSE}
+_UNIVERSAL_PRIVILEGES = {PrivilegeType.ALL_PRIVILEGES, PrivilegeType.MANAGE}
+
+SECURABLE_TYPE_PRIVILEGE_MAP: dict[SecurableType, set[PrivilegeType]] = {
+    SecurableType.CATALOG: _CATALOG_PRIVILEGES | _UNIVERSAL_PRIVILEGES,
+    SecurableType.SCHEMA: _SCHEMA_PRIVILEGES | _UNIVERSAL_PRIVILEGES,
+    SecurableType.TABLE: _TABLE_PRIVILEGES | _UNIVERSAL_PRIVILEGES,
+    SecurableType.VOLUME: _VOLUME_PRIVILEGES | _UNIVERSAL_PRIVILEGES,
+    # Unity Catalog does not support column-level GRANT/REVOKE. Column tags are
+    # excluded upstream in _build_tag_index, so a COLUMN securable never reaches
+    # matching or this map. This empty set is kept as a defensive guard: were a
+    # COLUMN target ever to appear, the compatibility filter in _emit_privileges
+    # would drop every privilege targeted at it.
+    SecurableType.COLUMN: frozenset(),
+}
+
+ABSTRACT_PRIVILEGE_MAP: dict[AbstractedPrivilegeType, frozenset[PrivilegeType]] = {
+    AbstractedPrivilegeType.READ: frozenset({
+        PrivilegeType.SELECT,
+        PrivilegeType.READ_VOLUME,
+        PrivilegeType.EXECUTE,
+    }),
+    AbstractedPrivilegeType.EDIT: frozenset({
+        PrivilegeType.MODIFY,
+        PrivilegeType.WRITE_VOLUME,
+        PrivilegeType.REFRESH,
+    }),
+    AbstractedPrivilegeType.USE: frozenset({
+        PrivilegeType.USE_CATALOG,
+        PrivilegeType.USE_SCHEMA,
+    }),
+    AbstractedPrivilegeType.CREATE: frozenset({
+        PrivilegeType.CREATE_TABLE,
+        PrivilegeType.CREATE_SCHEMA,
+        PrivilegeType.CREATE_FUNCTION,
+        PrivilegeType.CREATE_VOLUME,
+        PrivilegeType.CREATE_MATERIALIZED_VIEW,
+        PrivilegeType.CREATE_MODEL,
+        PrivilegeType.CREATE_MODEL_VERSION,
+    }),
+}

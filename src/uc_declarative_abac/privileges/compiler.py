@@ -16,75 +16,15 @@ from uc_declarative_abac.principals import Principal
 from uc_declarative_abac.tags import SecurableTag
 from uc_declarative_abac.privileges.state import SecurablePrivilege
 from uc_declarative_abac.types import (
+    ABSTRACT_PRIVILEGE_MAP,
+    SECURABLE_TYPE_PRIVILEGE_MAP,
     AbstractedPrivilegeType,
     PrincipalType,
     PrivilegeType,
     SecurableType,
 )
 
-# Privileges valid for each securable type. Higher-level securables inherit
-# all privileges from lower levels. Unknown privileges are allowed on all types.
-_TABLE_PRIVILEGES = {PrivilegeType.SELECT, PrivilegeType.MODIFY}
-_VOLUME_PRIVILEGES = {PrivilegeType.READ_VOLUME, PrivilegeType.WRITE_VOLUME}
-_SCHEMA_PRIVILEGES = (
-    _TABLE_PRIVILEGES
-    | _VOLUME_PRIVILEGES
-    | {
-        PrivilegeType.USE_SCHEMA,
-        PrivilegeType.CREATE_TABLE,
-        PrivilegeType.CREATE_FUNCTION,
-        PrivilegeType.CREATE_VOLUME,
-        PrivilegeType.EXECUTE,
-        PrivilegeType.EXTERNAL_USE_SCHEMA,
-        PrivilegeType.CREATE_MATERIALIZED_VIEW,
-        PrivilegeType.REFRESH,
-        PrivilegeType.CREATE_MODEL,
-        PrivilegeType.CREATE_MODEL_VERSION,
-    }
-)
-_CATALOG_PRIVILEGES = _SCHEMA_PRIVILEGES | {PrivilegeType.USE_CATALOG, PrivilegeType.CREATE_SCHEMA, PrivilegeType.BROWSE}
-_UNIVERSAL_PRIVILEGES = {PrivilegeType.ALL_PRIVILEGES, PrivilegeType.MANAGE}
-
 _TAG_VALUE_WILDCARD = "*"
-
-SECURABLE_TYPE_PRIVILEGE_MAP: dict[SecurableType, set[PrivilegeType]] = {
-    SecurableType.CATALOG: _CATALOG_PRIVILEGES | _UNIVERSAL_PRIVILEGES,
-    SecurableType.SCHEMA: _SCHEMA_PRIVILEGES | _UNIVERSAL_PRIVILEGES,
-    SecurableType.TABLE: _TABLE_PRIVILEGES | _UNIVERSAL_PRIVILEGES,
-    SecurableType.VOLUME: _VOLUME_PRIVILEGES | _UNIVERSAL_PRIVILEGES,
-    # Unity Catalog does not support column-level GRANT/REVOKE. Column tags are
-    # excluded upstream in _build_tag_index, so a COLUMN securable never reaches
-    # matching or this map. This empty set is kept as a defensive guard: were a
-    # COLUMN target ever to appear, the compatibility filter in _emit_privileges
-    # would drop every privilege targeted at it.
-    SecurableType.COLUMN: frozenset(),
-}
-
-ABSTRACT_PRIVILEGE_MAP: dict[AbstractedPrivilegeType, frozenset[PrivilegeType]] = {
-    AbstractedPrivilegeType.READ: frozenset({
-        PrivilegeType.SELECT,
-        PrivilegeType.READ_VOLUME,
-        PrivilegeType.EXECUTE,
-    }),
-    AbstractedPrivilegeType.EDIT: frozenset({
-        PrivilegeType.MODIFY,
-        PrivilegeType.WRITE_VOLUME,
-        PrivilegeType.REFRESH,
-    }),
-    AbstractedPrivilegeType.USE: frozenset({
-        PrivilegeType.USE_CATALOG,
-        PrivilegeType.USE_SCHEMA,
-    }),
-    AbstractedPrivilegeType.CREATE: frozenset({
-        PrivilegeType.CREATE_TABLE,
-        PrivilegeType.CREATE_SCHEMA,
-        PrivilegeType.CREATE_FUNCTION,
-        PrivilegeType.CREATE_VOLUME,
-        PrivilegeType.CREATE_MATERIALIZED_VIEW,
-        PrivilegeType.CREATE_MODEL,
-        PrivilegeType.CREATE_MODEL_VERSION,
-    }),
-}
 
 
 def _expand_privilege(
@@ -287,6 +227,15 @@ def _emit_privileges(
     return result
 
 
+def _policy_targets_securable_type(
+    policy: GrantPolicyConfig, sec_type: SecurableType
+) -> bool:
+    """Whether a matched securable falls within the policy's 'for' restriction.
+    When 'for' is unset the policy applies to every matched type; otherwise only
+    securables of that exact type are in scope."""
+    return policy.for_securable_type is None or sec_type == policy.for_securable_type
+
+
 def _match_policies(
     policies: list[GrantPolicyConfig],
     tag_index: dict[str, tuple[SecurableType, set[tuple[str, str | None]]]],
@@ -302,11 +251,15 @@ def _match_policies(
         if not policy.has_tags and not policy.has_any_of_tags:
             # Tagless policy — grant directly to the attached securable
             sec_type = _policy_securable_type(policy)
+            if not _policy_targets_securable_type(policy, sec_type):
+                continue
             result |= _emit_privileges(sec_type, policy.parent_full_name, policy)
             continue
 
         # Tag-matching policy — scoped to the attached securable and its children
         for full_name, (sec_type, actual_tags) in tag_index.items():
+            if not _policy_targets_securable_type(policy, sec_type):
+                continue
             if not _is_within_scope(full_name, policy):
                 continue
             if not _policy_tags_match(policy, actual_tags):

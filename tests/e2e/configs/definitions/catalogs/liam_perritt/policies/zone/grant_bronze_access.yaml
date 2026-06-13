@@ -1,6 +1,7 @@
 definitions:
   policies:
     zone|grant_bronze_access:
+      name: grant_bronze_access
       type: grant
       has_tags:
         uc_gov_zone: bronze

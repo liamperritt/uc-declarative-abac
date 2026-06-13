@@ -49,7 +49,7 @@ def _build_policy_sql(policy: Policy, or_replace: bool) -> str:
     ])
     if policy.except_principals:
         lines.append(f"EXCEPT {_quote_principals(policy.except_principals)}")
-    lines.append("FOR TABLES")
+    lines.append(f"FOR {policy.for_securable_type.value}S")
     if policy.when_condition:
         lines.append(f"WHEN {policy.when_condition}")
     if policy.match_columns:

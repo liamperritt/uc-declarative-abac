@@ -1,6 +1,7 @@
 definitions:
   policies:
     zone|grant_landing_read:
+      name: grant_landing_read
       type: grant
       has_tags:
         uc_gov_zone: landing

@@ -792,3 +792,19 @@ def test_policy_compiler_accepts_tag_declared_only_in_desired_governed_tags():
     assert not change_logger.has_errors
     (policy,) = result
     assert policy.when_condition == "has_tag('only_desired')"
+
+
+# ---------------------------------------------------------------------------
+# 'for' (for_securable_type)
+# ---------------------------------------------------------------------------
+
+
+def test_policy_compiler_defaults_for_securable_type_to_table_when_null():
+    """An FGAC policy with an explicit 'for: null' compiles to a Policy whose
+    for_securable_type is coalesced to TABLE."""
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(_fgac_policy(**{"for": None}), level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.for_securable_type == SecurableType.TABLE

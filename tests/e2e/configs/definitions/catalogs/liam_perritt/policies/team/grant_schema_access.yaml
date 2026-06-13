@@ -1,6 +1,7 @@
 definitions:
   policies:
     team|grant_schema_access:
+      name: grant_schema_access
       type: grant
       has_tags:
         uc_gov_team: platform

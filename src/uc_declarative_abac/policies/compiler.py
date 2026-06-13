@@ -137,6 +137,7 @@ def _build_policy(
         on_column=on_column,
         using_columns=using_columns,
         comment=policy.comment,
+        for_securable_type=policy.for_securable_type or SecurableType.TABLE,
     )
 
 

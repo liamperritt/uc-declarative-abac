@@ -1,6 +1,7 @@
 definitions:
   policies:
     pipeline|grant_pipeline_select:
+      name: grant_pipeline_select
       type: grant
       has_tags:
         uc_gov_pipeline: lff

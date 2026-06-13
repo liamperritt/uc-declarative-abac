@@ -32,6 +32,10 @@ class Policy:
     on_column: str | None
     using_columns: tuple[str, ...]
     comment: str | None = None
+    # The securable type the policy applies to (the SQL ``FOR <type>S`` clause).
+    # Always TABLE for mask/filter policies; part of equality (so a change is
+    # detected) but not of identity.
+    for_securable_type: SecurableType = SecurableType.TABLE
 
 
 @dataclass

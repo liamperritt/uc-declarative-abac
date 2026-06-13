@@ -6,6 +6,7 @@ definitions:
       # lands on the matched tables, while USE_SCHEMA cascades up to each
       # matched table's parent schema and USE_CATALOG cascades up to the
       # containing catalog.
+      name: grant_cascade_pipeline
       type: grant
       has_tags:
         uc_gov_pipeline: lff

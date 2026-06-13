@@ -404,3 +404,27 @@ def test_policy_executor_parallel_error_isolated_per_item():
     assert len(change_logger.errors) == 1
     assert "p1" in change_logger.errors[0].context
     assert len(stmts) == 2
+
+
+# ---------------------------------------------------------------------------
+# FOR clause (for_securable_type)
+# ---------------------------------------------------------------------------
+
+
+def test_policy_executor_renders_for_tables_by_default():
+    """A table-scoped policy renders 'FOR TABLES'."""
+    diff = PolicyDiff(to_create={_make_policy()})
+
+    stmts = execute_policy_diff(MagicMock(), diff, ChangeLogger())
+
+    _assert_sql_contains(stmts[0], "FOR TABLES")
+
+
+def test_policy_executor_renders_for_clause_from_securable_type():
+    """The FOR clause is rendered from the policy's for_securable_type rather
+    than being hard-coded to TABLES."""
+    diff = PolicyDiff(to_create={_make_policy(for_securable_type=SecurableType.SCHEMA)})
+
+    stmts = execute_policy_diff(MagicMock(), diff, ChangeLogger())
+
+    _assert_sql_contains(stmts[0], "FOR SCHEMAS")

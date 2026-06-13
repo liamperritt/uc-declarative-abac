@@ -1,6 +1,7 @@
 definitions:
   policies:
     managed_by|grant_use_catalog:
+      name: grant_use_catalog
       type: grant
       has_tags:
         uc_gov_managed_by: uc_declarative_abac

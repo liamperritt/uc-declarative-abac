@@ -102,6 +102,7 @@ def _resolve_policy_principals(
             on_column=policy.on_column,
             using_columns=policy.using_columns,
             comment=policy.comment,
+            for_securable_type=policy.for_securable_type,
         ))
     return result
 

@@ -2667,3 +2667,72 @@ def test_privilege_compiler_expands_use_and_read_combination():
             privilege_type=PrivilegeType.SELECT,
         ),
     }
+
+
+# ---------------------------------------------------------------------------
+# 'for' (for_securable_type) scope filtering
+# ---------------------------------------------------------------------------
+
+
+def _scope_config(policy_for: str | None) -> ResourcesConfig:
+    """A catalog-attached grant policy matching the 'sales' tag, optionally
+    restricted to a securable type via 'for'. The catalog has a schema and a
+    nested table, both of which carry the tag in the fixtures below."""
+    policy = {
+        "type": "grant",
+        "privileges": ["manage"],  # valid on every securable type
+        "to": ["analysts"],
+        "has_tags": {"sales": "*"},
+    }
+    if policy_for is not None:
+        policy["for"] = policy_for
+    return ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "c": {
+                    "policies": [policy],
+                    "schemas": [{"name": "s", "tables": [{"name": "t"}]}],
+                }
+            }
+        }
+    )
+
+
+_SCOPE_TAGS = {
+    SecurableTag(
+        securable_type=SecurableType.SCHEMA,
+        securable_full_name="c.s",
+        tag_name="sales",
+        tag_value="x",
+    ),
+    SecurableTag(
+        securable_type=SecurableType.TABLE,
+        securable_full_name="c.s.t",
+        tag_name="sales",
+        tag_value="x",
+    ),
+}
+
+
+def test_privilege_compiler_restricts_grant_to_for_securable_type():
+    """A grant policy with for: schema only emits privileges on the matched schema."""
+    result = _compile(_scope_config("schema"), _SCOPE_TAGS)
+
+    targets = {(p.securable_type, p.securable_full_name) for p in result}
+    assert targets == {(SecurableType.SCHEMA, "c.s")}
+
+
+def test_privilege_compiler_ignores_objects_outside_for_securable_type():
+    """A table that matches the tag is dropped when for: schema is set."""
+    result = _compile(_scope_config("schema"), _SCOPE_TAGS)
+
+    assert not any(p.securable_full_name == "c.s.t" for p in result)
+
+
+def test_privilege_compiler_grants_all_matched_types_when_for_omitted():
+    """With 'for' omitted, every matched securable type receives the grant."""
+    result = _compile(_scope_config(None), _SCOPE_TAGS)
+
+    targets = {(p.securable_type, p.securable_full_name) for p in result}
+    assert (SecurableType.SCHEMA, "c.s") in targets
+    assert (SecurableType.TABLE, "c.s.t") in targets

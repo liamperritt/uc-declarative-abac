@@ -436,6 +436,18 @@ def _has_fgac_policy(policies) -> bool:
     return any(isinstance(p, BaseFgacPolicyConfig) for p in policies)
 
 
+def _for_securable_type_from_info(info: PolicyInfo) -> SecurableType:
+    """Map an SDK PolicyInfo's ``for_securable_type`` onto the internal
+    SecurableType, defaulting to TABLE when it is absent or unrecognised
+    (mask/filter policies are always table-scoped)."""
+    raw = getattr(info, "for_securable_type", None)
+    value = getattr(raw, "value", raw)
+    try:
+        return SecurableType(value)
+    except (ValueError, TypeError):
+        return SecurableType.TABLE
+
+
 def _normalise_policy_info(
     info: PolicyInfo,
     securable_type: SecurableType,
@@ -480,6 +492,7 @@ def _normalise_policy_info(
         on_column=on_column,
         using_columns=using_columns,
         comment=info.comment,
+        for_securable_type=_for_securable_type_from_info(info),
     )
 
 

@@ -423,6 +423,7 @@ Policy fields:
 - **`column`/`columns`** — (`mask` and `filter` types only) a single column, or an ordered list of column slots. Every slot is passed as an argument to the `function` in declaration order, so the list must match the function's parameter signature. A slot is one of two kinds:
   - **alias column** — has an `alias` (a local name used to reference the column within this policy) and a `has_tags` and/or `has_any_of_tags` block that selects the actual table column by tag (at least one of the two is required). For **mask** policies, the **first** column in the list must be an alias column — it is the one the mask function is applied to (i.e. it becomes `ON COLUMN <alias>` in the generated SQL) and is also passed as the first argument to the function.
   - **constant column** — has a single `constant: <value>` and no tags. It is passed to the function as a constant rather than a table column, which is useful for parameterising a shared masking/filtering function per policy (e.g. a per-policy replacement value).
+- **`for`** — restricts the policy to a single securable type. Accepts any case and the trailing-`s` plural form (e.g. `tables`, `Schema`, `CATALOGS`), normalised to the canonical type. For **`mask`** and **`filter`** policies it must be `table` (the default) — these only apply to tables. For **`grant`** policies it may be any of `catalog`, `schema`, `table`, `volume`; when set, every listed privilege must be applicable to that type (e.g. only `read_volume`, `write_volume`, `manage`, `all_privileges` apply to `volume`) or config-load fails, and the grant is only applied to matched securables of that type.
 - **`privileges`** — (`grant` type only) the UC privileges to assign. Supported values include the concrete UC privileges (`select`, `modify`, `create_table`, `create_schema`, `create_function`, `create_volume`, `use_catalog`, `use_schema`, `read_volume`, `write_volume`, `execute`, `refresh`, `create_materialized_view`, `create_model`, `create_model_version`, `browse`, `all_privileges`, `external_use_schema`, `manage`) and four shorthand **abstractions** that each expand to a fixed set of UC privileges:
 
   | Abstraction | Expands to |
@@ -448,6 +449,7 @@ definitions:
         has_tags:
           pii: email
       function: platform.abac.mask_email_pii
+      for: tables
       to:
         - account users
       except:
@@ -547,7 +549,8 @@ definitions:
       has_tags:
         business_area: sales
       privileges:
-        - select
+        - read
+      for: tables
       to:
         - data_engineers
         - sales_team

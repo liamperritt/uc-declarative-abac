@@ -23,9 +23,12 @@ from pydantic import (
 )
 
 from uc_declarative_abac.types import (
+    ABSTRACT_PRIVILEGE_MAP,
+    SECURABLE_TYPE_PRIVILEGE_MAP,
     AbstractedPrivilegeType,
     PolicyType,
     PrivilegeType,
+    SecurableType,
 )
 from uc_declarative_abac.utils import (
     DuplicateResourceError,
@@ -39,6 +42,9 @@ _DATA_TYPE_PREFIX_PATTERN = re.compile(r"^([A-Z_][A-Z0-9_]*)")
 # Default principals for a mask/filter (FGAC) policy when 'to' is not provided —
 # the Databricks all-users system group.
 _DEFAULT_FGAC_TO = ("account users",)
+
+# Canonical securable-type string values, used to normalise the policy 'for' field.
+_SECURABLE_TYPE_VALUES = frozenset(s.value for s in SecurableType)
 
 
 def _coerce_null_tag_values(tags: dict | None) -> dict | None:
@@ -168,6 +174,7 @@ class BasePolicyConfig(BaseModel, ABC):
     has_tags: dict[str, str] | None = None
     has_any_of_tags: dict[str, str] | None = None
     comment: str | None = None
+    for_securable_type: SecurableType | None = Field(default=None, alias="for")
 
     @field_validator("has_tags", "has_any_of_tags", mode="before")
     @classmethod
@@ -181,6 +188,22 @@ class BasePolicyConfig(BaseModel, ABC):
         executor's double-quoted SQL ``COMMENT "..."`` clause. Single quotes
         are still allowed (the executor escapes them separately)."""
         return _validate_double_quote_not_in_comment(v)
+
+    @field_validator("for_securable_type", mode="before")
+    @classmethod
+    def _normalise_for_securable_type(cls, v):
+        """Accept the 'for' field in any case and as a trailing-'s' plural
+        (e.g. 'tables', 'Schema', 'CATALOGS'), resolving it to the canonical
+        securable-type string. Non-strings (None / an already-coerced enum)
+        pass through untouched so pydantic can coerce/validate them as usual.
+        Inherited by every policy subclass, including the
+        ``Literal[SecurableType.TABLE]`` override on FGAC policies."""
+        if not isinstance(v, str):
+            return v
+        normalised = v.strip().upper()
+        if normalised not in _SECURABLE_TYPE_VALUES and normalised.endswith("S"):
+            normalised = normalised[:-1]
+        return normalised
 
     @computed_field
     @property
@@ -200,6 +223,7 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
     to: list[str] = Field(default_factory=lambda: list(_DEFAULT_FGAC_TO))
     exceptions: list[str] | None = Field(default=None, alias="except")
     columns: list[PolicyColumnConfig] | None = None
+    for_securable_type: Literal[SecurableType.TABLE] | None = Field(default=SecurableType.TABLE, alias="for")
 
     @field_validator("to", mode="before")
     @classmethod
@@ -272,11 +296,49 @@ class FilterPolicyConfig(BaseFgacPolicyConfig):
     type: Literal[PolicyType.FILTER] = PolicyType.FILTER
 
 
+def _privilege_applies(
+    entry: PrivilegeType | AbstractedPrivilegeType,
+    allowed: set[PrivilegeType],
+) -> bool:
+    """Whether a privilege entry is applicable to a securable type, given that
+    type's ``allowed`` privilege set. A concrete privilege applies iff it is in
+    ``allowed``; an abstraction applies iff at least one of its expanded
+    privileges is in ``allowed`` (mirroring the compiler, which silently filters
+    the non-applicable expansions)."""
+    if isinstance(entry, AbstractedPrivilegeType):
+        return bool(ABSTRACT_PRIVILEGE_MAP[entry] & allowed)
+    return entry in allowed
+
+
 class GrantPolicyConfig(BasePolicyConfig):
     type: Literal[PolicyType.GRANT] = PolicyType.GRANT
     privileges: list[PrivilegeType | AbstractedPrivilegeType]
     to: list[str]
     expiry_date: date | None = None
+
+    @model_validator(mode="after")
+    def _validate_privileges_match_securable_type(self) -> "GrantPolicyConfig":
+        """When 'for' is set, every privilege must be applicable to that
+        securable type. With 'for' omitted, all privileges are allowed."""
+        if self.for_securable_type is None:
+            return self
+        allowed = SECURABLE_TYPE_PRIVILEGE_MAP.get(self.for_securable_type)
+        if allowed is None:
+            raise ValueError(
+                f"grant policies do not support securable type "
+                f"'{self.for_securable_type.value}'"
+            )
+        offending = [
+            getattr(p, "value", p)
+            for p in self.privileges
+            if not _privilege_applies(p, allowed)
+        ]
+        if offending:
+            raise ValueError(
+                f"privileges {offending} are not applicable to securable type "
+                f"'{self.for_securable_type.value}'"
+            )
+        return self
 
 
 PolicyConfig = Union[MaskPolicyConfig, FilterPolicyConfig, GrantPolicyConfig]
