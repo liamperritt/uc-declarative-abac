@@ -395,6 +395,17 @@ class WorkspaceHelper:
             responses = pool.map(lambda t: self._fetch_group_by_id(t[1]), targets)
             return {self._build_group_from_response(resp) for resp in responses}
 
+    def register_pending_groups(self, names: Iterable[str]) -> None:
+        """Add group display names that will be created this run to the principal
+        cache so downstream domains can resolve them as GROUP principals before the
+        group physically exists. A group's resolved identity is fully determined by
+        its display name (identifier == name), so no fetch is needed. Mirrors
+        register_created_tag_policy's cache-priming for newly-created objects."""
+        names = set(names)
+        if not names:
+            return
+        self._groups = (self._groups or set()) | names
+
     def create_group(self, display_name: str, members: Iterable[Principal]) -> None:
         """Create a Databricks-managed account group with the given initial members.
 

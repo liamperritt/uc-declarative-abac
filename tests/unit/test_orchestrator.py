@@ -2203,3 +2203,72 @@ def test_orchestrator_creates_missing_group_when_creation_enabled(
         if c.args and c.args[0] == "POST" and c.args[1].endswith("/account/scim/v2/Groups")
     ]
     assert post_calls, "Expected a POST to create the missing group"
+
+
+def _grant_config_referencing_pending_group(group_name: str) -> dict:
+    """A config whose grant policy targets a group declared under resources.groups
+    that does NOT yet exist in the account (so it is created this run)."""
+    return {
+        "resources": {
+            "governed_tags": {"team": {"allowed_values": ["data"]}},
+            "groups": {group_name: {"members": ["alice@example.com"]}},
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tags": {"team": "data"},
+                            "policies": [
+                                {
+                                    "name": "g1",
+                                    "type": "grant",
+                                    "privileges": ["select"],
+                                    "to": [group_name],
+                                    "has_tags": {"team": "data"},
+                                },
+                            ],
+                        },
+                    ],
+                }
+            },
+        }
+    }
+
+
+def test_orchestrator_resolves_pending_created_group_in_other_domains(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """A group that will be created this run (enable_group_creation) and is
+    referenced by another domain (here a grant policy) resolves cleanly — the run
+    raises no resolution errors. Regression for spurious dry-run failures."""
+    config = _grant_config_referencing_pending_group("uc_governor_data_engineers")
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    # The configured group is absent from the proxy (only "some_other_group"
+    # exists), so it is slated for creation; its member resolves.
+    _setup_mock_group_state(
+        mock_workspace_client,
+        group_name="some_other_group",
+        group_id="g-9",
+        member_ids=[],
+        users=[("u-1", "alice@example.com")],
+    )
+
+    # Would raise ExecutionBatchError pre-fix (group unresolvable in the privilege
+    # domain). Post-fix it resolves as a GROUP and the run completes cleanly.
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_group_creation=True,
+        enable_tag_management=True,
+        enable_privilege_management=True,
+        dry_run=True,
+    )
+
+    assert "uc_governor_data_engineers" in result.group_diff.groups_to_create
+    # The grant resolved to the pending group rather than erroring out.
+    assert any(
+        p.securable_full_name == "my_catalog.sales"
+        for p in result.privilege_diff.to_grant
+    )

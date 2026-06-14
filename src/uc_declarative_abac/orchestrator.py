@@ -287,6 +287,11 @@ def run(
         enable_group_creation=enable_group_creation,
         ignore_unresolvable=ignore_unresolvable,
     )
+    # Groups slated for creation this run aren't in the principal cache yet (it was
+    # fetched before any group existed). Register them so downstream domains
+    # (governed-tag assigners, policies, privileges, securable owners) can resolve
+    # them — group creation runs first, so they exist before any grant applies.
+    ws_helper.register_pending_groups(group_diff.groups_to_create.keys())
 
     # 4. Governed tags workflow (account-level tag policies — must run before
     # catalog-scoped tag assignments, so new tag keys exist before SET TAGS).

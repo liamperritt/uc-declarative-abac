@@ -276,6 +276,28 @@ def test_workspace_helper_drops_untranslatable_members() -> None:
 
 
 # ---------------------------------------------------------------------------
+# register_pending_groups
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_helper_register_pending_groups_resolves_as_group() -> None:
+    """A group registered as pending (to be created this run) resolves as a GROUP
+    principal by both name and identifier, even though it wasn't in the fetch."""
+    client = _make_workspace_client(users=[_make_user("alice@example.com", "u-1")])
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    helper.register_pending_groups({"new_team"})
+
+    assert helper.resolve_by_name("new_team") == Principal(
+        PrincipalType.GROUP, "new_team", "new_team",
+    )
+    assert helper.resolve_by_identifier("new_team") == Principal(
+        PrincipalType.GROUP, "new_team", "new_team",
+    )
+
+
+# ---------------------------------------------------------------------------
 # add_group_members
 # ---------------------------------------------------------------------------
 
