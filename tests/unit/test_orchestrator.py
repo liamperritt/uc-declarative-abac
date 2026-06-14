@@ -2086,6 +2086,7 @@ def test_orchestrator_raises_when_groups_configured_with_workspace_scim(
             workspace_client=mock_workspace_client,
             warehouse_id="test-warehouse-id",
             use_workspace_scim=True,
+            enable_group_management=True,
         )
 
 
@@ -2109,6 +2110,7 @@ def test_orchestrator_adds_group_members_end_to_end(
         config_dir=root,
         workspace_client=mock_workspace_client,
         warehouse_id="test-warehouse-id",
+        enable_group_management=True,
     )
 
     assert "data_engineers" in result.group_diff.members_to_add
@@ -2139,9 +2141,11 @@ def test_orchestrator_group_membership_is_idempotent(
         config_dir=root,
         workspace_client=mock_workspace_client,
         warehouse_id="test-warehouse-id",
+        enable_group_management=True,
     )
 
     assert result.group_diff.members_to_add == {}
+    assert result.group_diff.members_to_remove == {}
     patch_calls = [
         c for c in mock_workspace_client.api_client.do.call_args_list
         if c.args and c.args[0] == "PATCH"
@@ -2151,8 +2155,8 @@ def test_orchestrator_group_membership_is_idempotent(
 
 def test_orchestrator_fails_for_missing_group_without_creation_flag(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
-    """A configured group that doesn't exist is a fatal error unless
-    --enable-group-creation is set."""
+    """Under group management, a configured group that doesn't exist is a fatal
+    error unless --enable-group-creation is set."""
     config = _config_with_group(["alice@example.com"])
     root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
@@ -2171,6 +2175,7 @@ def test_orchestrator_fails_for_missing_group_without_creation_flag(
             config_dir=root,
             workspace_client=mock_workspace_client,
             warehouse_id="test-warehouse-id",
+            enable_group_management=True,
         )
 
 
@@ -2272,3 +2277,69 @@ def test_orchestrator_resolves_pending_created_group_in_other_domains(
         p.securable_full_name == "my_catalog.sales"
         for p in result.privilege_diff.to_grant
     )
+
+
+def test_orchestrator_removes_extra_group_member_end_to_end(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """Under --enable-group-management, a member on the group but absent from config
+    is removed via a SCIM PATCH remove."""
+    config = _config_with_group(["alice@example.com"])
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    # Group currently holds alice (configured) AND bob (not configured -> remove).
+    _setup_mock_group_state(
+        mock_workspace_client,
+        group_name="data_engineers",
+        group_id="g-1",
+        member_ids=["u-1", "u-2"],
+        users=[("u-1", "alice@example.com"), ("u-2", "bob@example.com")],
+    )
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_group_management=True,
+    )
+
+    assert "data_engineers" in result.group_diff.members_to_remove
+    remove_patches = [
+        c for c in mock_workspace_client.api_client.do.call_args_list
+        if c.args and c.args[0] == "PATCH" and "/Groups/g-1" in c.args[1]
+        and "remove" in repr(c.kwargs)
+    ]
+    assert remove_patches, "Expected a PATCH remove against the group's SCIM id"
+
+
+def test_orchestrator_does_not_manage_membership_when_flag_off(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """Without --enable-group-management, configured groups are ignored — no member
+    PATCH is issued even when the group's membership differs from config."""
+    config = _config_with_group(["alice@example.com"])
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    # Group exists but is missing the configured member; with no group flag the
+    # engine must not touch it.
+    _setup_mock_group_state(
+        mock_workspace_client,
+        group_name="data_engineers",
+        group_id="g-1",
+        member_ids=[],
+        users=[("u-1", "alice@example.com")],
+    )
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+    )
+
+    assert result.group_diff.members_to_add == {}
+    assert result.group_diff.members_to_remove == {}
+    patch_calls = [
+        c for c in mock_workspace_client.api_client.do.call_args_list
+        if c.args and c.args[0] == "PATCH"
+    ]
+    assert patch_calls == [], "Expected no membership PATCH when group management is off"

@@ -57,7 +57,7 @@ _bob_resolved = Principal(PrincipalType.USER, identifier="bob@example.com", name
 
 
 # ---------------------------------------------------------------------------
-# member additions for existing groups
+# member additions for existing groups (under --enable-group-management)
 # ---------------------------------------------------------------------------
 
 
@@ -67,13 +67,13 @@ def test_group_differ_adds_desired_member_missing_from_existing_group():
     actual = {_group("analysts", members=set())}
     resolver = _resolver(name_to_principal={"alice@example.com": _alice_resolved})
 
-    diff = compute_group_diff(desired, actual, resolver, ChangeLogger())
+    diff = compute_group_diff(desired, actual, resolver, ChangeLogger(), enable_group_management=True)
 
     assert _alice_resolved in diff.members_to_add["analysts"]
 
 
 def test_group_differ_omits_group_when_all_desired_members_present():
-    """When the existing group already holds all desired members, it is omitted from members_to_add."""
+    """When the existing group already holds all desired members, it is omitted from both maps."""
     desired = {_group("analysts", members={Principal(PrincipalType.UNKNOWN, name="alice@example.com")})}
     actual = {_group("analysts", members={Principal(PrincipalType.UNKNOWN, identifier="alice@example.com")})}
     resolver = _resolver(
@@ -81,13 +81,34 @@ def test_group_differ_omits_group_when_all_desired_members_present():
         identifier_to_principal={"alice@example.com": _alice_resolved},
     )
 
-    diff = compute_group_diff(desired, actual, resolver, ChangeLogger())
+    diff = compute_group_diff(desired, actual, resolver, ChangeLogger(), enable_group_management=True)
 
     assert "analysts" not in diff.members_to_add
+    assert "analysts" not in diff.members_to_remove
 
 
-def test_group_differ_does_not_remove_members_present_only_in_actual():
-    """Members in actual but not desired are never removed — there is no removal bucket."""
+def test_group_differ_resolves_both_sides_before_comparison():
+    """A desired member by name and the same principal in actual by identifier yield no change."""
+    desired = {_group("analysts", members={Principal(PrincipalType.UNKNOWN, name="alice@example.com")})}
+    actual = {_group("analysts", members={Principal(PrincipalType.UNKNOWN, identifier="alice@example.com")})}
+    resolver = _resolver(
+        name_to_principal={"alice@example.com": _alice_resolved},
+        identifier_to_principal={"alice@example.com": _alice_resolved},
+    )
+
+    diff = compute_group_diff(desired, actual, resolver, ChangeLogger(), enable_group_management=True)
+
+    assert "analysts" not in diff.members_to_add
+    assert "analysts" not in diff.members_to_remove
+
+
+# ---------------------------------------------------------------------------
+# member removals for existing groups (under --enable-group-management)
+# ---------------------------------------------------------------------------
+
+
+def test_group_differ_removes_member_present_in_actual_but_not_desired():
+    """A member on the group but absent from config surfaces in members_to_remove."""
     desired = {_group("analysts", members={Principal(PrincipalType.UNKNOWN, name="alice@example.com")})}
     actual = {_group(
         "analysts",
@@ -104,56 +125,97 @@ def test_group_differ_does_not_remove_members_present_only_in_actual():
         },
     )
 
-    diff = compute_group_diff(desired, actual, resolver, ChangeLogger())
+    diff = compute_group_diff(desired, actual, resolver, ChangeLogger(), enable_group_management=True)
 
-    # alice is already present, so nothing to add; bob is left alone (no removal anywhere).
+    # alice already present (no add); bob removed.
     assert "analysts" not in diff.members_to_add
-    assert diff.groups_to_create == {}
+    assert _bob_resolved in diff.members_to_remove["analysts"]
 
 
-def test_group_differ_resolves_both_sides_before_comparison():
-    """A desired member by name and the same principal in actual by identifier yield no addition."""
-    desired = {_group("analysts", members={Principal(PrincipalType.UNKNOWN, name="alice@example.com")})}
+def test_group_differ_empty_desired_members_removes_all():
+    """A configured group with no members removes every current member (config is absolute)."""
+    desired = {_group("analysts", members=set())}
     actual = {_group("analysts", members={Principal(PrincipalType.UNKNOWN, identifier="alice@example.com")})}
+    resolver = _resolver(identifier_to_principal={"alice@example.com": _alice_resolved})
+
+    diff = compute_group_diff(desired, actual, resolver, ChangeLogger(), enable_group_management=True)
+
+    assert _alice_resolved in diff.members_to_remove["analysts"]
+    assert "analysts" not in diff.members_to_add
+
+
+def test_group_differ_adds_and_removes_in_one_group():
+    """A group needing both an addition and a removal populates both maps."""
+    desired = {_group("analysts", members={Principal(PrincipalType.UNKNOWN, name="alice@example.com")})}
+    actual = {_group("analysts", members={Principal(PrincipalType.UNKNOWN, identifier="bob@example.com")})}
     resolver = _resolver(
         name_to_principal={"alice@example.com": _alice_resolved},
-        identifier_to_principal={"alice@example.com": _alice_resolved},
+        identifier_to_principal={"bob@example.com": _bob_resolved},
     )
 
-    diff = compute_group_diff(desired, actual, resolver, ChangeLogger())
+    diff = compute_group_diff(desired, actual, resolver, ChangeLogger(), enable_group_management=True)
 
-    assert "analysts" not in diff.members_to_add
+    assert _alice_resolved in diff.members_to_add["analysts"]
+    assert _bob_resolved in diff.members_to_remove["analysts"]
 
 
 # ---------------------------------------------------------------------------
-# missing groups and --enable-group-creation gating
+# management gating
 # ---------------------------------------------------------------------------
 
 
-def test_group_differ_errors_when_group_missing_and_creation_disabled():
-    """A desired group with no actual counterpart is a fatal error when creation is disabled."""
+def test_group_differ_leaves_existing_groups_untouched_when_management_disabled():
+    """Without --enable-group-management, an existing group's membership is never diffed."""
+    desired = {_group("analysts", members={Principal(PrincipalType.UNKNOWN, name="alice@example.com")})}
+    actual = {_group("analysts", members={Principal(PrincipalType.UNKNOWN, identifier="bob@example.com")})}
+    resolver = _resolver(
+        name_to_principal={"alice@example.com": _alice_resolved},
+        identifier_to_principal={"bob@example.com": _bob_resolved},
+    )
+    change_logger = ChangeLogger()
+
+    diff = compute_group_diff(desired, actual, resolver, change_logger)
+
+    assert diff.members_to_add == {}
+    assert diff.members_to_remove == {}
+    assert change_logger.has_errors is False
+
+
+# ---------------------------------------------------------------------------
+# missing groups: creation vs management gating
+# ---------------------------------------------------------------------------
+
+
+def test_group_differ_errors_when_group_missing_and_creation_disabled_under_management():
+    """A desired group with no actual counterpart is a fatal error when managing but
+    creation is disabled."""
     desired = {_group("analysts", members={Principal(PrincipalType.UNKNOWN, name="alice@example.com")})}
     actual: set[Group] = set()
     resolver = _resolver(name_to_principal={"alice@example.com": _alice_resolved})
     change_logger = ChangeLogger()
 
-    diff = compute_group_diff(desired, actual, resolver, change_logger)
+    diff = compute_group_diff(desired, actual, resolver, change_logger, enable_group_management=True)
 
     assert change_logger.has_errors
     assert "analysts" not in diff.groups_to_create
     assert "analysts" not in diff.members_to_add
 
 
-def test_group_differ_creates_group_when_creation_enabled():
-    """A missing group flows into groups_to_create (with resolved members) when creation is enabled."""
+def test_group_differ_creates_group_with_members_when_creation_enabled():
+    """A missing group flows into groups_to_create (with resolved members) when creation
+    is enabled — management does not separately process the new group."""
     desired = {_group("analysts", members={Principal(PrincipalType.UNKNOWN, name="alice@example.com")})}
     actual: set[Group] = set()
     resolver = _resolver(name_to_principal={"alice@example.com": _alice_resolved})
     change_logger = ChangeLogger()
 
-    diff = compute_group_diff(desired, actual, resolver, change_logger, enable_group_creation=True)
+    diff = compute_group_diff(
+        desired, actual, resolver, change_logger,
+        enable_group_creation=True, enable_group_management=True,
+    )
 
     assert _alice_resolved in diff.groups_to_create["analysts"]
+    assert "analysts" not in diff.members_to_add
     assert change_logger.has_errors is False
 
 
@@ -162,18 +224,18 @@ def test_group_differ_creates_group_when_creation_enabled():
 # ---------------------------------------------------------------------------
 
 
-def test_group_differ_errors_when_group_is_externally_managed():
-    """A desired group whose actual counterpart has an external_id is a fatal error and is dropped."""
+def test_group_differ_errors_when_managing_externally_managed_group():
+    """An existing group with an external_id is a fatal error under management and is dropped."""
     desired = {_group("analysts", members={Principal(PrincipalType.UNKNOWN, name="alice@example.com")})}
     actual = {_group("analysts", external_id="idp-123", members=set())}
     resolver = _resolver(name_to_principal={"alice@example.com": _alice_resolved})
     change_logger = ChangeLogger()
 
-    diff = compute_group_diff(desired, actual, resolver, change_logger)
+    diff = compute_group_diff(desired, actual, resolver, change_logger, enable_group_management=True)
 
     assert change_logger.has_errors
     assert "analysts" not in diff.members_to_add
-    assert "analysts" not in diff.groups_to_create
+    assert "analysts" not in diff.members_to_remove
 
 
 # ---------------------------------------------------------------------------
@@ -191,9 +253,11 @@ def test_group_differ_actual_side_unresolvable_member_is_warning():
     resolver = _resolver()  # nothing resolves
     change_logger = ChangeLogger()
 
-    diff = compute_group_diff(desired, actual, resolver, change_logger)
+    diff = compute_group_diff(desired, actual, resolver, change_logger, enable_group_management=True)
 
+    # Unresolvable actual member is dropped, so it is neither added nor removed.
     assert "analysts" not in diff.members_to_add
+    assert "analysts" not in diff.members_to_remove
     assert change_logger.has_errors is False
     assert len(change_logger.warnings) == 1
 
@@ -211,10 +275,11 @@ def test_group_differ_suppresses_warning_for_ignored_unresolvable_member():
 
     diff = compute_group_diff(
         desired, actual, resolver, change_logger,
+        enable_group_management=True,
         ignore_unresolvable=frozenset({ignored_id}),
     )
 
-    assert "analysts" not in diff.members_to_add
+    assert "analysts" not in diff.members_to_remove
     assert change_logger.has_errors is False
     assert change_logger.warnings == []
 
@@ -226,7 +291,7 @@ def test_group_differ_desired_side_unresolvable_member_is_error():
     resolver = _resolver()  # nothing resolves
     change_logger = ChangeLogger()
 
-    diff = compute_group_diff(desired, actual, resolver, change_logger)
+    diff = compute_group_diff(desired, actual, resolver, change_logger, enable_group_management=True)
 
     assert change_logger.has_errors
     # No phantom addition — the unresolvable member was dropped from desired.
@@ -259,7 +324,8 @@ def test_group_differ_handles_multiple_groups_independently():
         },
     )
 
-    diff = compute_group_diff(desired, actual, resolver, ChangeLogger())
+    diff = compute_group_diff(desired, actual, resolver, ChangeLogger(), enable_group_management=True)
 
     assert _alice_resolved in diff.members_to_add["analysts"]
     assert "engineers" not in diff.members_to_add
+    assert "engineers" not in diff.members_to_remove

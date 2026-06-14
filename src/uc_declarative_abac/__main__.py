@@ -112,11 +112,23 @@ def main() -> None:
         "--enable-group-creation",
         action="store_true",
         default=False,
-        help="Permit the engine to create account groups that are declared under "
-             "resources.groups but don't yet exist (with their configured members). "
-             "Off by default — a configured group that doesn't exist is otherwise a "
-             "fatal error. Group membership additions for existing groups happen by "
-             "default and need no flag.",
+        help="Permit the engine to create account groups declared under "
+             "resources.groups that don't yet exist, with their configured members "
+             "(the engine automatically gets the MANAGER role on groups it creates). "
+             "Off by default. Independent of --enable-group-management: this flag "
+             "only creates missing groups; managing the membership of existing "
+             "groups requires --enable-group-management.",
+    )
+    parser.add_argument(
+        "--enable-group-management",
+        action="store_true",
+        default=False,
+        help="Permit the engine to reconcile the membership of existing account "
+             "groups declared under resources.groups — adding configured members "
+             "and removing members absent from config (an empty members list "
+             "removes all). Off by default. Requires the engine principal to hold "
+             "the MANAGER role on each managed group. Does not create missing "
+             "groups (use --enable-group-creation for that).",
     )
     parser.add_argument(
         "--enable-governed-tag-deletion",
@@ -169,6 +181,7 @@ def main() -> None:
         enable_privilege_management=args.enable_privilege_management,
         enable_governed_tag_deletion=args.enable_governed_tag_deletion,
         enable_group_creation=args.enable_group_creation,
+        enable_group_management=args.enable_group_management,
         ignore_unresolvable_principals=args.ignore_unresolvable_principals,
         manage_tags_for_catalogs=args.manage_tags_for_catalogs,
         manage_privileges_for_catalogs=args.manage_privileges_for_catalogs,

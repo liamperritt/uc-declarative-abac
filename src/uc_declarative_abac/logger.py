@@ -158,6 +158,7 @@ class ChangeLogger:
         self._governed_tag_assigners_revoked = 0
         self._groups_created = 0
         self._group_members_added = 0
+        self._group_members_removed = 0
         self._errors: list[ExecutionError] = []
         self._warnings: list[ExecutionError] = []
 
@@ -482,14 +483,24 @@ class ChangeLogger:
         ))
 
     def log_group_member_add(self, group_name: str, members: frozenset[Principal]) -> None:
-        """Log members being added to an existing account group. Additions only —
-        the engine never removes group members."""
+        """Log members being added to an existing account group."""
         self._group_members_added += len(members)
         action_verb = "Add" if self._dry_run else "Added"
         added = ", ".join(f"+{p.name}" for p in sorted(members, key=lambda p: p.name))
         self._log_info(_format_change_line(
             "~", "GROUP", group_name,
             f"{action_verb} members ({added})",
+        ))
+
+    def log_group_member_remove(self, group_name: str, members: frozenset[Principal]) -> None:
+        """Log members being removed from an existing account group (full
+        reconciliation — members absent from config are removed)."""
+        self._group_members_removed += len(members)
+        action_verb = "Remove" if self._dry_run else "Removed"
+        removed = ", ".join(f"-{p.name}" for p in sorted(members, key=lambda p: p.name))
+        self._log_info(_format_change_line(
+            "~", "GROUP", group_name,
+            f"{action_verb} members ({removed})",
         ))
 
     # ------------------------------------------------------------------
@@ -568,6 +579,8 @@ class ChangeLogger:
             group_parts.append(f"{self._groups_created} created")
         if self._group_members_added:
             group_parts.append(f"{self._group_members_added} members added")
+        if self._group_members_removed:
+            group_parts.append(f"{self._group_members_removed} members removed")
 
         sections: list[str] = []
         if group_parts:
@@ -639,6 +652,8 @@ class ChangeLogger:
             group_parts.append(f"{self._groups_created} to create")
         if self._group_members_added:
             group_parts.append(f"{self._group_members_added} members to add")
+        if self._group_members_removed:
+            group_parts.append(f"{self._group_members_removed} members to remove")
 
         sections: list[str] = []
         if group_parts:

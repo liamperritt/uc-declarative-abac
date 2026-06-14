@@ -116,6 +116,7 @@ def run(
     enable_privilege_management: bool = False,
     enable_governed_tag_deletion: bool = False,
     enable_group_creation: bool = False,
+    enable_group_management: bool = False,
     ignore_unresolvable_principals: str = "",
     manage_tags_for_catalogs: str = "*",
     manage_privileges_for_catalogs: str = "*",
@@ -151,14 +152,18 @@ def run(
     protect UC auto data classification tags. An empty string allows the engine
     to remove any unconfigured tag.
 
-    Group management is the first domain orchestrated (before governed tags). It
-    runs by default whenever the config declares groups with members, adding any
-    missing members to those account groups (additions only — never removals).
-    Configured groups that don't yet exist are a fatal error unless
-    ``enable_group_creation=True``, which creates them (with their members) first.
-    Externally-managed (IdP-provisioned) groups are a fatal error. Group
-    management requires the account SCIM proxy, so combining configured groups
-    with ``use_workspace_scim=True`` raises immediately.
+    Group management is the first domain orchestrated (before governed tags),
+    gated by two orthogonal flags. ``enable_group_creation`` creates configured
+    groups that don't yet exist, with their configured members (atomically; the
+    engine auto-receives the MANAGER role on groups it creates).
+    ``enable_group_management`` reconciles the membership of *existing* groups —
+    adding missing members and removing members absent from config (an empty
+    members list removes all); it requires the MANAGER role on each managed group.
+    A configured group that doesn't exist is a fatal error under management unless
+    creation is also enabled; existing externally-managed (IdP-provisioned) groups
+    are a fatal error. With neither flag the group domain is inert. Both flags
+    require the account SCIM proxy, so combining them with
+    ``use_workspace_scim=True`` raises immediately.
 
     ``ignore_unresolvable_principals`` is a comma-separated list of actual-state
     (UC-side) principal identifiers — usernames, service-principal
@@ -176,14 +181,17 @@ def run(
     config = ResourcesConfig.model_validate(consolidated)
     catalog_names = list(config.catalogs.keys())
 
-    # Group management operates at the account level via the account SCIM proxy.
-    # The workspace SCIM API surfaces only workspace-level groups and cannot
-    # manage account-group membership, so configuring groups under
-    # --use-workspace-scim is unsupported.
-    if config.groups and use_workspace_scim:
+    # Group creation/management operate at the account level via the account SCIM
+    # proxy. The workspace SCIM API surfaces only workspace-level groups and cannot
+    # create or manage account groups, so enabling a group flag under
+    # --use-workspace-scim is unsupported. (Configuring groups without any group
+    # flag is inert and compatible with --use-workspace-scim.)
+    group_domain_active = enable_group_creation or enable_group_management
+    if config.groups and group_domain_active and use_workspace_scim:
         raise OrchestratorError(
-            "Group management requires the account SCIM proxy, but --use-workspace-scim "
-            "was set. Remove --use-workspace-scim to manage the groups declared in config."
+            "Group creation/management requires the account SCIM proxy, but "
+            "--use-workspace-scim was set. Remove --use-workspace-scim to create or "
+            "manage the groups declared in config."
         )
 
     # Parse per-domain catalog filters. Each scope is empty when its paired
@@ -244,7 +252,7 @@ def run(
     ws_helper = WorkspaceHelper(
         workspace_client,
         use_workspace_scim=use_workspace_scim,
-        manage_groups=bool(desired_groups),
+        manage_groups=group_domain_active and bool(desired_groups),
     )
     change_logger = ChangeLogger(dry_run=dry_run, logger=_logger)
     change_logger.log_banner()
@@ -274,19 +282,24 @@ def run(
 
     # Fetch membership for the configured groups only — one GET /Groups/{id} per
     # group (the account SCIM proxy list call doesn't return members inline),
-    # dispatched concurrently. Returns an empty set when no groups are configured.
-    actual_groups = ws_helper.fetch_actual_groups(desired_group_names)
+    # dispatched concurrently. Empty when the group domain is inert.
+    actual_groups = (
+        ws_helper.fetch_actual_groups(desired_group_names)
+        if group_domain_active else set()
+    )
 
     # 3. Construct the shared PrincipalResolver now that ws_helper cache is populated.
     resolver = PrincipalResolver(ws_helper)
 
-    # 3a. Group management workflow (the first domain — runs before governed tags
-    # so that any groups referenced as policy/grant principals exist first).
+    # 3a. Group workflow (the first domain — runs before governed tags so that any
+    # groups referenced as policy/grant principals exist first). Inert unless a
+    # group flag is set.
     group_diff = compute_group_diff(
         desired_groups, actual_groups, resolver, change_logger,
         enable_group_creation=enable_group_creation,
+        enable_group_management=enable_group_management,
         ignore_unresolvable=ignore_unresolvable,
-    )
+    ) if group_domain_active else GroupDiff()
     # Groups slated for creation this run aren't in the principal cache yet (it was
     # fetched before any group existed). Register them so downstream domains
     # (governed-tag assigners, policies, privileges, securable owners) can resolve
@@ -386,7 +399,7 @@ def run(
         privilege_diff = PrivilegeDiff()
 
     # 9. Log and execute (or dry-run) — group management runs first.
-    if group_diff.groups_to_create or group_diff.members_to_add:
+    if group_diff.groups_to_create or group_diff.members_to_add or group_diff.members_to_remove:
         change_logger.log_section_header("Groups")
     execute_group_diff(
         ws_helper, group_diff, change_logger,

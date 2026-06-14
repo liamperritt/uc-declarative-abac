@@ -328,6 +328,37 @@ def test_workspace_helper_add_group_members_issues_patch() -> None:
 
 
 # ---------------------------------------------------------------------------
+# remove_group_members
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_helper_remove_group_members_issues_patch() -> None:
+    """remove_group_members issues a PATCH whose path contains the target group's
+    SCIM id and whose request references the member's SCIM id."""
+    client = _make_workspace_client(
+        users=[_make_user("alice@example.com", "u-1")],
+        groups=[_make_group("data_engineers", "g-1")],
+    )
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    member = Principal(PrincipalType.USER, "alice@example.com", "alice@example.com")
+    helper.remove_group_members("data_engineers", [member])
+
+    patch_calls = [
+        call for call in client.api_client.do.call_args_list
+        if call.args and call.args[0] == "PATCH"
+    ]
+    assert len(patch_calls) == 1
+    call = patch_calls[0]
+    assert "g-1" in call.args[1]
+    captured = repr(call.kwargs)
+    # The member's SCIM id appears in the remove op and "remove" is the op.
+    assert "u-1" in captured
+    assert "remove" in captured
+
+
+# ---------------------------------------------------------------------------
 # create_group
 # ---------------------------------------------------------------------------
 

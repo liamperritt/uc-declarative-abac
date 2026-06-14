@@ -7,7 +7,25 @@ if TYPE_CHECKING:
     from uc_declarative_abac.logger import ChangeLogger
 
 from uc_declarative_abac.principals.state import GroupDiff
-from uc_declarative_abac.utils import ExecutionError, parallel_for_each
+from uc_declarative_abac.utils import ExecutionError, OrchestratorError, parallel_for_each
+
+
+def _group_membership_error(group_name: str, error: Exception) -> Exception:
+    """Augment a member add/remove failure with a clear remediation when it is a
+    permission error.
+
+    The account SCIM proxy returns ``PERMISSION_DENIED`` when the engine principal
+    lacks the ``MANAGER`` role on the target group, with an opaque message (e.g.
+    ``PERMISSION_DENIED: Requesting user '...' does not have securable_type:
+    "group"``). Rewrite it into actionable guidance; pass other errors through
+    unchanged."""
+    if "PERMISSION_DENIED" in str(error):
+        return OrchestratorError(
+            f"Permission denied updating membership of group '{group_name}'. The "
+            f"engine principal must be granted the 'MANAGER' role on this group to "
+            f"add or remove its members. Original error: {error}"
+        )
+    return error
 
 
 def _execute_creates(
@@ -69,10 +87,49 @@ def _execute_member_adds(
         name, members = item
         if error is not None:
             change_logger.log_error(ExecutionError(
-                context=f"add_group_members({name})", exception=error,
+                context=f"add_group_members({name})",
+                exception=_group_membership_error(name, error),
             ))
             return
         change_logger.log_group_member_add(name, members)
+
+    parallel_for_each(
+        work_items,
+        worker,
+        max_workers=max_workers,
+        on_complete=on_complete,
+    )
+
+
+def _execute_member_removes(
+    ws_helper: WorkspaceHelper,
+    diff: GroupDiff,
+    change_logger: ChangeLogger,
+    dry_run: bool,
+    max_workers: int,
+) -> None:
+    """Remove members from each group in members_to_remove via the account SCIM
+    proxy.
+
+    Per-group SDK calls run in parallel; logging and error capture run via
+    ``on_complete`` on the main thread.
+    """
+    work_items = sorted(diff.members_to_remove.items(), key=lambda item: item[0])
+
+    def worker(item: tuple[str, frozenset]) -> None:
+        name, members = item
+        if not dry_run:
+            ws_helper.remove_group_members(name, members)
+
+    def on_complete(item: tuple[str, frozenset], _result, error) -> None:
+        name, members = item
+        if error is not None:
+            change_logger.log_error(ExecutionError(
+                context=f"remove_group_members({name})",
+                exception=_group_membership_error(name, error),
+            ))
+            return
+        change_logger.log_group_member_remove(name, members)
 
     parallel_for_each(
         work_items,
@@ -91,12 +148,14 @@ def execute_group_diff(
 ) -> None:
     """Apply a GroupDiff against the account via the account SCIM proxy.
 
-    Creates groups first (``ws_helper.create_group``), then adds members to
-    existing groups (``ws_helper.add_group_members``). Each phase forms one
-    parallel batch (up to ``max_parallel_changes`` workers); dry-run forces
-    sequential execution and skips the API calls. Each SDK exception is logged
-    via ``change_logger.log_error`` and the batch continues.
+    Creates groups first (``ws_helper.create_group``, with their members), then
+    adds members to and removes members from existing groups
+    (``ws_helper.add_group_members`` / ``remove_group_members``). Each phase forms
+    one parallel batch (up to ``max_parallel_changes`` workers); dry-run forces
+    sequential execution and skips the API calls. Each SDK exception is logged via
+    ``change_logger.log_error`` and the batch continues.
     """
     workers = 1 if dry_run else max_parallel_changes
     _execute_creates(ws_helper, diff, change_logger, dry_run, workers)
     _execute_member_adds(ws_helper, diff, change_logger, dry_run, workers)
+    _execute_member_removes(ws_helper, diff, change_logger, dry_run, workers)

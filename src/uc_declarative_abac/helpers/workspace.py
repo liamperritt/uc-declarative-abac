@@ -448,6 +448,31 @@ class WorkspaceHelper:
             },
         )
 
+    def remove_group_members(self, display_name: str, members: Iterable[Principal]) -> None:
+        """Remove members from an existing Databricks-managed account group via a
+        SCIM PatchOp. Requires the engine principal to hold the MANAGER role on the
+        group.
+
+        TBD: verify in integration testing; the exact SCIM PatchOp body shape for
+        the account SCIM proxy patch endpoint is assumed here. If the API rejects
+        it, adjust the body accordingly.
+        """
+        group_id = self._group_id_by_name[display_name]
+        operations = [
+            {"op": "remove", "path": f'members[value eq "{_principal_to_member_dict(m, self._scim_id_by_identifier)["value"]}"]'}
+            for m in members
+        ]
+        if not operations:
+            return
+        self._client.api_client.do(
+            "PATCH",
+            f"/api/2.0/account/scim/v2/Groups/{group_id}",
+            body={
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                "Operations": operations,
+            },
+        )
+
     def _ensure_tag_policies_loaded(self) -> list[TagPolicy]:
         """Lazily list tag policies once and cache them. Thread-safe."""
         with self._tag_policies_lock:

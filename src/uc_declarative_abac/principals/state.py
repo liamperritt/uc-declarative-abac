@@ -57,14 +57,17 @@ class Group:
 
 @dataclass
 class GroupDiff:
-    """Computed group-management changes — additions only (no member removals).
+    """Computed group-management changes.
 
-    ``members_to_add`` maps an existing group's display name to the resolved
-    Principals to add to it. ``groups_to_create`` maps a not-yet-existent group's
-    display name to its resolved initial members (populated only when group
-    creation is enabled). Both values hold fully-resolved Principals — the differ
-    resolves them before they land here.
+    ``groups_to_create`` maps a not-yet-existent group's display name to its
+    resolved initial members (populated only when group creation is enabled — the
+    group is created with these members atomically). ``members_to_add`` and
+    ``members_to_remove`` map an *existing* group's display name to the resolved
+    Principals to add to / remove from it (populated only when group management is
+    enabled). All values hold fully-resolved Principals — the differ resolves them
+    before they land here.
     """
 
     members_to_add: dict[str, frozenset[Principal]] = field(default_factory=dict)
+    members_to_remove: dict[str, frozenset[Principal]] = field(default_factory=dict)
     groups_to_create: dict[str, frozenset[Principal]] = field(default_factory=dict)

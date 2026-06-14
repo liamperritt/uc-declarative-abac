@@ -49,7 +49,8 @@ Resolution precedence matches the SDK's unified-auth chain: explicit `--profile`
 > **Required permissions.** Whichever identity the engine authenticates as (typically a service principal for automation) must hold:
 > - **Workspace admin** on the target workspace — needed to execute SQL on the configured warehouse and manage UC object owners.
 > - **Metastore admin** on the target metastore — needed to create/alter catalogs, schemas, tables, volumes, functions, tags, grants, masks, and filters.
-> - **Governed tag creator/manager** on the account — needed to create and update account-level governed tags (tag policies) under `resources.governed_tags`.
+> - **Governed tag `creator`/`manager`** on the account — needed to create and update account-level governed tags (tag policies) under `resources.governed_tags`.
+> - **Group `manager` on each managed group** — needed to add/remove members of the account groups under `resources.groups` when `--enable-group-management` is set. The engine automatically receives the `manager` role on any group it creates via `--enable-group-creation`, so groups created by the engine are manageable without further grants; for pre-existing groups, the role must be granted to the engine principal out of band.
 
 ### GitHub Action
 
@@ -64,7 +65,8 @@ The repo ships a composite GitHub Action at `deploy/action.yml` so any other rep
 | `profile` | no | `''` | Databricks CLI profile name from `~/.databrickscfg`; omit to use env-based auth (see the [Authentication](#authentication) table) |
 | `dry-run` | no | `'false'` | Print planned changes without executing when `'true'` |
 | `use-workspace-scim` | no | `'false'` | Fetch principals from the workspace SCIM API instead of the account SCIM proxy when `'true'`. The account-level system groups `account users` and `account admins` are automatically included, since the workspace SCIM API does not surface them. **Incompatible with configuring `resources.groups`** — group management requires the account SCIM proxy, so combining the two errors out |
-| `enable-group-creation` | no | `'false'` | Permit the engine to create account groups declared under `resources.groups` that don't yet exist (with their configured members). When off, a configured group that doesn't exist is a fatal error. Adding members to *existing* groups happens by default and needs no flag |
+| `enable-group-creation` | no | `'false'` | Permit the engine to create account groups declared under `resources.groups` that don't yet exist, **with their configured members** (the engine automatically gets the `MANAGER` role on groups it creates). Independent of `enable-group-management`: this flag only creates missing groups |
+| `enable-group-management` | no | `'false'` | Permit the engine to reconcile the membership of **existing** account groups under `resources.groups` — adding configured members and **removing** members absent from config (an empty `members` list removes all). Requires the `MANAGER` role on each managed group. Off by default; does not create missing groups (use `enable-group-creation`) |
 | `enable-tag-management` | no | `'false'` | Permit the engine to create/update/remove tag assignments on securables |
 | `enable-privilege-management` | no | `'false'` | Permit the engine to `GRANT`/`REVOKE` privileges |
 | `enable-taggable-management` | no | `'false'` | Permit the engine to update attributes (owner, etc.) on existing catalogs/schemas/tables/volumes |
@@ -580,13 +582,14 @@ Account groups and their membership are defined under `resources: groups:` (not 
 - **`name`** — the group's display name.
 - **`members`** — the list of principals (users, groups, or service principals by display name) that must belong to the group.
 
-Behaviour:
+Behaviour (governed by two orthogonal, off-by-default flags):
 
-- **Additions only.** The engine ensures every configured member is in the group; it adds missing members and **never removes** members (the running service principal is typically a workspace admin, which can add — but not remove — account-group members; removal requires account admin). Members present in the group but absent from config are left untouched.
-- **Group creation is gated.** A configured group that doesn't exist is a fatal error unless `enable-group-creation` is set, in which case the engine creates it (with its configured members) first.
-- **Externally-managed groups are rejected.** A group provisioned from an external IdP (it carries an `external_id`) cannot have its membership managed here — the run fails with a clear error.
-- **Account SCIM proxy required.** Group management uses the account SCIM proxy reachable from the workspace; it is incompatible with `use-workspace-scim` (combining the two errors out). It reuses the single principal fetch the engine already performs — no additional API calls.
-- **Runs first.** Group management is the first domain reconciled (before governed tags), so groups referenced as policy/grant principals exist before they're used.
+- **Creation (`enable-group-creation`).** Creates a configured group that doesn't yet exist, **with its configured members** (atomically). The engine automatically receives the `MANAGER` role on groups it creates. This flag only brings missing groups into existence; it does not reconcile the membership of existing groups.
+- **Management (`enable-group-management`).** Reconciles the membership of **existing** groups: configured members not in the group are added, and members in the group but absent from config are **removed** (an empty/omitted `members` list removes all members — config is the source of truth). Requires the engine principal to hold the `MANAGER` role on each managed group.
+- **Gating.** With neither flag the group domain is inert (configured groups are ignored). Under management, a configured group that doesn't exist is a fatal error unless creation is also enabled. To fully provision a brand-new group with its members in one run, pass both flags.
+- **Externally-managed groups are rejected.** An existing group provisioned from an external IdP (it carries an `external_id`) cannot have its membership managed here — the run fails with a clear error.
+- **Account SCIM proxy required.** Group creation/management use the account SCIM proxy reachable from the workspace; enabling a group flag is incompatible with `use-workspace-scim` (combining them errors out).
+- **Runs first.** The group domain is reconciled first (before governed tags), so groups referenced as policy/grant principals exist before they're used.
 
 ```yaml
 # resources/groups/data_engineers.yaml
@@ -824,7 +827,7 @@ Not all object types are managed the same way:
 
 | Category | Behaviour | Examples |
 |----------|-----------|----------|
-| **Group membership** | Additive only (never removals) | Members are added to account groups; configured groups are created only with `--enable-group-creation`. Existing members absent from config are left untouched. |
+| **Group membership** | Additive + removals (gated) | With `--enable-group-management` the membership of existing groups is fully reconciled (members added and removed to match config; empty list removes all). Missing groups are created — with their members — only with `--enable-group-creation`. With neither flag, configured groups are ignored. |
 | **Governed tags** | Additive + deletes | Unconfigured governed tags are deleted from the account only if the "--enable-governed-tag-deletion" flag is set. |
 | **UC objects & attributes** | Additive only (create/update, never deletes) | Catalogs, schemas, tables, volumes, functions, comments |
 | **Tags & grant policies** | Additive + removals/revokes | Tag assignments on objects, `GRANT` statements |
@@ -847,12 +850,13 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 - **Pydantic model validation** — full config validation with parent context injection (`catalog_name`, `schema_name`, `table_name`), `full_name` computed fields, null tag coercion, and duplicate resource detection
 
 #### Group management domain
+- **Two orthogonal gates** — `--enable-group-creation` creates missing configured groups (with their members; the engine auto-gets MANAGER on them); `--enable-group-management` reconciles the membership of existing groups (add + remove). With neither flag the domain is inert.
 - **Group compilation** — walks `resources.groups`, emitting `Group` state with members as unresolved principals; dict key is used as the default display name
-- **Group fetch (no extra cost)** — account groups, their `external_id`, and their members are read from the *same* account-SCIM-proxy principal fetch the engine already performs (the group/user/SP list calls just request a wider attribute set); group member SCIM ids are translated back to canonical identifiers (username / display name / application_id) so both sides of the diff speak the same dialect. `fetch_actual_groups` is a pure cache read — no additional API calls
-- **Group diffing** — additions only: computes, per configured group, the members to add (desired − actual); members present in the group but absent from config are never removed. Idempotent — a fully-synced group produces no change
-- **Group execution** — adds members to existing groups via a SCIM PatchOp against the account proxy; with `--enable-group-creation`, missing groups are created (with members) first. Externally-managed (IdP-provisioned) groups are a fatal error; a missing group without the creation flag is a fatal error
-- **Ordering** — group management is reconciled *first* (before governed tags), so groups referenced as policy/grant principals exist before they're used
-- **Account SCIM proxy required** — group management is incompatible with `--use-workspace-scim` (the run errors out), since the workspace SCIM API does not manage account-group membership
+- **Group fetch** — account group existence + SCIM ids come from the principal fetch (wider attributes on the same list calls); each *configured* group's membership and `external_id` are then read via a per-group `GET /Groups/{id}` (the account-proxy list call doesn't return members reliably), scoped to configured groups and dispatched concurrently. Member SCIM ids are translated back to canonical identifiers (username / display name / application_id) so both sides of the diff speak the same dialect
+- **Group diffing** — under management, computes per configured group the members to add (desired − actual) and to remove (actual − desired); an empty configured `members` list removes all members. Idempotent — a fully-synced group produces no change. Unresolvable actual members are dropped (never removed)
+- **Group execution** — creates missing groups (with members) via SCIM POST, then adds/removes members of existing groups via SCIM PatchOps against the account proxy. Externally-managed (IdP-provisioned) existing groups are a fatal error; under management a missing group without the creation flag is a fatal error
+- **Ordering** — the group domain is reconciled *first* (before governed tags), and groups slated for creation are seeded into the principal cache so they resolve as principals in the governed-tag/policy/privilege/owner domains the same run
+- **Account SCIM proxy required** — enabling a group flag is incompatible with `--use-workspace-scim` (the run errors out), since the workspace SCIM API does not manage account groups
 
 #### Governed tags domain
 - **Governed tag compilation** — walks `resources.governed_tags`, emitting `GovernedTag` state with `description` and `allowed_values` per entry; dict key is used as the default tag name

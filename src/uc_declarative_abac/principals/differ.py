@@ -58,49 +58,46 @@ def compute_group_diff(
     resolver: PrincipalResolver,
     change_logger: ChangeLogger,
     enable_group_creation: bool = False,
+    enable_group_management: bool = False,
     ignore_unresolvable: frozenset[str] = frozenset(),
 ) -> GroupDiff:
-    """Compute additions-only group-management diff between desired and actual.
+    """Compute the group-management diff between desired and actual.
 
     Members on both sides are resolved before comparison so the two sides speak
     the same dialect (config-side has display names; UC-side has identifiers).
-    Membership is reconciled additively only — members present in actual but
-    absent from desired are left alone (no removals).
+    The two gates are orthogonal:
 
-    - A desired group whose actual counterpart carries an ``external_id`` is
-      externally managed (IdP-provisioned) and cannot be configured here — this
-      is a fatal error.
-    - A desired group with no actual counterpart is created (with its members)
-      when ``enable_group_creation`` is True; otherwise it is a fatal error
-      directing the operator to pass ``--enable-group-creation``.
+    - **Creation** (``enable_group_creation``): a desired group with no actual
+      counterpart is created with its configured members (atomically) — it goes
+      into ``groups_to_create``. Without the flag, a missing group is a fatal
+      error only when management is on (directing the operator to pass
+      ``--enable-group-creation``); with neither flag it is ignored.
+    - **Management** (``enable_group_management``): an *existing* group's
+      membership is reconciled — ``members_to_add = desired − actual`` and
+      ``members_to_remove = actual − desired`` (an empty desired set removes all
+      members). An existing group with an ``external_id`` (IdP-provisioned) is a
+      fatal error. Without the flag, existing groups are left untouched. A
+      newly-created group is handled by creation only — management does not
+      re-process it.
 
     ``ignore_unresolvable`` silences the resolution-failure warning for the
-    listed actual-state member identifiers (the member is still dropped).
+    listed actual-state member identifiers (the member is still dropped, so it is
+    never removed).
     """
     actual_by_name = {g.display_name: g for g in actual}
 
     diff = GroupDiff()
     for desired_group in desired:
         name = desired_group.display_name
-        resolved_desired = _resolve_group_members(
-            desired_group, resolver, change_logger, ignore_unresolvable
-        )
         actual_group = actual_by_name.get(name)
-
-        if actual_group is not None and actual_group.external_id:
-            change_logger.log_error(ExecutionError(
-                context=f"Configure GROUP {name}",
-                exception=OrchestratorError(
-                    f"Group '{name}' is externally managed (IdP-provisioned) "
-                    "and cannot be configured by this engine."
-                ),
-            ))
-            continue
 
         if actual_group is None:
             if enable_group_creation:
+                resolved_desired = _resolve_group_members(
+                    desired_group, resolver, change_logger, ignore_unresolvable
+                )
                 diff.groups_to_create[name] = resolved_desired.members
-            else:
+            elif enable_group_management:
                 change_logger.log_error(ExecutionError(
                     context=f"Configure GROUP {name}",
                     exception=OrchestratorError(
@@ -110,11 +107,30 @@ def compute_group_diff(
                 ))
             continue
 
+        # Existing group: only reconciled under group management.
+        if not enable_group_management:
+            continue
+        if actual_group.external_id:
+            change_logger.log_error(ExecutionError(
+                context=f"Configure GROUP {name}",
+                exception=OrchestratorError(
+                    f"Group '{name}' is externally managed (IdP-provisioned) "
+                    "and cannot be configured by this engine."
+                ),
+            ))
+            continue
+
+        resolved_desired = _resolve_group_members(
+            desired_group, resolver, change_logger, ignore_unresolvable
+        )
         resolved_actual = _resolve_group_members(
             actual_group, resolver, change_logger, ignore_unresolvable
         )
         to_add = resolved_desired.members - resolved_actual.members
+        to_remove = resolved_actual.members - resolved_desired.members
         if to_add:
             diff.members_to_add[name] = frozenset(to_add)
+        if to_remove:
+            diff.members_to_remove[name] = frozenset(to_remove)
 
     return diff
