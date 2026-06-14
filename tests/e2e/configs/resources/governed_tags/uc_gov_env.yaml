@@ -9,3 +9,4 @@ resources:
         - prod
       assigners:
         - sp_uc_governor_test
+        - uc_governor_data_engineers

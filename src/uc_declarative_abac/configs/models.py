@@ -631,15 +631,23 @@ class GovernedTagConfig(BaseModel):
     assigners: list[str] = Field(default_factory=list)
 
 
+class GroupConfig(BaseModel):
+    """Represents a Databricks-managed group with optional members.
+    """
+    name: str
+    members: list[str] = Field(default_factory=list)
+
+
 class ResourcesConfig(BaseModel):
     catalogs: dict[str, CatalogConfig]
     governed_tags: dict[str, GovernedTagConfig] | None = None
+    groups: dict[str, GroupConfig] | None = None
 
     @model_validator(mode="before")
     @classmethod
     def _inject_names_and_reject_duplicates(cls, data: dict) -> dict:
-        """Set each catalog's and governed tag's name from its dict key when
-        not provided, then reject any two entries that share the same
+        """Set each catalog's, governed tag's and group's name from its dict
+        key when not provided, then reject any two entries that share the same
         ``name`` (dict keys are unique by construction, but two entries can
         still explicitly set the same ``name`` field — both would target the
         same UC object)."""
@@ -658,5 +666,13 @@ class ResourcesConfig(BaseModel):
                     gt.setdefault("name", key)
             _check_duplicate_names(
                 list(governed_tags.values()), "governed tag", "resources",
+            )
+        groups = data.get("groups")
+        if isinstance(groups, dict):
+            for key, grp in groups.items():
+                if isinstance(grp, dict):
+                    grp.setdefault("name", key)
+            _check_duplicate_names(
+                list(groups.values()), "group", "resources",
             )
         return data

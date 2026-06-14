@@ -3,24 +3,24 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from uc_declarative_abac.principals import Principal
+from uc_declarative_abac.principals.state import Principal
 from uc_declarative_abac.utils import ExecutionError
 
 if TYPE_CHECKING:
-    from uc_declarative_abac.governed_tags import GovernedTag
-    from uc_declarative_abac.policies import Policy
-    from uc_declarative_abac.privileges import SecurablePrivilege
-    from uc_declarative_abac.securables import (
+    from uc_declarative_abac.governed_tags.state import GovernedTag
+    from uc_declarative_abac.policies.state import Policy
+    from uc_declarative_abac.privileges.state import SecurablePrivilege
+    from uc_declarative_abac.securables.state import (
         AttributeUpdate,
         Securable,
     )
-    from uc_declarative_abac.tags import SecurableTag
+    from uc_declarative_abac.tags.state import SecurableTag
 
 
 _default_logger = logging.getLogger("uc_declarative_abac")
 
 # Column widths for aligned output
-_TYPE_WIDTH = 8
+_TYPE_WIDTH = 12
 _NAME_WIDTH = 36
 
 
@@ -156,6 +156,8 @@ class ChangeLogger:
         self._governed_tags_deleted = 0
         self._governed_tag_assigners_granted = 0
         self._governed_tag_assigners_revoked = 0
+        self._groups_created = 0
+        self._group_members_added = 0
         self._errors: list[ExecutionError] = []
         self._warnings: list[ExecutionError] = []
 
@@ -461,6 +463,36 @@ class ChangeLogger:
         ))
 
     # ------------------------------------------------------------------
+    # Group management logging
+    # ------------------------------------------------------------------
+
+    def log_group_create(self, group_name: str, members: frozenset[Principal]) -> None:
+        """Log an account group being created with its initial members. Members
+        are also counted as additions for the summary."""
+        self._groups_created += 1
+        self._group_members_added += len(members)
+        action_verb = "Create" if self._dry_run else "Created"
+        suffix = (
+            f" (members={','.join(sorted(p.name for p in members))})"
+            if members else ""
+        )
+        self._log_info(_format_change_line(
+            "+", "GROUP", group_name,
+            f"{action_verb} group{suffix}",
+        ))
+
+    def log_group_member_add(self, group_name: str, members: frozenset[Principal]) -> None:
+        """Log members being added to an existing account group. Additions only —
+        the engine never removes group members."""
+        self._group_members_added += len(members)
+        action_verb = "Add" if self._dry_run else "Added"
+        added = ", ".join(f"+{p.name}" for p in sorted(members, key=lambda p: p.name))
+        self._log_info(_format_change_line(
+            "~", "GROUP", group_name,
+            f"{action_verb} members ({added})",
+        ))
+
+    # ------------------------------------------------------------------
     # Error section
     # ------------------------------------------------------------------
 
@@ -531,7 +563,15 @@ class ChangeLogger:
         if self._governed_tag_assigners_revoked:
             gt_assigner_parts.append(f"{self._governed_tag_assigners_revoked} revoked")
 
+        group_parts: list[str] = []
+        if self._groups_created:
+            group_parts.append(f"{self._groups_created} created")
+        if self._group_members_added:
+            group_parts.append(f"{self._group_members_added} members added")
+
         sections: list[str] = []
+        if group_parts:
+            sections.append("Groups: " + ", ".join(group_parts))
         if sec_parts:
             sections.append("Securables: " + ", ".join(sec_parts))
         if gt_parts:
@@ -594,7 +634,15 @@ class ChangeLogger:
         if self._governed_tag_assigners_revoked:
             gt_assigner_parts.append(f"{self._governed_tag_assigners_revoked} to revoke")
 
+        group_parts: list[str] = []
+        if self._groups_created:
+            group_parts.append(f"{self._groups_created} to create")
+        if self._group_members_added:
+            group_parts.append(f"{self._group_members_added} members to add")
+
         sections: list[str] = []
+        if group_parts:
+            sections.append("Groups: " + ", ".join(group_parts))
         if sec_parts:
             sections.append("Securables: " + ", ".join(sec_parts))
         if gt_parts:

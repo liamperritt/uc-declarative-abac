@@ -11,3 +11,4 @@ definitions:
       for: catalogs
       to:
         - liam.perritt@databricks.com
+        - uc_governor_data_engineers

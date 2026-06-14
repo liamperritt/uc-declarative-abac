@@ -63,7 +63,8 @@ The repo ships a composite GitHub Action at `deploy/action.yml` so any other rep
 | `warehouse-id` | yes | — | SQL warehouse ID used to execute UC queries |
 | `profile` | no | `''` | Databricks CLI profile name from `~/.databrickscfg`; omit to use env-based auth (see the [Authentication](#authentication) table) |
 | `dry-run` | no | `'false'` | Print planned changes without executing when `'true'` |
-| `use-workspace-scim` | no | `'false'` | Fetch principals from the workspace SCIM API instead of the account SCIM proxy when `'true'`. The account-level system groups `account users` and `account admins` are automatically included, since the workspace SCIM API does not surface them |
+| `use-workspace-scim` | no | `'false'` | Fetch principals from the workspace SCIM API instead of the account SCIM proxy when `'true'`. The account-level system groups `account users` and `account admins` are automatically included, since the workspace SCIM API does not surface them. **Incompatible with configuring `resources.groups`** — group management requires the account SCIM proxy, so combining the two errors out |
+| `enable-group-creation` | no | `'false'` | Permit the engine to create account groups declared under `resources.groups` that don't yet exist (with their configured members). When off, a configured group that doesn't exist is a fatal error. Adding members to *existing* groups happens by default and needs no flag |
 | `enable-tag-management` | no | `'false'` | Permit the engine to create/update/remove tag assignments on securables |
 | `enable-privilege-management` | no | `'false'` | Permit the engine to `GRANT`/`REVOKE` privileges |
 | `enable-taggable-management` | no | `'false'` | Permit the engine to update attributes (owner, etc.) on existing catalogs/schemas/tables/volumes |
@@ -100,7 +101,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: liamperritt/uc-declarative-abac/deploy@v0.4.0
+      - uses: liamperritt/uc-declarative-abac/deploy@v0.5.0
         with:
           config-dir: configs/
           warehouse-id: ${{ vars.DATABRICKS_WAREHOUSE_ID }}
@@ -128,6 +129,7 @@ Swap `DATABRICKS_TOKEN` for `DATABRICKS_CLIENT_ID` + `DATABRICKS_CLIENT_SECRET` 
 
 ### Resources (deployed UC objects)
 
+- **Groups** — account groups and their membership. The engine adds configured members to existing account groups (additions only) and, with `enable-group-creation`, creates missing groups.
 - **Governed tags** — enforced usage rules for UC governed tags with allowed values, allowed principals, and comments.
 - **Catalogs** — usually a thin `$ref` to a catalog definition with optional overrides (e.g. a different `name` or `tags` for a test vs prod environment). Can also be written fully inline when no reuse is needed.
 - **Schemas, tables, volumes, functions, mask/filter ABAC policies** — concrete instances that can reference relevant definitions. Generally you shouldn't need to declare these at the resource level because they're pulled in transitively via the catalog definition. BUt both options are supported.
@@ -571,6 +573,34 @@ For mask and filter policies, the `function` property can either be the name of 
 
 Resource configs are concrete, deployable instances (e.g., catalogs and their contents) that can compose definitions into real UC objects.
 
+#### Groups
+
+Account groups and their membership are defined under `resources: groups:` (not definitions) because they are account-level singletons. The dictionary key is used as the group's display name if `name` is not provided.
+
+- **`name`** — the group's display name.
+- **`members`** — the list of principals (users, groups, or service principals by display name) that must belong to the group.
+
+Behaviour:
+
+- **Additions only.** The engine ensures every configured member is in the group; it adds missing members and **never removes** members (the running service principal is typically a workspace admin, which can add — but not remove — account-group members; removal requires account admin). Members present in the group but absent from config are left untouched.
+- **Group creation is gated.** A configured group that doesn't exist is a fatal error unless `enable-group-creation` is set, in which case the engine creates it (with its configured members) first.
+- **Externally-managed groups are rejected.** A group provisioned from an external IdP (it carries an `external_id`) cannot have its membership managed here — the run fails with a clear error.
+- **Account SCIM proxy required.** Group management uses the account SCIM proxy reachable from the workspace; it is incompatible with `use-workspace-scim` (combining the two errors out). It reuses the single principal fetch the engine already performs — no additional API calls.
+- **Runs first.** Group management is the first domain reconciled (before governed tags), so groups referenced as policy/grant principals exist before they're used.
+
+```yaml
+# resources/groups/data_engineers.yaml
+resources:
+  groups:
+    data_engineers:
+      name: data_engineers
+      members:
+        - alice@example.com
+        - bob@example.com
+        - platform_admins         # groups can be members of groups
+        - etl-service-principal   # service principals by display name
+```
+
 #### Governed Tags
 
 Governed tags specify a tag name with a enforced set of allowed values. They are defined under `resources: governed_tags:` (not definitions) because they are account-level singletons—there is no catalog-scoped variant. The dictionary key is used as the tag name if `name` is not provided. All governed tags should exclusively be created through this framework.
@@ -769,9 +799,12 @@ resources/
 ├── catalogs/
 │   ├── operations_prod.yaml             # thin $ref to the catalog definition
 │   └── operations_test.yaml
-└── governed_tags/
-    ├── pii.yaml
-    └── domain.yaml
+├── governed_tags/
+│   ├── pii.yaml
+│   └── domain.yaml
+└── groups/
+    ├── data_engineers.yaml
+    └── finance_analysts.yaml
 CODEOWNERS
 ```
 
@@ -791,6 +824,7 @@ Not all object types are managed the same way:
 
 | Category | Behaviour | Examples |
 |----------|-----------|----------|
+| **Group membership** | Additive only (never removals) | Members are added to account groups; configured groups are created only with `--enable-group-creation`. Existing members absent from config are left untouched. |
 | **Governed tags** | Additive + deletes | Unconfigured governed tags are deleted from the account only if the "--enable-governed-tag-deletion" flag is set. |
 | **UC objects & attributes** | Additive only (create/update, never deletes) | Catalogs, schemas, tables, volumes, functions, comments |
 | **Tags & grant policies** | Additive + removals/revokes | Tag assignments on objects, `GRANT` statements |
@@ -811,6 +845,14 @@ Mask and filter policies are currently additive-only because Unity Catalog does 
 - **`$ref`/`$defs` resolution** — resolves `$defs/<type>/<key>` references with override support, circular reference detection, and unreferenced definition detection
 - **Resource consolidation** — standalone `resources.schemas`, `resources.tables`, `resources.volumes` are restructured into the nested catalog hierarchy with parent auto-creation
 - **Pydantic model validation** — full config validation with parent context injection (`catalog_name`, `schema_name`, `table_name`), `full_name` computed fields, null tag coercion, and duplicate resource detection
+
+#### Group management domain
+- **Group compilation** — walks `resources.groups`, emitting `Group` state with members as unresolved principals; dict key is used as the default display name
+- **Group fetch (no extra cost)** — account groups, their `external_id`, and their members are read from the *same* account-SCIM-proxy principal fetch the engine already performs (the group/user/SP list calls just request a wider attribute set); group member SCIM ids are translated back to canonical identifiers (username / display name / application_id) so both sides of the diff speak the same dialect. `fetch_actual_groups` is a pure cache read — no additional API calls
+- **Group diffing** — additions only: computes, per configured group, the members to add (desired − actual); members present in the group but absent from config are never removed. Idempotent — a fully-synced group produces no change
+- **Group execution** — adds members to existing groups via a SCIM PatchOp against the account proxy; with `--enable-group-creation`, missing groups are created (with members) first. Externally-managed (IdP-provisioned) groups are a fatal error; a missing group without the creation flag is a fatal error
+- **Ordering** — group management is reconciled *first* (before governed tags), so groups referenced as policy/grant principals exist before they're used
+- **Account SCIM proxy required** — group management is incompatible with `--use-workspace-scim` (the run errors out), since the workspace SCIM API does not manage account-group membership
 
 #### Governed tags domain
 - **Governed tag compilation** — walks `resources.governed_tags`, emitting `GovernedTag` state with `description` and `allowed_values` per entry; dict key is used as the default tag name

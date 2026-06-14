@@ -39,7 +39,7 @@ def main() -> None:
     parser.add_argument(
         "--use-workspace-scim",
         action="store_true",
-        help="Fetch principals from the workspace SCIM API instead of the account SCIM proxy (default: account). The 'account users' and 'account admins' system groups are automatically included, since the workspace SCIM API does not surface them",
+        help="Fetch principals from the workspace SCIM API instead of the account SCIM proxy (default: account). The 'account users' and 'account admins' system groups are automatically included, since the workspace SCIM API does not surface them. Incompatible with configuring groups under resources.groups (group management requires the account SCIM proxy).",
     )
     parser.add_argument(
         "--enable-tag-management",
@@ -109,6 +109,16 @@ def main() -> None:
              "resolvable via SCIM, which otherwise log a warning every run. Empty by default.",
     )
     parser.add_argument(
+        "--enable-group-creation",
+        action="store_true",
+        default=False,
+        help="Permit the engine to create account groups that are declared under "
+             "resources.groups but don't yet exist (with their configured members). "
+             "Off by default — a configured group that doesn't exist is otherwise a "
+             "fatal error. Group membership additions for existing groups happen by "
+             "default and need no flag.",
+    )
+    parser.add_argument(
         "--enable-governed-tag-deletion",
         action="store_true",
         default=False,
@@ -158,6 +168,7 @@ def main() -> None:
         enable_taggable_creation=args.enable_taggable_creation,
         enable_privilege_management=args.enable_privilege_management,
         enable_governed_tag_deletion=args.enable_governed_tag_deletion,
+        enable_group_creation=args.enable_group_creation,
         ignore_unresolvable_principals=args.ignore_unresolvable_principals,
         manage_tags_for_catalogs=args.manage_tags_for_catalogs,
         manage_privileges_for_catalogs=args.manage_privileges_for_catalogs,

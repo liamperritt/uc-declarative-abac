@@ -21,3 +21,5 @@ definitions:
         return: "CONCAT(mask_value, SUBSTRING(pii, -4))"
       to:
         - account users
+      except:
+        - uc_governor_data_engineers
