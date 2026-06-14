@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from typing import Iterable
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.iam import GrantRule, RuleSetResponse, RuleSetUpdateRequest
@@ -14,7 +15,7 @@ from uc_declarative_abac.utils import (
     OrchestratorError,
     PrincipalValidationError,
 )
-from uc_declarative_abac.principals import Principal
+from uc_declarative_abac.principals import Group, Principal, ensure_resolved
 from uc_declarative_abac.types import PrincipalType
 
 _logger = logging.getLogger("uc_declarative_abac")
@@ -37,6 +38,9 @@ _TAG_POLICY_ASSIGN_ROLE = "roles/tagPolicy.assigner"
 # Bounded concurrency for per-tag get_rule_set calls during the actual-state fetch.
 _ASSIGN_FETCH_WORKERS = 8
 
+# Bounded concurrency for per-group GET /Groups/{id} member fetches.
+_GROUP_FETCH_WORKERS = 8
+
 
 def _ruleset_name(account_id: str, tag_id: str) -> str:
     """Build the AccessControl proxy ruleset resource name for a tag policy."""
@@ -51,6 +55,32 @@ def _parse_ruleset_principal(s: str) -> str:
     return identifier or s
 
 
+def _member_dict_to_principal(
+    member: dict, identifier_by_scim_id: dict[str, str],
+) -> Principal | None:
+    """Convert a raw SCIM group-member dict to an unresolved Principal.
+
+    The member's ``value`` is a SCIM id; it is mapped to the principal's canonical
+    identifier (username / display name / application_id). Returns None when the
+    member's SCIM id has no known identifier (the member is then dropped)."""
+    scim_id = member.get("value")
+    identifier = identifier_by_scim_id.get(scim_id) if scim_id else None
+    if not identifier:
+        return None
+    return Principal(PrincipalType.UNKNOWN, identifier=identifier)
+
+
+def _principal_to_member_dict(
+    principal: Principal, scim_id_by_identifier: dict[str, str],
+) -> dict:
+    """Convert a resolved Principal to a SCIM group-member dict ({"value": <scim id>}).
+
+    The Principal must be resolved (its canonical identifier is looked up in the
+    SCIM-id map)."""
+    ensure_resolved(principal)
+    return {"value": scim_id_by_identifier.get(principal.identifier, principal.identifier)}
+
+
 class WorkspaceHelper:
     """Wraps WorkspaceClient for fetching and validating principals.
 
@@ -62,13 +92,25 @@ class WorkspaceHelper:
     Caches results after initial fetch.
     """
 
-    def __init__(self, workspace_client: WorkspaceClient, use_workspace_scim: bool = False) -> None:
+    def __init__(
+        self,
+        workspace_client: WorkspaceClient,
+        use_workspace_scim: bool = False,
+        manage_groups: bool = False,
+    ) -> None:
         self._client = workspace_client
         self._use_workspace_scim = use_workspace_scim
+        self._manage_groups = manage_groups
         self._users: set[str] | None = None
         self._groups: set[str] | None = None
         self._service_principals: dict[str, str] | None = None  # display_name -> application_id
         self._duplicate_sps: set[str] = set()
+        # Group-management caches, populated by _fetch_account_principals when
+        # manage_groups is enabled (otherwise left empty). Membership is NOT cached
+        # here — it is fetched per-group on demand in fetch_actual_groups.
+        self._group_id_by_name: dict[str, str] = {}  # display_name -> group SCIM id
+        self._scim_id_by_identifier: dict[str, str] = {}  # canonical identifier -> SCIM id
+        self._identifier_by_scim_id: dict[str, str] = {}  # SCIM id -> canonical identifier
         self._tag_policies_lock = threading.Lock()
         self._tag_policies: list[TagPolicy] | None = None
         self._tag_policy_id_by_name: dict[str, str] = {}
@@ -105,17 +147,31 @@ class WorkspaceHelper:
 
         Users, groups, and service principals are fetched concurrently.
         """
+        # When managing groups, the SAME three list calls request each principal's
+        # SCIM id so member SCIM ids can be translated to canonical identifiers.
+        # Group membership itself is NOT read from the list response — the account
+        # SCIM proxy does not reliably return `members` inline; it is fetched
+        # per-group via GET /Groups/{id} in fetch_actual_groups (scoped to config).
+        if self._manage_groups:
+            users_attrs = "id,userName"
+            groups_attrs = "id,displayName"
+            sps_attrs = "id,displayName,applicationId"
+        else:
+            users_attrs = "userName"
+            groups_attrs = "displayName"
+            sps_attrs = "displayName,applicationId"
+
         with ThreadPoolExecutor(max_workers=3) as pool:
             users_f = pool.submit(
-                self._scim_list_all, "/api/2.0/account/scim/v2/Users", "userName",
+                self._scim_list_all, "/api/2.0/account/scim/v2/Users", users_attrs,
             )
             groups_f = pool.submit(
-                self._scim_list_all, "/api/2.0/account/scim/v2/Groups", "displayName",
+                self._scim_list_all, "/api/2.0/account/scim/v2/Groups", groups_attrs,
             )
             sps_f = pool.submit(
                 self._scim_list_all,
                 "/api/2.0/account/scim/v2/ServicePrincipals",
-                "displayName,applicationId",
+                sps_attrs,
             )
             users_data = users_f.result()
             groups_data = groups_f.result()
@@ -124,6 +180,36 @@ class WorkspaceHelper:
         self._users = {u["userName"] for u in users_data if "userName" in u}
         self._groups = {g["displayName"] for g in groups_data if "displayName" in g}
         self._build_sp_map(sps_data)
+        if self._manage_groups:
+            self._build_group_id_maps(users_data, groups_data, sps_data)
+
+    def _build_group_id_maps(
+        self, users_data: list[dict], groups_data: list[dict], sps_data: list[dict],
+    ) -> None:
+        """Build the SCIM-id ↔ canonical-identifier maps and the group-name → id
+        index from the principal list responses.
+
+        Group *membership* is not read here — the account SCIM proxy list endpoint
+        does not reliably return members inline. Membership is fetched per-group in
+        fetch_actual_groups via GET /Groups/{id} (scoped to configured groups). The
+        maps built here translate member SCIM ids back to canonical identifiers
+        (username / display name / application_id) once those GETs return."""
+        for user in users_data:
+            scim_id, identifier = user.get("id"), user.get("userName")
+            if scim_id and identifier:
+                self._identifier_by_scim_id[scim_id] = identifier
+                self._scim_id_by_identifier[identifier] = scim_id
+        for sp in sps_data:
+            scim_id, identifier = sp.get("id"), sp.get("applicationId")
+            if scim_id and identifier:
+                self._identifier_by_scim_id[scim_id] = identifier
+                self._scim_id_by_identifier[identifier] = scim_id
+        for group in groups_data:
+            scim_id, display_name = group.get("id"), group.get("displayName")
+            if scim_id and display_name:
+                self._identifier_by_scim_id[scim_id] = display_name
+                self._scim_id_by_identifier[display_name] = scim_id
+                self._group_id_by_name[display_name] = scim_id
 
     def _fetch_workspace_principals(self) -> None:
         """Fetch principals via the SDK's workspace SCIM API (workspace principals only).
@@ -256,6 +342,100 @@ class WorkspaceHelper:
                 sp_reverse[identifier],
             )
         raise PrincipalValidationError(f"Principal not found by identifier: {identifier}")
+
+    def _fetch_group_by_id(self, group_id: str) -> dict:
+        """GET a single account group (with its members) via the SCIM proxy.
+
+        TBD: verify in integration testing; the account SCIM proxy list endpoint
+        does not reliably return `members` inline, so membership is read here from
+        the individual-group endpoint (members carry `value`; the group carries
+        `externalId`)."""
+        return self._client.api_client.do(
+            "GET", f"/api/2.0/account/scim/v2/Groups/{group_id}",
+        )
+
+    def _build_group_from_response(self, resp: dict) -> Group:
+        """Translate a single-group GET response into Group state.
+
+        Member SCIM ids are mapped back to canonical identifiers via the cache
+        built during fetch_principals; untranslatable members are dropped."""
+        members = frozenset(
+            p for p in (
+                _member_dict_to_principal(m, self._identifier_by_scim_id)
+                for m in (resp.get("members") or [])
+            ) if p is not None
+        )
+        return Group(
+            display_name=resp.get("displayName") or "",
+            external_id=resp.get("externalId") or "",
+            members=members,
+        )
+
+    def fetch_actual_groups(self, desired_names: set[str] | None = None) -> set[Group]:
+        """Fetch actual-state Groups (with membership) for the configured groups.
+
+        Scoped to ``desired_names`` (the groups declared in config) intersected with
+        the account groups discovered during ``fetch_principals()`` — groups absent
+        from config are never fetched, since their membership is irrelevant. Issues
+        one ``GET /Groups/{id}`` per managed group (the account SCIM proxy list call
+        does not reliably return members inline), dispatched concurrently up to
+        ``_GROUP_FETCH_WORKERS``. Must be called after ``fetch_principals()``.
+        Returns an empty set when group management is disabled.
+        """
+        if not self._manage_groups or not self._group_id_by_name:
+            return set()
+        names = set(self._group_id_by_name)
+        if desired_names is not None:
+            names &= desired_names
+        if not names:
+            return set()
+        targets = [(name, self._group_id_by_name[name]) for name in names]
+        worker_count = min(_GROUP_FETCH_WORKERS, len(targets))
+        with ThreadPoolExecutor(max_workers=worker_count) as pool:
+            responses = pool.map(lambda t: self._fetch_group_by_id(t[1]), targets)
+            return {self._build_group_from_response(resp) for resp in responses}
+
+    def create_group(self, display_name: str, members: Iterable[Principal]) -> None:
+        """Create a Databricks-managed account group with the given initial members.
+
+        TBD: verify in integration testing; the exact SCIM body shape for the
+        account SCIM proxy create endpoint is assumed here. If the API rejects it,
+        adjust the body (e.g. schemas / members shape) accordingly.
+        """
+        member_dicts = [
+            _principal_to_member_dict(m, self._scim_id_by_identifier) for m in members
+        ]
+        self._client.api_client.do(
+            "POST",
+            "/api/2.0/account/scim/v2/Groups",
+            body={
+                "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+                "displayName": display_name,
+                "members": member_dicts,
+            },
+        )
+
+    def add_group_members(self, display_name: str, members: Iterable[Principal]) -> None:
+        """Add members to an existing Databricks-managed account group via SCIM PatchOp.
+
+        TBD: verify in integration testing; the exact SCIM PatchOp body shape for
+        the account SCIM proxy patch endpoint is assumed here. If the API rejects
+        it, adjust the body accordingly.
+        """
+        group_id = self._group_id_by_name[display_name]
+        member_dicts = [
+            _principal_to_member_dict(m, self._scim_id_by_identifier) for m in members
+        ]
+        self._client.api_client.do(
+            "PATCH",
+            f"/api/2.0/account/scim/v2/Groups/{group_id}",
+            body={
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                "Operations": [
+                    {"op": "add", "path": "members", "value": member_dicts},
+                ],
+            },
+        )
 
     def _ensure_tag_policies_loaded(self) -> list[TagPolicy]:
         """Lazily list tag policies once and cache them. Thread-safe."""

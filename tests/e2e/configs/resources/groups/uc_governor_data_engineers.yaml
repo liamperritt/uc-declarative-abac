@@ -1,0 +1,6 @@
+resources:
+  groups:
+    uc_governor_data_engineers:
+      name: uc_governor_data_engineers
+      members:
+        - liam.perritt@databricks.com

@@ -9,6 +9,7 @@ from uc_declarative_abac.orchestrator import run
 from uc_declarative_abac.utils import (
     DisallowedTagValueError,
     ExecutionBatchError,
+    OrchestratorError,
     PrincipalValidationError,
     UngovernedTagError,
 )
@@ -2016,3 +2017,189 @@ def test_orchestrator_passes_empty_rfa_targets_when_taggable_management_off(
     assert len(calls) == 1
     _catalog_names, rfa_targets = calls[0]
     assert rfa_targets == frozenset()
+
+
+# ---------------------------------------------------------------------------
+# Group management workflow
+# ---------------------------------------------------------------------------
+
+
+def _config_with_group(members: list[str]) -> dict:
+    """A minimal config declaring one catalog and one group with members."""
+    return {
+        "resources": {
+            "catalogs": {"my_catalog": {}},
+            "groups": {"data_engineers": {"members": members}},
+        }
+    }
+
+
+def _setup_mock_group_state(
+    mock_workspace_client: MagicMock,
+    *,
+    group_name: str,
+    group_id: str,
+    member_ids: list[str],
+    users: list[tuple[str, str]],
+    external_id: str = "",
+) -> None:
+    """Configure the account SCIM proxy mock. The Groups LIST returns only
+    id + displayName (no members inline — matching the real proxy); the per-group
+    GET /Groups/{id} returns the full group with members + externalId. PATCH/POST
+    return {}. ``users`` is a list of (scim_id, userName).
+    """
+    def _scim_do(method, path, **kwargs):
+        if method in ("PATCH", "POST") and "/account/scim/v2/Groups" in path:
+            return {}
+        # Per-group GET: /api/2.0/account/scim/v2/Groups/{id} → full group object.
+        if "/account/scim/v2/Groups/" in path:
+            group_id_arg = path.rsplit("/", 1)[-1]
+            if group_id_arg != group_id:
+                return {}
+            return {
+                "id": group_id,
+                "displayName": group_name,
+                "externalId": external_id,
+                "members": [{"value": mid} for mid in member_ids],
+            }
+        if path.endswith("/account/scim/v2/Groups"):
+            group = {"id": group_id, "displayName": group_name}
+            return {"totalResults": 1, "startIndex": 1, "itemsPerPage": 100, "Resources": [group]}
+        if "/account/scim/v2/Users" in path:
+            resources = [{"id": sid, "userName": un} for sid, un in users]
+            return {"totalResults": len(resources), "startIndex": 1, "itemsPerPage": 100, "Resources": resources}
+        return {"totalResults": 0, "startIndex": 1, "itemsPerPage": 100, "Resources": []}
+
+    mock_workspace_client.api_client.do.side_effect = _scim_do
+
+
+def test_orchestrator_raises_when_groups_configured_with_workspace_scim(
+    tmp_yaml_dir, mock_workspace_client):
+    """Configuring groups while --use-workspace-scim is set fails fast: group
+    management requires the account SCIM proxy."""
+    config = _config_with_group(["alice@example.com"])
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+
+    with pytest.raises(OrchestratorError):
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            use_workspace_scim=True,
+        )
+
+
+def test_orchestrator_adds_group_members_end_to_end(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """A configured member absent from an existing group flows into
+    group_diff.members_to_add and a PATCH is issued against the group's SCIM id."""
+    config = _config_with_group(["alice@example.com"])
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_group_state(
+        mock_workspace_client,
+        group_name="data_engineers",
+        group_id="g-1",
+        member_ids=[],  # group currently has no members
+        users=[("u-1", "alice@example.com")],
+    )
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+    )
+
+    assert "data_engineers" in result.group_diff.members_to_add
+    patch_calls = [
+        c for c in mock_workspace_client.api_client.do.call_args_list
+        if c.args and c.args[0] == "PATCH" and "/Groups/g-1" in c.args[1]
+    ]
+    assert patch_calls, "Expected a PATCH against the group's SCIM id"
+
+
+def test_orchestrator_group_membership_is_idempotent(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """When the configured member is already in the group, no addition is computed
+    and no PATCH is issued."""
+    config = _config_with_group(["alice@example.com"])
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_group_state(
+        mock_workspace_client,
+        group_name="data_engineers",
+        group_id="g-1",
+        member_ids=["u-1"],  # alice is already a member
+        users=[("u-1", "alice@example.com")],
+    )
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+    )
+
+    assert result.group_diff.members_to_add == {}
+    patch_calls = [
+        c for c in mock_workspace_client.api_client.do.call_args_list
+        if c.args and c.args[0] == "PATCH"
+    ]
+    assert patch_calls == [], "Expected no PATCH when membership is already in sync"
+
+
+def test_orchestrator_fails_for_missing_group_without_creation_flag(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """A configured group that doesn't exist is a fatal error unless
+    --enable-group-creation is set."""
+    config = _config_with_group(["alice@example.com"])
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    # No groups returned by the proxy, but the user exists.
+    _setup_mock_group_state(
+        mock_workspace_client,
+        group_name="some_other_group",
+        group_id="g-9",
+        member_ids=[],
+        users=[("u-1", "alice@example.com")],
+    )
+
+    with pytest.raises(ExecutionBatchError):
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+        )
+
+
+def test_orchestrator_creates_missing_group_when_creation_enabled(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """With enable_group_creation=True, a missing configured group is created (with
+    its members) via a POST to the account SCIM proxy."""
+    config = _config_with_group(["alice@example.com"])
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_group_state(
+        mock_workspace_client,
+        group_name="some_other_group",
+        group_id="g-9",
+        member_ids=[],
+        users=[("u-1", "alice@example.com")],
+    )
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_group_creation=True,
+    )
+
+    assert "data_engineers" in result.group_diff.groups_to_create
+    post_calls = [
+        c for c in mock_workspace_client.api_client.do.call_args_list
+        if c.args and c.args[0] == "POST" and c.args[1].endswith("/account/scim/v2/Groups")
+    ]
+    assert post_calls, "Expected a POST to create the missing group"

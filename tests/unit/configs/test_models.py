@@ -852,6 +852,41 @@ def test_resources_config_rejects_duplicate_governed_tag_names():
         })
 
 
+def test_resources_config_derives_group_name_from_dict_key():
+    """A groups entry without an explicit ``name`` takes the dict key as its name."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {"cat": {}},
+        "groups": {"data_engineers": {"members": ["alice@example.com"]}},
+    })
+
+    assert config.groups is not None
+    assert config.groups["data_engineers"].name == "data_engineers"
+    assert config.groups["data_engineers"].members == ["alice@example.com"]
+
+
+def test_resources_config_defaults_group_members_to_empty():
+    """A groups entry without a ``members`` field defaults to an empty member list."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {"cat": {}},
+        "groups": {"data_engineers": {}},
+    })
+
+    assert config.groups is not None
+    assert config.groups["data_engineers"].members == []
+
+
+def test_resources_config_rejects_duplicate_group_names():
+    """Two group entries sharing the same explicit ``name`` raise DuplicateResourceError."""
+    with pytest.raises(DuplicateResourceError):
+        ResourcesConfig.model_validate({
+            "catalogs": {"cat": {}},
+            "groups": {
+                "entry_one": {"name": "shared_group"},
+                "entry_two": {"name": "shared_group"},
+            },
+        })
+
+
 def test_catalog_config_rejects_duplicate_schema_names():
     """Two schemas with the same name under one catalog raise DuplicateResourceError."""
     with pytest.raises(DuplicateResourceError):

@@ -32,7 +32,13 @@ from uc_declarative_abac.policies import (
     execute_policy_diff,
     PolicyDiff,
 )
-from uc_declarative_abac.principals import PrincipalResolver
+from uc_declarative_abac.principals import (
+    compile_desired_groups,
+    compute_group_diff,
+    execute_group_diff,
+    GroupDiff,
+    PrincipalResolver,
+)
 from uc_declarative_abac.privileges import (
     compile_desired_privileges,
     compute_privilege_diff,
@@ -59,6 +65,7 @@ from uc_declarative_abac.types import SecurableType
 from uc_declarative_abac.utils import (
     catalog_of,
     ExecutionBatchError,
+    OrchestratorError,
     parse_catalog_filter,
 )
 
@@ -67,8 +74,12 @@ _logger = logging.getLogger("uc_declarative_abac")
 
 @dataclass(frozen=True)
 class OrchestratorDiffsResult:
-    """Computed diffs from one ``orchestrator.run()`` invocation, one per domain."""
+    """Computed diffs from one ``orchestrator.run()`` invocation, one per domain.
 
+    Ordered as the domains are orchestrated — group management runs first.
+    """
+
+    group_diff: GroupDiff
     securable_diff: SecurableDiff
     governed_tag_diff: GovernedTagDiff
     tag_diff: TagDiff
@@ -104,6 +115,7 @@ def run(
     enable_taggable_creation: bool = False,
     enable_privilege_management: bool = False,
     enable_governed_tag_deletion: bool = False,
+    enable_group_creation: bool = False,
     ignore_unresolvable_principals: str = "",
     manage_tags_for_catalogs: str = "*",
     manage_privileges_for_catalogs: str = "*",
@@ -139,6 +151,15 @@ def run(
     protect UC auto data classification tags. An empty string allows the engine
     to remove any unconfigured tag.
 
+    Group management is the first domain orchestrated (before governed tags). It
+    runs by default whenever the config declares groups with members, adding any
+    missing members to those account groups (additions only — never removals).
+    Configured groups that don't yet exist are a fatal error unless
+    ``enable_group_creation=True``, which creates them (with their members) first.
+    Externally-managed (IdP-provisioned) groups are a fatal error. Group
+    management requires the account SCIM proxy, so combining configured groups
+    with ``use_workspace_scim=True`` raises immediately.
+
     ``ignore_unresolvable_principals`` is a comma-separated list of actual-state
     (UC-side) principal identifiers — usernames, service-principal
     application_ids, or group display names — whose resolution-failure warning is
@@ -154,6 +175,16 @@ def run(
     consolidated = consolidate_resources(resolved)
     config = ResourcesConfig.model_validate(consolidated)
     catalog_names = list(config.catalogs.keys())
+
+    # Group management operates at the account level via the account SCIM proxy.
+    # The workspace SCIM API surfaces only workspace-level groups and cannot
+    # manage account-group membership, so configuring groups under
+    # --use-workspace-scim is unsupported.
+    if config.groups and use_workspace_scim:
+        raise OrchestratorError(
+            "Group management requires the account SCIM proxy, but --use-workspace-scim "
+            "was set. Remove --use-workspace-scim to manage the groups declared in config."
+        )
 
     # Parse per-domain catalog filters. Each scope is empty when its paired
     # enable flag is off — that single representation drives the rest of the
@@ -192,6 +223,8 @@ def run(
     #    - securable attributes/securables → rfa_targets restricted to securables that
     #      actually declare ``rfa_destinations`` in config (gated by the
     #      taggable-management flag, since RFA is a managed attribute)
+    desired_groups = compile_desired_groups(config)
+    desired_group_names = {g.display_name for g in desired_groups}
     desired_governed_tags = compile_desired_governed_tags(config)
     desired_governed_tag_names = {gt.name for gt in desired_governed_tags}
     desired_attributes = compile_desired_attributes(config)
@@ -208,7 +241,11 @@ def run(
 
     # 3. Parallel initial fetch (securables, tags, privileges, and principals concurrently)
     uc_helper = UnityCatalogHelper(workspace_client, warehouse_id)
-    ws_helper = WorkspaceHelper(workspace_client, use_workspace_scim=use_workspace_scim)
+    ws_helper = WorkspaceHelper(
+        workspace_client,
+        use_workspace_scim=use_workspace_scim,
+        manage_groups=bool(desired_groups),
+    )
     change_logger = ChangeLogger(dry_run=dry_run, logger=_logger)
     change_logger.log_banner()
     _logger.info("  Fetching current state from workspace (this can take several minutes)...")
@@ -235,8 +272,21 @@ def run(
         actual_privileges = actual_privs_f.result() if actual_privs_f is not None else set()
     _logger.info("  Successfully fetched current state")
 
+    # Fetch membership for the configured groups only — one GET /Groups/{id} per
+    # group (the account SCIM proxy list call doesn't return members inline),
+    # dispatched concurrently. Returns an empty set when no groups are configured.
+    actual_groups = ws_helper.fetch_actual_groups(desired_group_names)
+
     # 3. Construct the shared PrincipalResolver now that ws_helper cache is populated.
     resolver = PrincipalResolver(ws_helper)
+
+    # 3a. Group management workflow (the first domain — runs before governed tags
+    # so that any groups referenced as policy/grant principals exist first).
+    group_diff = compute_group_diff(
+        desired_groups, actual_groups, resolver, change_logger,
+        enable_group_creation=enable_group_creation,
+        ignore_unresolvable=ignore_unresolvable,
+    )
 
     # 4. Governed tags workflow (account-level tag policies — must run before
     # catalog-scoped tag assignments, so new tag keys exist before SET TAGS).
@@ -330,7 +380,14 @@ def run(
     else:
         privilege_diff = PrivilegeDiff()
 
-    # 9. Log and execute (or dry-run)
+    # 9. Log and execute (or dry-run) — group management runs first.
+    if group_diff.groups_to_create or group_diff.members_to_add:
+        change_logger.log_section_header("Groups")
+    execute_group_diff(
+        ws_helper, group_diff, change_logger,
+        dry_run=dry_run, max_parallel_changes=max_parallel_changes,
+    )
+
     if governed_tag_diff.to_create or governed_tag_diff.to_update or governed_tag_diff.to_delete:
         change_logger.log_section_header("Governed tags")
     execute_governed_tag_diff(
@@ -375,6 +432,7 @@ def run(
         raise ExecutionBatchError(change_logger.errors)
 
     return OrchestratorDiffsResult(
+        group_diff=group_diff,
         securable_diff=securable_diff,
         governed_tag_diff=governed_tag_diff,
         tag_diff=tag_diff,

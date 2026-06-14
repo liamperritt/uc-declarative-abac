@@ -156,6 +156,8 @@ class ChangeLogger:
         self._governed_tags_deleted = 0
         self._governed_tag_assigners_granted = 0
         self._governed_tag_assigners_revoked = 0
+        self._groups_created = 0
+        self._group_members_added = 0
         self._errors: list[ExecutionError] = []
         self._warnings: list[ExecutionError] = []
 
@@ -461,6 +463,36 @@ class ChangeLogger:
         ))
 
     # ------------------------------------------------------------------
+    # Group management logging
+    # ------------------------------------------------------------------
+
+    def log_group_create(self, group_name: str, members: frozenset[Principal]) -> None:
+        """Log an account group being created with its initial members. Members
+        are also counted as additions for the summary."""
+        self._groups_created += 1
+        self._group_members_added += len(members)
+        action_verb = "Create" if self._dry_run else "Created"
+        suffix = (
+            f" (members={','.join(sorted(p.name for p in members))})"
+            if members else ""
+        )
+        self._log_info(_format_change_line(
+            "+", "GROUP", group_name,
+            f"{action_verb} group{suffix}",
+        ))
+
+    def log_group_member_add(self, group_name: str, members: frozenset[Principal]) -> None:
+        """Log members being added to an existing account group. Additions only —
+        the engine never removes group members."""
+        self._group_members_added += len(members)
+        action_verb = "Add" if self._dry_run else "Added"
+        added = ", ".join(f"+{p.name}" for p in sorted(members, key=lambda p: p.name))
+        self._log_info(_format_change_line(
+            "~", "GROUP", group_name,
+            f"{action_verb} members ({added})",
+        ))
+
+    # ------------------------------------------------------------------
     # Error section
     # ------------------------------------------------------------------
 
@@ -531,7 +563,15 @@ class ChangeLogger:
         if self._governed_tag_assigners_revoked:
             gt_assigner_parts.append(f"{self._governed_tag_assigners_revoked} revoked")
 
+        group_parts: list[str] = []
+        if self._groups_created:
+            group_parts.append(f"{self._groups_created} created")
+        if self._group_members_added:
+            group_parts.append(f"{self._group_members_added} members added")
+
         sections: list[str] = []
+        if group_parts:
+            sections.append("Groups: " + ", ".join(group_parts))
         if sec_parts:
             sections.append("Securables: " + ", ".join(sec_parts))
         if gt_parts:
@@ -594,7 +634,15 @@ class ChangeLogger:
         if self._governed_tag_assigners_revoked:
             gt_assigner_parts.append(f"{self._governed_tag_assigners_revoked} to revoke")
 
+        group_parts: list[str] = []
+        if self._groups_created:
+            group_parts.append(f"{self._groups_created} to create")
+        if self._group_members_added:
+            group_parts.append(f"{self._group_members_added} members to add")
+
         sections: list[str] = []
+        if group_parts:
+            sections.append("Groups: " + ", ".join(group_parts))
         if sec_parts:
             sections.append("Securables: " + ", ".join(sec_parts))
         if gt_parts:
