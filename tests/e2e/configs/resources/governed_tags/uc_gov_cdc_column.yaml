@@ -1,0 +1,9 @@
+resources:
+  governed_tags:
+    uc_gov_cdc_column:
+      name: uc_gov_cdc_column
+      description: Marks CDC metadata columns so ABAC policies can target them
+      allowed_values:
+        - lsn
+        - operation
+        - command

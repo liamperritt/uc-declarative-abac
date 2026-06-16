@@ -7,6 +7,9 @@ definitions:
         uc_gov_classification: internal
         uc_gov_pipeline: lff
       columns:
+        - name: __$operation
+          tags:
+            uc_gov_cdc_column: operation
         - name: data
           type: string
           tags:

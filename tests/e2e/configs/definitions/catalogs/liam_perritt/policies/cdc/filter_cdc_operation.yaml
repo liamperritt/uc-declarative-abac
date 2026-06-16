@@ -1,0 +1,20 @@
+definitions:
+  policies:
+    cdc|filter_cdc_operation:
+      name: filter_cdc_operation
+      comment: Filter out CDC rows where __$operation is not 3 (keep only operation = 3)
+      type: filter
+      columns:
+        - alias: operation
+          has_tags:
+            uc_gov_cdc_column: operation
+      function:
+        name: fn_filter_cdc_operation
+        schema_name: lff_sqlserver_bronze
+        comment: Row filter that keeps only CDC rows where __$operation equals 3
+        parameters:
+          - name: operation
+            type: int
+        return: "operation = 3"
+      to:
+        - account users

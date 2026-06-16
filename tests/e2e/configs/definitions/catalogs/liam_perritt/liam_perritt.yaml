@@ -18,6 +18,7 @@ definitions:
         - $ref: $defs/policies/zone|grant_landing_read
         - $ref: $defs/policies/pipeline|grant_pipeline_select
         - $ref: $defs/policies/pipeline|grant_cascade_pipeline
+        - $ref: $defs/policies/cdc|filter_cdc_operation
       schemas:
         - $ref: $defs/schemas/liam_perritt|default
         - $ref: $defs/schemas/liam_perritt|lff_sqlserver_bronze

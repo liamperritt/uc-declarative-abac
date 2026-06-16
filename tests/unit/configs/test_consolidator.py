@@ -584,3 +584,227 @@ def test_consolidator_duplicate_inline_function_names_surface_at_model_validatio
     # Pydantic validation raises DuplicateResourceError.
     with pytest.raises(DuplicateResourceError, match="dup"):
         ResourcesConfig.model_validate(result)
+
+
+# --- consolidate_resources: inline function catalog_name/schema_name overrides ---
+
+
+def test_consolidator_places_inline_function_in_overridden_schema_when_schema_name_set():
+    """A catalog-level policy whose inline function sets schema_name lands in that
+    schema (not the catalog's 'default' schema); policy.function reflects it."""
+    data = {
+        "catalogs": {
+            "c1": {
+                "name": "c1",
+                "policies": [
+                    _fgac_policy(
+                        function={**_inline_fn_dict("mask_pii"), "schema_name": "shared"}
+                    )
+                ],
+            }
+        }
+    }
+    result = consolidate_resources(data)
+
+    schemas = result["catalogs"]["c1"]["schemas"]
+    shared = [s for s in schemas if s["name"] == "shared"]
+    assert len(shared) == 1
+    assert [f["name"] for f in shared[0].get("functions", [])] == ["mask_pii"]
+    assert all(s["name"] != "default" for s in schemas)
+
+    (policy,) = result["catalogs"]["c1"]["policies"]
+    assert policy["function"] == "c1.shared.mask_pii"
+
+
+def test_consolidator_overrides_schema_on_schema_level_policy():
+    """A schema-level policy whose inline function sets schema_name lands in the
+    override schema, not the enclosing schema."""
+    data = {
+        "catalogs": {
+            "c1": {
+                "name": "c1",
+                "schemas": [
+                    {
+                        "name": "s1",
+                        "policies": [
+                            _fgac_policy(
+                                function={**_inline_fn_dict("mask_pii"), "schema_name": "shared"}
+                            )
+                        ],
+                    }
+                ],
+            }
+        }
+    }
+    result = consolidate_resources(data)
+
+    schemas = result["catalogs"]["c1"]["schemas"]
+    shared = next(s for s in schemas if s["name"] == "shared")
+    assert [f["name"] for f in shared.get("functions", [])] == ["mask_pii"]
+    s1 = next(s for s in schemas if s["name"] == "s1")
+    assert s1.get("functions", []) == []
+    (policy,) = s1["policies"]
+    assert policy["function"] == "c1.shared.mask_pii"
+
+
+def test_consolidator_places_inline_function_in_overridden_catalog_and_schema_when_both_set():
+    """Both overrides route the inline function to the other catalog/schema; the
+    policy's function string reflects both."""
+    data = {
+        "catalogs": {
+            "c1": {
+                "name": "c1",
+                "schemas": [
+                    {
+                        "name": "s1",
+                        "policies": [
+                            _fgac_policy(
+                                function={
+                                    **_inline_fn_dict("mask_pii"),
+                                    "catalog_name": "c2",
+                                    "schema_name": "shared",
+                                }
+                            )
+                        ],
+                    }
+                ],
+            },
+            "c2": {"name": "c2"},
+        }
+    }
+    result = consolidate_resources(data)
+
+    shared = next(s for s in result["catalogs"]["c2"]["schemas"] if s["name"] == "shared")
+    assert [f["name"] for f in shared.get("functions", [])] == ["mask_pii"]
+    s1 = next(s for s in result["catalogs"]["c1"]["schemas"] if s["name"] == "s1")
+    assert s1.get("functions", []) == []
+    (policy,) = s1["policies"]
+    assert policy["function"] == "c2.shared.mask_pii"
+
+
+def test_consolidator_overrides_catalog_only_uses_default_target_schema_name():
+    """catalog_name alone → override catalog + the default-target schema name
+    (the enclosing schema name for a schema-level policy)."""
+    data = {
+        "catalogs": {
+            "c1": {
+                "name": "c1",
+                "schemas": [
+                    {
+                        "name": "s1",
+                        "policies": [
+                            _fgac_policy(
+                                function={**_inline_fn_dict("mask_pii"), "catalog_name": "c2"}
+                            )
+                        ],
+                    }
+                ],
+            },
+            "c2": {"name": "c2"},
+        }
+    }
+    result = consolidate_resources(data)
+
+    s1_in_c2 = next(s for s in result["catalogs"]["c2"]["schemas"] if s["name"] == "s1")
+    assert [f["name"] for f in s1_in_c2.get("functions", [])] == ["mask_pii"]
+    (policy,) = result["catalogs"]["c1"]["schemas"][0]["policies"]
+    assert policy["function"] == "c2.s1.mask_pii"
+
+
+def test_consolidator_autocreates_overridden_catalog_and_schema_when_absent():
+    """Overriding to an undeclared catalog/schema creates minimal entries and
+    places the function there."""
+    data = {
+        "catalogs": {
+            "c1": {
+                "name": "c1",
+                "schemas": [
+                    {
+                        "name": "s1",
+                        "policies": [
+                            _fgac_policy(
+                                function={
+                                    **_inline_fn_dict("mask_pii"),
+                                    "catalog_name": "c2",
+                                    "schema_name": "shared",
+                                }
+                            )
+                        ],
+                    }
+                ],
+            }
+        }
+    }
+    result = consolidate_resources(data)
+
+    assert "c2" in result["catalogs"]
+    assert result["catalogs"]["c2"]["name"] == "c2"
+    shared = next(s for s in result["catalogs"]["c2"]["schemas"] if s["name"] == "shared")
+    assert [f["name"] for f in shared.get("functions", [])] == ["mask_pii"]
+
+
+def test_consolidator_reuses_existing_overridden_schema():
+    """Overriding to a schema declared elsewhere appends into that same schema's
+    functions list rather than creating a duplicate schema entry."""
+    data = {
+        "catalogs": {
+            "c1": {
+                "name": "c1",
+                "schemas": [
+                    {"name": "shared", "owner": "someone"},
+                    {
+                        "name": "s1",
+                        "policies": [
+                            _fgac_policy(
+                                function={**_inline_fn_dict("mask_pii"), "schema_name": "shared"}
+                            )
+                        ],
+                    },
+                ],
+            }
+        }
+    }
+    result = consolidate_resources(data)
+
+    shared = [s for s in result["catalogs"]["c1"]["schemas"] if s["name"] == "shared"]
+    assert len(shared) == 1
+    assert shared[0]["owner"] == "someone"
+    assert [f["name"] for f in shared[0].get("functions", [])] == ["mask_pii"]
+
+
+def test_consolidator_duplicate_inline_functions_in_overridden_schema_surface_at_validation():
+    """Two inline functions resolving (via overrides) to the same catalog.schema
+    collide at model validation."""
+    data = {
+        "catalogs": {
+            "c1": {
+                "name": "c1",
+                "schemas": [
+                    {
+                        "name": "s1",
+                        "policies": [
+                            _fgac_policy(
+                                name="policy_a",
+                                function={**_inline_fn_dict("dup"), "schema_name": "shared"},
+                            ),
+                        ],
+                    },
+                    {
+                        "name": "s2",
+                        "policies": [
+                            _fgac_policy(
+                                name="policy_b",
+                                function={**_inline_fn_dict("dup"), "schema_name": "shared"},
+                            ),
+                        ],
+                    },
+                ],
+            }
+        }
+    }
+    result = consolidate_resources(data)
+
+    shared = next(s for s in result["catalogs"]["c1"]["schemas"] if s["name"] == "shared")
+    assert len(shared.get("functions", [])) == 2
+    with pytest.raises(DuplicateResourceError, match="dup"):
+        ResourcesConfig.model_validate(result)
