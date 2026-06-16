@@ -103,7 +103,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: liamperritt/uc-declarative-abac/deploy@v0.5.1
+      - uses: liamperritt/uc-declarative-abac/deploy@v0.5.2
         with:
           config-dir: configs/
           warehouse-id: ${{ vars.DATABRICKS_WAREHOUSE_ID }}
@@ -569,20 +569,7 @@ For **grant** policies that list `use_catalog` or `use_schema`, the privilege is
 
 If a **mask** or **filter** policy specifies the optional `has_tags` property, this matches against tagged **tables** only. Use the mandatory `columns.[*]` tag-match (`has_tags` and/or `has_any_of_tags`) to match against tagged columns that you want to use for row filtering logic, or that you want to apply column masking to. As above, multiple `has_tags` entries require **all** tags to be present (AND semantics), while `has_any_of_tags` matches tables/columns carrying **any one** of the listed tags (OR semantics); the two combine as AND-of-groups when both are given. The values of the tagged column are passed as a single parameter to the specified function.
 
-For mask and filter policies, the `function` property can either be the name of an existing UC function (string), or an inline function definition. A string function name may be **partially qualified** and is auto-completed from the policy's own catalog/schema: a bare `mask_email` becomes `<catalog>.<schema>.mask_email` and a `shared.mask_email` becomes `<catalog>.shared.mask_email`, while an already fully-qualified `catalog.schema.fn` is left unchanged. (A bare name on a catalog-level policy has no schema to prepend, so it falls back to the catalog's `default` schema — the same place inline catalog-level functions are deployed.) When defining an inline function, the function resource will be deployed into the same catalog and schema as the policy. If the policy is attached at the catalog level, then the inline function will be deployed to the `default` schema of that catalog. To override this placement, add an optional `catalog_name` and/or `schema_name` field to the inline function definition — the function is then created in that catalog/schema instead. The two fields override **independently**: `schema_name` alone keeps the policy's catalog but uses the given schema, while `catalog_name` alone uses the given catalog with the default target schema name (the policy's schema, or `default` for a catalog-level policy). A target catalog or schema that isn't declared elsewhere in the configs is created automatically (just like standalone resources and the catalog-level `default` schema). For example:
-
-```yaml
-function:
-  name: mask_pii
-  catalog_name: platform   # optional — create in this catalog instead of the policy's catalog
-  schema_name: shared      # optional — create in this schema instead of the default placement
-  parameters:
-    - name: address
-      type: string
-  return: "CONCAT('***', SUBSTRING(address, -4))"
-```
-
-If this results in duplicate functions with identical names (in the same resolved catalog and schema), the framework will raise an error. If several policies reference a single reusable function definition as an inline function via `$defs/functions/<fn_name>`, then make sure to override the function `name` field as necessary to avoid a "Duplicate functions" error.
+For mask and filter policies, the `function` property can either be the name of an existing UC function (string), or an inline function definition. A string function name may be **partially qualified** and is auto-completed from the policy's own catalog/schema: a bare `mask_email` becomes `<catalog>.<schema>.mask_email` and a `shared.mask_email` becomes `<catalog>.shared.mask_email`, while an already fully-qualified `catalog.schema.fn` is left unchanged. (A bare name on a catalog-level policy has no schema to prepend, so it falls back to the catalog's `default` schema — the same place inline catalog-level functions are deployed.) When defining an inline function, the function resource will be deployed into the same catalog and schema as the policy. If the policy is attached at the catalog level, then the inline function will be deployed to the `default` schema of that catalog. To override this placement, add an optional `catalog_name` and/or `schema_name` field to the inline function definition — the function is then created in that catalog/schema instead. If this results in duplicate functions with identical names (in the same resolved catalog and schema), the framework will raise an error. If several policies reference a single reusable function definition as an inline function via `$defs/functions/<fn_name>`, then make sure to override the function `name` field as necessary to avoid a "Duplicate functions" error.
 
 ### Resources
 
