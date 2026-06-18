@@ -6,7 +6,7 @@ if TYPE_CHECKING:
     from uc_declarative_abac.helpers import WorkspaceHelper
     from uc_declarative_abac.logger import ChangeLogger
 
-from uc_declarative_abac.principals.state import GroupDiff
+from uc_declarative_abac.principals.state import GroupDiff, GroupRename
 from uc_declarative_abac.utils import ExecutionError, OrchestratorError, parallel_for_each
 
 
@@ -55,6 +55,45 @@ def _execute_creates(
             ))
             return
         change_logger.log_group_create(name, members)
+
+    parallel_for_each(
+        work_items,
+        worker,
+        max_workers=max_workers,
+        on_complete=on_complete,
+    )
+
+
+def _execute_renames(
+    ws_helper: WorkspaceHelper,
+    diff: GroupDiff,
+    change_logger: ChangeLogger,
+    dry_run: bool,
+    max_workers: int,
+) -> None:
+    """Rename each group in groups_to_rename via the account SCIM proxy.
+
+    Per-group SDK calls run in parallel; logging and error capture run via
+    ``on_complete`` on the main thread. Renames run before member add/remove so
+    the group carries its new display name before membership is reconciled.
+    """
+    work_items = sorted(diff.groups_to_rename, key=lambda r: r.new_display_name)
+
+    def worker(rename: GroupRename) -> None:
+        if not dry_run:
+            ws_helper.rename_group(rename.id, rename.new_display_name)
+
+    def on_complete(rename: GroupRename, _result, error) -> None:
+        if error is not None:
+            change_logger.log_error(ExecutionError(
+                context=f"rename_group({rename.old_display_name} -> "
+                        f"{rename.new_display_name})",
+                exception=error,
+            ))
+            return
+        change_logger.log_group_rename(
+            rename.old_display_name, rename.new_display_name,
+        )
 
     parallel_for_each(
         work_items,
@@ -149,13 +188,16 @@ def execute_group_diff(
     """Apply a GroupDiff against the account via the account SCIM proxy.
 
     Creates groups first (``ws_helper.create_group``, with their members), then
-    adds members to and removes members from existing groups
-    (``ws_helper.add_group_members`` / ``remove_group_members``). Each phase forms
-    one parallel batch (up to ``max_parallel_changes`` workers); dry-run forces
-    sequential execution and skips the API calls. Each SDK exception is logged via
+    renames existing groups (``ws_helper.rename_group``), then adds members to and
+    removes members from existing groups (``ws_helper.add_group_members`` /
+    ``remove_group_members``). Renames precede member ops so a group carries its new
+    display name before membership is reconciled. Each phase forms one parallel
+    batch (up to ``max_parallel_changes`` workers); dry-run forces sequential
+    execution and skips the API calls. Each SDK exception is logged via
     ``change_logger.log_error`` and the batch continues.
     """
     workers = 1 if dry_run else max_parallel_changes
     _execute_creates(ws_helper, diff, change_logger, dry_run, workers)
+    _execute_renames(ws_helper, diff, change_logger, dry_run, workers)
     _execute_member_adds(ws_helper, diff, change_logger, dry_run, workers)
     _execute_member_removes(ws_helper, diff, change_logger, dry_run, workers)

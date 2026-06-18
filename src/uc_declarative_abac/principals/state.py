@@ -45,14 +45,31 @@ class Group:
 
     Holds the group's display name plus its members for diffing. ``external_id``
     is populated on actual state for groups SCIM-provisioned from an external IdP;
-    such groups are not Databricks-managed and cannot be configured here.
-    ``members`` carries (resolved or unresolved) Principals; resolution happens in
-    the differ before comparison, mirroring governed-tag assigners.
+    such groups are not Databricks-managed and cannot be configured here. ``id`` is
+    the account SCIM / internal group id: set on the desired side from config (when
+    declared) and on the actual side from the fetched group; it lets the differ
+    match a group across a display-name change (a rename). ``members`` carries
+    (resolved or unresolved) Principals; resolution happens in the differ before
+    comparison, mirroring governed-tag assigners.
     """
 
     display_name: str
     external_id: str = ""
     members: frozenset[Principal] = frozenset()
+    id: str = ""
+
+
+@dataclass(frozen=True)
+class GroupRename:
+    """A pending rename of an existing account group.
+
+    ``id`` is the group's account SCIM id; ``old_display_name`` is its current
+    name in the account and ``new_display_name`` is the name declared in config.
+    """
+
+    id: str
+    old_display_name: str
+    new_display_name: str
 
 
 @dataclass
@@ -64,10 +81,13 @@ class GroupDiff:
     group is created with these members atomically). ``members_to_add`` and
     ``members_to_remove`` map an *existing* group's display name to the resolved
     Principals to add to / remove from it (populated only when group management is
-    enabled). All values hold fully-resolved Principals — the differ resolves them
-    before they land here.
+    enabled). ``groups_to_rename`` holds the renames detected by matching a desired
+    group's ``id`` to an existing group whose display name differs (populated only
+    under group management). All member values hold fully-resolved Principals — the
+    differ resolves them before they land here.
     """
 
     members_to_add: dict[str, frozenset[Principal]] = field(default_factory=dict)
     members_to_remove: dict[str, frozenset[Principal]] = field(default_factory=dict)
     groups_to_create: dict[str, frozenset[Principal]] = field(default_factory=dict)
+    groups_to_rename: list[GroupRename] = field(default_factory=list)

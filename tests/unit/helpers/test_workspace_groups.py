@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from uc_declarative_abac.helpers import WorkspaceHelper
-from uc_declarative_abac.principals import Principal
+from uc_declarative_abac.principals import GroupRename, Principal
 from uc_declarative_abac.types import PrincipalType
+from uc_declarative_abac.utils import PrincipalValidationError
 
 
 # ---------------------------------------------------------------------------
@@ -386,3 +389,175 @@ def test_workspace_helper_create_group_issues_post() -> None:
     captured = repr(call.kwargs)
     assert "new_team" in captured
     assert "u-1" in captured
+
+
+# ---------------------------------------------------------------------------
+# fetch_actual_groups — rename (locate by id)
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_helper_fetches_renamed_group_by_id_when_name_not_in_desired_names() -> None:
+    """A group whose SCIM id is in desired_ids is fetched under its CURRENT (actual)
+    display name even when that name is not in desired_names — config wants the new
+    name, but the account still returns the old name with the matching id."""
+    client = _make_workspace_client(
+        groups=[_make_group("old_name", "g-1")],
+    )
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    result = helper.fetch_actual_groups(
+        desired_names={"new_name"}, desired_ids={"g-1"},
+    )
+
+    # Located by id and returned under its current (old) display name.
+    names = {group.display_name for group in result}
+    assert "old_name" in names
+
+
+def test_workspace_helper_sets_id_on_actual_group_from_response() -> None:
+    """The returned Group carries the SCIM id from the per-group GET response."""
+    client = _make_workspace_client(
+        groups=[_make_group("old_name", "g-1")],
+    )
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    result = helper.fetch_actual_groups(desired_ids={"g-1"})
+
+    group = next(g for g in result if g.display_name == "old_name")
+    assert group.id == "g-1"
+
+
+# ---------------------------------------------------------------------------
+# register_pending_renames
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_helper_register_pending_renames_adds_new_name_and_removes_old() -> None:
+    """After register_pending_renames, the NEW display name resolves as a GROUP
+    principal and the OLD name no longer resolves."""
+    client = _make_workspace_client(
+        groups=[_make_group("old_name", "g-1")],
+    )
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    helper.register_pending_renames(
+        [GroupRename(id="g-1", old_display_name="old_name", new_display_name="new_name")],
+    )
+
+    resolved = helper.resolve_by_name("new_name")
+    assert resolved.principal_type == PrincipalType.GROUP
+
+    with pytest.raises(PrincipalValidationError):
+        helper.resolve_by_name("old_name")
+
+
+def test_workspace_helper_register_pending_renames_remaps_group_id_to_new_name() -> None:
+    """After the rename, a member add against the NEW name resolves the group's SCIM
+    id — the PATCH targets the same id that previously belonged to the old name."""
+    client = _make_workspace_client(
+        users=[_make_user("alice@example.com", "u-1")],
+        groups=[_make_group("old_name", "g-1")],
+    )
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    helper.register_pending_renames(
+        [GroupRename(id="g-1", old_display_name="old_name", new_display_name="new_name")],
+    )
+
+    member = Principal(PrincipalType.USER, "alice@example.com", "alice@example.com")
+    helper.add_group_members("new_name", [member])
+
+    patch_calls = [
+        call for call in client.api_client.do.call_args_list
+        if call.args and call.args[0] == "PATCH"
+    ]
+    assert len(patch_calls) == 1
+    assert "g-1" in patch_calls[0].args[1]
+
+
+def test_workspace_helper_resolves_new_name_after_pending_rename() -> None:
+    """resolve_by_name(new_name) returns a GROUP principal after a pending rename."""
+    client = _make_workspace_client(
+        groups=[_make_group("old_name", "g-1")],
+    )
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    helper.register_pending_renames(
+        [GroupRename(id="g-1", old_display_name="old_name", new_display_name="new_name")],
+    )
+
+    assert helper.resolve_by_name("new_name").principal_type == PrincipalType.GROUP
+
+
+def test_workspace_helper_rejects_old_name_after_pending_rename() -> None:
+    """resolve_by_name(old_name) raises after a pending rename retires the old name."""
+    client = _make_workspace_client(
+        groups=[_make_group("old_name", "g-1")],
+    )
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    helper.register_pending_renames(
+        [GroupRename(id="g-1", old_display_name="old_name", new_display_name="new_name")],
+    )
+
+    with pytest.raises(PrincipalValidationError):
+        helper.resolve_by_name("old_name")
+
+
+def test_workspace_helper_resolves_old_name_by_identifier_to_new_group_after_pending_rename() -> None:
+    """resolve_by_identifier(old_name) returns the NEW group principal after a
+    pending rename — deployed actual-state references to the old display name must
+    map onto the renamed group rather than failing or showing a spurious diff."""
+    client = _make_workspace_client(
+        groups=[_make_group("old_name", "g-1")],
+    )
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    helper.register_pending_renames(
+        [GroupRename(id="g-1", old_display_name="old_name", new_display_name="new_name")],
+    )
+
+    resolved = helper.resolve_by_identifier("old_name")
+    assert resolved.principal_type == PrincipalType.GROUP
+    assert resolved.identifier == "new_name"
+    assert resolved.name == "new_name"
+
+
+# ---------------------------------------------------------------------------
+# rename_group
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_helper_rename_group_issues_replace_displayname_patch() -> None:
+    """rename_group issues a PATCH to /Groups/{scim_id} whose Operations contain a
+    replace op on the displayName path with the new value."""
+    client = _make_workspace_client(
+        groups=[_make_group("old_name", "g-1")],
+    )
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    helper.rename_group("g-1", "new")
+
+    patch_calls = [
+        call for call in client.api_client.do.call_args_list
+        if call.args and call.args[0] == "PATCH"
+    ]
+    assert len(patch_calls) == 1
+    call = patch_calls[0]
+    assert call.args[1] == "/api/2.0/account/scim/v2/Groups/g-1"
+    body = call.kwargs["body"]
+    operations = body["Operations"]
+    assert any(
+        op.get("op") == "replace"
+        and op.get("path") == "displayName"
+        and op.get("value") == "new"
+        for op in operations
+    )

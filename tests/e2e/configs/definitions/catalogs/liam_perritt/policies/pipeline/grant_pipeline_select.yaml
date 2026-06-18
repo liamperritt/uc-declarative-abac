@@ -9,3 +9,4 @@ definitions:
         - select
       to:
         - uc_governor_test_team
+        - uc_governor_data_engineering_team

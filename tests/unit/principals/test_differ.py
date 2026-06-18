@@ -6,6 +6,7 @@ from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.principals import (
     compute_group_diff,
     Group,
+    GroupRename,
     Principal,
     PrincipalResolver,
 )
@@ -22,6 +23,20 @@ def _group(
         display_name=display_name,
         external_id=external_id,
         members=frozenset(members or set()),
+    )
+
+
+def _group_with_id(
+    display_name: str,
+    group_id: str,
+    external_id: str = "",
+    members: set[Principal] | None = None,
+) -> Group:
+    return Group(
+        display_name=display_name,
+        external_id=external_id,
+        members=frozenset(members or set()),
+        id=group_id,
     )
 
 
@@ -329,3 +344,159 @@ def test_group_differ_handles_multiple_groups_independently():
     assert _alice_resolved in diff.members_to_add["analysts"]
     assert "engineers" not in diff.members_to_add
     assert "engineers" not in diff.members_to_remove
+
+
+# ---------------------------------------------------------------------------
+# group renaming via id matching (under --enable-group-management)
+# ---------------------------------------------------------------------------
+
+
+def test_group_differ_matches_by_id_when_id_present():
+    """A desired group carrying an id matches the actual group with the same id
+    (regardless of name) rather than being treated as a brand-new group."""
+    desired = {_group_with_id(
+        "analysts_new", "id-X",
+        members={Principal(PrincipalType.UNKNOWN, name="alice@example.com")},
+    )}
+    actual = {_group_with_id(
+        "analysts_old", "id-X",
+        members={Principal(PrincipalType.UNKNOWN, identifier="alice@example.com")},
+    )}
+    resolver = _resolver(
+        name_to_principal={"alice@example.com": _alice_resolved},
+        identifier_to_principal={"alice@example.com": _alice_resolved},
+    )
+    change_logger = ChangeLogger()
+
+    diff = compute_group_diff(desired, actual, resolver, change_logger, enable_group_management=True)
+
+    # Matched by id, so not a creation; members are identical, so no membership churn.
+    assert "analysts_new" not in diff.groups_to_create
+    assert "analysts_old" not in diff.groups_to_create
+    assert change_logger.has_errors is False
+
+
+def test_group_differ_emits_rename_when_id_matches_and_name_differs():
+    """When the id matches but the display name differs, a GroupRename is recorded."""
+    desired = {_group_with_id("analysts_new", "id-X", members=set())}
+    actual = {_group_with_id("analysts_old", "id-X", members=set())}
+    resolver = _resolver_passthrough()
+    change_logger = ChangeLogger()
+
+    diff = compute_group_diff(desired, actual, resolver, change_logger, enable_group_management=True)
+
+    assert GroupRename(
+        id="id-X", old_display_name="analysts_old", new_display_name="analysts_new",
+    ) in diff.groups_to_rename
+    assert change_logger.has_errors is False
+
+
+def test_group_differ_no_rename_when_id_matches_and_name_same():
+    """When the id matches and the display name is unchanged, no rename is recorded."""
+    desired = {_group_with_id("team", "id-X", members=set())}
+    actual = {_group_with_id("team", "id-X", members=set())}
+    resolver = _resolver_passthrough()
+    change_logger = ChangeLogger()
+
+    diff = compute_group_diff(desired, actual, resolver, change_logger, enable_group_management=True)
+
+    assert diff.groups_to_rename == []
+    assert change_logger.has_errors is False
+
+
+def test_group_differ_reconciles_membership_under_new_name_when_renamed():
+    """A renamed group's membership changes are keyed by the new display name, not the old."""
+    desired = {_group_with_id(
+        "analysts_new", "id-X",
+        members={Principal(PrincipalType.UNKNOWN, name="alice@example.com")},
+    )}
+    actual = {_group_with_id(
+        "analysts_old", "id-X",
+        members={Principal(PrincipalType.UNKNOWN, identifier="bob@example.com")},
+    )}
+    resolver = _resolver(
+        name_to_principal={"alice@example.com": _alice_resolved},
+        identifier_to_principal={"bob@example.com": _bob_resolved},
+    )
+    change_logger = ChangeLogger()
+
+    diff = compute_group_diff(desired, actual, resolver, change_logger, enable_group_management=True)
+
+    assert _alice_resolved in diff.members_to_add["analysts_new"]
+    assert _bob_resolved in diff.members_to_remove["analysts_new"]
+    assert "analysts_old" not in diff.members_to_add
+    assert "analysts_old" not in diff.members_to_remove
+
+
+def test_group_differ_errors_when_id_has_no_matching_actual_group():
+    """A desired group declaring an id with no matching actual group is a fatal error."""
+    desired = {_group_with_id("analysts", "id-X", members=set())}
+    actual = {_group_with_id("other", "id-Y", members=set())}
+    resolver = _resolver_passthrough()
+    change_logger = ChangeLogger()
+
+    diff = compute_group_diff(desired, actual, resolver, change_logger, enable_group_management=True)
+
+    assert change_logger.has_errors
+    assert change_logger.errors
+    assert diff.groups_to_rename == []
+    assert diff.groups_to_create == {}
+
+
+def test_group_differ_errors_when_rename_target_name_already_taken():
+    """Renaming to a display name already held by a different actual group is a fatal error."""
+    desired = {_group_with_id("taken", "id-X", members=set())}
+    actual = {
+        _group_with_id("analysts_old", "id-X", members=set()),
+        _group_with_id("taken", "id-Y", members=set()),
+    }
+    resolver = _resolver_passthrough()
+    change_logger = ChangeLogger()
+
+    diff = compute_group_diff(desired, actual, resolver, change_logger, enable_group_management=True)
+
+    assert change_logger.has_errors
+    assert change_logger.errors
+    assert not any(r.id == "id-X" for r in diff.groups_to_rename)
+
+
+def test_group_differ_errors_when_renaming_externally_managed_group():
+    """Renaming a group matched by id that has an external_id is a fatal error."""
+    desired = {_group_with_id("analysts_new", "id-X", members=set())}
+    actual = {_group_with_id("analysts_old", "id-X", external_id="idp-123", members=set())}
+    resolver = _resolver_passthrough()
+    change_logger = ChangeLogger()
+
+    diff = compute_group_diff(desired, actual, resolver, change_logger, enable_group_management=True)
+
+    assert change_logger.has_errors
+    assert change_logger.errors
+    assert diff.groups_to_rename == []
+
+
+def test_group_differ_omits_rename_when_management_disabled():
+    """Without --enable-group-management, an id-matched name difference yields no rename and no error."""
+    desired = {_group_with_id("analysts_new", "id-X", members=set())}
+    actual = {_group_with_id("analysts_old", "id-X", members=set())}
+    resolver = _resolver_passthrough()
+    change_logger = ChangeLogger()
+
+    diff = compute_group_diff(desired, actual, resolver, change_logger)
+
+    assert diff.groups_to_rename == []
+    assert change_logger.has_errors is False
+
+
+def test_group_differ_falls_back_to_name_match_when_id_absent():
+    """A desired group with no id still matches the actual group by display name and
+    reconciles membership, recording no rename and no error (existing behavior)."""
+    desired = {_group("analysts", members={Principal(PrincipalType.UNKNOWN, name="alice@example.com")})}
+    actual = {_group("analysts", members=set())}
+    resolver = _resolver(name_to_principal={"alice@example.com": _alice_resolved})
+    change_logger = ChangeLogger()
+
+    diff = compute_group_diff(desired, actual, resolver, change_logger, enable_group_management=True)
+
+    assert _alice_resolved in diff.members_to_add["analysts"]
+    assert diff.groups_to_rename == []
+    assert change_logger.has_errors is False

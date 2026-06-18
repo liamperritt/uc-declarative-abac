@@ -633,9 +633,24 @@ class GovernedTagConfig(BaseModel):
 
 class GroupConfig(BaseModel):
     """Represents a Databricks-managed group with optional members.
+
+    ``id`` is the account-level SCIM / internal group id. When set, the engine
+    matches the group by ``id`` rather than by ``name``, which lets a group be
+    renamed: change ``name`` while keeping ``id`` and the engine updates the
+    group's display name instead of treating it as a new group. It is accepted as
+    either a string or an integer (a numeric id in YAML) and stored as a string.
     """
     name: str
+    id: str | None = None
     members: list[str] = Field(default_factory=list)
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def _coerce_id_to_str(cls, v: object) -> object:
+        """Accept a numeric group id and store it as a string, so an ``id``
+        written without quotes in YAML matches the string ids used everywhere
+        else (config, SCIM, the principal cache)."""
+        return str(v) if isinstance(v, int) else v
 
 
 class ResourcesConfig(BaseModel):
@@ -672,7 +687,13 @@ class ResourcesConfig(BaseModel):
             for key, grp in groups.items():
                 if isinstance(grp, dict):
                     grp.setdefault("name", key)
+                    if isinstance(grp.get("id"), int):
+                        grp["id"] = str(grp["id"])
             _check_duplicate_names(
                 list(groups.values()), "group", "resources",
+            )
+            _check_duplicate_names(
+                [g for g in groups.values() if isinstance(g, dict) and g.get("id")],
+                "group", "resources", key="id",
             )
         return data

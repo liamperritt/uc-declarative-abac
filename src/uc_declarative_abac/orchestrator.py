@@ -233,6 +233,7 @@ def run(
     #      taggable-management flag, since RFA is a managed attribute)
     desired_groups = compile_desired_groups(config)
     desired_group_names = {g.display_name for g in desired_groups}
+    desired_group_ids = {g.id for g in desired_groups if g.id}
     desired_governed_tags = compile_desired_governed_tags(config)
     desired_governed_tag_names = {gt.name for gt in desired_governed_tags}
     desired_attributes = compile_desired_attributes(config)
@@ -284,7 +285,7 @@ def run(
     # group (the account SCIM proxy list call doesn't return members inline),
     # dispatched concurrently. Empty when the group domain is inert.
     actual_groups = (
-        ws_helper.fetch_actual_groups(desired_group_names)
+        ws_helper.fetch_actual_groups(desired_group_names, desired_group_ids)
         if group_domain_active else set()
     )
 
@@ -305,6 +306,11 @@ def run(
     # (governed-tag assigners, policies, privileges, securable owners) can resolve
     # them — group creation runs first, so they exist before any grant applies.
     ws_helper.register_pending_groups(group_diff.groups_to_create.keys())
+    # Renames are reflected in the principal cache before downstream domains resolve:
+    # the new display name becomes resolvable and the old one becomes unknown, so
+    # references to the new name succeed and references to the old name fail (even in
+    # dry-run, where the SCIM PATCH itself is skipped).
+    ws_helper.register_pending_renames(group_diff.groups_to_rename)
 
     # 4. Governed tags workflow (account-level tag policies — must run before
     # catalog-scoped tag assignments, so new tag keys exist before SET TAGS).
@@ -399,7 +405,8 @@ def run(
         privilege_diff = PrivilegeDiff()
 
     # 9. Log and execute (or dry-run) — group management runs first.
-    if group_diff.groups_to_create or group_diff.members_to_add or group_diff.members_to_remove:
+    if (group_diff.groups_to_create or group_diff.members_to_add
+            or group_diff.members_to_remove or group_diff.groups_to_rename):
         change_logger.log_section_header("Groups")
     execute_group_diff(
         ws_helper, group_diff, change_logger,

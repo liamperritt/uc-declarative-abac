@@ -2,7 +2,7 @@ definitions:
   tables:
     liam_perritt|lff_sqlserver_bronze|dummy_cdc_sink:
       name: dummy_cdc_sink
-      owner: uc_governor_data_engineers
+      owner: uc_governor_data_engineering_team
       tags:
         uc_gov_classification: internal
         uc_gov_pipeline: lff

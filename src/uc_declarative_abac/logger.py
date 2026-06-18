@@ -157,6 +157,7 @@ class ChangeLogger:
         self._governed_tag_assigners_granted = 0
         self._governed_tag_assigners_revoked = 0
         self._groups_created = 0
+        self._groups_renamed = 0
         self._group_members_added = 0
         self._group_members_removed = 0
         self._errors: list[ExecutionError] = []
@@ -482,6 +483,15 @@ class ChangeLogger:
             f"{action_verb} group{suffix}",
         ))
 
+    def log_group_rename(self, old_name: str, new_name: str) -> None:
+        """Log an existing account group being renamed (display-name change)."""
+        self._groups_renamed += 1
+        action_verb = "Rename" if self._dry_run else "Renamed"
+        self._log_info(_format_change_line(
+            "~", "GROUP", old_name,
+            f"{action_verb} group -> {new_name}",
+        ))
+
     def log_group_member_add(self, group_name: str, members: frozenset[Principal]) -> None:
         """Log members being added to an existing account group."""
         self._group_members_added += len(members)
@@ -577,6 +587,8 @@ class ChangeLogger:
         group_parts: list[str] = []
         if self._groups_created:
             group_parts.append(f"{self._groups_created} created")
+        if self._groups_renamed:
+            group_parts.append(f"{self._groups_renamed} renamed")
         if self._group_members_added:
             group_parts.append(f"{self._group_members_added} members added")
         if self._group_members_removed:
@@ -650,6 +662,8 @@ class ChangeLogger:
         group_parts: list[str] = []
         if self._groups_created:
             group_parts.append(f"{self._groups_created} to create")
+        if self._groups_renamed:
+            group_parts.append(f"{self._groups_renamed} to rename")
         if self._group_members_added:
             group_parts.append(f"{self._group_members_added} members to add")
         if self._group_members_removed:

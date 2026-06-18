@@ -120,6 +120,34 @@ def test_groups_compiler_leaves_external_id_empty_on_desired_groups():
     assert all(g.external_id == "" for g in result)
 
 
+def test_groups_compiler_sets_id_on_group_when_id_in_config():
+    """A config group with an 'id' compiles to a Group whose .id equals that value."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {"cat": {"name": "cat"}},
+        "groups": {
+            "data_engineers": {"name": "data_engineers", "id": "1234567890"},
+        },
+    })
+
+    result = compile_desired_groups(config)
+
+    grp = next(g for g in result if g.display_name == "data_engineers")
+    assert grp.id == "1234567890"
+
+
+def test_groups_compiler_leaves_id_empty_when_omitted():
+    """A config group without 'id' compiles to a Group whose .id == ''."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {"cat": {"name": "cat"}},
+        "groups": {"data_engineers": {"name": "data_engineers"}},
+    })
+
+    result = compile_desired_groups(config)
+
+    grp = next(g for g in result if g.display_name == "data_engineers")
+    assert grp.id == ""
+
+
 def test_groups_compiler_emits_all_groups_in_config():
     """Every group declared in the config appears in the result."""
     config = ResourcesConfig.model_validate({

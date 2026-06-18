@@ -10,14 +10,17 @@ def compile_desired_groups(config: ResourcesConfig) -> set[Group]:
 
     Each member name becomes an unresolved Principal (principal_type=UNKNOWN,
     name=<display_name>); the differ resolves them against the workspace before
-    comparing against actual state. ``external_id`` is never set on the desired
-    side — it only appears on actual state for IdP-provisioned groups.
+    comparing against actual state. ``id`` is carried through from config (when
+    declared) so the differ can match the group across a display-name change.
+    ``external_id`` is never set on the desired side — it only appears on actual
+    state for IdP-provisioned groups.
     """
     if not config.groups:
         return set()
     return {
         Group(
             display_name=group.name,
+            id=group.id or "",
             members=frozenset(
                 Principal(PrincipalType.UNKNOWN, name=m)
                 for m in (group.members or ())

@@ -887,6 +887,76 @@ def test_resources_config_rejects_duplicate_group_names():
         })
 
 
+def test_group_config_accepts_optional_id():
+    """A group declaring an ``id`` parses it onto GroupConfig.id; a group without
+    ``id`` has ``id is None``."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {"cat": {}},
+        "groups": {
+            "with_id": {"id": "abc-123"},
+            "without_id": {},
+        },
+    })
+
+    assert config.groups is not None
+    assert config.groups["with_id"].id == "abc-123"
+    assert config.groups["without_id"].id is None
+
+
+def test_group_config_rejects_duplicate_ids_when_two_groups_share_id():
+    """Two group entries (different keys/names) sharing the same ``id`` raise
+    DuplicateResourceError."""
+    with pytest.raises(DuplicateResourceError):
+        ResourcesConfig.model_validate({
+            "catalogs": {"cat": {}},
+            "groups": {
+                "entry_one": {"name": "group_one", "id": "shared-id"},
+                "entry_two": {"name": "group_two", "id": "shared-id"},
+            },
+        })
+
+
+def test_group_config_allows_multiple_groups_without_ids():
+    """Multiple group entries all omitting ``id`` validate fine — ``None`` ids
+    are not treated as duplicates."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {"cat": {}},
+        "groups": {
+            "entry_one": {"name": "group_one"},
+            "entry_two": {"name": "group_two"},
+        },
+    })
+
+    assert config.groups is not None
+    assert config.groups["entry_one"].id is None
+    assert config.groups["entry_two"].id is None
+
+
+def test_group_config_coerces_integer_id_to_string():
+    """An ``id`` given as an integer (an unquoted numeric id in YAML) is stored as
+    its string form."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {"cat": {}},
+        "groups": {"with_int_id": {"id": 1234567890123456}},
+    })
+
+    assert config.groups is not None
+    assert config.groups["with_int_id"].id == "1234567890123456"
+
+
+def test_group_config_rejects_duplicate_ids_across_int_and_string_forms():
+    """A group whose ``id`` is an integer collides with another whose ``id`` is the
+    equivalent string — both normalise to the same string id."""
+    with pytest.raises(DuplicateResourceError):
+        ResourcesConfig.model_validate({
+            "catalogs": {"cat": {}},
+            "groups": {
+                "entry_one": {"name": "group_one", "id": 123},
+                "entry_two": {"name": "group_two", "id": "123"},
+            },
+        })
+
+
 def test_catalog_config_rejects_duplicate_schema_names():
     """Two schemas with the same name under one catalog raise DuplicateResourceError."""
     with pytest.raises(DuplicateResourceError):

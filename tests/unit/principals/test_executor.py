@@ -5,12 +5,21 @@ from unittest.mock import call, MagicMock
 import pytest
 
 from uc_declarative_abac.logger import ChangeLogger
-from uc_declarative_abac.principals import execute_group_diff, GroupDiff, Principal
+from uc_declarative_abac.principals import execute_group_diff, GroupDiff, GroupRename, Principal
 from uc_declarative_abac.types import PrincipalType
 
 
 def _resolved_user(name: str) -> Principal:
     return Principal(PrincipalType.USER, identifier=name, name=name)
+
+
+def _summary_of(logger_mock: MagicMock) -> str:
+    """Return the logged summary line emitted by ChangeLogger.log_summary()."""
+    return next(
+        c.args[0]
+        for c in reversed(logger_mock.info.call_args_list)
+        if c.args and "Summary:" in c.args[0]
+    )
 
 
 @pytest.fixture
@@ -240,3 +249,82 @@ def test_group_executor_logs_error_and_continues_on_create_group_failure(ws_help
     assert change_logger.has_errors
     ws_helper.add_group_members.assert_called_once()
     assert ws_helper.add_group_members.call_args.args[0] == "ok_group"
+
+
+# ---------------------------------------------------------------------------
+# Group rename
+# ---------------------------------------------------------------------------
+
+
+def test_group_executor_renames_each_group_to_rename(ws_helper, change_logger):
+    """Each entry in groups_to_rename triggers one rename_group call with (id, new_name)."""
+    diff = GroupDiff(groups_to_rename=[
+        GroupRename(id="g1", old_display_name="old_one", new_display_name="new_one"),
+        GroupRename(id="g2", old_display_name="old_two", new_display_name="new_two"),
+    ])
+
+    execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
+
+    assert ws_helper.rename_group.call_count == 2
+    sent = {(c.args[0], c.args[1]) for c in ws_helper.rename_group.call_args_list}
+    assert sent == {("g1", "new_one"), ("g2", "new_two")}
+
+
+def test_group_executor_renames_before_adding_members(ws_helper, change_logger):
+    """Renames are applied before members are added to existing groups."""
+    diff = GroupDiff(
+        groups_to_rename=[
+            GroupRename(id="g1", old_display_name="old_one", new_display_name="new_one"),
+        ],
+        members_to_add={"existing_group": frozenset({_resolved_user("bob@co.com")})},
+    )
+
+    execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
+
+    method_names = [c[0] for c in ws_helper.method_calls]
+    assert "rename_group" in method_names
+    assert "add_group_members" in method_names
+    assert method_names.index("rename_group") < method_names.index("add_group_members")
+
+
+def test_group_executor_skips_rename_patch_in_dry_run(ws_helper):
+    """In dry-run mode rename_group is not invoked, but the rename is still recorded."""
+    logger_mock = MagicMock()
+    change_logger = ChangeLogger(dry_run=True, logger=logger_mock)
+    diff = GroupDiff(groups_to_rename=[
+        GroupRename(id="g1", old_display_name="old_one", new_display_name="new_one"),
+    ])
+
+    execute_group_diff(ws_helper, diff, change_logger, dry_run=True)
+
+    ws_helper.rename_group.assert_not_called()
+    change_logger.log_summary()
+    assert "to rename" in _summary_of(logger_mock)
+    assert not change_logger.has_errors
+
+
+def test_group_executor_logs_rename_on_success(ws_helper):
+    """A successful rename is recorded in the change logger's summary."""
+    logger_mock = MagicMock()
+    change_logger = ChangeLogger(dry_run=False, logger=logger_mock)
+    diff = GroupDiff(groups_to_rename=[
+        GroupRename(id="g1", old_display_name="old_one", new_display_name="new_one"),
+    ])
+
+    execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
+
+    change_logger.log_summary()
+    assert "renamed" in _summary_of(logger_mock)
+    assert not change_logger.has_errors
+
+
+def test_group_executor_collects_error_when_rename_fails(ws_helper, change_logger):
+    """A failing rename_group is logged as an error without crashing execution."""
+    ws_helper.rename_group.side_effect = RuntimeError("boom")
+    diff = GroupDiff(groups_to_rename=[
+        GroupRename(id="g1", old_display_name="old_one", new_display_name="new_one"),
+    ])
+
+    execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
+
+    assert change_logger.has_errors

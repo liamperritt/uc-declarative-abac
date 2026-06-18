@@ -2343,3 +2343,377 @@ def test_orchestrator_does_not_manage_membership_when_flag_off(
         if c.args and c.args[0] == "PATCH"
     ]
     assert patch_calls == [], "Expected no membership PATCH when group management is off"
+
+
+# ---------------------------------------------------------------------------
+# Group renaming (match by id, change display name)
+# ---------------------------------------------------------------------------
+
+
+def _config_with_group_id(
+    display_name: str, group_id: str, members: list[str] | None = None
+) -> dict:
+    """A config declaring one catalog and one group keyed by ``display_name`` that
+    carries an explicit ``id`` (so the engine matches by id, enabling rename)."""
+    return {
+        "resources": {
+            "catalogs": {"my_catalog": {}},
+            "groups": {
+                display_name: {"id": group_id, "members": members or []},
+            },
+        }
+    }
+
+
+def _setup_mock_groups_state(
+    mock_workspace_client: MagicMock,
+    *,
+    groups: list[dict],
+    users: list[tuple[str, str]] | None = None,
+) -> None:
+    """Configure the account SCIM proxy mock for an arbitrary set of groups.
+
+    ``groups`` is a list of dicts each with keys: ``id``, ``displayName`` and
+    optionally ``member_ids`` (list[str]) and ``externalId`` (str). The Groups LIST
+    returns id + displayName for every group (modelling the not-yet-renamed account
+    state); the per-group GET /Groups/{id} returns the full group object including
+    members + externalId. PATCH/POST return {}. ``users`` is a list of
+    (scim_id, userName).
+    """
+    users = users or []
+    by_id = {g["id"]: g for g in groups}
+
+    def _scim_do(method, path, **kwargs):
+        if method in ("PATCH", "POST") and "/account/scim/v2/Groups" in path:
+            return {}
+        if "/account/scim/v2/Groups/" in path:
+            group_id_arg = path.rsplit("/", 1)[-1]
+            g = by_id.get(group_id_arg)
+            if g is None:
+                return {}
+            return {
+                "id": g["id"],
+                "displayName": g["displayName"],
+                "externalId": g.get("externalId", ""),
+                "members": [{"value": mid} for mid in g.get("member_ids", [])],
+            }
+        if path.endswith("/account/scim/v2/Groups"):
+            resources = [{"id": g["id"], "displayName": g["displayName"]} for g in groups]
+            return {
+                "totalResults": len(resources),
+                "startIndex": 1,
+                "itemsPerPage": 100,
+                "Resources": resources,
+            }
+        if "/account/scim/v2/Users" in path:
+            resources = [{"id": sid, "userName": un} for sid, un in users]
+            return {
+                "totalResults": len(resources),
+                "startIndex": 1,
+                "itemsPerPage": 100,
+                "Resources": resources,
+            }
+        return {"totalResults": 0, "startIndex": 1, "itemsPerPage": 100, "Resources": []}
+
+    mock_workspace_client.api_client.do.side_effect = _scim_do
+
+
+def _rename_patch_calls(mock_workspace_client: MagicMock, group_id: str) -> list:
+    """PATCH calls against /Groups/{group_id} that replace the displayName."""
+    return [
+        c for c in mock_workspace_client.api_client.do.call_args_list
+        if c.args and c.args[0] == "PATCH" and f"/Groups/{group_id}" in c.args[1]
+        and "displayName" in repr(c.kwargs) and "replace" in repr(c.kwargs)
+    ]
+
+
+def test_orchestrator_renames_group_end_to_end_when_id_matches_and_name_differs(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """Config keeps the same ``id`` but changes the display name; the account still
+    has the OLD name under that id. A GroupRename is recorded and a SCIM PATCH that
+    replaces displayName is issued against the group's id (real run)."""
+    config = _config_with_group_id("new_engineers", "g-1")
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_groups_state(
+        mock_workspace_client,
+        groups=[{"id": "g-1", "displayName": "old_engineers", "member_ids": []}],
+    )
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_group_management=True,
+        dry_run=False,
+    )
+
+    renames = result.group_diff.groups_to_rename
+    assert any(
+        r.id == "g-1"
+        and r.old_display_name == "old_engineers"
+        and r.new_display_name == "new_engineers"
+        for r in renames
+    ), f"Expected GroupRename(g-1, old_engineers -> new_engineers), got: {renames}"
+    assert _rename_patch_calls(mock_workspace_client, "g-1"), (
+        "Expected a PATCH replacing displayName against /Groups/g-1"
+    )
+
+
+def test_orchestrator_dry_run_resolves_new_name_reference_without_error(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """Dry-run rename old->new by id, with a grant policy referencing the NEW group
+    name. The new name resolves (the orchestrator primes the principal cache with the
+    rename), so the run has no errors and issues no rename PATCH (dry-run)."""
+    config = {
+        "resources": {
+            "governed_tags": {"team": {"allowed_values": ["data"]}},
+            "groups": {"new_engineers": {"id": "g-1", "members": []}},
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tags": {"team": "data"},
+                            "policies": [
+                                {
+                                    "name": "g1",
+                                    "type": "grant",
+                                    "privileges": ["select"],
+                                    "to": ["new_engineers"],
+                                    "has_tags": {"team": "data"},
+                                },
+                            ],
+                        },
+                    ],
+                }
+            },
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_groups_state(
+        mock_workspace_client,
+        groups=[{"id": "g-1", "displayName": "old_engineers", "member_ids": []}],
+    )
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_group_management=True,
+        enable_tag_management=True,
+        enable_privilege_management=True,
+        dry_run=True,
+    )
+
+    assert any(
+        r.id == "g-1" and r.new_display_name == "new_engineers"
+        for r in result.group_diff.groups_to_rename
+    )
+    # The grant resolved against the NEW name rather than erroring out.
+    assert any(
+        p.securable_full_name == "my_catalog.sales"
+        for p in result.privilege_diff.to_grant
+    ), f"Expected grant on my_catalog.sales, got: {result.privilege_diff.to_grant}"
+    assert _rename_patch_calls(mock_workspace_client, "g-1") == [], (
+        "Expected no rename PATCH in dry-run"
+    )
+
+
+def test_orchestrator_dry_run_rejects_old_name_reference(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """Same rename old->new by id, but a grant policy references the OLD group name.
+    After the rename is recorded the old name no longer resolves, so the config-side
+    resolution failure is fatal (ExecutionBatchError)."""
+    config = {
+        "resources": {
+            "governed_tags": {"team": {"allowed_values": ["data"]}},
+            "groups": {"new_engineers": {"id": "g-1", "members": []}},
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tags": {"team": "data"},
+                            "policies": [
+                                {
+                                    "name": "g1",
+                                    "type": "grant",
+                                    "privileges": ["select"],
+                                    "to": ["old_engineers"],
+                                    "has_tags": {"team": "data"},
+                                },
+                            ],
+                        },
+                    ],
+                }
+            },
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_groups_state(
+        mock_workspace_client,
+        groups=[{"id": "g-1", "displayName": "old_engineers", "member_ids": []}],
+    )
+
+    with pytest.raises(ExecutionBatchError) as exc_info:
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            enable_group_management=True,
+            enable_tag_management=True,
+            enable_privilege_management=True,
+            dry_run=True,
+        )
+
+    principal_errors = [
+        e for e in exc_info.value.errors
+        if isinstance(e.exception, PrincipalValidationError)
+    ]
+    assert principal_errors, (
+        f"Expected a PrincipalValidationError for the old name reference, got: "
+        f"{exc_info.value.errors}"
+    )
+
+
+def test_orchestrator_errors_when_group_id_does_not_exist(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """A config group declaring an ``id`` absent from the account is a fatal error."""
+    config = _config_with_group_id("new_engineers", "g-nonexistent")
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    # Account has a different group id.
+    _setup_mock_groups_state(
+        mock_workspace_client,
+        groups=[{"id": "g-other", "displayName": "some_group", "member_ids": []}],
+    )
+
+    with pytest.raises(ExecutionBatchError):
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            enable_group_management=True,
+        )
+
+
+def test_orchestrator_errors_when_rename_target_name_already_taken(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """Renaming group id g-1 to a display name already used by a different existing
+    group is a fatal error and issues no rename PATCH."""
+    config = _config_with_group_id("taken_name", "g-1")
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_groups_state(
+        mock_workspace_client,
+        groups=[
+            {"id": "g-1", "displayName": "old_engineers", "member_ids": []},
+            {"id": "g-2", "displayName": "taken_name", "member_ids": []},
+        ],
+    )
+
+    with pytest.raises(ExecutionBatchError):
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            enable_group_management=True,
+        )
+
+    assert _rename_patch_calls(mock_workspace_client, "g-1") == [], (
+        "Expected no rename PATCH when the target name collides"
+    )
+
+
+def test_orchestrator_rename_does_not_diff_actual_grants_referencing_old_name(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """A group is renamed by id (old_engineers -> new_engineers). The config grants
+    SELECT on a tagged schema to the NEW name, while the ACTUAL deployed privilege in
+    UC still references the OLD name (UC system tables lag the rename). After the fix
+    the actual old-name reference canonicalizes to the same group as the desired
+    new-name reference, so the two match: NO grant and NO revoke for that group, and
+    the run succeeds (no fatal ExecutionBatchError)."""
+    config = {
+        "resources": {
+            "governed_tags": {"team": {"allowed_values": ["data"]}},
+            "groups": {"new_engineers": {"id": "g-1", "members": []}},
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tags": {"team": "data"},
+                            "policies": [
+                                {
+                                    "name": "g1",
+                                    "type": "grant",
+                                    "privileges": ["select"],
+                                    "to": ["new_engineers"],
+                                    "has_tags": {"team": "data"},
+                                },
+                            ],
+                        },
+                    ],
+                }
+            },
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    # ACTUAL UC privilege still references the OLD group name on the same schema.
+    actual_privilege_rows = [
+        ["SCHEMA", "my_catalog.sales", "old_engineers", "SELECT"],
+    ]
+    _install_fetch_router(
+        monkeypatch,
+        config,
+        privilege_rows=actual_privilege_rows,
+    )
+    _setup_mock_groups_state(
+        mock_workspace_client,
+        groups=[{"id": "g-1", "displayName": "old_engineers", "member_ids": []}],
+    )
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_group_management=True,
+        enable_tag_management=True,
+        enable_privilege_management=True,
+        dry_run=True,
+    )
+
+    # The rename was detected.
+    assert any(
+        r.id == "g-1"
+        and r.old_display_name == "old_engineers"
+        and r.new_display_name == "new_engineers"
+        for r in result.group_diff.groups_to_rename
+    ), f"Expected GroupRename(g-1, old_engineers -> new_engineers), got: {result.group_diff.groups_to_rename}"
+
+    # The actual old-name grant matched the desired new-name grant: no diff for the
+    # renamed group in either direction.
+    group_names = {"old_engineers", "new_engineers"}
+
+    def _references_group(sp) -> bool:
+        return sp.principal.name in group_names or sp.principal.identifier in group_names
+
+    offending_grants = [sp for sp in result.privilege_diff.to_grant if _references_group(sp)]
+    offending_revokes = [sp for sp in result.privilege_diff.to_revoke if _references_group(sp)]
+    assert offending_grants == [], (
+        f"Expected no grant for the renamed group (actual old-name grant should match "
+        f"the desired new-name grant), got: {offending_grants}"
+    )
+    assert offending_revokes == [], (
+        f"Expected no revoke for the renamed group (the actual old-name grant should not "
+        f"appear as a stale revoke), got: {offending_revokes}"
+    )

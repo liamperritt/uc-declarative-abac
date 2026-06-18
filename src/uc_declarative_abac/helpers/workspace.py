@@ -15,7 +15,7 @@ from uc_declarative_abac.utils import (
     OrchestratorError,
     PrincipalValidationError,
 )
-from uc_declarative_abac.principals import Group, Principal, ensure_resolved
+from uc_declarative_abac.principals import Group, GroupRename, Principal, ensure_resolved
 from uc_declarative_abac.types import PrincipalType
 
 _logger = logging.getLogger("uc_declarative_abac")
@@ -109,6 +109,8 @@ class WorkspaceHelper:
         # manage_groups is enabled (otherwise left empty). Membership is NOT cached
         # here — it is fetched per-group on demand in fetch_actual_groups.
         self._group_id_by_name: dict[str, str] = {}  # display_name -> group SCIM id
+        self._group_name_by_id: dict[str, str] = {}  # group SCIM id -> display_name
+        self._renamed_group_new_by_old: dict[str, str] = {}  # old display_name -> new display_name
         self._scim_id_by_identifier: dict[str, str] = {}  # canonical identifier -> SCIM id
         self._identifier_by_scim_id: dict[str, str] = {}  # SCIM id -> canonical identifier
         self._tag_policies_lock = threading.Lock()
@@ -210,6 +212,7 @@ class WorkspaceHelper:
                 self._identifier_by_scim_id[scim_id] = display_name
                 self._scim_id_by_identifier[display_name] = scim_id
                 self._group_id_by_name[display_name] = scim_id
+                self._group_name_by_id[scim_id] = display_name
 
     def _fetch_workspace_principals(self) -> None:
         """Fetch principals via the SDK's workspace SCIM API (workspace principals only).
@@ -329,9 +332,17 @@ class WorkspaceHelper:
         For users, identifier is the username. For groups, identifier is
         the display name. For SPs, identifier is the application_id.
         Raises PrincipalValidationError if the identifier is not found.
+
+        A group pending a rename this run is still referenced by its OLD display
+        name in actual state (deployed grants/policies/assigners); that old name is
+        canonicalized to the NEW group principal so it matches the desired
+        (new-name) references and yields no spurious diff.
         """
         if self._users and identifier in self._users:
             return Principal(PrincipalType.USER, identifier, identifier)
+        new_name = self._renamed_group_new_by_old.get(identifier)
+        if new_name is not None:
+            return Principal(PrincipalType.GROUP, new_name, new_name)
         if self._groups and identifier in self._groups:
             return Principal(PrincipalType.GROUP, identifier, identifier)
         sp_reverse = getattr(self, "_sp_app_id_to_name", {})
@@ -368,31 +379,46 @@ class WorkspaceHelper:
         return Group(
             display_name=resp.get("displayName") or "",
             external_id=resp.get("externalId") or "",
+            id=resp.get("id") or "",
             members=members,
         )
 
-    def fetch_actual_groups(self, desired_names: set[str] | None = None) -> set[Group]:
+    def fetch_actual_groups(
+        self,
+        desired_names: set[str] | None = None,
+        desired_ids: set[str] | None = None,
+    ) -> set[Group]:
         """Fetch actual-state Groups (with membership) for the configured groups.
 
         Scoped to ``desired_names`` (the groups declared in config) intersected with
         the account groups discovered during ``fetch_principals()`` — groups absent
-        from config are never fetched, since their membership is irrelevant. Issues
-        one ``GET /Groups/{id}`` per managed group (the account SCIM proxy list call
-        does not reliably return members inline), dispatched concurrently up to
-        ``_GROUP_FETCH_WORKERS``. Must be called after ``fetch_principals()``.
-        Returns an empty set when group management is disabled.
+        from config are never fetched, since their membership is irrelevant. Any
+        account group whose SCIM id is in ``desired_ids`` is additionally fetched
+        under its *current* (actual) display name even when that name isn't in
+        ``desired_names`` — this is how a renamed group (config holds the new name,
+        the account still holds the old one) is located by id. A desired id with no
+        matching account group is left for the differ to flag. Issues one ``GET
+        /Groups/{id}`` per managed group (the account SCIM proxy list call does not
+        reliably return members inline), deduplicated by SCIM id and dispatched
+        concurrently up to ``_GROUP_FETCH_WORKERS``. Must be called after
+        ``fetch_principals()``. Returns an empty set when group management is
+        disabled.
         """
         if not self._manage_groups or not self._group_id_by_name:
             return set()
         names = set(self._group_id_by_name)
         if desired_names is not None:
             names &= desired_names
+        for scim_id in (desired_ids or set()):
+            actual_name = self._group_name_by_id.get(scim_id)
+            if actual_name is not None:
+                names.add(actual_name)
         if not names:
             return set()
-        targets = [(name, self._group_id_by_name[name]) for name in names]
+        targets = {self._group_id_by_name[name] for name in names}
         worker_count = min(_GROUP_FETCH_WORKERS, len(targets))
         with ThreadPoolExecutor(max_workers=worker_count) as pool:
-            responses = pool.map(lambda t: self._fetch_group_by_id(t[1]), targets)
+            responses = pool.map(self._fetch_group_by_id, targets)
             return {self._build_group_from_response(resp) for resp in responses}
 
     def register_pending_groups(self, names: Iterable[str]) -> None:
@@ -405,6 +431,57 @@ class WorkspaceHelper:
         if not names:
             return
         self._groups = (self._groups or set()) | names
+
+    def register_pending_renames(self, renames: Iterable[GroupRename]) -> None:
+        """Reflect pending group renames in the principal cache so downstream
+        domains resolve the renamed group consistently.
+
+        Mirrors register_pending_groups: the group domain runs first, so the cache
+        is updated here before later domains (governed-tag assigners, policies,
+        privileges, securable owners) resolve principals. The old name is removed
+        from ``_groups`` and the new name added, so a **config-side** reference to
+        the old name (``resolve_by_name``) fails (a stale YAML reference must error)
+        while the new name resolves. **Actual-state** references still carry the old
+        name (the deployed grants/policies/assigners aren't renamed yet — in dry-run
+        they never are), so ``resolve_by_identifier`` canonicalizes the old name to
+        the new group principal via ``_renamed_group_new_by_old``; that way an actual
+        grant to the old name compares equal to a desired grant to the new name and
+        produces no spurious diff. Applied even in dry-run — the SCIM PATCH is
+        skipped, but the cache must reflect the rename for resolution. Also remaps
+        ``_group_id_by_name`` so the executor's member add/remove (keyed by the new
+        display name) finds the SCIM id."""
+        for rename in renames:
+            scim_id = self._group_id_by_name.pop(rename.old_display_name, rename.id)
+            self._group_id_by_name[rename.new_display_name] = scim_id
+            self._group_name_by_id[scim_id] = rename.new_display_name
+            self._scim_id_by_identifier.pop(rename.old_display_name, None)
+            self._scim_id_by_identifier[rename.new_display_name] = scim_id
+            self._identifier_by_scim_id[scim_id] = rename.new_display_name
+            self._renamed_group_new_by_old[rename.old_display_name] = rename.new_display_name
+            if self._groups is not None:
+                self._groups = (
+                    self._groups - {rename.old_display_name}
+                ) | {rename.new_display_name}
+
+    def rename_group(self, group_id: str, new_display_name: str) -> None:
+        """Rename a Databricks-managed account group via a SCIM PatchOp (replace
+        displayName). Requires the engine principal to hold the MANAGER role on the
+        group.
+
+        TBD: verify in integration testing; the exact SCIM PatchOp body shape for
+        the account SCIM proxy patch endpoint is assumed here. If the API rejects
+        it, adjust the body accordingly.
+        """
+        self._client.api_client.do(
+            "PATCH",
+            f"/api/2.0/account/scim/v2/Groups/{group_id}",
+            body={
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                "Operations": [
+                    {"op": "replace", "path": "displayName", "value": new_display_name},
+                ],
+            },
+        )
 
     def create_group(self, display_name: str, members: Iterable[Principal]) -> None:
         """Create a Databricks-managed account group with the given initial members.
