@@ -22,4 +22,4 @@ definitions:
       to:
         - account users
       except:
-        - uc_governor_data_engineering_team
+        - uc_governor_data_engineers

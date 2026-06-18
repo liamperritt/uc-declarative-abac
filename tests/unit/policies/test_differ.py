@@ -24,6 +24,39 @@ def _resolver() -> PrincipalResolver:
     return PrincipalResolver(MagicMock())
 
 
+def _failing_resolver() -> PrincipalResolver:
+    """A resolver whose ws_helper raises PrincipalValidationError for any lookup —
+    used to exercise the unresolvable-principal paths."""
+    from uc_declarative_abac.utils import PrincipalValidationError
+
+    ws_helper = MagicMock()
+    ws_helper.resolve_by_name.side_effect = lambda n: (_ for _ in ()).throw(
+        PrincipalValidationError(f"Principal not found: {n}")
+    )
+    ws_helper.resolve_by_identifier.side_effect = lambda i: (_ for _ in ()).throw(
+        PrincipalValidationError(f"Principal not found by identifier: {i}")
+    )
+    return PrincipalResolver(ws_helper)
+
+
+def _selective_resolver(resolvable: dict[str, Principal]) -> PrincipalResolver:
+    """A resolver that resolves identifiers/names present in ``resolvable`` and
+    raises PrincipalValidationError for everything else. Keys are the identifier
+    (for actual-state principals) or name (for config-side principals) carried by
+    the unresolved input Principal; values are the resolved Principal to return."""
+    from uc_declarative_abac.utils import PrincipalValidationError
+
+    def _lookup(key: str) -> Principal:
+        if key in resolvable:
+            return resolvable[key]
+        raise PrincipalValidationError(f"Principal not found: {key}")
+
+    ws_helper = MagicMock()
+    ws_helper.resolve_by_name.side_effect = _lookup
+    ws_helper.resolve_by_identifier.side_effect = _lookup
+    return PrincipalResolver(ws_helper)
+
+
 def _change_logger() -> ChangeLogger:
     return ChangeLogger()
 
@@ -149,3 +182,109 @@ def test_policy_differ_old_policies_empty_when_no_replacements():
     """Pure-create diffs leave diff.old_policies empty."""
     diff = compute_policy_diff({_make_policy()}, set(), _resolver(), _change_logger())
     assert diff.old_policies == {}
+
+
+# ---------------------------------------------------------------------------
+# Unresolvable principals: per-principal drop, actual-side warning vs config-side fatal
+# ---------------------------------------------------------------------------
+
+
+def test_policy_differ_warns_and_drops_unresolvable_actual_principal_keeping_policy():
+    """An ACTUAL policy with one resolvable and one unresolvable identifier-only
+    principal keeps the policy but drops only the unresolvable principal: a
+    non-fatal warning is logged, no error, and the surviving policy carries just
+    the resolvable principal. A desired policy referencing only the resolvable
+    principal therefore matches it exactly — no to_create, no to_replace."""
+    good = _resolved("analysts")
+    actual = {
+        _make_policy(
+            to_principals=(
+                Principal(PrincipalType.UNKNOWN, identifier="analysts"),
+                Principal(PrincipalType.UNKNOWN, identifier="unresolvable-uuid"),
+            ),
+        )
+    }
+    desired = {_make_policy(to_principals=(good,))}
+    change_logger = _change_logger()
+
+    diff = compute_policy_diff(
+        desired,
+        actual,
+        _selective_resolver({"analysts": good}),
+        change_logger,
+    )
+
+    assert change_logger.has_errors is False
+    assert len(change_logger.warnings) == 1
+    # Policy survived in actual with only the resolvable principal → matches desired.
+    assert diff.to_create == set()
+    assert diff.to_replace == set()
+
+
+def test_policy_differ_retains_policy_when_all_actual_principals_unresolvable():
+    """An ACTUAL policy whose only principal is unresolvable is retained with an
+    empty to_principals (not treated as absent). A desired policy with empty
+    to_principals matches it, so no to_create/to_replace is produced, and only a
+    warning (no error) is logged."""
+    actual = {
+        _make_policy(
+            to_principals=(Principal(PrincipalType.UNKNOWN, identifier="unresolvable-uuid"),),
+        )
+    }
+    desired = {_make_policy(to_principals=())}
+    change_logger = _change_logger()
+
+    diff = compute_policy_diff(
+        desired,
+        actual,
+        _selective_resolver({}),
+        change_logger,
+    )
+
+    assert change_logger.has_errors is False
+    assert len(change_logger.warnings) == 1
+    assert diff.to_create == set()
+    assert diff.to_replace == set()
+
+
+def test_policy_differ_config_side_unresolvable_principal_is_fatal():
+    """A DESIRED policy whose config-side (name-only) principal cannot be resolved
+    logs a fatal error — config typos must still fail the run."""
+    desired = {
+        _make_policy(
+            to_principals=(Principal(PrincipalType.UNKNOWN, name="typo_group"),),
+        )
+    }
+    change_logger = _change_logger()
+
+    compute_policy_diff(desired, set(), _failing_resolver(), change_logger)
+
+    assert change_logger.has_errors is True
+
+
+def test_policy_differ_suppresses_warning_for_ignored_unresolvable_actual_principal():
+    """An unresolvable actual-state principal whose identifier is in
+    ignore_unresolvable is still dropped from the policy, but its resolution-failure
+    warning is suppressed — no warning, no error — and the policy is retained."""
+    ignored_id = "unresolvable-uuid"
+    actual = {
+        _make_policy(
+            to_principals=(Principal(PrincipalType.UNKNOWN, identifier=ignored_id),),
+        )
+    }
+    desired = {_make_policy(to_principals=())}
+    change_logger = _change_logger()
+
+    diff = compute_policy_diff(
+        desired,
+        actual,
+        _failing_resolver(),
+        change_logger,
+        ignore_unresolvable=frozenset({ignored_id}),
+    )
+
+    assert change_logger.has_errors is False
+    assert change_logger.warnings == []
+    # Policy retained with empty principals → matches the empty-principal desired.
+    assert diff.to_create == set()
+    assert diff.to_replace == set()

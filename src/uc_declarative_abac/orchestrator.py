@@ -383,6 +383,7 @@ def run(
     )
     policy_diff = compute_policy_diff(
         desired_policies, actual_policies, resolver, change_logger,
+        ignore_unresolvable=ignore_unresolvable,
     )
 
     # 8. Privileges workflow
