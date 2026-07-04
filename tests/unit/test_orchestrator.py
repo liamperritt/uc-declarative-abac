@@ -1375,7 +1375,7 @@ def test_orchestrator_still_checks_nonexistent_securables_when_taggable_manageme
 
 
 # ---------------------------------------------------------------------------
-# Per-catalog filter flags (--*-for-catalogs)
+# Per-namespace filter flags (--*-for-namespaces)
 # ---------------------------------------------------------------------------
 
 
@@ -1442,7 +1442,7 @@ def _two_catalog_owners_config() -> dict:
 
 def test_orchestrator_tag_filter_scopes_tag_set_sql_to_listed_catalog_only(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
-    """With --manage-tags-for-catalogs=cat_a, only cat_a tags emit SET TAGS SQL."""
+    """With --manage-tags-for-namespaces=cat_a, only cat_a tags emit SET TAGS SQL."""
     config = _two_catalog_tags_config()
     root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
@@ -1454,7 +1454,7 @@ def test_orchestrator_tag_filter_scopes_tag_set_sql_to_listed_catalog_only(
         workspace_client=mock_workspace_client,
         warehouse_id="test-warehouse-id",
         enable_tag_management=True,
-        manage_tags_for_catalogs="cat_a",
+        manage_tags_for_namespaces="cat_a",
     )
 
     set_tag_stmts = [s for s in mock_workspace_client.executed_sql if "SET TAGS" in s.upper()]
@@ -1480,7 +1480,7 @@ def test_orchestrator_tag_filter_excludes_out_of_scope_catalogs_from_tag_diff(
         workspace_client=mock_workspace_client,
         warehouse_id="test-warehouse-id",
         enable_tag_management=True,
-        manage_tags_for_catalogs="cat_a",
+        manage_tags_for_namespaces="cat_a",
     )
 
     catalogs_in_diff = {t.securable_full_name.split(".", 1)[0] for t in result.tag_diff.to_add}
@@ -1491,7 +1491,7 @@ def test_orchestrator_tag_filter_excludes_out_of_scope_catalogs_from_tag_diff(
 
 def test_orchestrator_privilege_filter_scopes_grants_to_listed_catalog_only(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
-    """With --manage-privileges-for-catalogs=cat_a, only cat_a privileges are granted."""
+    """With --manage-privileges-for-namespaces=cat_a, only cat_a privileges are granted."""
     config = _two_catalog_grants_config()
     root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
@@ -1504,7 +1504,7 @@ def test_orchestrator_privilege_filter_scopes_grants_to_listed_catalog_only(
         warehouse_id="test-warehouse-id",
         enable_tag_management=True,
         enable_privilege_management=True,
-        manage_privileges_for_catalogs="cat_a",
+        manage_privileges_for_namespaces="cat_a",
     )
 
     catalogs_in_grants = {
@@ -1533,7 +1533,7 @@ def test_orchestrator_taggable_management_filter_scopes_attribute_updates_to_lis
         workspace_client=mock_workspace_client,
         warehouse_id="test-warehouse-id",
         enable_taggable_management=True,
-        manage_taggables_for_catalogs="cat_a",
+        manage_taggables_for_namespaces="cat_a",
     )
 
     catalog_updates = [
@@ -1547,7 +1547,7 @@ def test_orchestrator_taggable_management_filter_scopes_attribute_updates_to_lis
 
 def test_orchestrator_taggable_creation_filter_creates_only_listed_catalog(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
-    """With --create-taggables-for-catalogs=cat_a and both catalogs missing from UC,
+    """With --create-taggables-for-namespaces=cat_a and both catalogs missing from UC,
     only cat_a gets a CREATE CATALOG statement. cat_b surfaces as NonexistentSecurableError."""
     from uc_declarative_abac.utils import (
         ExecutionBatchError,
@@ -1575,7 +1575,7 @@ def test_orchestrator_taggable_creation_filter_creates_only_listed_catalog(
             workspace_client=mock_workspace_client,
             warehouse_id="test-warehouse-id",
             enable_taggable_creation=True,
-            create_taggables_for_catalogs="cat_a",
+            create_taggables_for_namespaces="cat_a",
         )
 
     nonexistent = [e for e in exc_info.value.errors if isinstance(e.exception, NonexistentSecurableError)]
@@ -1642,7 +1642,7 @@ def test_orchestrator_taggable_creation_filter_still_creates_functions_in_out_of
         workspace_client=mock_workspace_client,
         warehouse_id="test-warehouse-id",
         enable_taggable_creation=True,
-        create_taggables_for_catalogs="cat_a",
+        create_taggables_for_namespaces="cat_a",
     )
 
     create_func_stmts = [
@@ -1678,7 +1678,7 @@ def test_orchestrator_tag_filter_uses_actual_tags_for_out_of_scope_catalogs_when
         warehouse_id="test-warehouse-id",
         enable_tag_management=True,
         enable_privilege_management=True,
-        manage_tags_for_catalogs="cat_a",  # cat_b's tags untouched this run
+        manage_tags_for_namespaces="cat_a",  # cat_b's tags untouched this run
     )
 
     # cat_b's grant policy matches against UC's actual env=prod tag → grant emitted.
@@ -1703,7 +1703,7 @@ def test_orchestrator_raises_when_catalog_filter_references_unknown_catalog(
             workspace_client=mock_workspace_client,
             warehouse_id="test-warehouse-id",
             enable_tag_management=True,
-            manage_tags_for_catalogs="cat_a,typo_cat",
+            manage_tags_for_namespaces="cat_a,typo_cat",
         )
     assert "typo_cat" in str(exc_info.value)
 
@@ -1723,12 +1723,140 @@ def test_orchestrator_filter_is_no_op_when_corresponding_enable_flag_is_off(
         workspace_client=mock_workspace_client,
         warehouse_id="test-warehouse-id",
         enable_tag_management=False,
-        manage_tags_for_catalogs="totally_made_up_catalog",
+        manage_tags_for_namespaces="totally_made_up_catalog",
     )
 
     assert result.tag_diff == TagDiff()
     set_tag_stmts = [s for s in mock_workspace_client.executed_sql if "SET TAGS" in s.upper()]
     assert set_tag_stmts == []
+
+
+def _one_catalog_two_schema_tags_config() -> dict:
+    """One catalog with two schemas, each schema carrying a tag."""
+    return {
+        "resources": {
+            "catalogs": {
+                "cat_a": {
+                    "schemas": [
+                        {"name": "sch1", "tags": {"env": "prod"}},
+                        {"name": "sch2", "tags": {"env": "prod"}},
+                    ],
+                },
+            }
+        }
+    }
+
+
+def test_orchestrator_tag_filter_scopes_to_qualified_schema_only(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """With --manage-tags-for-namespaces=cat_a.sch1, only sch1 tags are reconciled;
+    sibling schema sch2 is left untouched."""
+    config = _one_catalog_two_schema_tags_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_tag_management=True,
+        manage_tags_for_namespaces="cat_a.sch1",
+    )
+
+    schemas_in_diff = {t.securable_full_name for t in result.tag_diff.to_add}
+    assert schemas_in_diff == {"cat_a.sch1"}, (
+        f"Expected tag_diff.to_add to only contain cat_a.sch1, got: {schemas_in_diff}"
+    )
+    set_tag_stmts = [s for s in mock_workspace_client.executed_sql if "SET TAGS" in s.upper()]
+    assert any("sch1" in s for s in set_tag_stmts), (
+        f"Expected a SET TAGS for sch1, got: {set_tag_stmts}"
+    )
+    assert all("sch2" not in s for s in set_tag_stmts), (
+        f"Expected no SET TAGS touching sch2, got: {set_tag_stmts}"
+    )
+
+
+def test_orchestrator_tag_filter_accepts_mix_of_catalog_and_qualified_schema(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """A scope combining a whole catalog and a qualified schema includes both,
+    but excludes the out-of-scope sibling schema."""
+    config = {
+        "resources": {
+            "catalogs": {
+                "cat_a": {"tags": {"env": "prod"}},
+                "cat_b": {
+                    "schemas": [
+                        {"name": "sch1", "tags": {"env": "prod"}},
+                        {"name": "sch2", "tags": {"env": "prod"}},
+                    ],
+                },
+            }
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_tag_management=True,
+        manage_tags_for_namespaces="cat_a,cat_b.sch1",
+    )
+
+    names_in_diff = {t.securable_full_name for t in result.tag_diff.to_add}
+    assert names_in_diff == {"cat_a", "cat_b.sch1"}, (
+        f"Expected only cat_a and cat_b.sch1 in tag_diff.to_add, got: {names_in_diff}"
+    )
+
+
+def test_orchestrator_creation_filter_qualified_schema_does_not_create_parent_catalog(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """Strict prefix match: scoping creation to cat_a.sch1 creates the schema but
+    NOT its parent catalog — an absent cat_a surfaces as NonexistentSecurableError."""
+    from uc_declarative_abac.utils import (
+        ExecutionBatchError,
+        NonexistentSecurableError,
+    )
+    config = {
+        "resources": {
+            "catalogs": {
+                "cat_a": {"schemas": [{"name": "sch1"}]},
+            }
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    # Nothing exists in UC — both the catalog and schema are creation candidates.
+    monkeypatch.setattr(
+        "uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows",
+        lambda response: [],
+    )
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    with pytest.raises(ExecutionBatchError) as exc_info:
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            enable_taggable_creation=True,
+            create_taggables_for_namespaces="cat_a.sch1",
+        )
+
+    nonexistent = [e for e in exc_info.value.errors if isinstance(e.exception, NonexistentSecurableError)]
+    cat_a_errors = [e for e in nonexistent if e.exception.full_name == "cat_a"]
+    assert cat_a_errors, "Expected NonexistentSecurableError for out-of-scope parent catalog cat_a"
+
+    create_catalog_stmts = [
+        s for s in mock_workspace_client.executed_sql if "CREATE CATALOG" in s.upper()
+    ]
+    assert create_catalog_stmts == [], (
+        f"Expected no CREATE CATALOG (strict prefix match), got: {create_catalog_stmts}"
+    )
 
 
 def test_orchestrator_deletes_governed_tag_when_flag_and_force_enabled(

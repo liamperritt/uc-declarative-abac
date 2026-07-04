@@ -58,34 +58,60 @@ inputs:
       missing non-function securables raise NonexistentSecurableError.
     required: false
     default: 'false'
+  manage-tags-for-namespaces:
+    description: >-
+      Comma-separated catalog names or qualified schema names (<catalog>.<schema>)
+      to scope tag management to (default = all configured catalogs). No effect
+      unless ``enable-tag-management`` is set.
+    required: false
+    default: ''
+  manage-privileges-for-namespaces:
+    description: >-
+      Comma-separated catalog names or qualified schema names (<catalog>.<schema>)
+      to scope privilege management to (default = all configured catalogs). No
+      effect unless ``enable-privilege-management`` is set.
+    required: false
+    default: ''
+  manage-taggables-for-namespaces:
+    description: >-
+      Comma-separated catalog names or qualified schema names (<catalog>.<schema>)
+      to scope taggable attribute updates (e.g. owner) to (default = all configured
+      catalogs). Function attributes always flow through. No effect unless
+      ``enable-taggable-management`` is set.
+    required: false
+    default: ''
+  create-taggables-for-namespaces:
+    description: >-
+      Comma-separated catalog names or qualified schema names (<catalog>.<schema>)
+      to scope creation of missing catalogs/schemas/tables/volumes to (default =
+      all configured catalogs). Function creation always flows through. No effect
+      unless ``enable-taggable-creation`` is set.
+    required: false
+    default: ''
   manage-tags-for-catalogs:
     description: >-
-      Comma-separated catalog names to scope tag management to (default '*' = all
-      configured catalogs). No effect unless ``enable-tag-management`` is set.
+      Deprecated — use ``manage-tags-for-namespaces``. Forwarded to the CLI's
+      deprecated flag when set; cannot be combined with the namespaces input.
     required: false
-    default: '*'
+    default: ''
   manage-privileges-for-catalogs:
     description: >-
-      Comma-separated catalog names to scope privilege management to (default '*'
-      = all configured catalogs). No effect unless ``enable-privilege-management``
-      is set.
+      Deprecated — use ``manage-privileges-for-namespaces``. Forwarded to the
+      CLI's deprecated flag when set; cannot be combined with the namespaces input.
     required: false
-    default: '*'
+    default: ''
   manage-taggables-for-catalogs:
     description: >-
-      Comma-separated catalog names to scope taggable attribute updates (e.g.
-      owner) to (default '*' = all configured catalogs). Function attributes
-      always flow through. No effect unless ``enable-taggable-management`` is set.
+      Deprecated — use ``manage-taggables-for-namespaces``. Forwarded to the
+      CLI's deprecated flag when set; cannot be combined with the namespaces input.
     required: false
-    default: '*'
+    default: ''
   create-taggables-for-catalogs:
     description: >-
-      Comma-separated catalog names to scope creation of missing catalogs/schemas
-      /tables/volumes to (default '*' = all configured catalogs). Function
-      creation always flows through. No effect unless ``enable-taggable-creation``
-      is set.
+      Deprecated — use ``create-taggables-for-namespaces``. Forwarded to the
+      CLI's deprecated flag when set; cannot be combined with the namespaces input.
     required: false
-    default: '*'
+    default: ''
   retain-tag-prefixes:
     description: >-
       Comma-separated tag-key prefixes that must never be removed from
@@ -147,6 +173,10 @@ runs:
         ENABLE_PRIVILEGE_MANAGEMENT: ${{ inputs.enable-privilege-management }}
         ENABLE_TAGGABLE_MANAGEMENT: ${{ inputs.enable-taggable-management }}
         ENABLE_TAGGABLE_CREATION: ${{ inputs.enable-taggable-creation }}
+        MANAGE_TAGS_FOR_NAMESPACES: ${{ inputs.manage-tags-for-namespaces }}
+        MANAGE_PRIVILEGES_FOR_NAMESPACES: ${{ inputs.manage-privileges-for-namespaces }}
+        MANAGE_TAGGABLES_FOR_NAMESPACES: ${{ inputs.manage-taggables-for-namespaces }}
+        CREATE_TAGGABLES_FOR_NAMESPACES: ${{ inputs.create-taggables-for-namespaces }}
         MANAGE_TAGS_FOR_CATALOGS: ${{ inputs.manage-tags-for-catalogs }}
         MANAGE_PRIVILEGES_FOR_CATALOGS: ${{ inputs.manage-privileges-for-catalogs }}
         MANAGE_TAGGABLES_FOR_CATALOGS: ${{ inputs.manage-taggables-for-catalogs }}
@@ -181,10 +211,30 @@ runs:
         if [[ "$ENABLE_TAGGABLE_CREATION" == "true" ]]; then
           args+=(--enable-taggable-creation)
         fi
-        args+=(--manage-tags-for-catalogs "$MANAGE_TAGS_FOR_CATALOGS")
-        args+=(--manage-privileges-for-catalogs "$MANAGE_PRIVILEGES_FOR_CATALOGS")
-        args+=(--manage-taggables-for-catalogs "$MANAGE_TAGGABLES_FOR_CATALOGS")
-        args+=(--create-taggables-for-catalogs "$CREATE_TAGGABLES_FOR_CATALOGS")
+        if [[ -n "$MANAGE_TAGS_FOR_NAMESPACES" ]]; then
+          args+=(--manage-tags-for-namespaces "$MANAGE_TAGS_FOR_NAMESPACES")
+        fi
+        if [[ -n "$MANAGE_PRIVILEGES_FOR_NAMESPACES" ]]; then
+          args+=(--manage-privileges-for-namespaces "$MANAGE_PRIVILEGES_FOR_NAMESPACES")
+        fi
+        if [[ -n "$MANAGE_TAGGABLES_FOR_NAMESPACES" ]]; then
+          args+=(--manage-taggables-for-namespaces "$MANAGE_TAGGABLES_FOR_NAMESPACES")
+        fi
+        if [[ -n "$CREATE_TAGGABLES_FOR_NAMESPACES" ]]; then
+          args+=(--create-taggables-for-namespaces "$CREATE_TAGGABLES_FOR_NAMESPACES")
+        fi
+        if [[ -n "$MANAGE_TAGS_FOR_CATALOGS" ]]; then
+          args+=(--manage-tags-for-catalogs "$MANAGE_TAGS_FOR_CATALOGS")
+        fi
+        if [[ -n "$MANAGE_PRIVILEGES_FOR_CATALOGS" ]]; then
+          args+=(--manage-privileges-for-catalogs "$MANAGE_PRIVILEGES_FOR_CATALOGS")
+        fi
+        if [[ -n "$MANAGE_TAGGABLES_FOR_CATALOGS" ]]; then
+          args+=(--manage-taggables-for-catalogs "$MANAGE_TAGGABLES_FOR_CATALOGS")
+        fi
+        if [[ -n "$CREATE_TAGGABLES_FOR_CATALOGS" ]]; then
+          args+=(--create-taggables-for-catalogs "$CREATE_TAGGABLES_FOR_CATALOGS")
+        fi
         args+=(--retain-tag-prefixes "$RETAIN_TAG_PREFIXES")
         if [[ "$ENABLE_GOVERNED_TAG_DELETION" == "true" ]]; then
           args+=(--enable-governed-tag-deletion)

@@ -90,24 +90,41 @@ def catalog_of(full_name: str) -> str:
     return full_name.split(".", 1)[0]
 
 
-def parse_catalog_filter(spec: str, configured_catalogs: list[str]) -> frozenset[str]:
-    """Parse a comma-separated catalog filter spec.
+def in_namespace_scope(full_name: str, scope: frozenset[str]) -> bool:
+    """Return whether a UC ``full_name`` falls at or below any namespace in ``scope``.
 
-    ``"*"`` expands to every name in ``configured_catalogs``. Otherwise the spec
-    is split on commas, whitespace-trimmed, and validated against
-    ``configured_catalogs``. Any name not present raises ``ValueError`` listing
-    every offender so typos surface early.
+    A namespace in ``scope`` is either a bare catalog name (covers everything
+    under that catalog) or a qualified ``catalog.schema`` name (covers that schema
+    and its children, but not the catalog above it). A ``full_name`` matches when
+    its catalog is in ``scope`` or its two-segment ``catalog.schema`` prefix is in
+    ``scope``. An empty ``scope`` matches nothing.
     """
+    parts = full_name.split(".")
+    if parts[0] in scope:
+        return True
+    return len(parts) >= 2 and ".".join(parts[:2]) in scope
+
+
+def parse_namespace_filter(spec: str, configured_namespaces: set[str]) -> frozenset[str]:
+    """Parse a comma-separated namespace filter spec.
+
+    Each entry is either a bare catalog name or a qualified ``catalog.schema``
+    name. ``"*"`` expands to every configured catalog (whole-catalog scope, the
+    default). Otherwise the spec is split on commas, whitespace-trimmed, and each
+    entry validated against ``configured_namespaces`` — the set of configured
+    catalog names plus every configured ``catalog.schema`` full name. Any entry
+    not present raises ``ValueError`` listing every offender so typos surface early.
+    """
+    configured_catalogs = sorted(n for n in configured_namespaces if "." not in n)
     if spec.strip() == "*":
         return frozenset(configured_catalogs)
     names = [n.strip() for n in spec.split(",") if n.strip()]
-    configured_set = set(configured_catalogs)
-    unknown = [n for n in names if n not in configured_set]
+    unknown = [n for n in names if n not in configured_namespaces]
     if unknown:
         configured_list = ", ".join(configured_catalogs) if configured_catalogs else "(none)"
         raise ValueError(
-            f"Catalog filter references unknown catalog(s): {', '.join(unknown)}. "
-            f"Configured catalogs: {configured_list}"
+            f"Namespace filter references unknown catalog(s) or schema(s): "
+            f"{', '.join(unknown)}. Configured catalogs: {configured_list}"
         )
     return frozenset(names)
 

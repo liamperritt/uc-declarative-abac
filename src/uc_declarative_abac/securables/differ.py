@@ -19,8 +19,8 @@ from uc_declarative_abac.securables.state import (
 )
 from uc_declarative_abac.types import SecurableType
 from uc_declarative_abac.utils import (
-    catalog_of,
     ExecutionError,
+    in_namespace_scope,
     NonexistentSecurableError,
     OrchestratorError,
     PrincipalValidationError,
@@ -62,7 +62,7 @@ def compute_securable_diff(
     actual_securables: set[Securable],
     resolver: PrincipalResolver,
     change_logger: ChangeLogger,
-    creation_in_scope_catalogs: frozenset[str] = frozenset(),
+    creation_in_scope_namespaces: frozenset[str] = frozenset(),
     ignore_unresolvable: frozenset[str] = frozenset(),
 ) -> SecurableDiff:
     """Compute the diff between desired and actual securable state.
@@ -76,8 +76,8 @@ def compute_securable_diff(
     principals that own securables.
 
     Non-function securables declared in config but absent from UC are created
-    only if their catalog is in ``creation_in_scope_catalogs``; out-of-scope
-    catalogs (and the all-empty set, which is the default and means "creation
+    only if their namespace is in ``creation_in_scope_namespaces``; out-of-scope
+    namespaces (and the all-empty set, which is the default and means "creation
     disabled for everything") log ``NonexistentSecurableError`` and are dropped
     from ``securables_to_create``. Functions are always engine-managed and flow
     through regardless of scope. Tables require ≥1 column and every column must
@@ -92,7 +92,7 @@ def compute_securable_diff(
         desired_securables, actual_securables
     )
     creatable, blocked = _partition_by_creation_scope(
-        securables_to_create, creation_in_scope_catalogs,
+        securables_to_create, creation_in_scope_namespaces,
     )
     creatable = _validate_tables_for_creation(creatable, change_logger)
     _log_nonexistent_non_function_securables(blocked, change_logger)
@@ -104,7 +104,7 @@ def compute_securable_diff(
     }
     columns_to_create = _diff_table_columns(
         desired_securables, actual_securables,
-        table_full_names_being_created, change_logger, creation_in_scope_catalogs,
+        table_full_names_being_created, change_logger, creation_in_scope_namespaces,
     )
     securables_to_create.extend(columns_to_create)
 
@@ -236,14 +236,14 @@ def _diff_table_columns(
     actual: set[Securable],
     table_full_names_being_created: set[str],
     change_logger: ChangeLogger,
-    creation_in_scope_catalogs: frozenset[str],
+    creation_in_scope_namespaces: frozenset[str],
 ) -> list[Column]:
     """For each desired Table that already exists in UC (i.e. NOT being created
     this run), compare its declared columns against the columns fetched from UC
     and return any columns that should be added via ALTER TABLE ADD COLUMN.
 
     Logs ``NonexistentSecurableError(COLUMN, ...)`` for missing columns that
-    can't be created (catalog out of creation scope, or in scope but column
+    can't be created (namespace out of creation scope, or in scope but column
     lacks ``data_type``). Columns present in actual but absent from desired
     are ignored — additive only.
     """
@@ -267,7 +267,7 @@ def _diff_table_columns(
             if col.full_name in actual_column_names:
                 continue  # already exists in UC
 
-            if catalog_of(col.full_name) in creation_in_scope_catalogs:
+            if in_namespace_scope(col.full_name, creation_in_scope_namespaces):
                 blocker = _column_creation_blocker(col)
                 if blocker is None:
                     columns_to_create.append(col)
@@ -291,20 +291,20 @@ def _diff_table_columns(
 
 def _partition_by_creation_scope(
     to_create: list[Securable],
-    in_scope_catalogs: frozenset[str],
+    in_scope_namespaces: frozenset[str],
 ) -> tuple[list[Securable], list[Securable]]:
     """Split ``to_create`` into (creatable, blocked).
 
     Functions are always creatable — they're engine-managed and exempt from
-    the catalog-scope gate. Other securables (catalogs, schemas, tables,
-    volumes) are creatable only if their catalog is in ``in_scope_catalogs``.
+    the namespace-scope gate. Other securables (catalogs, schemas, tables,
+    volumes) are creatable only if their namespace is in ``in_scope_namespaces``.
     """
     creatable: list[Securable] = []
     blocked: list[Securable] = []
     for sec in to_create:
         if isinstance(sec, Function):
             creatable.append(sec)
-        elif catalog_of(sec.full_name) in in_scope_catalogs:
+        elif in_namespace_scope(sec.full_name, in_scope_namespaces):
             creatable.append(sec)
         else:
             blocked.append(sec)

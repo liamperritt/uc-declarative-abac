@@ -8,8 +8,9 @@ import time
 from uc_declarative_abac.utils import (
     catalog_of,
     classify_rfa_destination,
+    in_namespace_scope,
     parallel_for_each,
-    parse_catalog_filter,
+    parse_namespace_filter,
     validate_rfa_destinations,
 )
 
@@ -32,48 +33,101 @@ def test_utils_catalog_of_returns_first_segment_for_column_full_name():
 
 
 # ---------------------------------------------------------------------------
-# parse_catalog_filter
+# in_namespace_scope
 # ---------------------------------------------------------------------------
 
 
-def test_utils_parse_catalog_filter_expands_star_to_all_configured():
-    result = parse_catalog_filter("*", ["cat_a", "cat_b", "cat_c"])
-    assert result == frozenset({"cat_a", "cat_b", "cat_c"})
+def test_utils_in_namespace_scope_matches_catalog_entry_for_any_descendant():
+    scope = frozenset({"cat_a"})
+    assert in_namespace_scope("cat_a", scope)
+    assert in_namespace_scope("cat_a.sch", scope)
+    assert in_namespace_scope("cat_a.sch.tbl", scope)
+    assert in_namespace_scope("cat_a.sch.tbl.col", scope)
 
 
-def test_utils_parse_catalog_filter_returns_subset_for_comma_list():
-    result = parse_catalog_filter("cat_a,cat_c", ["cat_a", "cat_b", "cat_c"])
-    assert result == frozenset({"cat_a", "cat_c"})
+def test_utils_in_namespace_scope_matches_qualified_schema_entry_for_schema_and_children():
+    scope = frozenset({"cat_a.sch1"})
+    assert in_namespace_scope("cat_a.sch1", scope)
+    assert in_namespace_scope("cat_a.sch1.tbl", scope)
+    assert in_namespace_scope("cat_a.sch1.tbl.col", scope)
 
 
-def test_utils_parse_catalog_filter_trims_whitespace_around_names():
-    result = parse_catalog_filter(" cat_a , cat_b ", ["cat_a", "cat_b"])
+def test_utils_in_namespace_scope_qualified_schema_entry_excludes_parent_catalog():
+    scope = frozenset({"cat_a.sch1"})
+    assert not in_namespace_scope("cat_a", scope)
+
+
+def test_utils_in_namespace_scope_qualified_schema_entry_excludes_sibling_schema():
+    scope = frozenset({"cat_a.sch1"})
+    assert not in_namespace_scope("cat_a.sch2", scope)
+    assert not in_namespace_scope("cat_a.sch2.tbl", scope)
+
+
+def test_utils_in_namespace_scope_empty_scope_matches_nothing():
+    assert not in_namespace_scope("cat_a", frozenset())
+    assert not in_namespace_scope("cat_a.sch1.tbl", frozenset())
+
+
+# ---------------------------------------------------------------------------
+# parse_namespace_filter
+# ---------------------------------------------------------------------------
+
+
+def test_utils_parse_namespace_filter_expands_star_to_all_configured_catalogs():
+    result = parse_namespace_filter("*", {"cat_a", "cat_b", "cat_a.sch1"})
     assert result == frozenset({"cat_a", "cat_b"})
 
 
-def test_utils_parse_catalog_filter_raises_for_unknown_catalog():
+def test_utils_parse_namespace_filter_returns_subset_for_comma_list():
+    result = parse_namespace_filter("cat_a,cat_c", {"cat_a", "cat_b", "cat_c"})
+    assert result == frozenset({"cat_a", "cat_c"})
+
+
+def test_utils_parse_namespace_filter_accepts_qualified_schema():
+    result = parse_namespace_filter("cat_a.sch1", {"cat_a", "cat_a.sch1"})
+    assert result == frozenset({"cat_a.sch1"})
+
+
+def test_utils_parse_namespace_filter_accepts_mix_of_catalog_and_qualified_schema():
+    configured = {"cat_a", "cat_b", "cat_b.sch1", "cat_b.sch2"}
+    result = parse_namespace_filter("cat_a,cat_b.sch1,cat_b.sch2", configured)
+    assert result == frozenset({"cat_a", "cat_b.sch1", "cat_b.sch2"})
+
+
+def test_utils_parse_namespace_filter_trims_whitespace_around_names():
+    result = parse_namespace_filter(" cat_a , cat_b.sch1 ", {"cat_a", "cat_b", "cat_b.sch1"})
+    assert result == frozenset({"cat_a", "cat_b.sch1"})
+
+
+def test_utils_parse_namespace_filter_raises_for_unknown_catalog():
     with pytest.raises(ValueError) as exc_info:
-        parse_catalog_filter("cat_a,typo_cat", ["cat_a", "cat_b"])
+        parse_namespace_filter("cat_a,typo_cat", {"cat_a", "cat_b"})
     assert "typo_cat" in str(exc_info.value)
 
 
-def test_utils_parse_catalog_filter_lists_every_unknown_in_one_error():
+def test_utils_parse_namespace_filter_raises_for_unknown_schema():
     with pytest.raises(ValueError) as exc_info:
-        parse_catalog_filter("typo_one,typo_two", ["cat_a"])
+        parse_namespace_filter("cat_a.typo_sch", {"cat_a", "cat_a.sch1"})
+    assert "cat_a.typo_sch" in str(exc_info.value)
+
+
+def test_utils_parse_namespace_filter_lists_every_unknown_in_one_error():
+    with pytest.raises(ValueError) as exc_info:
+        parse_namespace_filter("typo_one,typo_two", {"cat_a"})
     msg = str(exc_info.value)
     assert "typo_one" in msg
     assert "typo_two" in msg
 
 
-def test_utils_parse_catalog_filter_returns_frozenset():
-    result = parse_catalog_filter("cat_a", ["cat_a"])
+def test_utils_parse_namespace_filter_returns_frozenset():
+    result = parse_namespace_filter("cat_a", {"cat_a"})
     assert isinstance(result, frozenset)
 
 
-def test_utils_parse_catalog_filter_empty_spec_returns_empty_set():
+def test_utils_parse_namespace_filter_empty_spec_returns_empty_set():
     # An empty comma list (e.g. "") with no names yields an empty filter —
     # callers can rely on `frozenset()` semantics.
-    result = parse_catalog_filter("", ["cat_a"])
+    result = parse_namespace_filter("", {"cat_a"})
     assert result == frozenset()
 
 

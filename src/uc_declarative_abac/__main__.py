@@ -8,6 +8,38 @@ from databricks.sdk import WorkspaceClient
 
 from uc_declarative_abac.orchestrator import run
 
+_logger = logging.getLogger("uc_declarative_abac")
+
+
+def _resolve_namespace_flag(
+    parser: argparse.ArgumentParser,
+    old_value: str | None,
+    new_value: str | None,
+    old_flag: str,
+    new_flag: str,
+) -> str:
+    """Resolve a namespace filter from its new flag and its deprecated alias.
+
+    Fails immediately (``parser.error``, exit code 2) if both are given. If only
+    the deprecated alias is set, logs a deprecation warning and returns its
+    value. Otherwise returns the new value, or ``"*"`` (all configured catalogs)
+    when neither is given.
+    """
+    if old_value is not None and new_value is not None:
+        parser.error(
+            f"{old_flag} is deprecated and cannot be combined with {new_flag}. "
+            f"Use {new_flag} only."
+        )
+    if old_value is not None:
+        _logger.warning(
+            "%s is deprecated; use %s instead. Treating it as %s for this run.",
+            old_flag, new_flag, new_flag,
+        )
+        return old_value
+    if new_value is not None:
+        return new_value
+    return "*"
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -66,28 +98,44 @@ def main() -> None:
         help="Permit the engine to create catalogs, schemas, tables, and volumes declared in config but absent from UC. Off by default.",
     )
     parser.add_argument(
-        "--manage-tags-for-catalogs",
+        "--manage-tags-for-namespaces",
         type=str,
-        default="*",
-        help="Comma-separated catalog names to scope tag management to (default '*' = all configured catalogs). No effect unless --enable-tag-management is set.",
+        default=None,
+        help="Comma-separated catalog names or qualified schema names (<catalog>.<schema>) to scope tag management to (default = all configured catalogs). No effect unless --enable-tag-management is set.",
     )
     parser.add_argument(
-        "--manage-privileges-for-catalogs",
+        "--manage-privileges-for-namespaces",
         type=str,
-        default="*",
-        help="Comma-separated catalog names to scope privilege management to (default '*' = all configured catalogs). No effect unless --enable-privilege-management is set.",
+        default=None,
+        help="Comma-separated catalog names or qualified schema names (<catalog>.<schema>) to scope privilege management to (default = all configured catalogs). No effect unless --enable-privilege-management is set.",
     )
     parser.add_argument(
-        "--manage-taggables-for-catalogs",
+        "--manage-taggables-for-namespaces",
         type=str,
-        default="*",
-        help="Comma-separated catalog names to scope taggable attribute updates (e.g. owner) to (default '*' = all configured catalogs). Function attributes always flow through. No effect unless --enable-taggable-management is set.",
+        default=None,
+        help="Comma-separated catalog names or qualified schema names (<catalog>.<schema>) to scope taggable attribute updates (e.g. owner) to (default = all configured catalogs). Function attributes always flow through. No effect unless --enable-taggable-management is set.",
     )
     parser.add_argument(
-        "--create-taggables-for-catalogs",
+        "--create-taggables-for-namespaces",
         type=str,
-        default="*",
-        help="Comma-separated catalog names to scope creation of missing catalogs/schemas/tables/volumes to (default '*' = all configured catalogs). Function creation always flows through. No effect unless --enable-taggable-creation is set.",
+        default=None,
+        help="Comma-separated catalog names or qualified schema names (<catalog>.<schema>) to scope creation of missing catalogs/schemas/tables/volumes to (default = all configured catalogs). Function creation always flows through. No effect unless --enable-taggable-creation is set.",
+    )
+    # Deprecated aliases (hidden from --help). Passing one logs a deprecation
+    # warning and is converted to its --*-for-namespaces equivalent; passing an
+    # alias together with its new flag fails immediately. default=None lets us
+    # detect explicit use.
+    parser.add_argument(
+        "--manage-tags-for-catalogs", type=str, default=None, help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--manage-privileges-for-catalogs", type=str, default=None, help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--manage-taggables-for-catalogs", type=str, default=None, help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--create-taggables-for-catalogs", type=str, default=None, help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--retain-tag-prefixes",
@@ -167,6 +215,23 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
+    manage_tags_for_namespaces = _resolve_namespace_flag(
+        parser, args.manage_tags_for_catalogs, args.manage_tags_for_namespaces,
+        "--manage-tags-for-catalogs", "--manage-tags-for-namespaces",
+    )
+    manage_privileges_for_namespaces = _resolve_namespace_flag(
+        parser, args.manage_privileges_for_catalogs, args.manage_privileges_for_namespaces,
+        "--manage-privileges-for-catalogs", "--manage-privileges-for-namespaces",
+    )
+    manage_taggables_for_namespaces = _resolve_namespace_flag(
+        parser, args.manage_taggables_for_catalogs, args.manage_taggables_for_namespaces,
+        "--manage-taggables-for-catalogs", "--manage-taggables-for-namespaces",
+    )
+    create_taggables_for_namespaces = _resolve_namespace_flag(
+        parser, args.create_taggables_for_catalogs, args.create_taggables_for_namespaces,
+        "--create-taggables-for-catalogs", "--create-taggables-for-namespaces",
+    )
+
     workspace_client = WorkspaceClient(profile=args.profile)
 
     run(
@@ -183,10 +248,10 @@ def main() -> None:
         enable_group_creation=args.enable_group_creation,
         enable_group_management=args.enable_group_management,
         ignore_unresolvable_principals=args.ignore_unresolvable_principals,
-        manage_tags_for_catalogs=args.manage_tags_for_catalogs,
-        manage_privileges_for_catalogs=args.manage_privileges_for_catalogs,
-        manage_taggables_for_catalogs=args.manage_taggables_for_catalogs,
-        create_taggables_for_catalogs=args.create_taggables_for_catalogs,
+        manage_tags_for_namespaces=manage_tags_for_namespaces,
+        manage_privileges_for_namespaces=manage_privileges_for_namespaces,
+        manage_taggables_for_namespaces=manage_taggables_for_namespaces,
+        create_taggables_for_namespaces=create_taggables_for_namespaces,
         retain_tag_prefixes=args.retain_tag_prefixes,
         force=args.force,
         ref_override_strategy=args.ref_override_strategy,

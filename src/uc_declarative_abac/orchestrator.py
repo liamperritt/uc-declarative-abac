@@ -63,10 +63,10 @@ from uc_declarative_abac.tags import (
 )
 from uc_declarative_abac.types import SecurableType
 from uc_declarative_abac.utils import (
-    catalog_of,
     ExecutionBatchError,
     OrchestratorError,
-    parse_catalog_filter,
+    in_namespace_scope,
+    parse_namespace_filter,
 )
 
 _logger = logging.getLogger("uc_declarative_abac")
@@ -88,20 +88,35 @@ class OrchestratorDiffsResult:
 
 
 def _filter_taggable_attributes(
-    attrs: set[SecurableAttributes], in_scope_catalogs: frozenset[str],
+    attrs: set[SecurableAttributes], in_scope_namespaces: frozenset[str],
 ) -> set[SecurableAttributes]:
-    """Drop non-function attributes whose catalog isn't in scope.
+    """Drop non-function attributes whose namespace isn't in scope.
 
     FUNCTION attributes always flow through (functions are engine-managed
-    independently of the taggable-management gate). When ``in_scope_catalogs``
+    independently of the taggable-management gate). When ``in_scope_namespaces``
     is empty, this collapses to "function attributes only" — which is the
     behaviour when ``--enable-taggable-management`` is off.
     """
     return {
         a for a in attrs
         if a.securable_type == SecurableType.FUNCTION
-        or catalog_of(a.full_name) in in_scope_catalogs
+        or in_namespace_scope(a.full_name, in_scope_namespaces)
     }
+
+
+def _collect_configured_namespaces(config: ResourcesConfig) -> set[str]:
+    """Collect every namespace token a filter flag may reference.
+
+    That is each configured catalog name plus every configured
+    ``catalog.schema`` full name — the valid tokens ``parse_namespace_filter``
+    validates entries against.
+    """
+    namespaces: set[str] = set()
+    for catalog in config.catalogs.values():
+        namespaces.add(catalog.full_name)
+        for schema in catalog.schemas or []:
+            namespaces.add(schema.full_name)
+    return namespaces
 
 
 def run(
@@ -118,10 +133,10 @@ def run(
     enable_group_creation: bool = False,
     enable_group_management: bool = False,
     ignore_unresolvable_principals: str = "",
-    manage_tags_for_catalogs: str = "*",
-    manage_privileges_for_catalogs: str = "*",
-    manage_taggables_for_catalogs: str = "*",
-    create_taggables_for_catalogs: str = "*",
+    manage_tags_for_namespaces: str = "*",
+    manage_privileges_for_namespaces: str = "*",
+    manage_taggables_for_namespaces: str = "*",
+    create_taggables_for_namespaces: str = "*",
     retain_tag_prefixes: str = "class.",
     force: bool = False,
     ref_override_strategy: Literal["merge", "replace"] = "merge",
@@ -139,12 +154,14 @@ def run(
     grant policies against the on-disk (``actual``) tag state instead of the
     config's desired tags.
 
-    The four ``*_for_catalogs`` strings further scope each enabled domain to a
-    subset of the configured catalogs. ``"*"`` (the default) means "all
-    configured catalogs"; a comma-separated list narrows to the listed names.
-    A filter has no effect unless its paired ``enable_*`` flag is set. Unknown
-    catalog names raise ``ValueError`` early. Function securables are never
-    catalog-filtered — they're engine-managed and flow through all scopes.
+    The four ``*_for_namespaces`` strings further scope each enabled domain to a
+    subset of the configured namespaces. Each comma-separated entry is either a
+    bare catalog name (covers everything under that catalog) or a qualified
+    ``catalog.schema`` name (covers that schema and its children). ``"*"`` (the
+    default) means "all configured catalogs". A filter has no effect unless its
+    paired ``enable_*`` flag is set. Unknown catalog/schema names raise
+    ``ValueError`` early. Function securables are never namespace-filtered —
+    they're engine-managed and flow through all scopes.
 
     ``retain_tag_prefixes`` is a comma-separated list of tag-key prefixes the
     engine must never remove from securables, even when those tags are absent
@@ -179,7 +196,8 @@ def run(
     resolved = resolve_refs(raw_defs, raw_resources, override_strategy=ref_override_strategy)
     consolidated = consolidate_resources(resolved)
     config = ResourcesConfig.model_validate(consolidated)
-    catalog_names = list(config.catalogs.keys())
+    catalog_names = [c.full_name for c in config.catalogs.values()]
+    configured_namespaces = _collect_configured_namespaces(config)
 
     # Group creation/management operate at the account level via the account SCIM
     # proxy. The workspace SCIM API surfaces only workspace-level groups and cannot
@@ -194,23 +212,23 @@ def run(
             "manage the groups declared in config."
         )
 
-    # Parse per-domain catalog filters. Each scope is empty when its paired
+    # Parse per-domain namespace filters. Each scope is empty when its paired
     # enable flag is off — that single representation drives the rest of the
-    # pipeline (empty set ⇒ domain inert for every catalog).
+    # pipeline (empty set ⇒ domain inert for every namespace).
     tag_scope = (
-        parse_catalog_filter(manage_tags_for_catalogs, catalog_names)
+        parse_namespace_filter(manage_tags_for_namespaces, configured_namespaces)
         if enable_tag_management else frozenset()
     )
     privilege_scope = (
-        parse_catalog_filter(manage_privileges_for_catalogs, catalog_names)
+        parse_namespace_filter(manage_privileges_for_namespaces, configured_namespaces)
         if enable_privilege_management else frozenset()
     )
     taggable_management_scope = (
-        parse_catalog_filter(manage_taggables_for_catalogs, catalog_names)
+        parse_namespace_filter(manage_taggables_for_namespaces, configured_namespaces)
         if enable_taggable_management else frozenset()
     )
     taggable_creation_scope = (
-        parse_catalog_filter(create_taggables_for_catalogs, catalog_names)
+        parse_namespace_filter(create_taggables_for_namespaces, configured_namespaces)
         if enable_taggable_creation else frozenset()
     )
     # Tag-key prefixes whose tags are never removed (only added/updated). Empty
@@ -343,7 +361,7 @@ def run(
     securable_diff = compute_securable_diff(
         desired_attributes, actual_attributes, desired_securables, actual_securables,
         resolver, change_logger,
-        creation_in_scope_catalogs=taggable_creation_scope,
+        creation_in_scope_namespaces=taggable_creation_scope,
         ignore_unresolvable=ignore_unresolvable,
     )
 
@@ -351,13 +369,13 @@ def run(
     if enable_tag_management:
         desired_tags = compile_desired_tags(config, governed_tags, change_logger)
         in_scope_desired_tags = {
-            t for t in desired_tags if catalog_of(t.securable_full_name) in tag_scope
+            t for t in desired_tags if in_namespace_scope(t.securable_full_name, tag_scope)
         }
         in_scope_actual_tags = {
-            t for t in actual_tags if catalog_of(t.securable_full_name) in tag_scope
+            t for t in actual_tags if in_namespace_scope(t.securable_full_name, tag_scope)
         }
         out_of_scope_actual_tags = {
-            t for t in actual_tags if catalog_of(t.securable_full_name) not in tag_scope
+            t for t in actual_tags if not in_namespace_scope(t.securable_full_name, tag_scope)
         }
         tag_diff = compute_tag_diff(in_scope_desired_tags, in_scope_actual_tags)
         tag_diff, retained_tags = filter_retained_removals(tag_diff, retain_prefixes)
@@ -393,10 +411,10 @@ def run(
             run_date=date.today(),
         )
         in_scope_compiled_privileges = {
-            p for p in compiled_privileges if catalog_of(p.securable_full_name) in privilege_scope
+            p for p in compiled_privileges if in_namespace_scope(p.securable_full_name, privilege_scope)
         }
         in_scope_actual_privileges = {
-            p for p in actual_privileges if catalog_of(p.securable_full_name) in privilege_scope
+            p for p in actual_privileges if in_namespace_scope(p.securable_full_name, privilege_scope)
         }
         privilege_diff = compute_privilege_diff(
             in_scope_compiled_privileges, in_scope_actual_privileges, resolver, change_logger,
