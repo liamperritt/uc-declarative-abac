@@ -2190,7 +2190,7 @@ def test_privilege_compiler_expands_read_abstraction_on_volume_match():
 
 def test_privilege_compiler_expands_read_abstraction_on_catalog_match():
     """A grant policy with privileges: ['read'] applied to a CATALOG-tagged match
-    expands to {SELECT, READ_VOLUME, EXECUTE}, all of which are valid on CATALOG."""
+    expands to {SELECT, READ_VOLUME, EXECUTE, READ_FEATURE}, all valid on CATALOG."""
     config = ResourcesConfig.model_validate(
         {
             "catalogs": {
@@ -2432,7 +2432,7 @@ def test_privilege_compiler_expands_use_abstraction_dropped_by_scope_when_attach
 
 def test_privilege_compiler_expands_create_abstraction_on_catalog_match():
     """A grant policy with privileges: ['create'] applied to a CATALOG-tagged
-    match expands to all 7 CREATE_* privileges; all are valid on CATALOG."""
+    match expands to all 8 CREATE_* privileges; all are valid on CATALOG."""
     config = ResourcesConfig.model_validate(
         {
             "catalogs": {
@@ -2511,8 +2511,8 @@ def test_privilege_compiler_expands_create_abstraction_on_catalog_match():
 
 def test_privilege_compiler_expands_create_abstraction_on_schema_match_drops_create_schema():
     """A grant policy with privileges: ['create'] applied to a SCHEMA-tagged
-    match expands to all 7 CREATE_* privileges; the SCHEMA compatibility filter
-    drops CREATE_SCHEMA (catalog-only), leaving 6 emitted privileges."""
+    match expands to all 8 CREATE_* privileges; the SCHEMA compatibility filter
+    drops CREATE_SCHEMA (catalog-only), leaving 7 emitted privileges."""
     config = ResourcesConfig.model_validate(
         {
             "catalogs": {

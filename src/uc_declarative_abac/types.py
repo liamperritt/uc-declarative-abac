@@ -31,6 +31,8 @@ class PrivilegeType(str, Enum):
     CREATE_MATERIALIZED_VIEW = "create_materialized_view"
     CREATE_MODEL = "create_model"
     CREATE_MODEL_VERSION = "create_model_version"
+    CREATE_FEATURE = "create_feature"
+    READ_FEATURE = "read_feature"
     BROWSE = "browse"
 
 
@@ -74,6 +76,8 @@ _SCHEMA_PRIVILEGES = (
         PrivilegeType.REFRESH,
         PrivilegeType.CREATE_MODEL,
         PrivilegeType.CREATE_MODEL_VERSION,
+        PrivilegeType.CREATE_FEATURE,
+        PrivilegeType.READ_FEATURE,
     }
 )
 _CATALOG_PRIVILEGES = _SCHEMA_PRIVILEGES | {PrivilegeType.USE_CATALOG, PrivilegeType.CREATE_SCHEMA, PrivilegeType.BROWSE}
