@@ -445,6 +445,39 @@ def test_consolidator_extracts_inline_function_from_ref_dict_after_resolution():
     assert policy["function"] == "c1.s1.mask_pii"
 
 
+def test_consolidator_derives_distinct_names_for_shared_unnamed_ref_function():
+    """Two policies referencing the same unnamed function definition each derive
+    'fn_<own_policy_name>', yielding distinct functions rather than a collision."""
+    definitions = {
+        "functions": {
+            "shared|base": _unnamed_inline_fn_dict(),
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c1": {
+                "name": "c1",
+                "schemas": [
+                    {
+                        "name": "s1",
+                        "policies": [
+                            _fgac_policy(name="mask_a", function={"$ref": "$defs/functions/shared|base"}),
+                            _fgac_policy(name="mask_b", function={"$ref": "$defs/functions/shared|base"}),
+                        ],
+                    }
+                ],
+            }
+        }
+    }
+    resolved = resolve_refs(definitions, resources)
+    result = consolidate_resources(resolved)
+
+    schema = result["catalogs"]["c1"]["schemas"][0]
+    assert sorted(f["name"] for f in schema.get("functions", [])) == ["fn_mask_a", "fn_mask_b"]
+    assert schema["policies"][0]["function"] == "c1.s1.fn_mask_a"
+    assert schema["policies"][1]["function"] == "c1.s1.fn_mask_b"
+
+
 def test_consolidator_uses_overridden_name_from_ref_function():
     """$ref with a name override → function lands under the new name, policy
     references the overridden full name."""
@@ -482,19 +515,98 @@ def test_consolidator_uses_overridden_name_from_ref_function():
     assert policy["function"] == "c1.s1.alt_fn"
 
 
-def test_consolidator_raises_when_inline_function_missing_name():
-    """An inline function dict without a 'name' raises OrchestratorError naming the policy."""
+def _unnamed_inline_fn_dict(return_expr: str = "col") -> dict:
+    """An inline function dict with no 'name' — the consolidator derives it."""
+    return {
+        "parameters": [{"name": "col", "type": "STRING"}],
+        "return": return_expr,
+    }
+
+
+def test_consolidator_derives_inline_function_name_from_policy_when_name_omitted():
+    """An inline function dict without a 'name' is named 'fn_<policy_name>' and the
+    policy is rewritten to reference that derived full name."""
+    data = {
+        "catalogs": {
+            "c1": {
+                "name": "c1",
+                "schemas": [
+                    {
+                        "name": "s1",
+                        "policies": [_fgac_policy(name="mask_pii", function=_unnamed_inline_fn_dict())],
+                    }
+                ],
+            }
+        }
+    }
+    result = consolidate_resources(data)
+
+    schema = result["catalogs"]["c1"]["schemas"][0]
+    assert [f["name"] for f in schema.get("functions", [])] == ["fn_mask_pii"]
+    assert schema["policies"][0]["function"] == "c1.s1.fn_mask_pii"
+
+
+def test_consolidator_derives_inline_function_name_for_catalog_level_policy():
+    """Name derivation also applies to a catalog-level policy, whose inline
+    function lands in the 'default' schema."""
+    data = {
+        "catalogs": {
+            "c1": {
+                "name": "c1",
+                "policies": [_fgac_policy(name="mask_pii", function=_unnamed_inline_fn_dict())],
+            }
+        }
+    }
+    result = consolidate_resources(data)
+
+    default_schema = next(
+        s for s in result["catalogs"]["c1"]["schemas"] if s["name"] == "default"
+    )
+    assert [f["name"] for f in default_schema.get("functions", [])] == ["fn_mask_pii"]
+    assert result["catalogs"]["c1"]["policies"][0]["function"] == "c1.default.fn_mask_pii"
+
+
+def test_consolidator_derived_inline_function_validates_as_model():
+    """The derived function name survives model validation — the function is a
+    real FunctionConfig named 'fn_<policy_name>' under the target schema."""
+    data = {
+        "catalogs": {
+            "c1": {
+                "name": "c1",
+                "schemas": [
+                    {
+                        "name": "s1",
+                        "policies": [_fgac_policy(name="mask_pii", function=_unnamed_inline_fn_dict())],
+                    }
+                ],
+            }
+        }
+    }
+    config = ResourcesConfig.model_validate(consolidate_resources(data))
+
+    schema = config.catalogs["c1"].schemas[0]
+    assert [f.name for f in schema.functions] == ["fn_mask_pii"]
+
+
+def test_consolidator_raises_when_inline_function_and_policy_both_missing_name():
+    """When neither the inline function nor its policy has a 'name', no function
+    name can be derived, so consolidation raises OrchestratorError."""
     data = {
         "catalogs": {
             "c1": {
                 "name": "c1",
                 "policies": [
-                    _fgac_policy(name="my_policy", function={"return": "col"}),
+                    {
+                        "type": "mask",
+                        "to": ["analysts"],
+                        "columns": [{"alias": "c", "has_tags": {"pii": "email"}}],
+                        "function": {"return": "col"},
+                    },
                 ],
             }
         }
     }
-    with pytest.raises(OrchestratorError, match="my_policy"):
+    with pytest.raises(OrchestratorError):
         consolidate_resources(data)
 
 

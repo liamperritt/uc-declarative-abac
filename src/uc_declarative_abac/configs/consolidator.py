@@ -7,6 +7,27 @@ from typing import Iterable
 
 
 _DEFAULT_SCHEMA_NAME = "default"
+_DERIVED_FUNCTION_NAME_PREFIX = "fn_"
+
+
+def _inline_function_name(policy: dict, function: dict) -> str:
+    """Return the name for an inline function, deriving it from the policy when
+    the function omits its own ``name``.
+
+    A named function keeps its name. An unnamed function is named
+    ``fn_<policy_name>``. If neither the function nor the policy has a name there
+    is nothing to derive from, so ``OrchestratorError`` is raised.
+    """
+    fn_name = function.get("name")
+    if fn_name:
+        return fn_name
+    policy_name = policy.get("name")
+    if not policy_name:
+        raise OrchestratorError(
+            "Inline function definition in an unnamed policy is missing a 'name' "
+            "and none can be derived — give the policy or the function a 'name'"
+        )
+    return f"{_DERIVED_FUNCTION_NAME_PREFIX}{policy_name}"
 
 
 def _iter_nested_policies_with_target_schema(
@@ -61,6 +82,10 @@ def _rewrite_policy_function_to_full_name(
     policy['function'] to the fully qualified name string. No-op for strings
     or missing function fields.
 
+    An inline function may omit its ``name``, in which case it is named
+    ``fn_<policy_name>`` (see _inline_function_name); the derived name is stamped
+    back onto the function dict so its FunctionConfig gets it.
+
     The target catalog/schema defaults to the policy's enclosing schema (the
     catalog's 'default' schema for a catalog-level policy) but may be overridden
     by ``catalog_name`` / ``schema_name`` on the function dict (see
@@ -71,11 +96,8 @@ def _rewrite_policy_function_to_full_name(
     function = policy.get("function")
     if not isinstance(function, dict):
         return
-    fn_name = function.get("name")
-    if not fn_name:
-        raise OrchestratorError(
-            f"Inline function definition in policy '{policy.get('name', '<unnamed>')}' is missing required 'name' field"
-        )
+    fn_name = _inline_function_name(policy, function)
+    function["name"] = fn_name
     target_catalog_name, target_schema = _resolve_inline_function_target(
         catalogs, policy_catalog_name, default_schema_name, function,
     )
