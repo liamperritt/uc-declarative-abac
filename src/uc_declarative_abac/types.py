@@ -33,6 +33,13 @@ class PrivilegeType(str, Enum):
     CREATE_MODEL_VERSION = "create_model_version"
     CREATE_FEATURE = "create_feature"
     READ_FEATURE = "read_feature"
+    CREATE_FLOW = "create_flow"
+    CREATE_SERVICE = "create_service"
+    CREATE_CONNECTION = "create_connection"
+    USE_CONNECTION = "use_connection"
+    CREATE_MEMORY_STORE = "create_memory_store"
+    READ_MEMORY_STORE = "read_memory_store"
+    WRITE_MEMORY_STORE = "write_memory_store"
     BROWSE = "browse"
 
 
@@ -78,6 +85,13 @@ _SCHEMA_PRIVILEGES = (
         PrivilegeType.CREATE_MODEL_VERSION,
         PrivilegeType.CREATE_FEATURE,
         PrivilegeType.READ_FEATURE,
+        PrivilegeType.CREATE_FLOW,
+        PrivilegeType.CREATE_SERVICE,
+        PrivilegeType.CREATE_CONNECTION,
+        PrivilegeType.USE_CONNECTION,
+        PrivilegeType.CREATE_MEMORY_STORE,
+        PrivilegeType.READ_MEMORY_STORE,
+        PrivilegeType.WRITE_MEMORY_STORE,
     }
 )
 _CATALOG_PRIVILEGES = _SCHEMA_PRIVILEGES | {PrivilegeType.USE_CATALOG, PrivilegeType.CREATE_SCHEMA, PrivilegeType.BROWSE}
