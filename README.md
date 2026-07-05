@@ -519,7 +519,6 @@ definitions:
           has_tags:
             to_region: '*'
       function:
-        name: to_or_from_region_filter
         parameters:
           - name: from_region
             type: string
@@ -539,8 +538,6 @@ definitions:
             OR (to_region = 'ASIA' AND is_account_group_member('asia_users'))
             OR (to_region = 'MIDDLE EAST' AND is_account_group_member('middle_east_users')
           )
-      to:
-        - account users
       except:
         - account admins
 
