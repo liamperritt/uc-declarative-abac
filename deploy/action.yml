@@ -88,6 +88,13 @@ inputs:
       unless ``enable-taggable-creation`` is set.
     required: false
     default: ''
+  delete-policies-for-namespaces:
+    description: >-
+      Comma-separated catalog names or qualified schema names (<catalog>.<schema>)
+      to scope mask/filter policy deletion to (default = all configured catalogs).
+      No effect unless ``enable-policy-deletion`` is set.
+    required: false
+    default: ''
   manage-tags-for-catalogs:
     description: >-
       Deprecated — use ``manage-tags-for-namespaces``. Forwarded to the CLI's
@@ -127,6 +134,16 @@ inputs:
       Requires interactive confirmation unless ``force`` is also "true"; in a
       non-interactive GitHub Actions runner, ``force`` MUST be set or the run
       will error out.
+    required: false
+    default: 'false'
+  enable-policy-deletion:
+    description: >-
+      If "true", make each securable's configured mask/filter policies authoritative
+      and delete any actual policy on that securable not declared in config (a
+      securable declaring ``policies: []`` has all its policies removed; one that
+      omits ``policies`` is left unmanaged). Off by default. Requires interactive
+      confirmation unless ``force`` is also "true"; in a non-interactive GitHub
+      Actions runner, ``force`` MUST be set or the run will error out.
     required: false
     default: 'false'
   force:
@@ -177,12 +194,14 @@ runs:
         MANAGE_PRIVILEGES_FOR_NAMESPACES: ${{ inputs.manage-privileges-for-namespaces }}
         MANAGE_TAGGABLES_FOR_NAMESPACES: ${{ inputs.manage-taggables-for-namespaces }}
         CREATE_TAGGABLES_FOR_NAMESPACES: ${{ inputs.create-taggables-for-namespaces }}
+        DELETE_POLICIES_FOR_NAMESPACES: ${{ inputs.delete-policies-for-namespaces }}
         MANAGE_TAGS_FOR_CATALOGS: ${{ inputs.manage-tags-for-catalogs }}
         MANAGE_PRIVILEGES_FOR_CATALOGS: ${{ inputs.manage-privileges-for-catalogs }}
         MANAGE_TAGGABLES_FOR_CATALOGS: ${{ inputs.manage-taggables-for-catalogs }}
         CREATE_TAGGABLES_FOR_CATALOGS: ${{ inputs.create-taggables-for-catalogs }}
         RETAIN_TAG_PREFIXES: ${{ inputs.retain-tag-prefixes }}
         ENABLE_GOVERNED_TAG_DELETION: ${{ inputs.enable-governed-tag-deletion }}
+        ENABLE_POLICY_DELETION: ${{ inputs.enable-policy-deletion }}
         FORCE: ${{ inputs.force }}
         MAX_PARALLEL_CHANGES: ${{ inputs.max-parallel-changes }}
       run: |
@@ -223,6 +242,9 @@ runs:
         if [[ -n "$CREATE_TAGGABLES_FOR_NAMESPACES" ]]; then
           args+=(--create-taggables-for-namespaces "$CREATE_TAGGABLES_FOR_NAMESPACES")
         fi
+        if [[ -n "$DELETE_POLICIES_FOR_NAMESPACES" ]]; then
+          args+=(--delete-policies-for-namespaces "$DELETE_POLICIES_FOR_NAMESPACES")
+        fi
         if [[ -n "$MANAGE_TAGS_FOR_CATALOGS" ]]; then
           args+=(--manage-tags-for-catalogs "$MANAGE_TAGS_FOR_CATALOGS")
         fi
@@ -238,6 +260,9 @@ runs:
         args+=(--retain-tag-prefixes "$RETAIN_TAG_PREFIXES")
         if [[ "$ENABLE_GOVERNED_TAG_DELETION" == "true" ]]; then
           args+=(--enable-governed-tag-deletion)
+        fi
+        if [[ "$ENABLE_POLICY_DELETION" == "true" ]]; then
+          args+=(--enable-policy-deletion)
         fi
         if [[ "$FORCE" == "true" ]]; then
           args+=(--force)
