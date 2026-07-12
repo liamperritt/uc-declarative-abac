@@ -32,6 +32,7 @@ from uc_declarative_abac.types import (
 )
 from uc_declarative_abac.utils import (
     DuplicateResourceError,
+    is_system_governed_tag,
     validate_rfa_destinations,
 )
 
@@ -621,6 +622,17 @@ class GovernedTagConfig(BaseModel):
     )
     allowed_values: list[str] = Field(default_factory=list)
     assigners: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _reject_allowed_values_on_system_tag(self) -> "GovernedTagConfig":
+        """A system-defined governed tag (see ``is_system_governed_tag``) has its
+        allowed values owned by Databricks; they must not be pinned in config."""
+        if is_system_governed_tag(self.name) and self.allowed_values:
+            raise ValueError(
+                f"Governed tag '{self.name}' is system-defined (its name contains "
+                "'.'); allowed_values are managed by Databricks and must not be set."
+            )
+        return self
 
 
 class GroupConfig(BaseModel):

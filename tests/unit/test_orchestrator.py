@@ -2001,6 +2001,39 @@ def test_orchestrator_does_not_delete_governed_tag_when_flag_disabled(
     mock_workspace_client.tag_policies.delete_tag_policy.assert_not_called()
 
 
+def test_orchestrator_does_not_delete_system_governed_tag_when_flag_enabled(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """A Databricks system governed tag (name contains '.') present in UC but absent
+    from config is never deleted, even with enable_governed_tag_deletion + force —
+    UC would reject the delete and fail the run."""
+    config = {
+        "resources": {
+            "catalogs": {"cat": {"name": "cat"}},
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    from unittest.mock import MagicMock as _MagicMock
+    system_policy = _MagicMock()
+    system_policy.tag_key = "class.email_address"
+    system_policy.description = "databricks-owned"
+    system_policy.values = []
+    mock_workspace_client.tag_policies.list_tag_policies.return_value = iter([system_policy])
+
+    run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_governed_tag_deletion=True,
+        force=True,
+    )
+
+    mock_workspace_client.tag_policies.delete_tag_policy.assert_not_called()
+
+
 def test_orchestrator_raises_ungoverned_tag_error_when_grant_policy_references_ungoverned_tag(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """A grant policy whose has_tags key is not declared as a governed tag

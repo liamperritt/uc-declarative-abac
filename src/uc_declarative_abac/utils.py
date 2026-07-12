@@ -174,6 +174,18 @@ def validate_rfa_destinations(values: list[str]) -> list[str]:
     return values
 
 
+def is_system_governed_tag(name: str) -> bool:
+    """Return True if a governed tag is Databricks system-managed.
+
+    System governed tag keys always contain a ``.`` (e.g. ``class.email_address``,
+    ``system.certification_status``); user-defined tag keys never do. System tags
+    cannot be created, deleted, or have their definition (description/allowed_values)
+    edited — only their assigners are managed. This is the single source of truth for
+    that classification, shared by the config model and the governed-tags differ.
+    """
+    return "." in name
+
+
 class OrchestratorError(Exception):
     """Base exception for all orchestrator errors."""
 

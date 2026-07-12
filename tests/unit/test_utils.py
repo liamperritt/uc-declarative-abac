@@ -9,10 +9,26 @@ from uc_declarative_abac.utils import (
     catalog_of,
     classify_rfa_destination,
     in_namespace_scope,
+    is_system_governed_tag,
     parallel_for_each,
     parse_namespace_filter,
     validate_rfa_destinations,
 )
+
+
+# ---------------------------------------------------------------------------
+# is_system_governed_tag
+# ---------------------------------------------------------------------------
+
+
+def test_utils_is_system_governed_tag_true_for_dotted_name():
+    assert is_system_governed_tag("class.email_address") is True
+    assert is_system_governed_tag("system.certification_status") is True
+
+
+def test_utils_is_system_governed_tag_false_for_user_defined_name():
+    assert is_system_governed_tag("pii") is False
+    assert is_system_governed_tag("legacy_tag") is False
 
 
 # ---------------------------------------------------------------------------

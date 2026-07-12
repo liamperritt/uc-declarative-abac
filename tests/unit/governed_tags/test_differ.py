@@ -310,3 +310,71 @@ def test_governed_tag_differ_treats_reordered_assigners_as_unchanged():
     diff = compute_governed_tag_diff(desired, actual, resolver, ChangeLogger())
 
     assert diff.to_update == set()
+
+
+# ---------------------------------------------------------------------------
+# system-managed governed tags (name contains '.')
+# ---------------------------------------------------------------------------
+
+
+def test_governed_tag_differ_does_not_delete_system_tag_when_flag_enabled():
+    """With enable_deletion=True, a user-defined tag absent from config is deleted,
+    but a system tag (name contains '.') absent from config is left alone."""
+    user_legacy = _gt("legacy_tag", "legacy", {"a"})
+    system_tag = _gt("class.email_address", "databricks-owned", set())
+    desired = {_gt("pii", "PII", {"name"})}
+    actual = {_gt("pii", "PII", {"name"}), user_legacy, system_tag}
+
+    diff = compute_governed_tag_diff(
+        desired, actual, _resolver_passthrough(), ChangeLogger(), enable_deletion=True,
+    )
+
+    assert user_legacy in diff.to_delete
+    assert system_tag not in diff.to_delete
+
+
+def test_governed_tag_differ_fails_when_system_tag_absent_from_account():
+    """A system tag declared in config but absent from the account is a fatal error
+    (system tags cannot be created) — not a to_create entry."""
+    change_logger = ChangeLogger()
+    desired = {_gt("class.email_address", assigners=set())}
+    actual: set[GovernedTag] = set()
+
+    diff = compute_governed_tag_diff(desired, actual, _resolver_passthrough(), change_logger)
+
+    assert change_logger.has_errors
+    assert diff.to_create == set()
+
+
+def test_governed_tag_differ_updates_system_tag_assigners_only():
+    """A system tag present on both sides with differing assigners flows into
+    to_update; the entry carries the resolved assigners and the ACTUAL definition
+    (config-side description/allowed_values are ignored for system tags)."""
+    stewards = Principal(PrincipalType.GROUP, identifier="data_stewards", name="data_stewards")
+    desired = {_gt(
+        "class.email_address",
+        assigners={Principal(PrincipalType.UNKNOWN, name="data_stewards")},
+    )}
+    actual = {_gt(
+        "class.email_address", "databricks-owned", {"work", "personal"}, assigners=set(),
+    )}
+    resolver = _resolver(name_to_principal={"data_stewards": stewards})
+
+    diff = compute_governed_tag_diff(desired, actual, resolver, ChangeLogger())
+
+    update = next(gt for gt in diff.to_update if gt.name == "class.email_address")
+    assert stewards in update.assigners
+    assert update.description == "databricks-owned"
+    assert update.allowed_values == frozenset({"work", "personal"})
+
+
+def test_governed_tag_differ_ignores_system_tag_definition_differences():
+    """A system tag whose only difference is description/allowed_values (assigners
+    unchanged) produces no update — its definition is Databricks-owned."""
+    desired = {_gt("class.email_address", "my label")}
+    actual = {_gt("class.email_address", "databricks label", {"work"})}
+
+    diff = compute_governed_tag_diff(desired, actual, _resolver_passthrough(), ChangeLogger())
+
+    assert diff.to_update == set()
+    assert diff.to_create == set()

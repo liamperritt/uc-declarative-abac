@@ -1996,6 +1996,53 @@ def test_governed_tag_config_accepts_comment_as_alias_for_description():
     assert config.governed_tags["pii"].description == "Legacy field name"
 
 
+def test_governed_tag_config_rejects_allowed_values_on_system_tag():
+    """A system-defined governed tag (name contains '.') with non-empty allowed_values
+    is rejected — allowed values are managed by Databricks."""
+    data = {
+        "catalogs": {"cat": {"name": "cat"}},
+        "governed_tags": {
+            "class.email_address": {
+                "allowed_values": ["work", "personal"],
+            }
+        },
+    }
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate(data)
+    assert "allowed_values" in str(exc_info.value)
+
+
+def test_governed_tag_config_allows_system_tag_without_allowed_values():
+    """A system-defined governed tag with empty allowed_values (managing only its
+    assigners / description) validates fine."""
+    data = {
+        "catalogs": {"cat": {"name": "cat"}},
+        "governed_tags": {
+            "class.email_address": {
+                "assigners": ["data_stewards"],
+                "description": "email classification",
+            }
+        },
+    }
+    config = ResourcesConfig.model_validate(data)
+
+    assert config.governed_tags["class.email_address"].allowed_values == []
+    assert config.governed_tags["class.email_address"].assigners == ["data_stewards"]
+
+
+def test_governed_tag_config_allows_allowed_values_on_user_tag():
+    """A user-defined governed tag (no '.') with allowed_values is unaffected."""
+    data = {
+        "catalogs": {"cat": {"name": "cat"}},
+        "governed_tags": {
+            "pii": {"allowed_values": ["name", "email"]},
+        },
+    }
+    config = ResourcesConfig.model_validate(data)
+
+    assert config.governed_tags["pii"].allowed_values == ["name", "email"]
+
+
 def test_resources_config_injects_governed_tag_name_from_key():
     """When a governed_tags entry has no explicit 'name', the dict key is used."""
     data = {
