@@ -561,6 +561,26 @@ def test_securable_compiler_emits_attributes_when_only_rfa_destinations_set():
     assert not any(a.full_name == "without_anything" for a in result)
 
 
+def test_securable_compiler_emits_empty_rfa_destinations_when_explicitly_empty_list():
+    """A catalog with an explicitly-empty rfa_destinations list produces a
+    SecurableAttributes whose rfa_destinations is an empty frozenset (not None) —
+    signalling "remove all", distinct from the absent/unmanaged case. This holds
+    even when no other managed attribute (owner/comment) is set."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {
+            "my_cat": {"rfa_destinations": []},
+        },
+    })
+
+    result = compile_desired_attributes(config)
+
+    catalog_attrs = next(
+        a for a in result
+        if a.securable_type == SecurableType.CATALOG and a.full_name == "my_cat"
+    )
+    assert catalog_attrs.rfa_destinations == frozenset()
+
+
 # ---------------------------------------------------------------------------
 # compile_desired_securables
 # ---------------------------------------------------------------------------

@@ -367,7 +367,6 @@ class BaseSecurableConfig(BaseModel, ABC):
     name: SecurableName
     owner: str | None = None
     comment: str | None = None
-    tags: dict[str, str] | None = None
     rfa_destinations: list[str] | None = None
 
     @field_validator("comment", mode="before")
@@ -416,13 +415,6 @@ class FunctionConfig(BaseSecurableConfig):
     @property
     def full_name(self) -> str:
         return f"{self.catalog_name}.{self.schema_name}.{self.name}"
-
-    @model_validator(mode="before")
-    @classmethod
-    def _reject_tags(cls, data):
-        if isinstance(data, dict) and "tags" in data:
-            raise ValueError("Function tags are not currently supported")
-        return data
 
 
 class ColumnConfig(BaseTaggableConfig):

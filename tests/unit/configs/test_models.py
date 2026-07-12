@@ -1563,38 +1563,6 @@ def test_column_config_rejects_unknown_data_type():
 
 
 # ---------------------------------------------------------------------------
-# FunctionConfig.tags validation
-# ---------------------------------------------------------------------------
-
-
-def test_function_config_rejects_tags():
-    """A FunctionConfig with an explicit 'tags' field raises a ValidationError."""
-    with pytest.raises(ValidationError):
-        FunctionConfig.model_validate({
-            "name": "mask_pii_email",
-            "owner": None,
-            "catalog_name": "my_catalog",
-            "schema_name": "shared",
-            "parameters": [{"name": "col", "type": "STRING"}],
-            "return": "CASE WHEN is_member('admins') THEN col ELSE '***' END",
-            "tags": {"env": "prod"},
-        })
-
-
-def test_function_config_allows_omitted_tags():
-    """A FunctionConfig without 'tags' validates successfully with tags as None."""
-    function = FunctionConfig.model_validate({
-        "name": "mask_pii_email",
-        "owner": None,
-        "catalog_name": "my_catalog",
-        "schema_name": "shared",
-        "parameters": [{"name": "col", "type": "STRING"}],
-        "return": "CASE WHEN is_member('admins') THEN col ELSE '***' END",
-    })
-    assert function.tags is None
-
-
-# ---------------------------------------------------------------------------
 # MaskPolicyConfig / FilterPolicyConfig
 # ---------------------------------------------------------------------------
 

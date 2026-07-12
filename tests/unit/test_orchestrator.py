@@ -2147,6 +2147,87 @@ def test_orchestrator_passes_empty_rfa_targets_when_taggable_management_off(
     assert rfa_targets == frozenset()
 
 
+def test_orchestrator_includes_securable_in_rfa_targets_when_rfa_destinations_is_empty_list(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch,
+):
+    """An explicitly-empty rfa_destinations list ("remove all") still counts as a
+    managed securable — it must be included in rfa_targets so actual state is
+    fetched and a clearing diff can be computed. This distinguishes [] from an
+    absent field (which stays unmanaged)."""
+    config = {
+        "resources": {
+            "catalogs": {
+                "my_catalog": {
+                    "rfa_destinations": [],
+                }
+            }
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _setup_mock_empty_principals(mock_workspace_client)
+    calls = _capture_fetch_actual_securables_calls(monkeypatch)
+
+    with pytest.raises(ExecutionBatchError):
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            enable_taggable_management=True,
+        )
+
+    assert len(calls) == 1
+    _catalog_names, rfa_targets = calls[0]
+    assert (SecurableType.CATALOG, "my_catalog") in rfa_targets
+
+
+def test_orchestrator_includes_function_in_rfa_targets_when_taggable_management_off(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch,
+):
+    """Functions are always engine-managed, so their RFA actual state must be
+    fetched even when --enable-taggable-management is off. Otherwise a function's
+    actual rfa_destinations stays None (unfetched) and an explicit empty list
+    ("remove all") silently no-ops against a None actual. Non-function securables
+    remain gated by the flag."""
+    config = {
+        "resources": {
+            "catalogs": {
+                "my_catalog": {
+                    "rfa_destinations": ["data-gov@example.com"],
+                    "schemas": [{
+                        "name": "sch",
+                        "functions": [{
+                            "name": "format_phone",
+                            "parameters": [{"name": "x", "type": "STRING"}],
+                            "return": "x",
+                            "rfa_destinations": [],
+                        }],
+                    }],
+                }
+            }
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _setup_mock_empty_principals(mock_workspace_client)
+    calls = _capture_fetch_actual_securables_calls(monkeypatch)
+
+    with pytest.raises(ExecutionBatchError):
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            enable_taggable_management=False,
+        )
+
+    assert len(calls) == 1
+    _catalog_names, rfa_targets = calls[0]
+    # Function is always managed -> fetched even with the flag off.
+    assert (SecurableType.FUNCTION, "my_catalog.sch.format_phone") in rfa_targets
+    # Non-function securables stay gated by the flag.
+    assert (SecurableType.CATALOG, "my_catalog") not in rfa_targets
+
+
 # ---------------------------------------------------------------------------
 # Group management workflow
 # ---------------------------------------------------------------------------

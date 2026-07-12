@@ -1561,6 +1561,22 @@ def test_uc_helper_update_rfa_destinations_handles_function_securable_type():
     assert securable.type == SdkSecurableType.FUNCTION
 
 
+def test_uc_helper_update_rfa_destinations_clears_all_when_empty():
+    """An empty destination set posts an AccessRequestDestinations payload with an
+    empty destinations list and update_mask='destinations' — removing every RFA
+    destination from the securable."""
+    client = MagicMock()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.update_rfa_destinations(
+        SecurableType.CATALOG, "my_catalog", frozenset()
+    )
+
+    kwargs = _get_rfa_update_call(client)
+    assert kwargs["update_mask"] == "destinations"
+    assert kwargs["access_request_destinations"].destinations == []
+
+
 # ---------------------------------------------------------------------------
 # UnityCatalogHelper.fetch_actual_policies
 # ---------------------------------------------------------------------------

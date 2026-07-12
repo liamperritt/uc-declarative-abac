@@ -36,7 +36,9 @@ def _emit_attributes(
     ``Function`` securable itself since it's part of the replaceable definition).
     ``rfa_destinations`` is stored as a frozenset (order-insensitive); the
     Pydantic validator has already classified every entry, so no further
-    validation is needed here.
+    validation is needed here. An absent field stays ``None`` (unmanaged —
+    existing destinations are left untouched), while an explicitly-empty list
+    compiles to an empty frozenset, signalling "remove all destinations".
 
     ``location`` is **not** a managed attribute — it's only consulted at CREATE
     time (see ``compile_desired_securables``), never diffed.
@@ -51,7 +53,7 @@ def _emit_attributes(
         comment = getattr(obj, "comment", None)
 
     raw_rfa = getattr(obj, "rfa_destinations", None)
-    rfa_destinations = frozenset(raw_rfa) if raw_rfa else None
+    rfa_destinations = frozenset(raw_rfa) if raw_rfa is not None else None
 
     if owner is None and comment is None and rfa_destinations is None:
         return None

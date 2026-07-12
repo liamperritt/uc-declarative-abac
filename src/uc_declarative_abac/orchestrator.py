@@ -247,8 +247,12 @@ def run(
     # 2. Compile desired up-front so we can scope downstream fetches:
     #    - governed tags name set → rule-set fetches restricted to (actual ∩ desired)
     #    - securable attributes/securables → rfa_targets restricted to securables that
-    #      actually declare ``rfa_destinations`` in config (gated by the
-    #      taggable-management flag, since RFA is a managed attribute)
+    #      actually declare ``rfa_destinations`` in config. Non-function securables are
+    #      gated by the taggable-management flag (RFA is a managed attribute), but
+    #      FUNCTION targets are always fetched — functions are engine-managed
+    #      independently of the flag (mirroring ``_filter_taggable_attributes``). Without
+    #      this the function's actual RFA state stays ``None`` when the flag is off, and an
+    #      explicit empty list ("remove all") silently no-ops against a ``None`` actual.
     desired_groups = compile_desired_groups(config)
     desired_group_names = {g.display_name for g in desired_groups}
     desired_group_ids = {g.id for g in desired_groups if g.id}
@@ -256,15 +260,12 @@ def run(
     desired_governed_tag_names = {gt.name for gt in desired_governed_tags}
     desired_attributes = compile_desired_attributes(config)
     desired_securables = compile_desired_securables(config)
-    rfa_targets: set[tuple[SecurableType, str]] = (
-        {
-            (a.securable_type, a.full_name)
-            for a in desired_attributes
-            if a.rfa_destinations is not None
-        }
-        if enable_taggable_management
-        else set()
-    )
+    rfa_targets: set[tuple[SecurableType, str]] = {
+        (a.securable_type, a.full_name)
+        for a in desired_attributes
+        if a.rfa_destinations is not None
+        and (enable_taggable_management or a.securable_type == SecurableType.FUNCTION)
+    }
 
     # 3. Parallel initial fetch (securables, tags, privileges, and principals concurrently)
     uc_helper = UnityCatalogHelper(workspace_client, warehouse_id)
