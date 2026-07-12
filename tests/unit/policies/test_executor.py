@@ -428,3 +428,85 @@ def test_policy_executor_renders_for_clause_from_securable_type():
     stmts = execute_policy_diff(MagicMock(), diff, ChangeLogger())
 
     _assert_sql_contains(stmts[0], "FOR SCHEMAS")
+
+
+# ---------------------------------------------------------------------------
+# DROP (to_delete) — force / prompt / dry-run
+# ---------------------------------------------------------------------------
+
+
+def test_policy_executor_emits_drop_for_to_delete_when_forced():
+    """A to_delete policy issues a DROP POLICY statement on its securable."""
+    uc_helper = MagicMock()
+    diff = PolicyDiff(to_delete={_make_policy(name="stale")})
+
+    stmts = execute_policy_diff(uc_helper, diff, ChangeLogger(), force=True)
+
+    assert len(stmts) == 1
+    sql = stmts[0]
+    _assert_sql_contains(sql, "DROP POLICY", "`stale`", "ON TABLE", "cat.s.t")
+    uc_helper.execute_sql.assert_called_once_with(sql)
+
+
+def test_policy_executor_skips_delete_sql_in_dry_run():
+    """Dry-run logs the deletion but issues no DROP SQL."""
+    uc_helper = MagicMock()
+    diff = PolicyDiff(to_delete={_make_policy(name="stale")})
+
+    stmts = execute_policy_diff(uc_helper, diff, ChangeLogger(dry_run=True), dry_run=True)
+
+    assert stmts == []
+    uc_helper.execute_sql.assert_not_called()
+
+
+def test_policy_executor_deletes_after_yes_confirmation(monkeypatch):
+    """With input 'yes' and no force, the DROP executes."""
+    monkeypatch.setattr("builtins.input", lambda *_: "yes")
+    uc_helper = MagicMock()
+    diff = PolicyDiff(to_delete={_make_policy(name="stale")})
+
+    execute_policy_diff(uc_helper, diff, ChangeLogger(), force=False)
+
+    uc_helper.execute_sql.assert_called_once()
+
+
+def test_policy_executor_exits_when_delete_confirmation_denied(monkeypatch):
+    """A 'no' answer aborts the run via SystemExit and issues no DROP."""
+    import pytest
+    monkeypatch.setattr("builtins.input", lambda *_: "no")
+    uc_helper = MagicMock()
+    diff = PolicyDiff(to_delete={_make_policy(name="stale")})
+
+    with pytest.raises(SystemExit):
+        execute_policy_diff(uc_helper, diff, ChangeLogger(), force=False)
+
+    uc_helper.execute_sql.assert_not_called()
+
+
+def test_policy_executor_does_not_prompt_when_force_enabled(monkeypatch):
+    """force=True bypasses the interactive prompt entirely."""
+    def _should_not_be_called(*_):
+        raise AssertionError("input() was called even though force=True")
+    monkeypatch.setattr("builtins.input", _should_not_be_called)
+    uc_helper = MagicMock()
+    diff = PolicyDiff(to_delete={_make_policy(name="stale")})
+
+    execute_policy_diff(uc_helper, diff, ChangeLogger(), force=True)
+
+    uc_helper.execute_sql.assert_called_once()
+
+
+def test_policy_executor_raises_interactive_error_on_eof_when_not_forced(monkeypatch):
+    """A non-interactive stream (input raises EOFError) without force raises
+    InteractiveConfirmationRequiredError directing the operator to set --force."""
+    import pytest
+    from uc_declarative_abac.utils import InteractiveConfirmationRequiredError
+
+    def _raise_eof(*_):
+        raise EOFError
+    monkeypatch.setattr("builtins.input", _raise_eof)
+    uc_helper = MagicMock()
+    diff = PolicyDiff(to_delete={_make_policy(name="stale")})
+
+    with pytest.raises(InteractiveConfirmationRequiredError):
+        execute_policy_diff(uc_helper, diff, ChangeLogger(), force=False)

@@ -151,6 +151,7 @@ class ChangeLogger:
         self._securables_replaced = 0
         self._policies_created = 0
         self._policies_replaced = 0
+        self._policies_deleted = 0
         self._governed_tags_created = 0
         self._governed_tags_updated = 0
         self._governed_tags_deleted = 0
@@ -370,6 +371,16 @@ class ChangeLogger:
             "~", policy.securable_type.value, policy.securable_full_name, action,
         ))
 
+    def log_policy_delete(self, policy: Policy) -> None:
+        """Log a mask/filter policy being deleted (config is authoritative and the
+        policy is no longer declared)."""
+        self._policies_deleted += 1
+        action_verb = "Delete" if self._dry_run else "Deleted"
+        self._log_info(_format_change_line(
+            "-", policy.securable_type.value, policy.securable_full_name,
+            f"{action_verb} {policy.policy_type.value} policy '{policy.name}'",
+        ))
+
     # ------------------------------------------------------------------
     # Governed tag logging
     # ------------------------------------------------------------------
@@ -563,6 +574,8 @@ class ChangeLogger:
             policy_parts.append(f"{self._policies_created} created")
         if self._policies_replaced:
             policy_parts.append(f"{self._policies_replaced} replaced")
+        if self._policies_deleted:
+            policy_parts.append(f"{self._policies_deleted} deleted")
 
         priv_parts: list[str] = []
         if self._privileges_granted:
@@ -638,6 +651,8 @@ class ChangeLogger:
             policy_parts.append(f"{self._policies_created} to create")
         if self._policies_replaced:
             policy_parts.append(f"{self._policies_replaced} to replace")
+        if self._policies_deleted:
+            policy_parts.append(f"{self._policies_deleted} to delete")
 
         priv_parts: list[str] = []
         if self._privileges_granted:

@@ -1741,6 +1741,43 @@ def test_uc_helper_fetch_actual_policies_calls_list_per_configured_securable():
     }
 
 
+def _list_policies_call_targets(client: MagicMock) -> set[tuple[str, str]]:
+    return {
+        (c.kwargs.get("on_securable_type"), c.kwargs.get("on_securable_fullname"))
+        for c in client.policies.list_policies.call_args_list
+    }
+
+
+def test_uc_helper_fetch_actual_policies_lists_securable_with_empty_policies():
+    """A securable declaring an explicit empty 'policies: []' is a managed securable
+    and is listed — required so its actual policies are visible for deletion."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {"cat": {"name": "cat", "policies": []}},
+    })
+    client = MagicMock()
+    client.policies.list_policies.return_value = iter([])
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.fetch_actual_policies(config)
+
+    assert ("CATALOG", "cat") in _list_policies_call_targets(client)
+
+
+def test_uc_helper_fetch_actual_policies_skips_securable_when_policies_absent():
+    """A securable that omits the policies key (None) is unmanaged and is never
+    listed — its actual policies can never be deleted."""
+    config = ResourcesConfig.model_validate({
+        "catalogs": {"cat": {"name": "cat", "owner": "admin"}},
+    })
+    client = MagicMock()
+    client.policies.list_policies.return_value = iter([])
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.fetch_actual_policies(config)
+
+    client.policies.list_policies.assert_not_called()
+
+
 def test_uc_helper_fetch_actual_policies_normalises_column_mask():
     config = _config_with_policy("table")
     client = MagicMock()

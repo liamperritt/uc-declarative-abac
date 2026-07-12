@@ -27,7 +27,6 @@ from databricks.sdk.service.sql import (
 import logging
 
 from uc_declarative_abac.configs import (
-    BaseFgacPolicyConfig,
     ResourcesConfig,
 )
 from uc_declarative_abac.policies import Policy
@@ -416,24 +415,27 @@ def _parse_securable_rows(
 def _collect_policy_securables(
     config: ResourcesConfig,
 ) -> set[tuple[SecurableType, str]]:
-    """Return the set of securables that have at least one mask/filter policy."""
+    """Return the securables whose actual mask/filter policies must be fetched.
+
+    A securable is included when its ``policies`` field is **present** (not
+    ``None``) — i.e. it declares a policy list, even an empty one or a list of
+    only grant policies. This is deliberately broader than "declares a mask/filter
+    policy": it also covers the authoritative-deletion cases, so that a securable
+    declaring ``policies: []`` still has its actual policies fetched and thus
+    visible for deletion. A securable that omits ``policies`` (``None``) is
+    unmanaged — its actual policies are never fetched and so can never be deleted.
+    """
     result: set[tuple[SecurableType, str]] = set()
     for catalog in config.catalogs.values():
-        if _has_fgac_policy(catalog.policies):
+        if catalog.policies is not None:
             result.add((SecurableType.CATALOG, catalog.full_name))
         for schema in catalog.schemas or []:
-            if _has_fgac_policy(schema.policies):
+            if schema.policies is not None:
                 result.add((SecurableType.SCHEMA, schema.full_name))
             for table in schema.tables or []:
-                if _has_fgac_policy(table.policies):
+                if table.policies is not None:
                     result.add((SecurableType.TABLE, table.full_name))
     return result
-
-
-def _has_fgac_policy(policies) -> bool:
-    if not policies:
-        return False
-    return any(isinstance(p, BaseFgacPolicyConfig) for p in policies)
 
 
 def _for_securable_type_from_info(info: PolicyInfo) -> SecurableType:
@@ -776,13 +778,14 @@ class UnityCatalogHelper:
                 self._client.functions.update(full_name, owner=new_owner)
 
     def fetch_actual_policies(self, config: ResourcesConfig) -> set[Policy]:
-        """Return mask/filter policies attached to any configured securable.
+        """Return mask/filter policies attached to any policy-managed securable.
 
-        Walks the config to find every catalog/schema/table that declares at
-        least one mask or filter policy, then fans out one list_policies SDK
-        call per securable via a thread pool (max 16 concurrent). Results
-        from the SDK are normalised into Policy instances. Policies of
-        non-mask/filter types are skipped.
+        Walks the config for every catalog/schema/table that declares a
+        ``policies`` list (see ``_collect_policy_securables`` — a present list,
+        even an empty one, marks a securable as managed), then fans out one
+        list_policies SDK call per securable via a thread pool (max 16
+        concurrent). Results from the SDK are normalised into Policy instances.
+        Policies of non-mask/filter types are skipped.
 
         Results are cached after the first call.
         """

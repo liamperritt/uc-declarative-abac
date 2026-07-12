@@ -646,6 +646,26 @@ def test_logger_includes_policies_in_summary() -> None:
     assert "1 replaced" in summary
 
 
+def test_logger_logs_policy_delete_increments_counter() -> None:
+    cl, mock_logger = _make_change_logger()
+    cl.log_policy_delete(_make_policy(name="mask_pii"))
+
+    assert cl._policies_deleted == 1
+    msg = _info_messages(mock_logger)[0].lower()
+    assert "delet" in msg
+    assert "mask policy 'mask_pii'" in msg
+    assert "cat.s.t" in msg
+
+
+def test_logger_includes_policy_deletions_in_summary() -> None:
+    cl, _ = _make_change_logger()
+    cl.log_policy_delete(_make_policy(name="p1"))
+
+    summary = cl._build_summary()
+    assert "Policies:" in summary
+    assert "1 deleted" in summary
+
+
 # ---------------------------------------------------------------------------
 # Field-level diff on replacement
 # ---------------------------------------------------------------------------

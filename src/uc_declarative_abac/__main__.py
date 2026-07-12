@@ -121,6 +121,12 @@ def main() -> None:
         default=None,
         help="Comma-separated catalog names or qualified schema names (<catalog>.<schema>) to scope creation of missing catalogs/schemas/tables/volumes to (default = all configured catalogs). Function creation always flows through. No effect unless --enable-taggable-creation is set.",
     )
+    parser.add_argument(
+        "--delete-policies-for-namespaces",
+        type=str,
+        default=None,
+        help="Comma-separated catalog names or qualified schema names (<catalog>.<schema>) to scope policy deletion to (default = all configured catalogs). No effect unless --enable-policy-deletion is set.",
+    )
     # Deprecated aliases (hidden from --help). Passing one logs a deprecation
     # warning and is converted to its --*-for-namespaces equivalent; passing an
     # alias together with its new flag fails immediately. default=None lets us
@@ -187,6 +193,17 @@ def main() -> None:
              "Requires interactive confirmation at the terminal unless --force is set.",
     )
     parser.add_argument(
+        "--enable-policy-deletion",
+        action="store_true",
+        default=False,
+        help="Make a securable's configured mask/filter policies authoritative: any "
+             "actual policy on that securable not declared in config is deleted. A "
+             "securable with an explicit empty 'policies: []' has all its policies "
+             "removed; one that omits 'policies' entirely is left untouched. Off by "
+             "default. Requires interactive confirmation at the terminal unless "
+             "--force is set.",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         default=False,
@@ -245,6 +262,7 @@ def main() -> None:
         enable_taggable_creation=args.enable_taggable_creation,
         enable_privilege_management=args.enable_privilege_management,
         enable_governed_tag_deletion=args.enable_governed_tag_deletion,
+        enable_policy_deletion=args.enable_policy_deletion,
         enable_group_creation=args.enable_group_creation,
         enable_group_management=args.enable_group_management,
         ignore_unresolvable_principals=args.ignore_unresolvable_principals,
@@ -252,6 +270,7 @@ def main() -> None:
         manage_privileges_for_namespaces=manage_privileges_for_namespaces,
         manage_taggables_for_namespaces=manage_taggables_for_namespaces,
         create_taggables_for_namespaces=create_taggables_for_namespaces,
+        delete_policies_for_namespaces=args.delete_policies_for_namespaces or "*",
         retain_tag_prefixes=args.retain_tag_prefixes,
         force=args.force,
         ref_override_strategy=args.ref_override_strategy,

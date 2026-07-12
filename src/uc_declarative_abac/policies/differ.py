@@ -11,6 +11,7 @@ from uc_declarative_abac.policies.state import (
     PolicyDiff,
 )
 from uc_declarative_abac.utils import (
+    in_namespace_scope,
     PrincipalValidationError,
 )
 from uc_declarative_abac.principals import (
@@ -26,6 +27,7 @@ def compute_policy_diff(
     resolver: PrincipalResolver,
     change_logger: ChangeLogger,
     ignore_unresolvable: frozenset[str] = frozenset(),
+    delete_scope: frozenset[str] = frozenset(),
 ) -> PolicyDiff:
     """Compute the diff between desired and actual mask/filter policies.
 
@@ -38,8 +40,15 @@ def compute_policy_diff(
     Key by (securable_type, securable_full_name, name):
     - to_create: policy not present in actual
     - to_replace: policy present in both but fields differ
-    Policies present only in actual are ignored (UC policies are never deleted
-    by the orchestrator).
+    - to_delete: policy present only in actual, on a securable in ``delete_scope``
+
+    ``delete_scope`` is the namespace scope (as produced by
+    ``parse_namespace_filter``) that policy deletion applies to; an actual policy
+    absent from the desired set whose securable falls in scope is a deletion
+    candidate. The default empty scope means "never delete" — so with policy
+    deletion off this is byte-identical to the additive-only behaviour. Note the
+    ``actual`` set only ever contains policies on **managed** securables, so an
+    unmanaged securable is never a deletion candidate regardless of scope.
     """
     desired_resolved = _resolve_policy_principals(
         desired, resolver, change_logger, ignore_unresolvable
@@ -49,6 +58,7 @@ def compute_policy_diff(
     )
 
     actual_by_key = {_identity(p): p for p in actual_resolved}
+    desired_ids = {_identity(p) for p in desired_resolved}
 
     to_create: set[Policy] = set()
     to_replace: set[Policy] = set()
@@ -63,7 +73,18 @@ def compute_policy_diff(
             to_replace.add(desired_policy)
             old_policies[identity] = existing
 
-    return PolicyDiff(to_create=to_create, to_replace=to_replace, old_policies=old_policies)
+    to_delete = {
+        p for p in actual_resolved
+        if in_namespace_scope(p.securable_full_name, delete_scope)
+        and _identity(p) not in desired_ids
+    }
+
+    return PolicyDiff(
+        to_create=to_create,
+        to_replace=to_replace,
+        to_delete=to_delete,
+        old_policies=old_policies,
+    )
 
 
 def _identity(policy: Policy) -> tuple:

@@ -130,6 +130,7 @@ def run(
     enable_taggable_creation: bool = False,
     enable_privilege_management: bool = False,
     enable_governed_tag_deletion: bool = False,
+    enable_policy_deletion: bool = False,
     enable_group_creation: bool = False,
     enable_group_management: bool = False,
     ignore_unresolvable_principals: str = "",
@@ -137,6 +138,7 @@ def run(
     manage_privileges_for_namespaces: str = "*",
     manage_taggables_for_namespaces: str = "*",
     create_taggables_for_namespaces: str = "*",
+    delete_policies_for_namespaces: str = "*",
     retain_tag_prefixes: str = "class.",
     force: bool = False,
     ref_override_strategy: Literal["merge", "replace"] = "merge",
@@ -230,6 +232,10 @@ def run(
     taggable_creation_scope = (
         parse_namespace_filter(create_taggables_for_namespaces, configured_namespaces)
         if enable_taggable_creation else frozenset()
+    )
+    policy_delete_scope = (
+        parse_namespace_filter(delete_policies_for_namespaces, configured_namespaces)
+        if enable_policy_deletion else frozenset()
     )
     # Tag-key prefixes whose tags are never removed (only added/updated). Empty
     # string ⇒ no retention. Defaults to "class." to protect auto-classification.
@@ -403,6 +409,7 @@ def run(
     policy_diff = compute_policy_diff(
         desired_policies, actual_policies, resolver, change_logger,
         ignore_unresolvable=ignore_unresolvable,
+        delete_scope=policy_delete_scope,
     )
 
     # 8. Privileges workflow
@@ -456,11 +463,11 @@ def run(
         max_parallel_changes=max_parallel_changes,
     )
 
-    if policy_diff.to_create or policy_diff.to_replace:
+    if policy_diff.to_create or policy_diff.to_replace or policy_diff.to_delete:
         change_logger.log_section_header("Policies")
     execute_policy_diff(
         uc_helper, policy_diff, change_logger,
-        dry_run=dry_run, max_parallel_changes=max_parallel_changes,
+        dry_run=dry_run, force=force, max_parallel_changes=max_parallel_changes,
     )
 
     if privilege_diff.to_grant or privilege_diff.to_revoke:

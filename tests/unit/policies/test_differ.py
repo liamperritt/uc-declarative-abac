@@ -288,3 +288,80 @@ def test_policy_differ_suppresses_warning_for_ignored_unresolvable_actual_princi
     # Policy retained with empty principals → matches the empty-principal desired.
     assert diff.to_create == set()
     assert diff.to_replace == set()
+
+
+# ---------------------------------------------------------------------------
+# to_delete (delete_scope)
+# ---------------------------------------------------------------------------
+
+
+def test_policy_differ_emits_to_delete_for_in_scope_actual_only():
+    """An actual policy absent from config, whose securable is in the delete scope,
+    is a deletion candidate."""
+    desired: set[Policy] = set()
+    actual = {_make_policy(name="stale")}  # securable cat.s.t
+
+    diff = compute_policy_diff(
+        desired, actual, _resolver(), _change_logger(),
+        delete_scope=frozenset({"cat"}),
+    )
+
+    assert diff.to_delete == actual
+    assert diff.to_create == set()
+
+
+def test_policy_differ_deletes_all_in_scope_when_desired_empty():
+    """An in-scope securable with no desired policies ('policies: []') has all of its
+    actual policies deleted."""
+    desired: set[Policy] = set()
+    actual = {_make_policy(name="p1"), _make_policy(name="p2")}
+
+    diff = compute_policy_diff(
+        desired, actual, _resolver(), _change_logger(),
+        delete_scope=frozenset({"cat"}),
+    )
+
+    assert diff.to_delete == actual
+
+
+def test_policy_differ_no_delete_when_scope_empty():
+    """With an empty delete scope (deletion off) actual-only policies are left
+    untouched — byte-identical to the additive-only behaviour."""
+    desired: set[Policy] = set()
+    actual = {_make_policy(name="stale")}
+
+    diff = compute_policy_diff(
+        desired, actual, _resolver(), _change_logger(),
+        delete_scope=frozenset(),
+    )
+
+    assert diff.to_delete == set()
+
+
+def test_policy_differ_no_delete_when_securable_out_of_scope():
+    """An actual-only policy whose securable is outside the delete scope is not
+    deleted."""
+    desired: set[Policy] = set()
+    actual = {_make_policy(name="stale")}  # securable cat.s.t
+
+    diff = compute_policy_diff(
+        desired, actual, _resolver(), _change_logger(),
+        delete_scope=frozenset({"other_catalog"}),
+    )
+
+    assert diff.to_delete == set()
+
+
+def test_policy_differ_never_deletes_a_desired_policy():
+    """A policy present in both desired and actual (in scope) is a match, never a
+    deletion."""
+    kept = _make_policy(name="kept")
+    stale = _make_policy(name="stale")
+
+    diff = compute_policy_diff(
+        {kept}, {kept, stale}, _resolver(), _change_logger(),
+        delete_scope=frozenset({"cat"}),
+    )
+
+    assert diff.to_delete == {stale}
+    assert kept not in diff.to_delete

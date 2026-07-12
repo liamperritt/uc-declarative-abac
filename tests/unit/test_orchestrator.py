@@ -759,6 +759,84 @@ def test_orchestrator_policies_workflow_is_idempotent(
     assert create_stmts == []
 
 
+def _catalog_with_empty_policies_config() -> dict:
+    """A catalog declaring an explicit empty policies list (authoritative -> remove all)."""
+    return {"resources": {"catalogs": {"my_catalog": {"policies": []}}}}
+
+
+def _fake_stale_catalog_mask_policy() -> MagicMock:
+    """A fake list_policies result: a mask policy on my_catalog not in config."""
+    from databricks.sdk.service.catalog import PolicyType as SdkPolicyType
+
+    p = MagicMock()
+    p.name = "stale_mask"
+    p.on_securable_type = MagicMock(value="CATALOG")
+    p.on_securable_fullname = "my_catalog"
+    p.policy_type = SdkPolicyType.POLICY_TYPE_COLUMN_MASK
+    p.column_mask = MagicMock()
+    p.column_mask.function_name = "my_catalog.default.mask_fn"
+    p.column_mask.on_column = "c_pii"
+    p.column_mask.using = []
+    p.row_filter = None
+    p.to_principals = ["analysts"]
+    p.except_principals = None
+    p.when_condition = None
+    p.match_columns = [MagicMock(alias="c_pii", condition="has_tag_value('pii', 'email')")]
+    p.comment = None
+    return p
+
+
+def test_orchestrator_deletes_stale_policy_when_deletion_enabled_and_forced(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """A securable with 'policies: []' and a stale actual policy -> DROP POLICY is
+    executed when --enable-policy-deletion and --force are set."""
+    config = _catalog_with_empty_policies_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals_with_groups(mock_workspace_client, ["analysts"])
+    mock_workspace_client.policies.list_policies.return_value = iter([
+        _fake_stale_catalog_mask_policy()
+    ])
+
+    result = _run_all_enabled(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_policy_deletion=True,
+    )
+
+    assert len(result.policy_diff.to_delete) == 1
+    drop_stmts = [s for s in mock_workspace_client.executed_sql if "DROP POLICY" in s.upper()]
+    assert len(drop_stmts) == 1, f"Expected DROP POLICY SQL, got: {mock_workspace_client.executed_sql}"
+    assert "stale_mask" in drop_stmts[0]
+
+
+def test_orchestrator_leaves_stale_policy_when_deletion_disabled(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch):
+    """With policy deletion off, the same stale policy is left untouched (no DROP,
+    empty to_delete) — the authoritative set is empty when the flag is off."""
+    config = _catalog_with_empty_policies_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals_with_groups(mock_workspace_client, ["analysts"])
+    mock_workspace_client.policies.list_policies.return_value = iter([
+        _fake_stale_catalog_mask_policy()
+    ])
+
+    result = _run_all_enabled(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_policy_deletion=False,
+    )
+
+    assert result.policy_diff.to_delete == set()
+    drop_stmts = [s for s in mock_workspace_client.executed_sql if "DROP POLICY" in s.upper()]
+    assert drop_stmts == []
+
+
 # ---------------------------------------------------------------------------
 # Service principal display-name ↔ application_id idempotency
 # ---------------------------------------------------------------------------
