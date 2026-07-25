@@ -17,6 +17,11 @@ definitions:
           tags:
             uc_gov_classification: internal
             class.name: ~
+          columns:
+            - name: col1
+              type: string
+              tags:
+                uc_gov_team: platform
         - name: test_table
           tags:
             uc_gov_classification: internal

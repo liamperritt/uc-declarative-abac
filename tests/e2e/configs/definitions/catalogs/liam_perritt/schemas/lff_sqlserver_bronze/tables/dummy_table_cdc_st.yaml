@@ -7,5 +7,6 @@ definitions:
         uc_gov_pipeline: lff
       columns:
         - name: __$operation
+          type: int
           tags:
             uc_gov_cdc_column: operation
