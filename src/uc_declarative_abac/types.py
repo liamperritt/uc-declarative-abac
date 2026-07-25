@@ -40,6 +40,11 @@ class PrivilegeType(str, Enum):
     CREATE_MEMORY_STORE = "create_memory_store"
     READ_MEMORY_STORE = "read_memory_store"
     WRITE_MEMORY_STORE = "write_memory_store"
+    CREATE_SECRET = "create_secret"
+    READ_SECRET = "read_secret"
+    REFERENCE_SECRET = "reference_secret"
+    WRITE_SECRET = "write_secret"
+    READ_METADATA = "read_metadata"
     BROWSE = "browse"
 
 
@@ -92,6 +97,10 @@ _SCHEMA_PRIVILEGES = (
         PrivilegeType.CREATE_MEMORY_STORE,
         PrivilegeType.READ_MEMORY_STORE,
         PrivilegeType.WRITE_MEMORY_STORE,
+        PrivilegeType.CREATE_SECRET,
+        PrivilegeType.READ_SECRET,
+        PrivilegeType.REFERENCE_SECRET,
+        PrivilegeType.WRITE_SECRET,
     }
 )
 _CATALOG_PRIVILEGES = _SCHEMA_PRIVILEGES | {PrivilegeType.USE_CATALOG, PrivilegeType.CREATE_SCHEMA, PrivilegeType.BROWSE}
