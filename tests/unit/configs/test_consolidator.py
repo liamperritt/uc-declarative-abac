@@ -447,7 +447,7 @@ def test_consolidator_extracts_inline_function_from_ref_dict_after_resolution():
 
 def test_consolidator_derives_distinct_names_for_shared_unnamed_ref_function():
     """Two policies referencing the same unnamed function definition each derive
-    'fn_<own_policy_name>', yielding distinct functions rather than a collision."""
+    'abac_<own_policy_name>', yielding distinct functions rather than a collision."""
     definitions = {
         "functions": {
             "shared|base": _unnamed_inline_fn_dict(),
@@ -473,9 +473,9 @@ def test_consolidator_derives_distinct_names_for_shared_unnamed_ref_function():
     result = consolidate_resources(resolved)
 
     schema = result["catalogs"]["c1"]["schemas"][0]
-    assert sorted(f["name"] for f in schema.get("functions", [])) == ["fn_mask_a", "fn_mask_b"]
-    assert schema["policies"][0]["function"] == "c1.s1.fn_mask_a"
-    assert schema["policies"][1]["function"] == "c1.s1.fn_mask_b"
+    assert sorted(f["name"] for f in schema.get("functions", [])) == ["abac_mask_a", "abac_mask_b"]
+    assert schema["policies"][0]["function"] == "c1.s1.abac_mask_a"
+    assert schema["policies"][1]["function"] == "c1.s1.abac_mask_b"
 
 
 def test_consolidator_uses_overridden_name_from_ref_function():
@@ -524,7 +524,7 @@ def _unnamed_inline_fn_dict(return_expr: str = "col") -> dict:
 
 
 def test_consolidator_derives_inline_function_name_from_policy_when_name_omitted():
-    """An inline function dict without a 'name' is named 'fn_<policy_name>' and the
+    """An inline function dict without a 'name' is named 'abac_<policy_name>' and the
     policy is rewritten to reference that derived full name."""
     data = {
         "catalogs": {
@@ -542,8 +542,8 @@ def test_consolidator_derives_inline_function_name_from_policy_when_name_omitted
     result = consolidate_resources(data)
 
     schema = result["catalogs"]["c1"]["schemas"][0]
-    assert [f["name"] for f in schema.get("functions", [])] == ["fn_mask_pii"]
-    assert schema["policies"][0]["function"] == "c1.s1.fn_mask_pii"
+    assert [f["name"] for f in schema.get("functions", [])] == ["abac_mask_pii"]
+    assert schema["policies"][0]["function"] == "c1.s1.abac_mask_pii"
 
 
 def test_consolidator_derives_inline_function_name_for_catalog_level_policy():
@@ -562,13 +562,13 @@ def test_consolidator_derives_inline_function_name_for_catalog_level_policy():
     default_schema = next(
         s for s in result["catalogs"]["c1"]["schemas"] if s["name"] == "default"
     )
-    assert [f["name"] for f in default_schema.get("functions", [])] == ["fn_mask_pii"]
-    assert result["catalogs"]["c1"]["policies"][0]["function"] == "c1.default.fn_mask_pii"
+    assert [f["name"] for f in default_schema.get("functions", [])] == ["abac_mask_pii"]
+    assert result["catalogs"]["c1"]["policies"][0]["function"] == "c1.default.abac_mask_pii"
 
 
 def test_consolidator_derived_inline_function_validates_as_model():
     """The derived function name survives model validation — the function is a
-    real FunctionConfig named 'fn_<policy_name>' under the target schema."""
+    real FunctionConfig named 'abac_<policy_name>' under the target schema."""
     data = {
         "catalogs": {
             "c1": {
@@ -585,7 +585,7 @@ def test_consolidator_derived_inline_function_validates_as_model():
     config = ResourcesConfig.model_validate(consolidate_resources(data))
 
     schema = config.catalogs["c1"].schemas[0]
-    assert [f.name for f in schema.functions] == ["fn_mask_pii"]
+    assert [f.name for f in schema.functions] == ["abac_mask_pii"]
 
 
 def test_consolidator_raises_when_inline_function_and_policy_both_missing_name():

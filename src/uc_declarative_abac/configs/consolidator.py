@@ -7,7 +7,7 @@ from typing import Iterable
 
 
 _DEFAULT_SCHEMA_NAME = "default"
-_DERIVED_FUNCTION_NAME_PREFIX = "fn_"
+_DERIVED_FUNCTION_NAME_PREFIX = "abac_"
 
 
 def _inline_function_name(policy: dict, function: dict) -> str:
@@ -15,7 +15,7 @@ def _inline_function_name(policy: dict, function: dict) -> str:
     the function omits its own ``name``.
 
     A named function keeps its name. An unnamed function is named
-    ``fn_<policy_name>``. If neither the function nor the policy has a name there
+    ``abac_<policy_name>``. If neither the function nor the policy has a name there
     is nothing to derive from, so ``OrchestratorError`` is raised.
     """
     fn_name = function.get("name")
@@ -83,7 +83,7 @@ def _rewrite_policy_function_to_full_name(
     or missing function fields.
 
     An inline function may omit its ``name``, in which case it is named
-    ``fn_<policy_name>`` (see _inline_function_name); the derived name is stamped
+    ``abac_<policy_name>`` (see _inline_function_name); the derived name is stamped
     back onto the function dict so its FunctionConfig gets it.
 
     The target catalog/schema defaults to the policy's enclosing schema (the

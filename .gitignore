@@ -36,5 +36,10 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
+# AI
+.claude/
+.cursor/
+.isaac/
+
 # Databricks
 scratch/
