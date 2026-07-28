@@ -21,9 +21,11 @@ class PrivilegeType(str, Enum):
     CREATE_VOLUME = "create_volume"
     USE_CATALOG = "use_catalog"
     USE_SCHEMA = "use_schema"
+    USE_VOLUME = "use_volume"
     READ_VOLUME = "read_volume"
     WRITE_VOLUME = "write_volume"
     EXECUTE = "execute"
+    APPLY_TAG = "apply_tag"
     ALL_PRIVILEGES = "all_privileges"
     EXTERNAL_USE_SCHEMA = "external_use_schema"
     MANAGE = "manage"
@@ -73,7 +75,7 @@ class PrincipalType(str, Enum):
 # Privileges valid for each securable type. Higher-level securables inherit
 # all privileges from lower levels. Unknown privileges are allowed on all types.
 _TABLE_PRIVILEGES = {PrivilegeType.SELECT, PrivilegeType.MODIFY}
-_VOLUME_PRIVILEGES = {PrivilegeType.READ_VOLUME, PrivilegeType.WRITE_VOLUME}
+_VOLUME_PRIVILEGES = {PrivilegeType.READ_VOLUME, PrivilegeType.WRITE_VOLUME, PrivilegeType.USE_VOLUME}
 _SCHEMA_PRIVILEGES = (
     _TABLE_PRIVILEGES
     | _VOLUME_PRIVILEGES
@@ -104,7 +106,7 @@ _SCHEMA_PRIVILEGES = (
     }
 )
 _CATALOG_PRIVILEGES = _SCHEMA_PRIVILEGES | {PrivilegeType.USE_CATALOG, PrivilegeType.CREATE_SCHEMA, PrivilegeType.BROWSE}
-_UNIVERSAL_PRIVILEGES = {PrivilegeType.ALL_PRIVILEGES, PrivilegeType.MANAGE}
+_UNIVERSAL_PRIVILEGES = {PrivilegeType.ALL_PRIVILEGES, PrivilegeType.MANAGE, PrivilegeType.APPLY_TAG}
 
 SECURABLE_TYPE_PRIVILEGE_MAP: dict[SecurableType, set[PrivilegeType]] = {
     SecurableType.CATALOG: _CATALOG_PRIVILEGES | _UNIVERSAL_PRIVILEGES,
