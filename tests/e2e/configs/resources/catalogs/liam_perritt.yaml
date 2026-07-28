@@ -3,10 +3,10 @@ resources:
     liam_perritt:
       $ref: $defs/catalogs/liam_perritt
       policies:
-        - name: grant_read_access_to_mehdi
+        - name: grant_read_access_to_sp
           type: grant
           privileges:
             - use
             - read
           to:
-            - mehdi.modarressi@databricks.com
+            - sp_uc_governor_test

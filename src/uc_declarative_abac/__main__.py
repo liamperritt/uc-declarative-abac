@@ -79,10 +79,8 @@ def main() -> None:
         help="Skip listing account/workspace users and treat the user set as empty. "
              "For organisations that govern access only via groups and service principals, "
              "this avoids the slowest SCIM list call and speeds up the initial fetch "
-             "significantly in accounts with many users. Any user referenced in config "
-             "will then fail resolution, and user identifiers in actual state log the usual "
-             "non-fatal warning and are dropped. Incompatible with configuring groups under "
-             "resources.groups with a group-management flag (resolving user members requires the users list).",
+             "significantly in accounts with many users. It is useful when running interactively "
+             "for a faster fetch time, but it is not intended for production use."
     )
     parser.add_argument(
         "--enable-tag-management",
