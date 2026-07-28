@@ -105,6 +105,38 @@ def test_workspace_helper_fetches_and_caches_service_principals() -> None:
     assert client.api_client.do.call_count == 3
 
 
+def test_workspace_helper_skips_user_fetch_when_skip_users_fetch() -> None:
+    """With skip_users_fetch, users are never listed: groups/SPs still resolve, any
+    user name is unknown, and only the Groups + ServicePrincipals SCIM calls run."""
+    client = _make_workspace_client(
+        users=[_make_user("alice@example.com")],
+        groups=[_make_group("data_engineers")],
+        service_principals=[_make_sp("my-sp", "app-id-123")],
+    )
+    helper = WorkspaceHelper(client, skip_users_fetch=True)
+    helper.fetch_principals()
+
+    assert helper.validate_principal("data_engineers") is True
+    assert helper.validate_principal("my-sp") is True
+    assert helper.validate_principal("alice@example.com") is False
+    # Only Groups + ServicePrincipals are listed — the Users call is skipped.
+    assert client.api_client.do.call_count == 2
+
+
+def test_workspace_helper_fetches_users_by_default() -> None:
+    """Without skip_users_fetch, users are listed as usual (all three SCIM calls run)."""
+    client = _make_workspace_client(
+        users=[_make_user("alice@example.com")],
+        groups=[_make_group("data_engineers")],
+        service_principals=[_make_sp("my-sp", "app-id-123")],
+    )
+    helper = WorkspaceHelper(client)
+    helper.fetch_principals()
+
+    assert helper.validate_principal("alice@example.com") is True
+    assert client.api_client.do.call_count == 3
+
+
 def test_workspace_helper_warns_on_duplicate_sp_display_names() -> None:
     """Two SPs with same display_name -> fetch_principals succeeds but logs warning."""
     client = _make_workspace_client(

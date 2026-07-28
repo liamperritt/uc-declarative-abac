@@ -2410,6 +2410,23 @@ def test_orchestrator_raises_when_groups_configured_with_workspace_scim(
         )
 
 
+def test_orchestrator_raises_when_groups_configured_with_skip_users_fetch(
+    tmp_yaml_dir, mock_workspace_client):
+    """Configuring groups while --skip-users-fetch is set fails fast: resolving user
+    members of a managed group needs the account users list."""
+    config = _config_with_group(["alice@example.com"])
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+
+    with pytest.raises(OrchestratorError):
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            skip_users_fetch=True,
+            enable_group_management=True,
+        )
+
+
 def test_orchestrator_adds_group_members_end_to_end(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """A configured member absent from an existing group flows into

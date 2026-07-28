@@ -89,3 +89,13 @@ def test_main_passes_delete_policies_namespaces_through_to_run(monkeypatch):
 def test_main_defaults_delete_policies_namespaces_to_star(monkeypatch):
     captured = _run_main(monkeypatch, [])
     assert captured["delete_policies_for_namespaces"] == "*"
+
+
+def test_main_passes_skip_users_fetch_through_to_run(monkeypatch):
+    captured = _run_main(monkeypatch, ["--skip-users-fetch"])
+    assert captured["skip_users_fetch"] is True
+
+
+def test_main_defaults_skip_users_fetch_off(monkeypatch):
+    captured = _run_main(monkeypatch, [])
+    assert captured["skip_users_fetch"] is False

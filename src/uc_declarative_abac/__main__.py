@@ -74,6 +74,17 @@ def main() -> None:
         help="Fetch principals from the workspace SCIM API instead of the account SCIM proxy (default: account). The 'account users' and 'account admins' system groups are automatically included, since the workspace SCIM API does not surface them. Incompatible with configuring groups under resources.groups (group management requires the account SCIM proxy).",
     )
     parser.add_argument(
+        "--skip-users-fetch",
+        action="store_true",
+        help="Skip listing account/workspace users and treat the user set as empty. "
+             "For organisations that govern access only via groups and service principals, "
+             "this avoids the slowest SCIM list call and speeds up the initial fetch "
+             "significantly in accounts with many users. Any user referenced in config "
+             "will then fail resolution, and user identifiers in actual state log the usual "
+             "non-fatal warning and are dropped. Incompatible with configuring groups under "
+             "resources.groups with a group-management flag (resolving user members requires the users list).",
+    )
+    parser.add_argument(
         "--enable-tag-management",
         action="store_true",
         default=False,
@@ -257,6 +268,7 @@ def main() -> None:
         warehouse_id=args.warehouse_id,
         dry_run=args.dry_run,
         use_workspace_scim=args.use_workspace_scim,
+        skip_users_fetch=args.skip_users_fetch,
         enable_tag_management=args.enable_tag_management,
         enable_taggable_management=args.enable_taggable_management,
         enable_taggable_creation=args.enable_taggable_creation,

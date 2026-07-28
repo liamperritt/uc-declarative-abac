@@ -125,6 +125,7 @@ def run(
     warehouse_id: str,
     dry_run: bool = False,
     use_workspace_scim: bool = False,
+    skip_users_fetch: bool = False,
     enable_tag_management: bool = False,
     enable_taggable_management: bool = False,
     enable_taggable_creation: bool = False,
@@ -213,6 +214,14 @@ def run(
             "--use-workspace-scim was set. Remove --use-workspace-scim to create or "
             "manage the groups declared in config."
         )
+    # Resolving user members of a managed group requires the account users list, so
+    # group management cannot run alongside --skip-users-fetch.
+    if config.groups and group_domain_active and skip_users_fetch:
+        raise OrchestratorError(
+            "Group creation/management requires the account users list to resolve "
+            "user members, but --skip-users-fetch was set. Remove --skip-users-fetch "
+            "to create or manage the groups declared in config."
+        )
 
     # Parse per-domain namespace filters. Each scope is empty when its paired
     # enable flag is off — that single representation drives the rest of the
@@ -279,6 +288,7 @@ def run(
         workspace_client,
         use_workspace_scim=use_workspace_scim,
         manage_groups=group_domain_active and bool(desired_groups),
+        skip_users_fetch=skip_users_fetch,
     )
     change_logger = ChangeLogger(dry_run=dry_run, logger=_logger)
     change_logger.log_banner()

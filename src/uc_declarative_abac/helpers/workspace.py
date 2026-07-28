@@ -97,10 +97,12 @@ class WorkspaceHelper:
         workspace_client: WorkspaceClient,
         use_workspace_scim: bool = False,
         manage_groups: bool = False,
+        skip_users_fetch: bool = False,
     ) -> None:
         self._client = workspace_client
         self._use_workspace_scim = use_workspace_scim
         self._manage_groups = manage_groups
+        self._skip_users_fetch = skip_users_fetch
         self._users: set[str] | None = None
         self._groups: set[str] | None = None
         self._service_principals: dict[str, str] | None = None  # display_name -> application_id
@@ -164,7 +166,10 @@ class WorkspaceHelper:
             sps_attrs = "displayName,applicationId"
 
         with ThreadPoolExecutor(max_workers=3) as pool:
-            users_f = pool.submit(
+            # When skipping the user fetch, don't submit the /Users call at all — it
+            # is the slowest SCIM list for large accounts and pure overhead for orgs
+            # that govern only groups and service principals.
+            users_f = None if self._skip_users_fetch else pool.submit(
                 self._scim_list_all, "/api/2.0/account/scim/v2/Users", users_attrs,
             )
             groups_f = pool.submit(
@@ -175,7 +180,7 @@ class WorkspaceHelper:
                 "/api/2.0/account/scim/v2/ServicePrincipals",
                 sps_attrs,
             )
-            users_data = users_f.result()
+            users_data = users_f.result() if users_f is not None else []
             groups_data = groups_f.result()
             sps_data = sps_f.result()
 
@@ -220,7 +225,9 @@ class WorkspaceHelper:
         Users, groups, and service principals are fetched concurrently.
         """
         with ThreadPoolExecutor(max_workers=3) as pool:
-            users_f = pool.submit(
+            # See _fetch_account_principals: skip the user list entirely when the
+            # org governs only groups and service principals.
+            users_f = None if self._skip_users_fetch else pool.submit(
                 lambda: list(self._client.users.list(attributes="userName")),
             )
             groups_f = pool.submit(
@@ -229,7 +236,7 @@ class WorkspaceHelper:
             sps_f = pool.submit(
                 lambda: list(self._client.service_principals.list(attributes="displayName,applicationId")),
             )
-            users = users_f.result()
+            users = users_f.result() if users_f is not None else []
             groups = groups_f.result()
             sps = sps_f.result()
 
