@@ -14,7 +14,8 @@ dependencies = [
 ]
 
 [project.scripts]
-uc-declarative-abac = "uc_declarative_abac.__main__:main"
+uc-abac = "uc_declarative_abac.cli:main"
+uc-declarative-abac = "uc_declarative_abac.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/uc_declarative_abac"]

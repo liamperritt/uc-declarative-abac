@@ -34,7 +34,7 @@ minimal YAML config and the exact command you ran, e.g.:
 ```
 
 ```bash
-python -m uc_declarative_abac --config-dir ... --warehouse-id ... --dry-run
+uc-abac plan --config-dir ... --warehouse-id ...
 ```
 -->
 
@@ -44,7 +44,7 @@ python -m uc_declarative_abac --config-dir ... --warehouse-id ... --dry-run
 - Python version:
 - OS:
 - Auth mechanism (PAT, OAuth M2M, CLI profile, etc.):
-- Run mode (CLI / GitHub Action), and whether `--dry-run` / `--use-workspace-scim` were set:
+- Run mode (CLI / GitHub Action), and which subcommand (`validate` / `plan` / `apply`) or legacy flags were used:
 
 ## Additional context
 

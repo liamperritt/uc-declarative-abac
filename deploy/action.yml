@@ -161,6 +161,32 @@ inputs:
       sequential execution.
     required: false
     default: '8'
+  skip-users-fetch:
+    description: >-
+      If "true", skip listing account/workspace users and treat the user set as
+      empty. Useful for faster interactive runs when access is governed only via
+      groups and service principals. Not intended for production use.
+    required: false
+    default: 'false'
+  enable-group-creation:
+    description: >-
+      If "true", permit the engine to create account groups declared under
+      resources.groups that do not yet exist. Off by default.
+    required: false
+    default: 'false'
+  enable-group-management:
+    description: >-
+      If "true", permit the engine to reconcile membership of existing account
+      groups declared under resources.groups. Off by default.
+    required: false
+    default: 'false'
+  ignore-unresolvable-principals:
+    description: >-
+      Comma-separated list of actual-state principal identifiers whose
+      resolution-failure warning should be suppressed (e.g. Databricks-managed
+      system service principals). Empty by default.
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -178,7 +204,7 @@ runs:
         python -m pip install --upgrade pip
         python -m pip install "$ACTION_PATH/.."
 
-    - name: Run uc-declarative-abac
+    - name: Run uc-abac
       shell: bash
       env:
         CONFIG_DIR: ${{ inputs.config-dir }}
@@ -204,16 +230,22 @@ runs:
         ENABLE_POLICY_DELETION: ${{ inputs.enable-policy-deletion }}
         FORCE: ${{ inputs.force }}
         MAX_PARALLEL_CHANGES: ${{ inputs.max-parallel-changes }}
+        SKIP_USERS_FETCH: ${{ inputs.skip-users-fetch }}
+        ENABLE_GROUP_CREATION: ${{ inputs.enable-group-creation }}
+        ENABLE_GROUP_MANAGEMENT: ${{ inputs.enable-group-management }}
+        IGNORE_UNRESOLVABLE_PRINCIPALS: ${{ inputs.ignore-unresolvable-principals }}
       run: |
+        subcommand="apply"
+        if [[ "$DRY_RUN" == "true" ]]; then
+          subcommand="plan"
+        fi
         args=(
+          "$subcommand"
           --config-dir "$CONFIG_DIR"
           --warehouse-id "$WAREHOUSE_ID"
         )
         if [[ -n "$PROFILE" ]]; then
           args+=(--profile "$PROFILE")
-        fi
-        if [[ "$DRY_RUN" == "true" ]]; then
-          args+=(--dry-run)
         fi
         if [[ "$USE_WORKSPACE_SCIM" == "true" ]]; then
           args+=(--use-workspace-scim)
@@ -264,8 +296,20 @@ runs:
         if [[ "$ENABLE_POLICY_DELETION" == "true" ]]; then
           args+=(--enable-policy-deletion)
         fi
+        if [[ "$SKIP_USERS_FETCH" == "true" ]]; then
+          args+=(--skip-users-fetch)
+        fi
+        if [[ "$ENABLE_GROUP_CREATION" == "true" ]]; then
+          args+=(--enable-group-creation)
+        fi
+        if [[ "$ENABLE_GROUP_MANAGEMENT" == "true" ]]; then
+          args+=(--enable-group-management)
+        fi
+        if [[ -n "$IGNORE_UNRESOLVABLE_PRINCIPALS" ]]; then
+          args+=(--ignore-unresolvable-principals "$IGNORE_UNRESOLVABLE_PRINCIPALS")
+        fi
         if [[ "$FORCE" == "true" ]]; then
           args+=(--force)
         fi
         args+=(--max-parallel-changes "$MAX_PARALLEL_CHANGES")
-        python -m uc_declarative_abac "${args[@]}"
+        uc-abac "${args[@]}"

@@ -15,6 +15,33 @@ Definitions define *what* exists; resources define *where* it gets deployed.
 
 > **Note:** Definitions are not mandatory. You can define all of your governance directly under `resources:` without using `definitions:` at all. Definitions exist to reduce config duplication when the same logical objects appear in multiple places — for example, an ABAC policy that is applied across many catalogs, schemas that are replicated across environment catalogs (dev, test, prod), or bronze tables that exist across multiple locale-based schemas.
 
+## Installation
+
+Install from PyPI (recommended):
+
+```bash
+pip install uc-declarative-abac
+# or, without installing into your environment:
+pipx install uc-declarative-abac
+uvx uc-declarative-abac --version
+```
+
+For local development, clone the repo and install in editable mode:
+
+```bash
+uv venv && uv sync --extra dev
+.venv/bin/pip install -e .
+```
+
+The package installs two console scripts that point at the same entry point:
+
+| Command | Description |
+|---------|-------------|
+| `uc-abac` | Short alias (recommended) |
+| `uc-declarative-abac` | Full package name |
+
+`python -m uc_declarative_abac` still works but is deprecated in favour of the console scripts.
+
 ## Quick Start
 
 Env-based auth (CI, GitHub Actions, Databricks Apps):
@@ -22,14 +49,53 @@ Env-based auth (CI, GitHub Actions, Databricks Apps):
 ```bash
 export DATABRICKS_HOST=https://<workspace>.cloud.databricks.com
 export DATABRICKS_TOKEN=<personal-access-token>
-python -m uc_declarative_abac --config-dir tests/e2e/configs --warehouse-id <warehouse-id> --enable-tag-management --enable-privilege-management --dry-run
+uc-abac plan --config-dir tests/e2e/configs --warehouse-id <warehouse-id> --enable-tag-management --enable-privilege-management
 ```
 
 Local development via `~/.databrickscfg` profile:
 
 ```bash
-python -m uc_declarative_abac --config-dir tests/e2e/configs --warehouse-id <warehouse-id> --profile <profile-name> --enable-tag-management --enable-privilege-management --dry-run
+uc-abac plan --config-dir tests/e2e/configs --warehouse-id <warehouse-id> --profile <profile-name> --enable-tag-management --enable-privilege-management
 ```
+
+Validate configs locally (no warehouse or credentials required):
+
+```bash
+uc-abac validate --config-dir tests/e2e/configs
+```
+
+Apply changes to Unity Catalog:
+
+```bash
+uc-abac apply --config-dir tests/e2e/configs --warehouse-id <warehouse-id> --enable-tag-management --enable-privilege-management
+```
+
+### CLI
+
+The CLI has three subcommands:
+
+| Subcommand | Description |
+|------------|-------------|
+| `validate` | Parse, resolve, and validate YAML configs locally. No `--warehouse-id` or Databricks credentials required. |
+| `plan` | Compute and print planned changes without executing (replaces `--dry-run`). |
+| `apply` | Apply governance changes to Unity Catalog. |
+
+Global flags: `--version`, `--verbose`, `--quiet`, `--settings-file <path>`.
+
+**Settings file.** Place a `uc-abac.yml` in the working directory (or pass `--settings-file`) to avoid repeating flags on every run:
+
+```yaml
+config_dir: ./configs
+warehouse_id: <warehouse-id>
+enable_tag_management: true
+enable_privilege_management: true
+```
+
+**Environment variables.** Any setting can also be set via `UC_ABAC_*` env vars (e.g. `UC_ABAC_WAREHOUSE_ID`, `UC_ABAC_ENABLE_TAG_MANAGEMENT=true`). Precedence: defaults < settings file < env vars < CLI flags.
+
+**Exit codes:** `0` success · `1` execution errors · `2` usage error · `3` config/validation error · `4` Databricks/auth error · `130` interrupted.
+
+**Legacy invocation.** The old flat form (`uc-abac --config-dir … --warehouse-id … --dry-run`) still works but logs a deprecation warning. Use `uc-abac plan` or `uc-abac apply` instead.
 
 ### Authentication
 
@@ -928,7 +994,7 @@ Mask and filter policies are additive by default (create/update, never delete). 
 - **Structured logging** — `Securables` / `Governed tags` / `Tags` / `Policies` / `Privileges` section headers, ordered by securable type then name, with dry-run prefix support and summary counts
 
 #### Infrastructure
-- **CLI** (`python -m uc_declarative_abac`) — required: `--config-dir`, `--warehouse-id`. Optional: `--profile` (CLI profile name from `~/.databrickscfg`; omit to use unified auth via env vars / default profile / metadata service — see the [Authentication](#authentication) section), `--dry-run`, `--use-workspace-scim`, `--skip-users-fetch`, the five opt-in mutation flags (`--enable-tag-management`, `--enable-taggable-management`, `--enable-taggable-creation`, `--enable-privilege-management`, `--enable-governed-tag-deletion`), their per-namespace scopes (`--manage-tags-for-namespaces`, `--manage-privileges-for-namespaces`, `--manage-taggables-for-namespaces`, `--create-taggables-for-namespaces` — each defaults to all configured catalogs and is a no-op unless its paired enable flag is set), and `--force` (skip interactive confirmations) — all described below.
+- **CLI** (`uc-abac` / `uc-declarative-abac`) — subcommands: `validate` (local YAML check), `plan` (dry-run), `apply` (execute). Required for `plan`/`apply`: `--config-dir`, `--warehouse-id`. Optional: `--profile` (CLI profile name from `~/.databrickscfg`; omit to use unified auth via env vars / default profile / metadata service — see the [Authentication](#authentication) section), `--use-workspace-scim`, `--skip-users-fetch`, the five opt-in mutation flags (`--enable-tag-management`, `--enable-taggable-management`, `--enable-taggable-creation`, `--enable-privilege-management`, `--enable-governed-tag-deletion`), their per-namespace scopes (`--manage-tags-for-namespaces`, `--manage-privileges-for-namespaces`, `--manage-taggables-for-namespaces`, `--create-taggables-for-namespaces` — each defaults to all configured catalogs and is a no-op unless its paired enable flag is set), and `--force` (skip interactive confirmations) — all described below. Settings can also be supplied via `uc-abac.yml` or `UC_ABAC_*` environment variables.
 - **GitHub Action** — reusable composite action at `deploy/action.yml`; caller repos invoke it as `liamperritt/uc-declarative-abac/deploy@<ref>` to reconcile their own YAML configs against UC on push / PR / schedule (see the [GitHub Action](#github-action) section)
 - **Hybrid SQL polling** — `wait_timeout=50s` with `on_wait_timeout=CONTINUE` and 10s polling for long-running queries
 - **External links** — fetches SQL results via external link URLs for large result sets
