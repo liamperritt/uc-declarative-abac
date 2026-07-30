@@ -36,7 +36,7 @@ Run the test suite before and after your change:
 - **Open an issue first** for anything beyond a trivial fix, and reference it from your PR (e.g. `Fixes #123`).
 - **Write tests.** This project is developed with Test-Driven / Behaviour-Driven Development — add or update tests alongside (ideally before) the implementation. The full conventions live in [`CLAUDE.md`](CLAUDE.md).
 - **Keep the engine idempotent.** Running the same configs twice must produce no changes on the second run; please verify this for any change to the diff/apply pipeline.
-- **Update the docs.** If you change behaviour, CLI flags, or YAML config structure, update [`README.md`](README.md) (and the GitHub Action inputs in [`deploy/action.yml`](deploy/action.yml) where relevant) in the same PR.
+- **Update the docs.** If you change behaviour, CLI flags or subcommands, or YAML config structure, update [`README.md`](README.md) (and the GitHub Action inputs in [`deploy/action.yml`](deploy/action.yml) where relevant) in the same PR.
 - **Describe your change** clearly in the PR description: what changed, why, and how you verified it.
 
 **ProTip:** It's frustrating to have a contribution pushed back over a process nobody told you about. If you hit such a case, please open an issue so we can document it here and lower the barrier for the next person.

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "uc-declarative-abac"
-version = "0.7.1"
+version = "0.7.2"
 description = "Declarative ABAC governance engine for Databricks Unity Catalog"
 requires-python = ">=3.11"
 dependencies = [
@@ -14,7 +14,8 @@ dependencies = [
 ]
 
 [project.scripts]
-uc-declarative-abac = "uc_declarative_abac.__main__:main"
+uc-abac = "uc_declarative_abac.cli:main"
+uc-declarative-abac = "uc_declarative_abac.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/uc_declarative_abac"]

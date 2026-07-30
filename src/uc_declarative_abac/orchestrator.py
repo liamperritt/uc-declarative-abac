@@ -119,6 +119,18 @@ def _collect_configured_namespaces(config: ResourcesConfig) -> set[str]:
     return namespaces
 
 
+def load_config(
+    config_dir: Path,
+    ref_override_strategy: Literal["merge", "replace"] = "merge",
+) -> ResourcesConfig:
+    """Discover, resolve, and validate YAML configs without contacting Databricks."""
+    paths = discover_yaml_files(config_dir)
+    raw_defs, raw_resources = load_raw_configs(paths)
+    resolved = resolve_refs(raw_defs, raw_resources, override_strategy=ref_override_strategy)
+    consolidated = consolidate_resources(resolved)
+    return ResourcesConfig.model_validate(consolidated)
+
+
 def run(
     config_dir: Path,
     workspace_client: WorkspaceClient,
@@ -194,11 +206,7 @@ def run(
     via SCIM. Empty by default.
     """
     # 1. Discover + load + resolve YAML
-    paths = discover_yaml_files(config_dir)
-    raw_defs, raw_resources = load_raw_configs(paths)
-    resolved = resolve_refs(raw_defs, raw_resources, override_strategy=ref_override_strategy)
-    consolidated = consolidate_resources(resolved)
-    config = ResourcesConfig.model_validate(consolidated)
+    config = load_config(config_dir, ref_override_strategy)
     catalog_names = [c.full_name for c in config.catalogs.values()]
     configured_namespaces = _collect_configured_namespaces(config)
 
