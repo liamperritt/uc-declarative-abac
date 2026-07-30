@@ -37,3 +37,21 @@ def test_settings_loads_boolean_from_env(monkeypatch):
     monkeypatch.setenv("UC_ABAC_ENABLE_TAG_MANAGEMENT", "true")
     settings = resolve_settings({}, settings_file=None)
     assert settings.enable_tag_management is True
+
+
+def test_settings_loads_namespace_scope_from_env(monkeypatch):
+    monkeypatch.setenv("UC_ABAC_MANAGE_TAGS_FOR_NAMESPACES", "cat_env.sch1")
+    settings = resolve_settings({}, settings_file=None)
+    assert settings.manage_tags_for_namespaces == "cat_env.sch1"
+
+
+def test_settings_empty_retain_prefixes_env_clears_default(monkeypatch):
+    monkeypatch.setenv("UC_ABAC_RETAIN_TAG_PREFIXES", "")
+    settings = resolve_settings({}, settings_file=None)
+    assert settings.retain_tag_prefixes == ""
+
+
+def test_settings_empty_bool_env_does_not_override_default(monkeypatch):
+    monkeypatch.setenv("UC_ABAC_ENABLE_TAG_MANAGEMENT", "")
+    settings = resolve_settings({}, settings_file=None)
+    assert settings.enable_tag_management is False

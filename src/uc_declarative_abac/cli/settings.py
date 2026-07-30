@@ -12,6 +12,14 @@ _DEFAULT_SETTINGS_FILE = Path("uc-abac.yml")
 
 _BOOL_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
 
+# Fields where an empty string is a meaningful value ("clear the list"), not
+# "unset". For every other field an empty env var is treated as absent, so that
+# the GitHub Action — which sets every UC_ABAC_* var, often to '' — does not
+# clobber defaults or settings-file values with empty strings.
+_EMPTY_MEANINGFUL_FIELDS = frozenset(
+    {"retain_tag_prefixes", "ignore_unresolvable_principals"}
+)
+
 # Maps RunSettings field names to UC_ABAC_* environment variable suffixes.
 _ENV_FIELD_MAP: dict[str, str] = {
     "config_dir": "CONFIG_DIR",
@@ -94,7 +102,9 @@ def _load_env_settings() -> dict[str, Any]:
     loaded: dict[str, Any] = {}
     for field_name, suffix in _ENV_FIELD_MAP.items():
         raw = os.environ.get(f"{_ENV_PREFIX}{suffix}")
-        if raw is None or raw == "":
+        if raw is None:
+            continue
+        if raw == "" and field_name not in _EMPTY_MEANINGFUL_FIELDS:
             continue
         loaded[field_name] = _coerce_env_value(field_name, raw, field_lookup[field_name])
     return loaded

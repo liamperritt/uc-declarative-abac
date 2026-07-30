@@ -39,6 +39,32 @@ def test_parser_legacy_without_dry_run_maps_to_deploy():
     assert namespace.legacy is True
 
 
+def test_parser_global_flag_before_subcommand_is_not_legacy():
+    namespace = parse_cli_args(
+        ["--verbose", "deploy", "--config-dir", "cfg", "--warehouse-id", "wh"],
+    )
+    assert namespace.command == "deploy"
+    assert namespace.legacy is False
+
+
+def test_parser_value_taking_global_flag_before_subcommand_is_not_legacy(tmp_path):
+    settings_file = tmp_path / "s.yml"
+    settings_file.write_text("config_dir: cfg\n", encoding="utf-8")
+    namespace = parse_cli_args(
+        ["--settings-file", str(settings_file), "validate"],
+    )
+    assert namespace.command == "validate"
+    assert namespace.legacy is False
+
+
+def test_parser_global_flag_before_legacy_flags_stays_legacy():
+    namespace = parse_cli_args(
+        ["--verbose", "--config-dir", "cfg", "--warehouse-id", "wh"],
+    )
+    assert namespace.command == "deploy"
+    assert namespace.legacy is True
+
+
 def test_cli_reports_version(capsys):
     with pytest.raises(SystemExit) as exc_info:
         parse_cli_args(["--version"])

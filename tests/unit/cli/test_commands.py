@@ -66,6 +66,25 @@ def test_main_fails_when_old_and_new_namespace_flags_combined(monkeypatch):
     assert exit_code == 2
 
 
+def test_main_passes_namespace_scope_from_env_through_to_run(monkeypatch):
+    monkeypatch.setenv("UC_ABAC_MANAGE_TAGS_FOR_NAMESPACES", "cat_env.sch1")
+    captured = _run_legacy(monkeypatch, [])
+    assert captured["manage_tags_for_namespaces"] == "cat_env.sch1"
+
+
+def test_main_fails_on_conflicting_namespace_flags_for_deploy(monkeypatch):
+    exit_code = cli.run_cli(
+        [
+            "deploy",
+            "--config-dir", "cfg",
+            "--warehouse-id", "wh",
+            "--manage-tags-for-catalogs", "cat_a",
+            "--manage-tags-for-namespaces", "cat_a",
+        ],
+    )
+    assert exit_code == 2
+
+
 def test_main_passes_enable_policy_deletion_through_to_run(monkeypatch):
     captured = _run_legacy(monkeypatch, ["--enable-policy-deletion"])
     assert captured["enable_policy_deletion"] is True
@@ -162,3 +181,15 @@ def test_commands_deploy_passes_dry_run_false(monkeypatch):
     )
     assert exit_code == 0
     assert captured["dry_run"] is False
+
+
+def test_commands_deploy_missing_warehouse_returns_config_error(monkeypatch):
+    monkeypatch.setattr(cli, "WorkspaceClient", lambda **_: object())
+    exit_code = cli.run_cli(["deploy", "--config-dir", "cfg"])
+    assert exit_code == 3
+
+
+def test_commands_legacy_missing_warehouse_returns_config_error(monkeypatch):
+    monkeypatch.setattr(cli, "WorkspaceClient", lambda **_: object())
+    exit_code = cli.run_cli(["--config-dir", "cfg"])
+    assert exit_code == 3

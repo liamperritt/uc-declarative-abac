@@ -18,9 +18,14 @@ from uc_declarative_abac.utils import ExecutionBatchError, OrchestratorError
 
 _logger = logging.getLogger("uc_declarative_abac")
 
+
+class CliUsageError(Exception):
+    """Raised for invalid flag combinations or other CLI usage errors (exit 2)."""
+
+
 # Deprecated *-for-catalogs flags are consumed directly off the namespace by
-# _namespace_values_from_namespace; they are not RunSettings fields, so they
-# must be kept out of the cli_overrides passed to resolve_settings.
+# _resolve_namespace_values; they are not RunSettings fields, so they must be
+# kept out of the cli_overrides passed to resolve_settings.
 _DEPRECATED_CATALOG_FLAGS = frozenset(
     {
         "manage_tags_for_catalogs",
@@ -32,6 +37,7 @@ _DEPRECATED_CATALOG_FLAGS = frozenset(
 
 EXIT_SUCCESS = 0
 EXIT_EXECUTION_ERROR = 1
+EXIT_USAGE_ERROR = 2
 EXIT_CONFIG_ERROR = 3
 EXIT_DATABRICKS_ERROR = 4
 EXIT_INTERRUPTED = 130
@@ -44,7 +50,7 @@ def _resolve_namespace_flag(
     new_flag: str,
 ) -> str:
     if old_value is not None and new_value is not None:
-        raise argparse.ArgumentTypeError(
+        raise CliUsageError(
             f"{old_flag} is deprecated and cannot be combined with {new_flag}. "
             f"Use {new_flag} only."
         )
@@ -61,31 +67,36 @@ def _resolve_namespace_flag(
     return "*"
 
 
-def _namespace_values_from_namespace(
+def _resolve_namespace_values(
+    settings: RunSettings,
     namespace: argparse.Namespace,
 ) -> dict[str, str]:
+    """Merge deprecated *-for-catalogs flags (namespace-only) with the resolved
+    *-for-namespaces settings (which already fold in env vars and the settings
+    file). The deprecated flags are read off the raw namespace because they are
+    not RunSettings fields; the new-style values come from settings."""
     return {
         "manage_tags_for_namespaces": _resolve_namespace_flag(
             getattr(namespace, "manage_tags_for_catalogs", None),
-            getattr(namespace, "manage_tags_for_namespaces", None),
+            settings.manage_tags_for_namespaces,
             "--manage-tags-for-catalogs",
             "--manage-tags-for-namespaces",
         ),
         "manage_privileges_for_namespaces": _resolve_namespace_flag(
             getattr(namespace, "manage_privileges_for_catalogs", None),
-            getattr(namespace, "manage_privileges_for_namespaces", None),
+            settings.manage_privileges_for_namespaces,
             "--manage-privileges-for-catalogs",
             "--manage-privileges-for-namespaces",
         ),
         "manage_taggables_for_namespaces": _resolve_namespace_flag(
             getattr(namespace, "manage_taggables_for_catalogs", None),
-            getattr(namespace, "manage_taggables_for_namespaces", None),
+            settings.manage_taggables_for_namespaces,
             "--manage-taggables-for-catalogs",
             "--manage-taggables-for-namespaces",
         ),
         "create_taggables_for_namespaces": _resolve_namespace_flag(
             getattr(namespace, "create_taggables_for_catalogs", None),
-            getattr(namespace, "create_taggables_for_namespaces", None),
+            settings.create_taggables_for_namespaces,
             "--create-taggables-for-catalogs",
             "--create-taggables-for-namespaces",
         ),
@@ -118,8 +129,7 @@ def _require_warehouse_id(settings: RunSettings) -> str:
     return settings.warehouse_id
 
 
-def _run_kwargs(settings: RunSettings, namespace: argparse.Namespace, *, dry_run: bool) -> dict:
-    namespaces = _namespace_values_from_namespace(namespace)
+def _run_kwargs(settings: RunSettings, namespaces: dict[str, str], *, dry_run: bool) -> dict:
     delete_policies = settings.delete_policies_for_namespaces or "*"
     return {
         "config_dir": _require_config_dir(settings),
@@ -155,9 +165,13 @@ def cmd_validate(settings: RunSettings) -> int:
     return EXIT_SUCCESS
 
 
-def cmd_deploy(settings: RunSettings, namespace: argparse.Namespace) -> int:
+def cmd_deploy(
+    settings: RunSettings,
+    namespace: argparse.Namespace,
+    namespaces: dict[str, str],
+) -> int:
     dry_run = getattr(namespace, "dry_run", False)
-    kwargs = _run_kwargs(settings, namespace, dry_run=dry_run)
+    kwargs = _run_kwargs(settings, namespaces, dry_run=dry_run)
     workspace_client = WorkspaceClient(profile=settings.profile)
     run(workspace_client=workspace_client, **kwargs)
     return EXIT_SUCCESS
@@ -179,9 +193,9 @@ def _handle_cli_error(exc: BaseException, *, verbose: bool) -> int:
     if isinstance(exc, DatabricksError):
         _print_error(str(exc), verbose=verbose)
         return EXIT_DATABRICKS_ERROR
-    if isinstance(exc, argparse.ArgumentTypeError):
+    if isinstance(exc, CliUsageError):
         _print_error(str(exc), verbose=verbose)
-        return 2
+        return EXIT_USAGE_ERROR
     raise exc
 
 
@@ -205,9 +219,13 @@ def run_cli(argv: list[str] | None = None) -> int:
     settings = resolve_settings(cli_overrides, settings_file=settings_file)
 
     try:
+        # Resolve/validate namespace scope flags up front so the deprecated+new
+        # conflict check (CliUsageError -> exit 2) fires for every command, not
+        # just deploy.
+        namespaces = _resolve_namespace_values(settings, namespace)
         if namespace.command == "validate":
             return cmd_validate(settings)
-        return cmd_deploy(settings, namespace)
+        return cmd_deploy(settings, namespace, namespaces)
     except KeyboardInterrupt:
         return EXIT_INTERRUPTED
     except BaseException as exc:

@@ -351,32 +351,60 @@ def _build_legacy_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="Print planned changes without executing (deprecated: use 'deploy --dry-run').",
     )
+    # Not required at the argparse layer: like the modern subcommands, these may
+    # be supplied via env vars or the settings file. A genuinely missing value is
+    # caught after settings resolution (_require_config_dir / _require_warehouse_id
+    # -> OrchestratorError -> exit 3), matching the deploy subcommand's behaviour.
     parser.add_argument(
         "--config-dir",
         type=Path,
-        required=True,
+        default=argparse.SUPPRESS,
         help="Path to the YAML config directory",
     )
     parser.add_argument(
         "--warehouse-id",
         type=str,
-        required=True,
+        default=argparse.SUPPRESS,
         help="SQL warehouse ID for executing queries",
     )
     return parser
 
 
+# Global flags that may legitimately precede a subcommand in modern mode.
+# Store-true globals consume no value; --settings-file consumes one value token
+# in its split form ("--settings-file path"). The "=" form ("--settings-file=x")
+# is a single token. Any *other* leading option means this is not a modern
+# "[globals] <subcommand> ..." invocation, so it is treated as the legacy flat form.
+_STORE_TRUE_GLOBAL_FLAGS = frozenset({"--verbose", "--quiet", "--version", "-h", "--help"})
+_VALUE_TAKING_GLOBAL_FLAGS = frozenset({"--settings-file"})
+
+
 def _is_legacy_invocation(argv: list[str]) -> bool:
+    """A modern invocation is ``[global-flags] <subcommand> [...]``. Scan past any
+    leading global flags; if the next token is a known subcommand it is modern,
+    otherwise (a non-global option, or a non-subcommand positional) it is legacy.
+    An argv of only global flags (e.g. ``--version``) is modern."""
     if not argv:
         return False
-    first = argv[0]
-    if first in _SUBCOMMANDS:
-        return False
-    return True
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        if token in _STORE_TRUE_GLOBAL_FLAGS:
+            index += 1
+            continue
+        if token in _VALUE_TAKING_GLOBAL_FLAGS:
+            index += 2
+            continue
+        if token.startswith(tuple(f"{flag}=" for flag in _VALUE_TAKING_GLOBAL_FLAGS)):
+            index += 1
+            continue
+        # First non-global token decides: subcommand => modern, anything else => legacy.
+        return token not in _SUBCOMMANDS
+    return False
 
 
 def parse_cli_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """Parse argv into a namespace with ``command`` set to validate/plan/apply/legacy."""
+    """Parse argv into a namespace with ``command`` set to validate/deploy."""
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     if _is_legacy_invocation(raw_argv):
         namespace = _build_legacy_parser().parse_args(raw_argv)
