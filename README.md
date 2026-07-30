@@ -162,7 +162,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: liamperritt/uc-declarative-abac/deploy@v0.7.2
+      - uses: liamperritt/uc-declarative-abac/deploy@v0.7.3
         with:
           config-dir: configs/
           warehouse-id: ${{ vars.DATABRICKS_WAREHOUSE_ID }}
@@ -176,6 +176,37 @@ jobs:
 ```
 
 Swap `DATABRICKS_TOKEN` for `DATABRICKS_CLIENT_ID` + `DATABRICKS_CLIENT_SECRET` for OAuth M2M, or the Azure SP variables for Azure Databricks. Pinning to an immutable ref (e.g. a commit SHA or a signed tag) is recommended over `@main`.
+
+#### Offline validation action
+
+The repo also ships a lightweight companion action at `validate/action.yml` that runs `uc-abac validate` — parsing, resolving, and validating the YAML **without contacting Databricks** (no warehouse ID, credentials, or secrets required). It's ideal as a feature branch CI step before a pull request is raised. Reference it as `liamperritt/uc-declarative-abac/validate@<ref>`.
+
+**Inputs:**
+
+| Input | Required | Default | Description |
+|---|---|---|---|
+| `config-dir` | yes | — | Path to the YAML config directory, relative to the caller's repo root |
+| `ref-override-strategy` | no | `'merge'` | How sibling fields on a `$ref` entry combine with the referenced definition: `merge` (recursive deep-merge) or `replace` (shallow top-level replace) |
+
+**Example** (`.github/workflows/validate-uc-abac-configs.yml`):
+
+```yaml
+name: Validate UC ABAC configs
+
+on:
+  push:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: liamperritt/uc-declarative-abac/validate@v0.7.3
+        with:
+          config-dir: configs/
+```
 
 ## What You Can Define in YAML
 
@@ -989,7 +1020,7 @@ Mask and filter policies are additive by default (create/update, never delete). 
 
 #### Infrastructure
 - **CLI** (`uc-abac` / `uc-declarative-abac`) — subcommands: `validate` (local YAML check), `deploy` (execute; add `--dry-run` to preview). Required for `deploy`: `--config-dir`, `--warehouse-id`. Optional: `--profile` (CLI profile name from `~/.databrickscfg`; omit to use unified auth via env vars / default profile / metadata service — see the [Authentication](#authentication) section), `--use-workspace-scim`, `--skip-users-fetch`, the five opt-in mutation flags (`--enable-tag-management`, `--enable-taggable-management`, `--enable-taggable-creation`, `--enable-privilege-management`, `--enable-governed-tag-deletion`), their per-namespace scopes (`--manage-tags-for-namespaces`, `--manage-privileges-for-namespaces`, `--manage-taggables-for-namespaces`, `--create-taggables-for-namespaces` — each defaults to all configured catalogs and is a no-op unless its paired enable flag is set), and `--force` (skip interactive confirmations) — all described below. Settings can also be supplied via `uc_abac.yml` or `UC_ABAC_*` environment variables.
-- **GitHub Action** — reusable composite action at `deploy/action.yml`; caller repos invoke it as `liamperritt/uc-declarative-abac/deploy@<ref>` to reconcile their own YAML configs against UC on push / PR / schedule (see the [GitHub Action](#github-action) section)
+- **GitHub Actions** — two reusable composite actions: `deploy/action.yml` (invoked as `liamperritt/uc-declarative-abac/deploy@<ref>`) to reconcile YAML configs against UC on push / PR / schedule, and `validate/action.yml` (invoked as `liamperritt/uc-declarative-abac/validate@<ref>`) for offline config validation with no warehouse or credentials (see the [GitHub Action](#github-action) section)
 - **Hybrid SQL polling** — `wait_timeout=50s` with `on_wait_timeout=CONTINUE` and 10s polling for long-running queries
 - **External links** — fetches SQL results via external link URLs for large result sets
 - **Parallel state fetch** — securables, tags, privileges, policies, governed tags, and principals are fetched concurrently
