@@ -34,7 +34,7 @@ minimal YAML config and the exact command you ran, e.g.:
 ```
 
 ```bash
-uc-abac deploy --config-dir ... --warehouse-id ...
+uc-abac deploy --config-dir ... --warehouse-id ... --dry-run
 ```
 -->
 
