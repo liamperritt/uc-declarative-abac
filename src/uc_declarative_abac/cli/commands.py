@@ -18,6 +18,18 @@ from uc_declarative_abac.utils import ExecutionBatchError, OrchestratorError
 
 _logger = logging.getLogger("uc_declarative_abac")
 
+# Deprecated *-for-catalogs flags are consumed directly off the namespace by
+# _namespace_values_from_namespace; they are not RunSettings fields, so they
+# must be kept out of the cli_overrides passed to resolve_settings.
+_DEPRECATED_CATALOG_FLAGS = frozenset(
+    {
+        "manage_tags_for_catalogs",
+        "manage_privileges_for_catalogs",
+        "manage_taggables_for_catalogs",
+        "create_taggables_for_catalogs",
+    }
+)
+
 EXIT_SUCCESS = 0
 EXIT_EXECUTION_ERROR = 1
 EXIT_CONFIG_ERROR = 3
@@ -87,7 +99,11 @@ def _configure_logging(namespace: argparse.Namespace) -> None:
         level = logging.DEBUG
     else:
         level = logging.INFO
-    logging.basicConfig(level=level, format="%(message)s", force=True)
+    # basicConfig only installs the root handler on the first call (no force=True),
+    # so we don't tear down handlers other libraries or pytest's caplog have added.
+    # The explicit setLevel keeps the level current across repeated invocations.
+    logging.basicConfig(level=level, format="%(message)s")
+    logging.getLogger().setLevel(level)
 
 
 def _require_config_dir(settings: RunSettings) -> Path:
@@ -189,6 +205,7 @@ def run_cli(argv: list[str] | None = None) -> int:
         key: value
         for key, value in vars(namespace).items()
         if key not in {"command", "legacy", "settings_file", "verbose", "quiet", "dry_run"}
+        and key not in _DEPRECATED_CATALOG_FLAGS
     }
     settings_file = getattr(namespace, "settings_file", None)
     settings = resolve_settings(cli_overrides, settings_file=settings_file)
