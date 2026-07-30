@@ -1,0 +1,4 @@
+config_dir: ./configs
+enable_tag_management: true
+enable_privilege_management: true
+use_workspace_scim: true

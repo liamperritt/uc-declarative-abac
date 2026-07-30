@@ -8,7 +8,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 _ENV_PREFIX = "UC_ABAC_"
-_DEFAULT_SETTINGS_FILE = Path("uc-abac.yml")
+_DEFAULT_SETTINGS_FILE = Path("uc_abac.yml")
 
 _BOOL_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
 

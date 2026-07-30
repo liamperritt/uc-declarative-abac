@@ -72,7 +72,7 @@ The CLI has two subcommands:
 
 Global flags: `--version`, `--verbose`, `--quiet`, `--settings-file <path>`.
 
-**Settings file.** Place a `uc-abac.yml` in the working directory (or pass `--settings-file`) to avoid repeating flags on every run:
+**Settings file.** Place a `uc_abac.yml` in the working directory (or pass `--settings-file`) to avoid repeating flags on every run:
 
 ```yaml
 config_dir: ./configs
@@ -984,7 +984,7 @@ Mask and filter policies are additive by default (create/update, never delete). 
 - **Structured logging** — `Securables` / `Governed tags` / `Tags` / `Policies` / `Privileges` section headers, ordered by securable type then name, with dry-run prefix support and summary counts
 
 #### Infrastructure
-- **CLI** (`uc-abac` / `uc-declarative-abac`) — subcommands: `validate` (local YAML check), `deploy` (execute; add `--dry-run` to preview). Required for `deploy`: `--config-dir`, `--warehouse-id`. Optional: `--profile` (CLI profile name from `~/.databrickscfg`; omit to use unified auth via env vars / default profile / metadata service — see the [Authentication](#authentication) section), `--use-workspace-scim`, `--skip-users-fetch`, the five opt-in mutation flags (`--enable-tag-management`, `--enable-taggable-management`, `--enable-taggable-creation`, `--enable-privilege-management`, `--enable-governed-tag-deletion`), their per-namespace scopes (`--manage-tags-for-namespaces`, `--manage-privileges-for-namespaces`, `--manage-taggables-for-namespaces`, `--create-taggables-for-namespaces` — each defaults to all configured catalogs and is a no-op unless its paired enable flag is set), and `--force` (skip interactive confirmations) — all described below. Settings can also be supplied via `uc-abac.yml` or `UC_ABAC_*` environment variables.
+- **CLI** (`uc-abac` / `uc-declarative-abac`) — subcommands: `validate` (local YAML check), `deploy` (execute; add `--dry-run` to preview). Required for `deploy`: `--config-dir`, `--warehouse-id`. Optional: `--profile` (CLI profile name from `~/.databrickscfg`; omit to use unified auth via env vars / default profile / metadata service — see the [Authentication](#authentication) section), `--use-workspace-scim`, `--skip-users-fetch`, the five opt-in mutation flags (`--enable-tag-management`, `--enable-taggable-management`, `--enable-taggable-creation`, `--enable-privilege-management`, `--enable-governed-tag-deletion`), their per-namespace scopes (`--manage-tags-for-namespaces`, `--manage-privileges-for-namespaces`, `--manage-taggables-for-namespaces`, `--create-taggables-for-namespaces` — each defaults to all configured catalogs and is a no-op unless its paired enable flag is set), and `--force` (skip interactive confirmations) — all described below. Settings can also be supplied via `uc_abac.yml` or `UC_ABAC_*` environment variables.
 - **GitHub Action** — reusable composite action at `deploy/action.yml`; caller repos invoke it as `liamperritt/uc-declarative-abac/deploy@<ref>` to reconcile their own YAML configs against UC on push / PR / schedule (see the [GitHub Action](#github-action) section)
 - **Hybrid SQL polling** — `wait_timeout=50s` with `on_wait_timeout=CONTINUE` and 10s polling for long-running queries
 - **External links** — fetches SQL results via external link URLs for large result sets

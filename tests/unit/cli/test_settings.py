@@ -18,7 +18,7 @@ def test_settings_prefers_cli_flag_over_env_var(monkeypatch, tmp_path: Path):
 
 
 def test_settings_prefers_env_var_over_settings_file(tmp_path: Path, monkeypatch):
-    settings_path = tmp_path / "uc-abac.yml"
+    settings_path = tmp_path / "uc_abac.yml"
     settings_path.write_text(yaml.dump({"warehouse_id": "from-file"}), encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("UC_ABAC_WAREHOUSE_ID", "from-env")

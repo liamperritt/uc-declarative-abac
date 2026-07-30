@@ -259,7 +259,7 @@ def _add_global_arguments(parser: argparse.ArgumentParser) -> None:
         "--settings-file",
         type=Path,
         default=argparse.SUPPRESS,
-        help="Path to a YAML settings file (default: ./uc-abac.yml when present).",
+        help="Path to a YAML settings file (default: ./uc_abac.yml when present).",
     )
     parser.add_argument(
         "--verbose",
