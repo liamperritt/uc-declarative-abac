@@ -34,7 +34,7 @@ Run the test suite before and after your change:
 **Working on a change:**
 
 - **Open an issue first** for anything beyond a trivial fix, and reference it from your PR (e.g. `Fixes #123`).
-- **Write tests.** This project is developed with Test-Driven / Behaviour-Driven Development — add or update tests alongside (ideally before) the implementation. The full conventions live in [`CLAUDE.md`](CLAUDE.md).
+- **Write tests.** This project is developed with Test-Driven / Behaviour-Driven Development — add or update tests alongside (ideally before) the implementation. The full conventions live in [`AGENTS.md`](AGENTS.md).
 - **Keep the engine idempotent.** Running the same configs twice must produce no changes on the second run; please verify this for any change to the diff/apply pipeline.
 - **Update the docs.** If you change behaviour, CLI flags or subcommands, or YAML config structure, update [`README.md`](README.md) (and the GitHub Action inputs in [`deploy/action.yml`](deploy/action.yml) where relevant) in the same PR.
 - **Describe your change** clearly in the PR description: what changed, why, and how you verified it.
@@ -43,7 +43,7 @@ Run the test suite before and after your change:
 
 ## Coding conventions
 
-Code should be optimized for readability. This is a Python project; please follow standard Python conventions and the project-specific guidelines documented in [`CLAUDE.md`](CLAUDE.md). In short:
+Code should be optimized for readability. This is a Python project; please follow standard Python conventions and the project-specific guidelines documented in [`AGENTS.md`](AGENTS.md). In short:
 
 - **Formatting and linting** — code is linted with [Ruff](https://docs.astral.sh/ruff/). Run `.venv/bin/ruff check src tests` and keep it clean.
 - **Tests** — use `pytest`. Test functions are root-level (no test classes) and follow the BDD naming convention `test_<module>_<does_behaviour>[_when_<state>]`. Tests should exercise only public interfaces.

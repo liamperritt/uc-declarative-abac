@@ -26,7 +26,7 @@ Fixes #
 
 ## Checklist
 
-- [ ] Tests added or updated, following the BDD naming convention `test_<module>_<does_behaviour>[_when_<state>]` (see `CLAUDE.md`)
+- [ ] Tests added or updated, following the BDD naming convention `test_<module>_<does_behaviour>[_when_<state>]` (see `AGENTS.md`)
 - [ ] `.venv/bin/pytest tests/unit -q` passes locally
 - [ ] `.venv/bin/ruff check src tests` is clean
 - [ ] Idempotency preserved — running the same configs twice produces no changes on the second run (for diff/apply changes)
