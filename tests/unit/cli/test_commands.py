@@ -134,7 +134,7 @@ def test_commands_return_config_error_code_when_yaml_invalid(tmp_path: Path):
     assert exit_code == 3
 
 
-def test_commands_plan_passes_dry_run_true(monkeypatch):
+def test_commands_deploy_dry_run_passes_dry_run_true(monkeypatch):
     captured: dict = {}
 
     def _fake_run(**kwargs):
@@ -143,13 +143,13 @@ def test_commands_plan_passes_dry_run_true(monkeypatch):
     monkeypatch.setattr(cli, "run", _fake_run)
     monkeypatch.setattr(cli, "WorkspaceClient", lambda **_: object())
     exit_code = cli.run_cli(
-        ["plan", "--config-dir", "cfg", "--warehouse-id", "wh"],
+        ["deploy", "--dry-run", "--config-dir", "cfg", "--warehouse-id", "wh"],
     )
     assert exit_code == 0
     assert captured["dry_run"] is True
 
 
-def test_commands_apply_passes_dry_run_false(monkeypatch):
+def test_commands_deploy_passes_dry_run_false(monkeypatch):
     captured: dict = {}
 
     def _fake_run(**kwargs):
@@ -158,7 +158,7 @@ def test_commands_apply_passes_dry_run_false(monkeypatch):
     monkeypatch.setattr(cli, "run", _fake_run)
     monkeypatch.setattr(cli, "WorkspaceClient", lambda **_: object())
     exit_code = cli.run_cli(
-        ["apply", "--config-dir", "cfg", "--warehouse-id", "wh"],
+        ["deploy", "--config-dir", "cfg", "--warehouse-id", "wh"],
     )
     assert exit_code == 0
     assert captured["dry_run"] is False

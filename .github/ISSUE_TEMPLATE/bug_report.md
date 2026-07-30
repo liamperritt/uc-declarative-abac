@@ -34,7 +34,7 @@ minimal YAML config and the exact command you ran, e.g.:
 ```
 
 ```bash
-uc-abac plan --config-dir ... --warehouse-id ...
+uc-abac deploy --config-dir ... --warehouse-id ...
 ```
 -->
 
@@ -44,7 +44,7 @@ uc-abac plan --config-dir ... --warehouse-id ...
 - Python version:
 - OS:
 - Auth mechanism (PAT, OAuth M2M, CLI profile, etc.):
-- Run mode (CLI / GitHub Action), and which subcommand (`validate` / `plan` / `apply`) or legacy flags were used:
+- Run mode (CLI / GitHub Action), and which subcommand (`validate` / `deploy`) or legacy flags were used:
 
 ## Additional context
 

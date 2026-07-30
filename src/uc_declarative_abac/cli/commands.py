@@ -155,15 +155,9 @@ def cmd_validate(settings: RunSettings) -> int:
     return EXIT_SUCCESS
 
 
-def cmd_plan(settings: RunSettings, namespace: argparse.Namespace) -> int:
-    kwargs = _run_kwargs(settings, namespace, dry_run=True)
-    workspace_client = WorkspaceClient(profile=settings.profile)
-    run(workspace_client=workspace_client, **kwargs)
-    return EXIT_SUCCESS
-
-
-def cmd_apply(settings: RunSettings, namespace: argparse.Namespace) -> int:
-    kwargs = _run_kwargs(settings, namespace, dry_run=False)
+def cmd_deploy(settings: RunSettings, namespace: argparse.Namespace) -> int:
+    dry_run = getattr(namespace, "dry_run", False)
+    kwargs = _run_kwargs(settings, namespace, dry_run=dry_run)
     workspace_client = WorkspaceClient(profile=settings.profile)
     run(workspace_client=workspace_client, **kwargs)
     return EXIT_SUCCESS
@@ -198,7 +192,7 @@ def run_cli(argv: list[str] | None = None) -> int:
     if getattr(namespace, "legacy", False):
         _logger.warning(
             "Invoking uc-abac without a subcommand is deprecated. "
-            "Use 'uc-abac plan' or 'uc-abac apply' instead."
+            "Use 'uc-abac deploy' (add --dry-run to preview) instead."
         )
 
     cli_overrides = {
@@ -213,9 +207,7 @@ def run_cli(argv: list[str] | None = None) -> int:
     try:
         if namespace.command == "validate":
             return cmd_validate(settings)
-        if namespace.command == "plan":
-            return cmd_plan(settings, namespace)
-        return cmd_apply(settings, namespace)
+        return cmd_deploy(settings, namespace)
     except KeyboardInterrupt:
         return EXIT_INTERRUPTED
     except BaseException as exc:

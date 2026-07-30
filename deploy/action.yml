@@ -235,15 +235,14 @@ runs:
         ENABLE_GROUP_MANAGEMENT: ${{ inputs.enable-group-management }}
         IGNORE_UNRESOLVABLE_PRINCIPALS: ${{ inputs.ignore-unresolvable-principals }}
       run: |
-        subcommand="apply"
-        if [[ "$DRY_RUN" == "true" ]]; then
-          subcommand="plan"
-        fi
         args=(
-          "$subcommand"
+          "deploy"
           --config-dir "$CONFIG_DIR"
           --warehouse-id "$WAREHOUSE_ID"
         )
+        if [[ "$DRY_RUN" == "true" ]]; then
+          args+=(--dry-run)
+        fi
         if [[ -n "$PROFILE" ]]; then
           args+=(--profile "$PROFILE")
         fi

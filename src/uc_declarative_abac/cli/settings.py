@@ -41,7 +41,7 @@ _ENV_FIELD_MAP: dict[str, str] = {
 
 
 class RunSettings(BaseModel):
-    """Resolved runtime settings for validate / plan / apply."""
+    """Resolved runtime settings for validate / deploy."""
 
     model_config = ConfigDict(extra="forbid")
 

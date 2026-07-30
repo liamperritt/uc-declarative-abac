@@ -6,11 +6,11 @@ from pathlib import Path
 
 from uc_declarative_abac.cli import __version__
 
-_SUBCOMMANDS = frozenset({"validate", "plan", "apply"})
+_SUBCOMMANDS = frozenset({"validate", "deploy"})
 
 
 def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
-    """Register optional run flags shared by validate, plan, apply, and legacy mode."""
+    """Register optional run flags shared by validate, deploy, and legacy mode."""
     parser.add_argument(
         "--profile",
         type=str,
@@ -304,45 +304,31 @@ def _build_modern_parser() -> argparse.ArgumentParser:
     )
     validate_parser.set_defaults(command="validate")
 
-    plan_parser = subparsers.add_parser(
-        "plan",
+    deploy_parser = subparsers.add_parser(
+        "deploy",
         parents=[common],
-        help="Compute and print the planned changes without executing them.",
-        description="Dry-run: show planned changes without applying them.",
-    )
-    plan_parser.add_argument(
-        "--config-dir",
-        type=Path,
-        default=argparse.SUPPRESS,
-        help="Path to the YAML config directory",
-    )
-    plan_parser.add_argument(
-        "--warehouse-id",
-        type=str,
-        default=argparse.SUPPRESS,
-        help="SQL warehouse ID for executing queries",
-    )
-    plan_parser.set_defaults(command="plan")
-
-    apply_parser = subparsers.add_parser(
-        "apply",
-        parents=[common],
-        help="Apply governance changes to Unity Catalog.",
+        help="Deploy governance changes to Unity Catalog (add --dry-run to preview).",
         description="Execute planned changes against Unity Catalog.",
     )
-    apply_parser.add_argument(
+    deploy_parser.add_argument(
         "--config-dir",
         type=Path,
         default=argparse.SUPPRESS,
         help="Path to the YAML config directory",
     )
-    apply_parser.add_argument(
+    deploy_parser.add_argument(
         "--warehouse-id",
         type=str,
         default=argparse.SUPPRESS,
         help="SQL warehouse ID for executing queries",
     )
-    apply_parser.set_defaults(command="apply")
+    deploy_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Print the planned changes without executing them.",
+    )
+    deploy_parser.set_defaults(command="deploy")
 
     return parser
 
@@ -363,7 +349,7 @@ def _build_legacy_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="Print planned changes without executing (deprecated: use 'plan' subcommand).",
+        help="Print planned changes without executing (deprecated: use 'deploy --dry-run').",
     )
     parser.add_argument(
         "--config-dir",
@@ -394,7 +380,7 @@ def parse_cli_args(argv: list[str] | None = None) -> argparse.Namespace:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     if _is_legacy_invocation(raw_argv):
         namespace = _build_legacy_parser().parse_args(raw_argv)
-        namespace.command = "plan" if getattr(namespace, "dry_run", False) else "apply"
+        namespace.command = "deploy"
         namespace.legacy = True
         return namespace
 
