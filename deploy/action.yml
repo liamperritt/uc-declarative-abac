@@ -138,10 +138,12 @@ inputs:
     default: 'false'
   enable-policy-deletion:
     description: >-
-      If "true", make each securable's configured mask/filter policies authoritative
-      and delete any actual policy on that securable not declared in config (a
-      securable declaring ``policies: []`` has all its policies removed; one that
-      omits ``policies`` is left unmanaged). Off by default. Requires interactive
+      If "true", make config authoritative over mask/filter policies within the
+      in-scope catalogs and delete any actual policy discovered on an in-scope
+      securable but not declared in config — regardless of whether that securable
+      declares a ``policies`` list. Actual policies are discovered via the
+      ``abac_policy_definitions`` system table and scoped by
+      ``delete-policies-for-namespaces``. Off by default. Requires interactive
       confirmation unless ``force`` is also "true"; in a non-interactive GitHub
       Actions runner, ``force`` MUST be set or the run will error out.
     required: false
