@@ -63,11 +63,26 @@ def _build_catalog_in_clause(catalog_names: list[str]) -> str:
     return f"({quoted})"
 
 
-def _build_double_underscore_filter(name_columns: list[str]) -> str:
+def _build_double_underscore_filter(
+    name_columns: list[str], *, null_safe: bool = False
+) -> str:
     """Build the AND-chained predicate that excludes securables whose name — or any
     ancestor's name — starts with ``__`` (hidden, Databricks-managed system
     securables, e.g. SDP materializations). Returns a clause fragment beginning with
-    `` AND `` ready to append to an existing WHERE, or `''` if no columns are given."""
+    `` AND `` ready to append to an existing WHERE, or `''` if no columns are given.
+
+    When ``null_safe`` is set, each predicate is wrapped as
+    ``(<col> IS NULL OR ...)`` so a NULL in the column doesn't drop the row. This is
+    required for single tables of varying grain (e.g. ``abac_policy_definitions``,
+    where ``schema_name``/``securable_name`` are NULL for catalog/schema-attached
+    policies) — a bare ``substring(col, 1, 2) != '__'`` evaluates to NULL (not TRUE)
+    there and would silently drop those rows. Columns that are always populated
+    (e.g. ``catalog_name``) don't need it and should pass ``null_safe=False``."""
+    if null_safe:
+        return "".join(
+            f" AND ({col} IS NULL OR substring({col}, 1, 2) != '__')"
+            for col in name_columns
+        )
     return "".join(f" AND substring({col}, 1, 2) != '__'" for col in name_columns)
 
 
@@ -428,13 +443,19 @@ def _build_policy_securables_query(catalog_names: list[str]) -> str:
     ``(<col> IS NULL OR <predicate on col>)``. This guards catalog-level policies
     from being filtered out by schema predicates, and schema-level policies from
     being filtered out by securable predicates. ``catalog_name`` is always
-    non-NULL, so its ``__``-prefix predicate needs no guard. Note: we do NOT
-    reuse ``_build_double_underscore_filter`` here because it does not apply this
-    NULL-safety pattern. ``ROW_FILTER``/``COLUMN_MASK`` are the system-table
-    spellings — distinct from the SDK's ``POLICY_TYPE_*`` used in
-    ``_normalise_policy_info``.
+    non-NULL, so its ``__``-prefix predicate needs no guard (built via the shared
+    ``_build_double_underscore_filter`` with ``null_safe=False``); ``schema_name``
+    and ``securable_name`` use the same helper with ``null_safe=True``.
+    ``ROW_FILTER``/``COLUMN_MASK`` are the system-table spellings — distinct from
+    the SDK's ``POLICY_TYPE_*`` used in ``_normalise_policy_info``.
     """
     in_clause = _build_catalog_in_clause(catalog_names)
+    hidden_filter = (
+        _build_double_underscore_filter(["catalog_name"])
+        + _build_double_underscore_filter(
+            ["schema_name", "securable_name"], null_safe=True
+        )
+    )
     return (
         "SELECT DISTINCT "
         "  on_securable_type AS securable_type, "
@@ -447,10 +468,8 @@ def _build_policy_securables_query(catalog_names: list[str]) -> str:
         "WHERE catalog_name IN " + in_clause + " "
         "  AND policy_type IN ('ROW_FILTER', 'COLUMN_MASK') "
         "  AND on_securable_type IN ('CATALOG', 'SCHEMA', 'TABLE') "
-        "  AND substring(catalog_name, 1, 2) != '__' "
-        "  AND (schema_name IS NULL OR schema_name != 'information_schema') "
-        "  AND (schema_name IS NULL OR substring(schema_name, 1, 2) != '__') "
-        "  AND (securable_name IS NULL OR substring(securable_name, 1, 2) != '__')"
+        "  AND (schema_name IS NULL OR schema_name != 'information_schema')"
+        + hidden_filter
     )
 
 
