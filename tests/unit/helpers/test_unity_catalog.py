@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import sqlglot
 from databricks.sdk.service.sql import Disposition, StatementState
 
-from uc_declarative_abac.configs import ResourcesConfig
 from uc_declarative_abac.utils import OrchestratorError
 from uc_declarative_abac.helpers import UnityCatalogHelper
 from uc_declarative_abac.helpers.unity_catalog import _POLL_INTERVAL_SECONDS
@@ -1582,49 +1581,6 @@ def test_uc_helper_update_rfa_destinations_clears_all_when_empty():
 # ---------------------------------------------------------------------------
 
 
-def _mask_policy_dict(**overrides) -> dict:
-    base = {
-        "name": "p1",
-        "type": "mask",
-        "function": "cat.default.fn",
-        "to": ["analysts"],
-        "except": ["admins"],
-        "columns": [{"alias": "c", "has_tags": {"pii": "email"}}],
-    }
-    base.update(overrides)
-    return base
-
-
-def _config_with_policy(level: str = "table", **policy_overrides) -> ResourcesConfig:
-    policy = _mask_policy_dict(**policy_overrides)
-    if level == "catalog":
-        data = {"catalogs": {"cat": {"name": "cat", "policies": [policy]}}}
-    elif level == "schema":
-        data = {
-            "catalogs": {
-                "cat": {
-                    "name": "cat",
-                    "schemas": [{"name": "s", "policies": [policy]}],
-                }
-            }
-        }
-    else:
-        data = {
-            "catalogs": {
-                "cat": {
-                    "name": "cat",
-                    "schemas": [
-                        {
-                            "name": "s",
-                            "tables": [{"name": "t", "policies": [policy]}],
-                        }
-                    ],
-                }
-            }
-        }
-    return ResourcesConfig.model_validate(data)
-
-
 def _make_column_mask_policy_info(
     *,
     name: str = "p1",
@@ -1692,95 +1648,163 @@ def _make_row_filter_policy_info(
     return info
 
 
-def test_uc_helper_fetch_actual_policies_skips_sdk_when_no_policies_configured():
-    """A config with no mask/filter policies returns empty set without calling list_policies."""
-    config = ResourcesConfig.model_validate({"catalogs": {"cat": {"name": "cat"}}})
-    client = MagicMock()
+# ===== Query builder / parser tests (Group A) =====
+
+
+def test_build_policy_securables_query_parses_as_valid_sql():
+    """_parse_sql(_build_policy_securables_query(["cat"])) doesn't raise; references table abac_policy_definitions."""
+    from uc_declarative_abac.helpers.unity_catalog import _build_policy_securables_query
+
+    sql = _build_policy_securables_query(["cat"])
+    stmt = _parse_sql(sql)
+
+    # Should be a valid SQL statement (SELECT)
+    assert isinstance(stmt, sqlglot.exp.Select)
+
+    # Should reference abac_policy_definitions
+    tables = _get_table_names(stmt)
+    assert "abac_policy_definitions" in tables, f"Expected 'abac_policy_definitions' in {tables}"
+
+
+def test_build_policy_securables_query_filters_to_mask_and_filter_types():
+    """The query string contains 'ROW_FILTER' and 'COLUMN_MASK', and restricts on_securable_type to CATALOG/SCHEMA/TABLE."""
+    from uc_declarative_abac.helpers.unity_catalog import _build_policy_securables_query
+
+    sql = _build_policy_securables_query(["cat"])
+
+    # Must contain both policy types
+    assert "'ROW_FILTER'" in sql, "Expected 'ROW_FILTER' in query"
+    assert "'COLUMN_MASK'" in sql, "Expected 'COLUMN_MASK' in query"
+
+    # Must contain all three securable types in IN list and not MODEL
+    assert "'CATALOG'" in sql, "Expected 'CATALOG' in query"
+    assert "'SCHEMA'" in sql, "Expected 'SCHEMA' in query"
+    assert "'TABLE'" in sql, "Expected 'TABLE' in query"
+    assert "'MODEL'" not in sql, "Should not contain 'MODEL' in query"
+
+
+def test_build_policy_securables_query_null_guards_schema_and_securable_predicates():
+    """The query string contains schema_name IS NULL and securable_name IS NULL (NULL-safety guards)."""
+    from uc_declarative_abac.helpers.unity_catalog import _build_policy_securables_query
+
+    sql = _build_policy_securables_query(["cat"])
+    sql_lower = sql.lower()
+
+    # Both NULL guards must be present
+    assert "schema_name is null" in sql_lower, "Expected 'schema_name IS NULL' in query"
+    assert "securable_name is null" in sql_lower, "Expected 'securable_name IS NULL' in query"
+
+
+def test_build_policy_securables_query_scopes_to_given_catalogs():
+    """Building with ["cat_a", "cat_b"] includes both catalog names quoted in an IN clause."""
+    from uc_declarative_abac.helpers.unity_catalog import _build_policy_securables_query
+
+    sql = _build_policy_securables_query(["cat_a", "cat_b"])
+
+    # Both catalog names should be present quoted
+    assert "'cat_a'" in sql, "Expected 'cat_a' in query"
+    assert "'cat_b'" in sql, "Expected 'cat_b' in query"
+    assert "catalog_name in" in sql.lower(), "Expected 'catalog_name IN' in query"
+
+
+def test_parse_policy_securable_rows_reconstructs_securables():
+    """Input rows [["CATALOG","cat"],["SCHEMA","cat.s"],["TABLE","cat.s.t"]] -> correct set."""
+    from uc_declarative_abac.helpers.unity_catalog import _parse_policy_securable_rows
+
+    rows = [
+        ["CATALOG", "cat"],
+        ["SCHEMA", "cat.s"],
+        ["TABLE", "cat.s.t"],
+    ]
+
+    result = _parse_policy_securable_rows(rows)
+
+    expected = {
+        (SecurableType.CATALOG, "cat"),
+        (SecurableType.SCHEMA, "cat.s"),
+        (SecurableType.TABLE, "cat.s.t"),
+    }
+    assert result == expected, f"Expected {expected}, got {result}"
+
+
+def test_parse_policy_securable_rows_skips_unrecognised_securable_type():
+    """Input [["MODEL","cat.s.m"],["TABLE","cat.s.t"]] -> only {(SecurableType.TABLE,"cat.s.t")}."""
+    from uc_declarative_abac.helpers.unity_catalog import _parse_policy_securable_rows
+
+    rows = [
+        ["MODEL", "cat.s.m"],
+        ["TABLE", "cat.s.t"],
+    ]
+
+    result = _parse_policy_securable_rows(rows)
+
+    # Should skip MODEL and only include TABLE
+    expected = {(SecurableType.TABLE, "cat.s.t")}
+    assert result == expected, f"Expected {expected}, got {result}"
+
+
+# ===== fetch_actual_policies tests (Group B) =====
+
+
+def test_uc_helper_fetch_actual_policies_returns_empty_when_no_catalogs():
+    """fetch_actual_policies([]) returns set() and does NOT call execute_statement or list_policies."""
+    client = _make_mock_workspace_client()
     helper = UnityCatalogHelper(client, WAREHOUSE_ID)
 
-    assert helper.fetch_actual_policies(config) == set()
+    result = helper.fetch_actual_policies([])
+
+    assert result == set()
+    client.statement_execution.execute_statement.assert_not_called()
     client.policies.list_policies.assert_not_called()
 
 
-def test_uc_helper_fetch_actual_policies_calls_list_per_configured_securable():
-    """list_policies is called once per securable that has a mask/filter policy configured."""
-    config = ResourcesConfig.model_validate(
-        {
-            "catalogs": {
-                "cat": {
-                    "name": "cat",
-                    "policies": [_mask_policy_dict(name="cp")],
-                    "schemas": [
-                        {
-                            "name": "s",
-                            "policies": [_mask_policy_dict(name="sp")],
-                            "tables": [
-                                {"name": "t", "policies": [_mask_policy_dict(name="tp")]}
-                            ],
-                        }
-                    ],
-                }
-            }
-        }
-    )
-    client = MagicMock()
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetch_actual_policies_returns_empty_when_discovery_empty(mock_fetch):
+    """Discovery rows [] -> returns set(), does not call list_policies."""
+    mock_fetch.return_value = []
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    result = helper.fetch_actual_policies(["cat"])
+
+    assert result == set()
+    client.policies.list_policies.assert_not_called()
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetch_actual_policies_lists_per_discovered_securable(mock_fetch):
+    """Discovery rows [["CATALOG","cat"],["SCHEMA","cat.s"],["TABLE","cat.s.t"]]; assert list_policies called 3 times with correct kwargs."""
+    rows = [
+        ["CATALOG", "cat"],
+        ["SCHEMA", "cat.s"],
+        ["TABLE", "cat.s.t"],
+    ]
+    mock_fetch.return_value = rows
+    client = _make_mock_workspace_client()
     client.policies.list_policies.return_value = iter([])
     helper = UnityCatalogHelper(client, WAREHOUSE_ID)
 
-    helper.fetch_actual_policies(config)
+    helper.fetch_actual_policies(["cat"])
 
     assert client.policies.list_policies.call_count == 3
-    call_args = {
+    call_targets = {
         (c.kwargs.get("on_securable_type"), c.kwargs.get("on_securable_fullname"))
         for c in client.policies.list_policies.call_args_list
     }
-    assert call_args == {
+    expected_targets = {
         ("CATALOG", "cat"),
         ("SCHEMA", "cat.s"),
         ("TABLE", "cat.s.t"),
     }
+    assert call_targets == expected_targets, f"Expected {expected_targets}, got {call_targets}"
 
 
-def _list_policies_call_targets(client: MagicMock) -> set[tuple[str, str]]:
-    return {
-        (c.kwargs.get("on_securable_type"), c.kwargs.get("on_securable_fullname"))
-        for c in client.policies.list_policies.call_args_list
-    }
-
-
-def test_uc_helper_fetch_actual_policies_lists_securable_with_empty_policies():
-    """A securable declaring an explicit empty 'policies: []' is a managed securable
-    and is listed — required so its actual policies are visible for deletion."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {"cat": {"name": "cat", "policies": []}},
-    })
-    client = MagicMock()
-    client.policies.list_policies.return_value = iter([])
-    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
-
-    helper.fetch_actual_policies(config)
-
-    assert ("CATALOG", "cat") in _list_policies_call_targets(client)
-
-
-def test_uc_helper_fetch_actual_policies_skips_securable_when_policies_absent():
-    """A securable that omits the policies key (None) is unmanaged and is never
-    listed — its actual policies can never be deleted."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {"cat": {"name": "cat", "owner": "admin"}},
-    })
-    client = MagicMock()
-    client.policies.list_policies.return_value = iter([])
-    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
-
-    helper.fetch_actual_policies(config)
-
-    client.policies.list_policies.assert_not_called()
-
-
-def test_uc_helper_fetch_actual_policies_normalises_column_mask():
-    config = _config_with_policy("table")
-    client = MagicMock()
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetch_actual_policies_normalises_column_mask(mock_fetch):
+    """Discovery [["TABLE","cat.s.t"]]; list_policies returns column mask; assert normalized Policy."""
+    rows = [["TABLE", "cat.s.t"]]
+    mock_fetch.return_value = rows
+    client = _make_mock_workspace_client()
     client.policies.list_policies.return_value = iter([
         _make_column_mask_policy_info(
             using_column_aliases=("c_extra",),
@@ -1792,8 +1816,9 @@ def test_uc_helper_fetch_actual_policies_normalises_column_mask():
     ])
     helper = UnityCatalogHelper(client, WAREHOUSE_ID)
 
-    result = helper.fetch_actual_policies(config)
+    result = helper.fetch_actual_policies(["cat"])
     (policy,) = result
+
     assert isinstance(policy, Policy)
     assert policy.policy_type == PolicyType.MASK
     assert policy.securable_type == SecurableType.TABLE
@@ -1814,13 +1839,29 @@ def test_uc_helper_fetch_actual_policies_normalises_column_mask():
     )
 
 
-def test_uc_helper_fetch_actual_policies_preserves_constant_using_columns():
-    """Constant (non-column) USING COLUMNS arguments are kept verbatim and in
-    declaration order. Previously they were dropped (only column aliases survived),
-    so a policy with a constant arg looked different from the desired state on every
-    run and was perpetually replaced."""
-    config = _config_with_policy("table")
-    client = MagicMock()
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetch_actual_policies_normalises_row_filter(mock_fetch):
+    """Discovery [["TABLE","cat.s.t"]]; list_policies returns row filter; assert normalized Policy."""
+    rows = [["TABLE", "cat.s.t"]]
+    mock_fetch.return_value = rows
+    client = _make_mock_workspace_client()
+    client.policies.list_policies.return_value = iter([_make_row_filter_policy_info()])
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    (policy,) = helper.fetch_actual_policies(["cat"])
+
+    assert policy.policy_type == PolicyType.FILTER
+    assert policy.function_name == "cat.default.filter_fn"
+    assert policy.on_column is None
+    assert policy.using_columns == ("c_region",)
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetch_actual_policies_preserves_constant_using_columns(mock_fetch):
+    """Discovery [["TABLE","cat.s.t"]]; column mask with constant using columns."""
+    rows = [["TABLE", "cat.s.t"]]
+    mock_fetch.return_value = rows
+    client = _make_mock_workspace_client()
     info = _make_column_mask_policy_info()
     # USING COLUMNS (domain, '####') — a column reference followed by a constant.
     info.column_mask.using = [
@@ -1830,14 +1871,16 @@ def test_uc_helper_fetch_actual_policies_preserves_constant_using_columns():
     client.policies.list_policies.return_value = iter([info])
     helper = UnityCatalogHelper(client, WAREHOUSE_ID)
 
-    (policy,) = helper.fetch_actual_policies(config)
+    (policy,) = helper.fetch_actual_policies(["cat"])
     assert policy.using_columns == ("domain", "'####'")
 
 
-def test_uc_helper_fetch_actual_policies_preserves_constant_using_columns_in_row_filter():
-    """The same constant preservation applies to row-filter policies."""
-    config = _config_with_policy("table", type="filter", function="cat.default.filter_fn")
-    client = MagicMock()
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetch_actual_policies_preserves_constant_using_columns_in_row_filter(mock_fetch):
+    """Discovery [["TABLE","cat.s.t"]]; row filter with constant using columns."""
+    rows = [["TABLE", "cat.s.t"]]
+    mock_fetch.return_value = rows
+    client = _make_mock_workspace_client()
     info = _make_row_filter_policy_info()
     info.row_filter.using = [
         MagicMock(alias="region", constant=None),
@@ -1846,99 +1889,81 @@ def test_uc_helper_fetch_actual_policies_preserves_constant_using_columns_in_row
     client.policies.list_policies.return_value = iter([info])
     helper = UnityCatalogHelper(client, WAREHOUSE_ID)
 
-    (policy,) = helper.fetch_actual_policies(config)
+    (policy,) = helper.fetch_actual_policies(["cat"])
     assert policy.using_columns == ("region", "'EU'")
 
 
-def test_uc_helper_fetch_actual_policies_normalises_row_filter():
-    config = _config_with_policy("table", type="filter", function="cat.default.filter_fn")
-    client = MagicMock()
-    client.policies.list_policies.return_value = iter([_make_row_filter_policy_info()])
-    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
-
-    (policy,) = helper.fetch_actual_policies(config)
-    assert policy.policy_type == PolicyType.FILTER
-    assert policy.function_name == "cat.default.filter_fn"
-    assert policy.on_column is None
-    assert policy.using_columns == ("c_region",)
-
-
-def test_uc_helper_fetch_actual_policies_filters_out_unknown_policy_types():
-    """Policies of non-mask/filter types (future SDK additions) are skipped."""
-    config = _config_with_policy("table")
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetch_actual_policies_filters_out_unknown_policy_types(mock_fetch):
+    """Discovery [["TABLE","cat.s.t"]]; list_policies returns unknown type; result empty."""
+    rows = [["TABLE", "cat.s.t"]]
+    mock_fetch.return_value = rows
     fake = MagicMock()
     fake.policy_type = MagicMock()
     fake.policy_type.value = "POLICY_TYPE_OTHER"
-    client = MagicMock()
+    client = _make_mock_workspace_client()
     client.policies.list_policies.return_value = iter([fake])
     helper = UnityCatalogHelper(client, WAREHOUSE_ID)
 
-    assert helper.fetch_actual_policies(config) == set()
+    result = helper.fetch_actual_policies(["cat"])
+    assert result == set()
 
 
-def test_uc_helper_fetch_actual_policies_treats_missing_securable_as_no_policies():
-    """A NotFound from list_policies (parent securable doesn't yet exist —
-    e.g., a schema declared in YAML and scheduled for creation on this same
-    run) must map to an empty result for that securable rather than aborting
-    the fetch. Other securables in the fan-out must still be aggregated.
-
-    The real SDK paginator raises lazily — the HTTP request fires on first
-    iteration, not on the call — so this test simulates a generator that
-    raises on first ``next()``."""
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetch_actual_policies_treats_missing_securable_as_no_policies(mock_fetch):
+    """Discovery two rows; list_policies raises NotFound for first; assert len(result) == 1."""
     from databricks.sdk.errors import NotFound
 
-    config = ResourcesConfig.model_validate(
-        {
-            "catalogs": {
-                "cat": {
-                    "name": "cat",
-                    "schemas": [
-                        {"name": "missing", "policies": [_mask_policy_dict(name="mp")]},
-                        {"name": "present", "policies": [_mask_policy_dict(name="pp")]},
-                    ],
-                }
-            }
-        }
-    )
-    client = MagicMock()
+    rows = [
+        ["SCHEMA", "cat.missing"],
+        ["SCHEMA", "cat.present"],
+    ]
+    mock_fetch.return_value = rows
+    client = _make_mock_workspace_client()
 
     def _missing_paginator():
-        raise NotFound("Schema 'cat.missing' does not exist.")
-        yield  # unreachable, but makes this a generator function
+        raise NotFound("Schema does not exist.")
+        yield  # unreachable, makes this a generator
 
-    def list_side_effect(*, on_securable_type, on_securable_fullname, **_):
+    def list_side_effect(*, on_securable_fullname, **_):
         if on_securable_fullname == "cat.missing":
             return _missing_paginator()
-        return iter([_make_column_mask_policy_info()])
+        return iter([_make_column_mask_policy_info(on_securable_fullname="cat.present")])
 
     client.policies.list_policies.side_effect = list_side_effect
     helper = UnityCatalogHelper(client, WAREHOUSE_ID)
 
-    result = helper.fetch_actual_policies(config)
-
+    result = helper.fetch_actual_policies(["cat"])
     assert len(result) == 1
 
 
-def test_uc_helper_fetch_actual_policies_caches_result():
-    config = _config_with_policy("table")
-    client = MagicMock()
-    client.policies.list_policies.side_effect = [iter([_make_column_mask_policy_info()])]
-    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
-
-    first = helper.fetch_actual_policies(config)
-    second = helper.fetch_actual_policies(config)
-
-    assert first == second
-    client.policies.list_policies.assert_called_once()
-
-
-def test_uc_helper_fetch_actual_policies_handles_empty_except_principals():
-    config = _config_with_policy("table")
-    client = MagicMock()
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetch_actual_policies_handles_empty_except_principals(mock_fetch):
+    """Discovery [["TABLE","cat.s.t"]]; except_principals=None; assert policy.except_principals == ()."""
+    rows = [["TABLE", "cat.s.t"]]
+    mock_fetch.return_value = rows
+    client = _make_mock_workspace_client()
     client.policies.list_policies.return_value = iter([
         _make_column_mask_policy_info(except_principals=None)
     ])
     helper = UnityCatalogHelper(client, WAREHOUSE_ID)
 
-    (policy,) = helper.fetch_actual_policies(config)
+    (policy,) = helper.fetch_actual_policies(["cat"])
     assert policy.except_principals == ()
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetch_actual_policies_caches_result(mock_fetch):
+    """Call fetch_actual_policies twice; assert results equal, list_policies called once, execute_statement called once."""
+    rows = [["TABLE", "cat.s.t"]]
+    mock_fetch.return_value = rows
+    client = _make_mock_workspace_client()
+    client.policies.list_policies.side_effect = [iter([_make_column_mask_policy_info()])]
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    first = helper.fetch_actual_policies(["cat"])
+    second = helper.fetch_actual_policies(["cat"])
+
+    assert first == second
+    client.policies.list_policies.assert_called_once()
+    client.statement_execution.execute_statement.assert_called_once()
