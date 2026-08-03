@@ -308,7 +308,7 @@ def run(
         actual_securables_f = pool.submit(
             uc_helper.fetch_actual_securables, catalog_names, rfa_targets,
         )
-        actual_policies_f = pool.submit(uc_helper.fetch_actual_policies, config)
+        actual_policies_f = pool.submit(uc_helper.fetch_actual_policies, catalog_names)
         actual_governed_tags_f = pool.submit(
             ws_helper.fetch_actual_governed_tags, desired_governed_tag_names,
         )

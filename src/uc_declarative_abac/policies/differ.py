@@ -46,9 +46,13 @@ def compute_policy_diff(
     ``parse_namespace_filter``) that policy deletion applies to; an actual policy
     absent from the desired set whose securable falls in scope is a deletion
     candidate. The default empty scope means "never delete" — so with policy
-    deletion off this is byte-identical to the additive-only behaviour. Note the
-    ``actual`` set only ever contains policies on **managed** securables, so an
-    unmanaged securable is never a deletion candidate regardless of scope.
+    deletion off this is byte-identical to the additive-only behaviour. The
+    ``actual`` set now holds *every* mask/filter policy discovered in the in-scope
+    catalogs (via the ``abac_policy_definitions`` system table), regardless of
+    whether its securable declares a ``policies`` list in config; deletion is
+    gated solely by ``delete_scope``. So with deletion off, extra actual policies
+    on undeclared securables are simply ignored (never a create/replace, since
+    those iterate the desired set only, and never a delete under an empty scope).
     """
     desired_resolved = _resolve_policy_principals(
         desired, resolver, change_logger, ignore_unresolvable

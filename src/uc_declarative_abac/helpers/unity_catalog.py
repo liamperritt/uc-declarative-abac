@@ -26,9 +26,6 @@ from databricks.sdk.service.sql import (
 
 import logging
 
-from uc_declarative_abac.configs import (
-    ResourcesConfig,
-)
 from uc_declarative_abac.policies import Policy
 from uc_declarative_abac.principals import Principal
 from uc_declarative_abac.tags import SecurableTag
@@ -66,11 +63,26 @@ def _build_catalog_in_clause(catalog_names: list[str]) -> str:
     return f"({quoted})"
 
 
-def _build_double_underscore_filter(name_columns: list[str]) -> str:
+def _build_double_underscore_filter(
+    name_columns: list[str], *, null_safe: bool = False
+) -> str:
     """Build the AND-chained predicate that excludes securables whose name — or any
     ancestor's name — starts with ``__`` (hidden, Databricks-managed system
     securables, e.g. SDP materializations). Returns a clause fragment beginning with
-    `` AND `` ready to append to an existing WHERE, or `''` if no columns are given."""
+    `` AND `` ready to append to an existing WHERE, or `''` if no columns are given.
+
+    When ``null_safe`` is set, each predicate is wrapped as
+    ``(<col> IS NULL OR ...)`` so a NULL in the column doesn't drop the row. This is
+    required for single tables of varying grain (e.g. ``abac_policy_definitions``,
+    where ``schema_name``/``securable_name`` are NULL for catalog/schema-attached
+    policies) — a bare ``substring(col, 1, 2) != '__'`` evaluates to NULL (not TRUE)
+    there and would silently drop those rows. Columns that are always populated
+    (e.g. ``catalog_name``) don't need it and should pass ``null_safe=False``."""
+    if null_safe:
+        return "".join(
+            f" AND ({col} IS NULL OR substring({col}, 1, 2) != '__')"
+            for col in name_columns
+        )
     return "".join(f" AND substring({col}, 1, 2) != '__'" for col in name_columns)
 
 
@@ -412,29 +424,72 @@ def _parse_securable_rows(
     return securables, attributes
 
 
-def _collect_policy_securables(
-    config: ResourcesConfig,
-) -> set[tuple[SecurableType, str]]:
-    """Return the securables whose actual mask/filter policies must be fetched.
+def _build_policy_securables_query(catalog_names: list[str]) -> str:
+    """Build a single-scan discovery query against the system table for securables carrying mask/filter policies.
 
-    A securable is included when its ``policies`` field is **present** (not
-    ``None``) — i.e. it declares a policy list, even an empty one or a list of
-    only grant policies. This is deliberately broader than "declares a mask/filter
-    policy": it also covers the authoritative-deletion cases, so that a securable
-    declaring ``policies: []`` still has its actual policies fetched and thus
-    visible for deletion. A securable that omits ``policies`` (``None``) is
-    unmanaged — its actual policies are never fetched and so can never be deleted.
+    Returns all catalogs, schemas, and tables that have ROW_FILTER or COLUMN_MASK
+    policies attached, using the system.information_schema.abac_policy_definitions table.
+
+    **NULL-safety notes:**
+    The ``abac_policy_definitions`` table has varying grain across rows:
+    - CATALOG-level policies have schema_name=NULL and securable_name=NULL
+    - SCHEMA-level policies have securable_name=NULL
+    - TABLE-level policies have all three name components populated
+
+    A bare predicate like ``substring(schema_name, 1, 2) != '__'`` or
+    ``schema_name != 'information_schema'`` evaluates to NULL (not TRUE) when
+    schema_name is NULL, causing the row to be silently dropped. Therefore,
+    every predicate that references a nullable name column is wrapped as
+    ``(<col> IS NULL OR <predicate on col>)``. This guards catalog-level policies
+    from being filtered out by schema predicates, and schema-level policies from
+    being filtered out by securable predicates. ``catalog_name`` is always
+    non-NULL, so its ``__``-prefix predicate needs no guard (built via the shared
+    ``_build_double_underscore_filter`` with ``null_safe=False``); ``schema_name``
+    and ``securable_name`` use the same helper with ``null_safe=True``.
+    ``ROW_FILTER``/``COLUMN_MASK`` are the system-table spellings — distinct from
+    the SDK's ``POLICY_TYPE_*`` used in ``_normalise_policy_info``.
+    """
+    in_clause = _build_catalog_in_clause(catalog_names)
+    hidden_filter = (
+        _build_double_underscore_filter(["catalog_name"])
+        + _build_double_underscore_filter(
+            ["schema_name", "securable_name"], null_safe=True
+        )
+    )
+    return (
+        "SELECT DISTINCT "
+        "  on_securable_type AS securable_type, "
+        "  CASE on_securable_type "
+        "    WHEN 'CATALOG' THEN catalog_name "
+        "    WHEN 'SCHEMA'  THEN concat(catalog_name, '.', schema_name) "
+        "    WHEN 'TABLE'   THEN concat(catalog_name, '.', schema_name, '.', securable_name) "
+        "  END AS securable_full_name "
+        "FROM system.information_schema.abac_policy_definitions "
+        "WHERE catalog_name IN " + in_clause + " "
+        "  AND policy_type IN ('ROW_FILTER', 'COLUMN_MASK') "
+        "  AND on_securable_type IN ('CATALOG', 'SCHEMA', 'TABLE') "
+        "  AND (schema_name IS NULL OR schema_name != 'information_schema')"
+        + hidden_filter
+    )
+
+
+def _parse_policy_securable_rows(
+    rows: list[list[str]],
+) -> set[tuple[SecurableType, str]]:
+    """Parse discovery rows into (SecurableType, full_name) pairs.
+
+    Positional row format: [securable_type_str, full_name_str]. Converts
+    securable_type_str to SecurableType enum. Rows with unrecognised
+    securable types (e.g., "MODEL") are skipped with a logged warning.
     """
     result: set[tuple[SecurableType, str]] = set()
-    for catalog in config.catalogs.values():
-        if catalog.policies is not None:
-            result.add((SecurableType.CATALOG, catalog.full_name))
-        for schema in catalog.schemas or []:
-            if schema.policies is not None:
-                result.add((SecurableType.SCHEMA, schema.full_name))
-            for table in schema.tables or []:
-                if table.policies is not None:
-                    result.add((SecurableType.TABLE, table.full_name))
+    for row in rows:
+        try:
+            securable_type = SecurableType(row[0])
+        except ValueError:
+            _logger.warning(f"Skipping policy securable from system table: unsupported type '{row[0]}'")
+            continue
+        result.add((securable_type, row[1]))
     return result
 
 
@@ -777,22 +832,42 @@ class UnityCatalogHelper:
             case SecurableType.FUNCTION:
                 self._client.functions.update(full_name, owner=new_owner)
 
-    def fetch_actual_policies(self, config: ResourcesConfig) -> set[Policy]:
-        """Return mask/filter policies attached to any policy-managed securable.
+    def fetch_actual_policies(self, catalog_names: list[str]) -> set[Policy]:
+        """Return mask/filter policies attached to any securable in the catalogs.
 
-        Walks the config for every catalog/schema/table that declares a
-        ``policies`` list (see ``_collect_policy_securables`` — a present list,
-        even an empty one, marks a securable as managed), then fans out one
-        list_policies SDK call per securable via a thread pool (max 16
-        concurrent). Results from the SDK are normalised into Policy instances.
-        Policies of non-mask/filter types are skipped.
+        Uses a two-phase discovery:
+        1. **Discovery via system table** (catalog-scoped): Scans
+           system.information_schema.abac_policy_definitions to find all
+           securables carrying ROW_FILTER or COLUMN_MASK policies.
+        2. **Fetch full detail via list_policies**: For each discovered
+           securable, calls the SDK's ``list_policies`` to retrieve complete
+           policy metadata (function_name, on_column, using_columns,
+           match_columns, comment, etc.) that is not available in the system
+           table.
 
-        Results are cached after the first call.
+        The system table lacks function_name/on_column/using_columns/comment
+        and stores match_columns as a flat array, so it can only discover
+        securables carrying policies, not reconstruct the policies themselves.
+
+        Results are cached after the first call; subsequent calls return the
+        cached set without executing SQL or calling list_policies.
+
+        If the catalog_names list is empty, returns an empty set without
+        executing any SQL. If discovery finds no securables, returns an
+        empty set without calling list_policies (avoids spinning up an idle
+        thread pool).
         """
         if self._policies_cache is not None:
             return self._policies_cache
 
-        securables = _collect_policy_securables(config)
+        if not catalog_names:
+            self._policies_cache = set()
+            return self._policies_cache
+
+        response = self._execute_and_poll(_build_policy_securables_query(catalog_names))
+        rows = _fetch_external_links_rows(response)
+        securables = _parse_policy_securable_rows(rows)
+
         if not securables:
             self._policies_cache = set()
             return self._policies_cache
@@ -804,7 +879,7 @@ class UnityCatalogHelper:
                 for sec_type, full_name in securables
             }
             for future in as_completed(futures):
-                result |= future.result()
+                result.update(future.result())
 
         self._policies_cache = result
         return self._policies_cache

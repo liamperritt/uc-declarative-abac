@@ -193,6 +193,7 @@ def _install_fetch_router(
     config_dict: dict,
     tag_rows: list[list] | None = None,
     privilege_rows: list[list] | None = None,
+    policy_securable_rows: list[list] | None = None,
 ) -> None:
     """Monkeypatch ``_fetch_external_links_rows`` so it routes by the executed SQL:
 
@@ -200,6 +201,11 @@ def _install_fetch_router(
       in ``config_dict`` (so the differ's nonexistent-securable check passes),
     - tags query -> ``tag_rows`` or ``[]``,
     - privileges query -> ``privilege_rows`` or ``[]``,
+    - policy-discovery query (``abac_policy_definitions``) -> ``policy_securable_rows``
+      or ``[]``. Each row is ``[on_securable_type, full_name]`` and represents a
+      securable that carries a mask/filter policy in UC — the helper then fans out
+      ``list_policies`` per discovered securable to get full detail. An empty list
+      means "no actual policies exist", so the fan-out is skipped entirely.
     - anything else -> ``[]``.
 
     Assumes each response returned by execute_statement carries ``._sql`` — set by
@@ -209,6 +215,8 @@ def _install_fetch_router(
 
     def _route(response):
         sql = (getattr(response, "_sql", "") or "").lower()
+        if "abac_policy_definitions" in sql:
+            return policy_securable_rows or []
         if "catalog_owner" in sql or "schema_owner" in sql or "routine_owner" in sql:
             return sec_rows
         if any(t in sql for t in ("catalog_tags", "schema_tags", "table_tags", "volume_tags", "column_tags")):
@@ -724,7 +732,10 @@ def test_orchestrator_policies_workflow_is_idempotent(
     config = _catalog_with_mask_policy_config()
     root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
-    _install_fetch_router(monkeypatch, config)
+    # Discovery finds the catalog carries a mask policy, so list_policies is consulted.
+    _install_fetch_router(
+        monkeypatch, config, policy_securable_rows=[["CATALOG", "my_catalog"]]
+    )
     _setup_mock_principals_with_groups(mock_workspace_client, ["analysts", "admins"])
 
     # Configure list_policies to return the matching desired policy
@@ -793,7 +804,10 @@ def test_orchestrator_deletes_stale_policy_when_deletion_enabled_and_forced(
     config = _catalog_with_empty_policies_config()
     root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
-    _install_fetch_router(monkeypatch, config)
+    # Discovery surfaces the stale policy's securable so list_policies is consulted.
+    _install_fetch_router(
+        monkeypatch, config, policy_securable_rows=[["CATALOG", "my_catalog"]]
+    )
     _setup_mock_principals_with_groups(mock_workspace_client, ["analysts"])
     mock_workspace_client.policies.list_policies.return_value = iter([
         _fake_stale_catalog_mask_policy()
@@ -819,7 +833,10 @@ def test_orchestrator_leaves_stale_policy_when_deletion_disabled(
     config = _catalog_with_empty_policies_config()
     root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
-    _install_fetch_router(monkeypatch, config)
+    # Discovery surfaces the stale policy, but with deletion off it must not be reaped.
+    _install_fetch_router(
+        monkeypatch, config, policy_securable_rows=[["CATALOG", "my_catalog"]]
+    )
     _setup_mock_principals_with_groups(mock_workspace_client, ["analysts"])
     mock_workspace_client.policies.list_policies.return_value = iter([
         _fake_stale_catalog_mask_policy()
@@ -977,6 +994,10 @@ def _seed_actual_state_for_sp_idempotency(mock_workspace_client: MagicMock, sp_a
     # _fetch_external_links_rows is called per-query; route by SQL content.
     def _rows_for_sql(sql: str) -> list[list[str]]:
         lower = sql.lower()
+        # Policy-discovery query — the catalog carries the mask policy, so list_policies
+        # is consulted for it (returning the fake_policy seeded below).
+        if "abac_policy_definitions" in lower:
+            return [["CATALOG", "my_catalog"]]
         # Securables query — return rows for the declared catalog (plus the default
         # schema auto-created by the consolidator because the catalog has catalog-
         # level policies) so the nonexistent-securable check in the differ passes.

@@ -209,11 +209,12 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         default=argparse.SUPPRESS,
         help=(
-            "Make a securable's configured mask/filter policies authoritative: any actual policy "
-            "on that securable not declared in config is deleted. A securable with an explicit "
-            "empty 'policies: []' has all its policies removed; one that omits 'policies' "
-            "entirely is left untouched. Off by default. Requires interactive confirmation at "
-            "the terminal unless --force is set."
+            "Make config authoritative over mask/filter policies within the in-scope catalogs: "
+            "any actual policy discovered on an in-scope securable but not declared in config is "
+            "deleted, regardless of whether that securable declares a 'policies' list. Actual "
+            "policies are discovered via the abac_policy_definitions system table and scoped by "
+            "--delete-policies-for-namespaces. Off by default. Requires interactive confirmation "
+            "at the terminal unless --force is set."
         ),
     )
     parser.add_argument(
