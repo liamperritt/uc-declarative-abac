@@ -29,7 +29,9 @@ def _format_tag(tag_name: str, tag_value: str | None) -> str:
     return f"{tag_name}='{tag_value or ''}'"
 
 
-def _format_change_line(symbol: str, securable_type: str, full_name: str, action: str) -> str:
+def _format_change_line(
+    symbol: str, securable_type: str, full_name: str, action: str
+) -> str:
     """Format a single change line with columnar alignment.
 
     Example:  + CATALOG my_catalog                  ADDED tag env='prod'
@@ -46,7 +48,8 @@ def _format_set_delta(added: frozenset[str], removed: frozenset[str]) -> str:
 
 
 def _format_principal_delta(
-    added: frozenset[Principal], removed: frozenset[Principal],
+    added: frozenset[Principal],
+    removed: frozenset[Principal],
 ) -> str:
     """Format an add/remove delta on a Principal set as `+name, -name` (sorted by name)."""
     parts: list[str] = []
@@ -76,6 +79,7 @@ def _format_function_diff(info: Securable, old: Securable | None) -> str:
     (``definition``) is intentionally summarised as ``definition: changed``
     rather than inlined — multi-line SQL would break the columnar log layout."""
     from uc_declarative_abac.securables import Function
+
     if old is None or not isinstance(info, Function) or not isinstance(old, Function):
         return ""
     parts: list[str] = []
@@ -100,7 +104,9 @@ def _format_policy_diff(new: Policy, old: Policy | None) -> str:
     parts: list[str] = []
     for field_name in ("function_name", "when_condition", "on_column", "comment"):
         delta = _format_scalar_delta(
-            field_name, getattr(old, field_name), getattr(new, field_name),
+            field_name,
+            getattr(old, field_name),
+            getattr(new, field_name),
         )
         if delta:
             parts.append(delta)
@@ -203,7 +209,9 @@ class ChangeLogger:
 
     def log_banner(self) -> None:
         """Log the opening banner."""
-        title = "UC Declarative ABAC (dry run)" if self._dry_run else "UC Declarative ABAC"
+        title = (
+            "UC Declarative ABAC (dry run)" if self._dry_run else "UC Declarative ABAC"
+        )
         self._logger.info("")
         self._logger.info(title)
         self._logger.info("=" * len(title))
@@ -234,10 +242,14 @@ class ChangeLogger:
         self._tags_added += 1
         action_verb = "Add" if self._dry_run else "Added"
         display = _format_tag(tag.tag_name, tag.tag_value)
-        self._log_info(_format_change_line(
-            "+", tag.securable_type.value, tag.securable_full_name,
-            f"{action_verb} tag: {display}",
-        ))
+        self._log_info(
+            _format_change_line(
+                "+",
+                tag.securable_type.value,
+                tag.securable_full_name,
+                f"{action_verb} tag: {display}",
+            )
+        )
 
     def log_tag_update(self, tag: SecurableTag, old_value: str | None) -> None:
         """Log a tag value being updated on a securable."""
@@ -245,19 +257,27 @@ class ChangeLogger:
         action_verb = "Update" if self._dry_run else "Updated"
         old_display = _format_tag(tag.tag_name, old_value)
         new_display = _format_tag(tag.tag_name, tag.tag_value)
-        self._log_info(_format_change_line(
-            "~", tag.securable_type.value, tag.securable_full_name,
-            f"{action_verb} tag: {old_display} -> {new_display}",
-        ))
+        self._log_info(
+            _format_change_line(
+                "~",
+                tag.securable_type.value,
+                tag.securable_full_name,
+                f"{action_verb} tag: {old_display} -> {new_display}",
+            )
+        )
 
     def log_tag_remove(self, tag: SecurableTag) -> None:
         """Log a tag being removed from a securable."""
         self._tags_removed += 1
         action_verb = "Remove" if self._dry_run else "Removed"
-        self._log_info(_format_change_line(
-            "-", tag.securable_type.value, tag.securable_full_name,
-            f"{action_verb} tag: {tag.tag_name}",
-        ))
+        self._log_info(
+            _format_change_line(
+                "-",
+                tag.securable_type.value,
+                tag.securable_full_name,
+                f"{action_verb} tag: {tag.tag_name}",
+            )
+        )
 
     # ------------------------------------------------------------------
     # Privilege logging
@@ -274,20 +294,28 @@ class ChangeLogger:
         self._privileges_granted += 1
         action_verb = "Grant" if self._dry_run else "Granted"
         name = self._principal_name(privilege.principal)
-        self._log_info(_format_change_line(
-            "+", privilege.securable_type.value, privilege.securable_full_name,
-            f"{action_verb} {privilege.privilege_type.value.upper()} to '{name}'",
-        ))
+        self._log_info(
+            _format_change_line(
+                "+",
+                privilege.securable_type.value,
+                privilege.securable_full_name,
+                f"{action_verb} {privilege.privilege_type.value.upper()} to '{name}'",
+            )
+        )
 
     def log_revoke(self, privilege: SecurablePrivilege) -> None:
         """Log a privilege being revoked."""
         self._privileges_revoked += 1
         action_verb = "Revoke" if self._dry_run else "Revoked"
         name = self._principal_name(privilege.principal)
-        self._log_info(_format_change_line(
-            "-", privilege.securable_type.value, privilege.securable_full_name,
-            f"{action_verb} {privilege.privilege_type.value.upper()} from '{name}'",
-        ))
+        self._log_info(
+            _format_change_line(
+                "-",
+                privilege.securable_type.value,
+                privilege.securable_full_name,
+                f"{action_verb} {privilege.privilege_type.value.upper()} from '{name}'",
+            )
+        )
 
     # ------------------------------------------------------------------
     # Securable logging
@@ -316,21 +344,31 @@ class ChangeLogger:
         action_verb = "Update" if self._dry_run else "Updated"
         old = self._display_value(update.old_value)
         new = self._display_value(update.new_value)
-        self._log_info(_format_change_line(
-            "~", update.securable_type.value, update.full_name,
-            f"{action_verb} {update.attribute}: {old} -> {new}",
-        ))
+        self._log_info(
+            _format_change_line(
+                "~",
+                update.securable_type.value,
+                update.full_name,
+                f"{action_verb} {update.attribute}: {old} -> {new}",
+            )
+        )
 
     def log_securable_create(self, info: Securable) -> None:
         """Log a securable being created."""
         self._securables_created += 1
         action_verb = "Create" if self._dry_run else "Created"
-        self._log_info(_format_change_line(
-            "+", info.securable_type.value, info.full_name,
-            f"{action_verb} {info.securable_type.value.lower()}",
-        ))
+        self._log_info(
+            _format_change_line(
+                "+",
+                info.securable_type.value,
+                info.full_name,
+                f"{action_verb} {info.securable_type.value.lower()}",
+            )
+        )
 
-    def log_securable_replace(self, info: Securable, old: Securable | None = None) -> None:
+    def log_securable_replace(
+        self, info: Securable, old: Securable | None = None
+    ) -> None:
         """Log a securable being replaced. When ``old`` is provided alongside a
         Function ``info``, the line includes a pipe-joined per-field diff so the
         reader can see which fields actually changed."""
@@ -340,9 +378,14 @@ class ChangeLogger:
         suffix = _format_function_diff(info, old)
         if suffix:
             action = f"{action} ({suffix})"
-        self._log_info(_format_change_line(
-            "~", info.securable_type.value, info.full_name, action,
-        ))
+        self._log_info(
+            _format_change_line(
+                "~",
+                info.securable_type.value,
+                info.full_name,
+                action,
+            )
+        )
 
     # ------------------------------------------------------------------
     # Policy logging
@@ -352,10 +395,14 @@ class ChangeLogger:
         """Log a mask/filter policy being created."""
         self._policies_created += 1
         action_verb = "Create" if self._dry_run else "Created"
-        self._log_info(_format_change_line(
-            "+", policy.securable_type.value, policy.securable_full_name,
-            f"{action_verb} {policy.policy_type.value} policy '{policy.name}'",
-        ))
+        self._log_info(
+            _format_change_line(
+                "+",
+                policy.securable_type.value,
+                policy.securable_full_name,
+                f"{action_verb} {policy.policy_type.value} policy '{policy.name}'",
+            )
+        )
 
     def log_policy_replace(self, policy: Policy, old: Policy | None = None) -> None:
         """Log a mask/filter policy being replaced. When ``old`` is provided,
@@ -367,19 +414,28 @@ class ChangeLogger:
         suffix = _format_policy_diff(policy, old)
         if suffix:
             action = f"{action} ({suffix})"
-        self._log_info(_format_change_line(
-            "~", policy.securable_type.value, policy.securable_full_name, action,
-        ))
+        self._log_info(
+            _format_change_line(
+                "~",
+                policy.securable_type.value,
+                policy.securable_full_name,
+                action,
+            )
+        )
 
     def log_policy_delete(self, policy: Policy) -> None:
         """Log a mask/filter policy being deleted (config is authoritative and the
         policy is no longer declared)."""
         self._policies_deleted += 1
         action_verb = "Delete" if self._dry_run else "Deleted"
-        self._log_info(_format_change_line(
-            "-", policy.securable_type.value, policy.securable_full_name,
-            f"{action_verb} {policy.policy_type.value} policy '{policy.name}'",
-        ))
+        self._log_info(
+            _format_change_line(
+                "-",
+                policy.securable_type.value,
+                policy.securable_full_name,
+                f"{action_verb} {policy.policy_type.value} policy '{policy.name}'",
+            )
+        )
 
     # ------------------------------------------------------------------
     # Governed tag logging
@@ -399,15 +455,16 @@ class ChangeLogger:
         if gt.allowed_values:
             parts.append(f"allowed_values={','.join(sorted(gt.allowed_values))}")
         if gt.assigners:
-            parts.append(
-                f"assigners="
-                f"{','.join(sorted(p.name for p in gt.assigners))}"
-            )
+            parts.append(f"assigners={','.join(sorted(p.name for p in gt.assigners))}")
         suffix = f" ({' | '.join(parts)})" if parts else ""
-        self._log_info(_format_change_line(
-            "+", "GOVERNED_TAG", gt.name,
-            f"{action_verb} governed tag{suffix}",
-        ))
+        self._log_info(
+            _format_change_line(
+                "+",
+                "GOVERNED_TAG",
+                gt.name,
+                f"{action_verb} governed tag{suffix}",
+            )
+        )
 
     def log_governed_tag_update(self, gt: GovernedTag, old: GovernedTag | None) -> None:
         """Log a governed tag being updated — shows the specific deltas per field.
@@ -433,7 +490,9 @@ class ChangeLogger:
         added_values = gt.allowed_values - old_values
         removed_values = old_values - gt.allowed_values
         if added_values or removed_values:
-            parts.append(f"allowed_values: {_format_set_delta(added_values, removed_values)}")
+            parts.append(
+                f"allowed_values: {_format_set_delta(added_values, removed_values)}"
+            )
 
         added_assigners = gt.assigners - old_assigners
         removed_assigners = old_assigners - gt.assigners
@@ -446,10 +505,14 @@ class ChangeLogger:
             )
 
         summary = " | ".join(parts) if parts else "no fields"
-        self._log_info(_format_change_line(
-            "~", "GOVERNED_TAG", gt.name,
-            f"{action_verb} governed tag ({summary})",
-        ))
+        self._log_info(
+            _format_change_line(
+                "~",
+                "GOVERNED_TAG",
+                gt.name,
+                f"{action_verb} governed tag ({summary})",
+            )
+        )
 
     def log_governed_tag_delete(self, gt: GovernedTag) -> None:
         """Log a governed tag being deleted — enumerates the description, allowed
@@ -465,15 +528,16 @@ class ChangeLogger:
         if gt.allowed_values:
             parts.append(f"allowed_values={','.join(sorted(gt.allowed_values))}")
         if gt.assigners:
-            parts.append(
-                f"assigners="
-                f"{','.join(sorted(p.name for p in gt.assigners))}"
-            )
+            parts.append(f"assigners={','.join(sorted(p.name for p in gt.assigners))}")
         suffix = f" ({' | '.join(parts)})" if parts else ""
-        self._log_info(_format_change_line(
-            "-", "GOVERNED_TAG", gt.name,
-            f"{action_verb} governed tag{suffix}",
-        ))
+        self._log_info(
+            _format_change_line(
+                "-",
+                "GOVERNED_TAG",
+                gt.name,
+                f"{action_verb} governed tag{suffix}",
+            )
+        )
 
     # ------------------------------------------------------------------
     # Group management logging
@@ -486,43 +550,62 @@ class ChangeLogger:
         self._group_members_added += len(members)
         action_verb = "Create" if self._dry_run else "Created"
         suffix = (
-            f" (members={','.join(sorted(p.name for p in members))})"
-            if members else ""
+            f" (members={','.join(sorted(p.name for p in members))})" if members else ""
         )
-        self._log_info(_format_change_line(
-            "+", "GROUP", group_name,
-            f"{action_verb} group{suffix}",
-        ))
+        self._log_info(
+            _format_change_line(
+                "+",
+                "GROUP",
+                group_name,
+                f"{action_verb} group{suffix}",
+            )
+        )
 
     def log_group_rename(self, old_name: str, new_name: str) -> None:
         """Log an existing account group being renamed (display-name change)."""
         self._groups_renamed += 1
         action_verb = "Rename" if self._dry_run else "Renamed"
-        self._log_info(_format_change_line(
-            "~", "GROUP", old_name,
-            f"{action_verb} group -> {new_name}",
-        ))
+        self._log_info(
+            _format_change_line(
+                "~",
+                "GROUP",
+                old_name,
+                f"{action_verb} group -> {new_name}",
+            )
+        )
 
-    def log_group_member_add(self, group_name: str, members: frozenset[Principal]) -> None:
+    def log_group_member_add(
+        self, group_name: str, members: frozenset[Principal]
+    ) -> None:
         """Log members being added to an existing account group."""
         self._group_members_added += len(members)
         action_verb = "Add" if self._dry_run else "Added"
         added = ", ".join(f"+{p.name}" for p in sorted(members, key=lambda p: p.name))
-        self._log_info(_format_change_line(
-            "~", "GROUP", group_name,
-            f"{action_verb} members ({added})",
-        ))
+        self._log_info(
+            _format_change_line(
+                "~",
+                "GROUP",
+                group_name,
+                f"{action_verb} members ({added})",
+            )
+        )
 
-    def log_group_member_remove(self, group_name: str, members: frozenset[Principal]) -> None:
+    def log_group_member_remove(
+        self, group_name: str, members: frozenset[Principal]
+    ) -> None:
         """Log members being removed from an existing account group (full
         reconciliation — members absent from config are removed)."""
         self._group_members_removed += len(members)
         action_verb = "Remove" if self._dry_run else "Removed"
         removed = ", ".join(f"-{p.name}" for p in sorted(members, key=lambda p: p.name))
-        self._log_info(_format_change_line(
-            "~", "GROUP", group_name,
-            f"{action_verb} members ({removed})",
-        ))
+        self._log_info(
+            _format_change_line(
+                "~",
+                "GROUP",
+                group_name,
+                f"{action_verb} members ({removed})",
+            )
+        )
 
     # ------------------------------------------------------------------
     # Error section
@@ -533,7 +616,9 @@ class ChangeLogger:
         if self._warnings:
             self.log_section_header("Warnings")
             for warning in self._warnings:
-                self._logger.info(f"  ! Warning: {warning.context}: {warning.exception}")
+                self._logger.info(
+                    f"  ! Warning: {warning.context}: {warning.exception}"
+                )
             self._logger.info("")
         if not self._errors:
             return
@@ -672,7 +757,9 @@ class ChangeLogger:
         if self._governed_tag_assigners_granted:
             gt_assigner_parts.append(f"{self._governed_tag_assigners_granted} to grant")
         if self._governed_tag_assigners_revoked:
-            gt_assigner_parts.append(f"{self._governed_tag_assigners_revoked} to revoke")
+            gt_assigner_parts.append(
+                f"{self._governed_tag_assigners_revoked} to revoke"
+            )
 
         group_parts: list[str] = []
         if self._groups_created:

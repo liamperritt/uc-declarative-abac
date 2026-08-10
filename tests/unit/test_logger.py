@@ -10,7 +10,6 @@ from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.securables import (
     AttributeUpdate,
     Function,
-    Securable,
 )
 from uc_declarative_abac.tags import SecurableTag
 from uc_declarative_abac.principals import Principal
@@ -55,8 +54,11 @@ def _all_messages(mock_logger: MagicMock) -> list[str]:
 
 def _change_lines(mock_logger: MagicMock) -> list[str]:
     """Extract only change lines (indented action symbols like '  + ...') from info messages."""
-    return [m for m in _info_messages(mock_logger) if m.startswith("  ") and m[2:3] in ("+", "~", "-", "!")]
-
+    return [
+        m
+        for m in _info_messages(mock_logger)
+        if m.startswith("  ") and m[2:3] in ("+", "~", "-", "!")
+    ]
 
 
 def _make_tag(
@@ -76,7 +78,9 @@ def _make_tag(
 def _make_privilege(
     securable_type: SecurableType = SecurableType.SCHEMA,
     securable_full_name: str = "my_catalog.sales",
-    principal: Principal = Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
+    principal: Principal = Principal(
+        PrincipalType.GROUP, "data_engineers", "data_engineers"
+    ),
     privilege_type: str | PrivilegeType = PrivilegeType.SELECT,
 ) -> SecurablePrivilege:
     return SecurablePrivilege(
@@ -314,7 +318,9 @@ def test_change_logger_log_warning_is_non_fatal() -> None:
     """log_warning() collects a warning that does NOT set has_errors and is
     surfaced separately from errors."""
     cl, _ = _make_change_logger()
-    warning = _make_execution_error(statement="Resolve principal for USE_SCHEMA on SCHEMA c.s")
+    warning = _make_execution_error(
+        statement="Resolve principal for USE_SCHEMA on SCHEMA c.s"
+    )
 
     cl.log_warning(warning)
 
@@ -345,9 +351,7 @@ def test_change_logger_log_warning_uses_warning_prefix_not_tilde() -> None:
 
     cl.log_warning(_make_execution_error(statement="resolve principal foo"))
 
-    emitted = " ".join(
-        c.args[0] for c in mock_logger.warning.call_args_list if c.args
-    )
+    emitted = " ".join(c.args[0] for c in mock_logger.warning.call_args_list if c.args)
     assert "! Warning" in emitted
     assert "~" not in emitted
 
@@ -463,13 +467,15 @@ def test_logger_logs_attribute_update() -> None:
 def test_logger_renders_attribute_update_for_multi_value_frozenset() -> None:
     """A multi-element frozenset[str] renders as a sorted comma-separated list."""
     cl, mock_logger = _make_change_logger()
-    cl.log_attribute_update(AttributeUpdate(
-        securable_type=SecurableType.CATALOG,
-        full_name="my_cat",
-        attribute="rfa_destinations",
-        old_value=frozenset(),
-        new_value=frozenset({"alice@x.com", "bob@y.com"}),
-    ))
+    cl.log_attribute_update(
+        AttributeUpdate(
+            securable_type=SecurableType.CATALOG,
+            full_name="my_cat",
+            attribute="rfa_destinations",
+            old_value=frozenset(),
+            new_value=frozenset({"alice@x.com", "bob@y.com"}),
+        )
+    )
 
     log_line = "\n".join(_info_messages(mock_logger))
     assert "alice@x.com" in log_line
@@ -483,13 +489,15 @@ def test_logger_renders_attribute_update_for_multi_value_frozenset() -> None:
 def test_logger_renders_attribute_update_for_principal_frozenset() -> None:
     """A single-Principal frozenset renders as the Principal's .name, not its repr."""
     cl, mock_logger = _make_change_logger()
-    cl.log_attribute_update(AttributeUpdate(
-        securable_type=SecurableType.CATALOG,
-        full_name="my_cat",
-        attribute="owner",
-        old_value=frozenset(),
-        new_value=frozenset({Principal(PrincipalType.USER, "joe", "joe")}),
-    ))
+    cl.log_attribute_update(
+        AttributeUpdate(
+            securable_type=SecurableType.CATALOG,
+            full_name="my_cat",
+            attribute="owner",
+            old_value=frozenset(),
+            new_value=frozenset({Principal(PrincipalType.USER, "joe", "joe")}),
+        )
+    )
 
     log_line = "\n".join(_info_messages(mock_logger))
     assert "joe" in log_line
@@ -501,13 +509,15 @@ def test_logger_renders_attribute_update_for_principal_frozenset() -> None:
 def test_logger_renders_attribute_update_for_empty_old_value_frozenset() -> None:
     """An empty frozenset() old_value renders as an empty quoted slot, not 'frozenset()'."""
     cl, mock_logger = _make_change_logger()
-    cl.log_attribute_update(AttributeUpdate(
-        securable_type=SecurableType.CATALOG,
-        full_name="my_cat",
-        attribute="rfa_destinations",
-        old_value=frozenset(),
-        new_value=frozenset({"alice@x.com"}),
-    ))
+    cl.log_attribute_update(
+        AttributeUpdate(
+            securable_type=SecurableType.CATALOG,
+            full_name="my_cat",
+            attribute="rfa_destinations",
+            old_value=frozenset(),
+            new_value=frozenset({"alice@x.com"}),
+        )
+    )
 
     log_line = "\n".join(_info_messages(mock_logger))
     # Empty old value renders as '' (quoted empty slot in the diff line)
@@ -519,13 +529,15 @@ def test_logger_renders_attribute_update_for_empty_old_value_frozenset() -> None
 def test_logger_renders_attribute_update_for_rfa_destinations_attribute() -> None:
     """The attribute name 'rfa_destinations' appears verbatim in the log line."""
     cl, mock_logger = _make_change_logger()
-    cl.log_attribute_update(AttributeUpdate(
-        securable_type=SecurableType.CATALOG,
-        full_name="my_cat",
-        attribute="rfa_destinations",
-        old_value=frozenset(),
-        new_value=frozenset({"alice@x.com", "bob@y.com"}),
-    ))
+    cl.log_attribute_update(
+        AttributeUpdate(
+            securable_type=SecurableType.CATALOG,
+            full_name="my_cat",
+            attribute="rfa_destinations",
+            old_value=frozenset(),
+            new_value=frozenset({"alice@x.com", "bob@y.com"}),
+        )
+    )
 
     log_line = "\n".join(_info_messages(mock_logger))
     assert "rfa_destinations" in log_line
@@ -566,25 +578,31 @@ def test_logger_includes_securables_in_summary() -> None:
     """_build_summary includes a Securables section with attribute, create, and replace counts."""
     cl, _ = _make_change_logger()
 
-    cl.log_attribute_update(AttributeUpdate(
-        securable_type=SecurableType.CATALOG,
-        full_name="my_catalog",
-        attribute="owner",
-        old_value=frozenset({"old_owner"}),
-        new_value=frozenset({"new_owner"}),
-    ))
-    cl.log_securable_create(Function(
-        securable_type=SecurableType.FUNCTION,
-        full_name="cat.schema.func",
-        parameters=(("col", "STRING"),),
-        definition="col",
-    ))
-    cl.log_securable_replace(Function(
-        securable_type=SecurableType.FUNCTION,
-        full_name="cat.schema.func2",
-        parameters=(("col", "STRING"),),
-        definition="col",
-    ))
+    cl.log_attribute_update(
+        AttributeUpdate(
+            securable_type=SecurableType.CATALOG,
+            full_name="my_catalog",
+            attribute="owner",
+            old_value=frozenset({"old_owner"}),
+            new_value=frozenset({"new_owner"}),
+        )
+    )
+    cl.log_securable_create(
+        Function(
+            securable_type=SecurableType.FUNCTION,
+            full_name="cat.schema.func",
+            parameters=(("col", "STRING"),),
+            definition="col",
+        )
+    )
+    cl.log_securable_replace(
+        Function(
+            securable_type=SecurableType.FUNCTION,
+            full_name="cat.schema.func2",
+            parameters=(("col", "STRING"),),
+            definition="col",
+        )
+    )
 
     summary = cl._build_summary()
 
@@ -714,7 +732,9 @@ def test_logger_securable_replace_shows_changed_parameters() -> None:
     assert "parameters: (a STRING) -> (a STRING, b INT)" in msg
 
 
-def test_logger_securable_replace_marks_definition_change_without_inlining_body() -> None:
+def test_logger_securable_replace_marks_definition_change_without_inlining_body() -> (
+    None
+):
     """Function replace where the body changed surfaces only `definition: changed`
     — the actual SQL body is intentionally NOT inlined to keep log lines short."""
     cl, mock_logger = _make_change_logger()
@@ -743,7 +763,9 @@ def test_logger_securable_replace_combines_multiple_field_changes() -> None:
     assert " | " in msg
 
 
-def test_logger_securable_replace_without_old_state_falls_back_to_bare_message() -> None:
+def test_logger_securable_replace_without_old_state_falls_back_to_bare_message() -> (
+    None
+):
     """Calling log_securable_replace without an `old` argument preserves the
     original behaviour: just `Replaced function` with no field-diff suffix."""
     cl, mock_logger = _make_change_logger()
@@ -781,7 +803,9 @@ def test_logger_policy_replace_shows_changed_to_principals() -> None:
     """A change to to_principals surfaces as a Principal-style set delta."""
     cl, mock_logger = _make_change_logger()
     analysts = Principal(PrincipalType.GROUP, identifier="analysts", name="analysts")
-    scientists = Principal(PrincipalType.GROUP, identifier="scientists", name="scientists")
+    scientists = Principal(
+        PrincipalType.GROUP, identifier="scientists", name="scientists"
+    )
     new = _make_logger_policy(to_principals=(analysts, scientists))
     old = _make_logger_policy(to_principals=(analysts,))
 
@@ -874,6 +898,7 @@ def _gt(
     assigners: set[Principal] | None = None,
 ):
     from uc_declarative_abac.governed_tags import GovernedTag
+
     return GovernedTag(
         name=name,
         description=description,
@@ -887,11 +912,13 @@ def _gt(
 
 def test_logger_governed_tag_create_shows_description_values_and_assigners() -> None:
     cl, mock_logger = _make_change_logger()
-    cl.log_governed_tag_create(_gt(
-        description="PII data",
-        values={"name", "email"},
-        assigners={_resolved_user("alice@co.com")},
-    ))
+    cl.log_governed_tag_create(
+        _gt(
+            description="PII data",
+            values={"name", "email"},
+            assigners={_resolved_user("alice@co.com")},
+        )
+    )
     msg = _info_messages(mock_logger)[0]
     assert "PII data" in msg
     assert "name" in msg and "email" in msg
@@ -916,9 +943,14 @@ def test_logger_governed_tag_create_increments_created_counter() -> None:
 def test_logger_governed_tag_create_counts_assigners_as_grants() -> None:
     """Creating a tag with assigners counts each one as a grant for the summary."""
     cl, _ = _make_change_logger()
-    cl.log_governed_tag_create(_gt(assigners={
-        _resolved_user("alice@co.com"), _resolved_user("bob@co.com"),
-    }))
+    cl.log_governed_tag_create(
+        _gt(
+            assigners={
+                _resolved_user("alice@co.com"),
+                _resolved_user("bob@co.com"),
+            }
+        )
+    )
     assert cl._governed_tag_assigners_granted == 2
 
 
@@ -965,7 +997,8 @@ def test_logger_governed_tag_update_shows_added_and_removed_assigners() -> None:
 def test_logger_governed_tag_update_increments_updated_counter() -> None:
     cl, _ = _make_change_logger()
     cl.log_governed_tag_update(
-        _gt(description="new"), _gt(description="old"),
+        _gt(description="new"),
+        _gt(description="old"),
     )
     assert cl._governed_tags_updated == 1
 
@@ -999,11 +1032,13 @@ def test_logger_governed_tag_update_omits_unchanged_fields() -> None:
 
 def test_logger_governed_tag_delete_shows_values_and_assigners_being_lost() -> None:
     cl, mock_logger = _make_change_logger()
-    cl.log_governed_tag_delete(_gt(
-        description="legacy",
-        values={"a", "b"},
-        assigners={_resolved_user("admin@co.com")},
-    ))
+    cl.log_governed_tag_delete(
+        _gt(
+            description="legacy",
+            values={"a", "b"},
+            assigners={_resolved_user("admin@co.com")},
+        )
+    )
     msg = _info_messages(mock_logger)[0]
     assert "legacy" in msg
     assert "a" in msg and "b" in msg
@@ -1019,9 +1054,14 @@ def test_logger_governed_tag_delete_increments_deleted_counter() -> None:
 def test_logger_governed_tag_delete_counts_assigners_as_revokes() -> None:
     """Deleting a tag with N assigners counts each as a revoke for the summary."""
     cl, _ = _make_change_logger()
-    cl.log_governed_tag_delete(_gt(assigners={
-        _resolved_user("alice@co.com"), _resolved_user("bob@co.com"),
-    }))
+    cl.log_governed_tag_delete(
+        _gt(
+            assigners={
+                _resolved_user("alice@co.com"),
+                _resolved_user("bob@co.com"),
+            }
+        )
+    )
     assert cl._governed_tag_assigners_revoked == 2
 
 
@@ -1031,16 +1071,22 @@ def test_logger_governed_tag_delete_counts_assigners_as_revokes() -> None:
 def test_logger_includes_governed_tags_in_summary() -> None:
     cl, _ = _make_change_logger()
     cl.log_governed_tag_create(_gt(name="a"))
-    cl.log_governed_tag_update(_gt(name="b", description="new"), _gt(name="b", description="old"))
+    cl.log_governed_tag_update(
+        _gt(name="b", description="new"), _gt(name="b", description="old")
+    )
     summary = cl._build_summary()
     assert "Governed tags:" in summary
     assert "1 created" in summary
     assert "1 updated" in summary
 
 
-def test_logger_includes_governed_tag_assigners_in_summary_via_create_and_update() -> None:
+def test_logger_includes_governed_tag_assigners_in_summary_via_create_and_update() -> (
+    None
+):
     cl, _ = _make_change_logger()
-    cl.log_governed_tag_create(_gt(name="new", assigners={_resolved_user("alice@co.com")}))
+    cl.log_governed_tag_create(
+        _gt(name="new", assigners={_resolved_user("alice@co.com")})
+    )
     cl.log_governed_tag_update(
         _gt(assigners={_resolved_user("c@co.com")}),
         _gt(assigners={_resolved_user("d@co.com")}),

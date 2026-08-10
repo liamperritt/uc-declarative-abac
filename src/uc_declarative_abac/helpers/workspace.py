@@ -15,7 +15,12 @@ from uc_declarative_abac.utils import (
     OrchestratorError,
     PrincipalValidationError,
 )
-from uc_declarative_abac.principals import Group, GroupRename, Principal, ensure_resolved
+from uc_declarative_abac.principals import (
+    Group,
+    GroupRename,
+    Principal,
+    ensure_resolved,
+)
 from uc_declarative_abac.types import PrincipalType
 
 _logger = logging.getLogger("uc_declarative_abac")
@@ -56,7 +61,8 @@ def _parse_ruleset_principal(s: str) -> str:
 
 
 def _member_dict_to_principal(
-    member: dict, identifier_by_scim_id: dict[str, str],
+    member: dict,
+    identifier_by_scim_id: dict[str, str],
 ) -> Principal | None:
     """Convert a raw SCIM group-member dict to an unresolved Principal.
 
@@ -71,14 +77,17 @@ def _member_dict_to_principal(
 
 
 def _principal_to_member_dict(
-    principal: Principal, scim_id_by_identifier: dict[str, str],
+    principal: Principal,
+    scim_id_by_identifier: dict[str, str],
 ) -> dict:
     """Convert a resolved Principal to a SCIM group-member dict ({"value": <scim id>}).
 
     The Principal must be resolved (its canonical identifier is looked up in the
     SCIM-id map)."""
     ensure_resolved(principal)
-    return {"value": scim_id_by_identifier.get(principal.identifier, principal.identifier)}
+    return {
+        "value": scim_id_by_identifier.get(principal.identifier, principal.identifier)
+    }
 
 
 class WorkspaceHelper:
@@ -105,16 +114,24 @@ class WorkspaceHelper:
         self._skip_users_fetch = skip_users_fetch
         self._users: set[str] | None = None
         self._groups: set[str] | None = None
-        self._service_principals: dict[str, str] | None = None  # display_name -> application_id
+        self._service_principals: dict[str, str] | None = (
+            None  # display_name -> application_id
+        )
         self._duplicate_sps: set[str] = set()
         # Group-management caches, populated by _fetch_account_principals when
         # manage_groups is enabled (otherwise left empty). Membership is NOT cached
         # here — it is fetched per-group on demand in fetch_actual_groups.
         self._group_id_by_name: dict[str, str] = {}  # display_name -> group SCIM id
         self._group_name_by_id: dict[str, str] = {}  # group SCIM id -> display_name
-        self._renamed_group_new_by_old: dict[str, str] = {}  # old display_name -> new display_name
-        self._scim_id_by_identifier: dict[str, str] = {}  # canonical identifier -> SCIM id
-        self._identifier_by_scim_id: dict[str, str] = {}  # SCIM id -> canonical identifier
+        self._renamed_group_new_by_old: dict[
+            str, str
+        ] = {}  # old display_name -> new display_name
+        self._scim_id_by_identifier: dict[
+            str, str
+        ] = {}  # canonical identifier -> SCIM id
+        self._identifier_by_scim_id: dict[
+            str, str
+        ] = {}  # SCIM id -> canonical identifier
         self._tag_policies_lock = threading.Lock()
         self._tag_policies: list[TagPolicy] | None = None
         self._tag_policy_id_by_name: dict[str, str] = {}
@@ -125,8 +142,13 @@ class WorkspaceHelper:
         start_index = 1
         while True:
             resp = self._client.api_client.do(
-                "GET", endpoint,
-                query={"startIndex": start_index, "count": _SCIM_PAGE_SIZE, "attributes": attributes},
+                "GET",
+                endpoint,
+                query={
+                    "startIndex": start_index,
+                    "count": _SCIM_PAGE_SIZE,
+                    "attributes": attributes,
+                },
             )
             resources = resp.get("Resources", [])
             results.extend(resources)
@@ -169,11 +191,19 @@ class WorkspaceHelper:
             # When skipping the user fetch, don't submit the /Users call at all — it
             # is the slowest SCIM list for large accounts and pure overhead for orgs
             # that govern only groups and service principals.
-            users_f = None if self._skip_users_fetch else pool.submit(
-                self._scim_list_all, "/api/2.0/account/scim/v2/Users", users_attrs,
+            users_f = (
+                None
+                if self._skip_users_fetch
+                else pool.submit(
+                    self._scim_list_all,
+                    "/api/2.0/account/scim/v2/Users",
+                    users_attrs,
+                )
             )
             groups_f = pool.submit(
-                self._scim_list_all, "/api/2.0/account/scim/v2/Groups", groups_attrs,
+                self._scim_list_all,
+                "/api/2.0/account/scim/v2/Groups",
+                groups_attrs,
             )
             sps_f = pool.submit(
                 self._scim_list_all,
@@ -191,7 +221,10 @@ class WorkspaceHelper:
             self._build_group_id_maps(users_data, groups_data, sps_data)
 
     def _build_group_id_maps(
-        self, users_data: list[dict], groups_data: list[dict], sps_data: list[dict],
+        self,
+        users_data: list[dict],
+        groups_data: list[dict],
+        sps_data: list[dict],
     ) -> None:
         """Build the SCIM-id ↔ canonical-identifier maps and the group-name → id
         index from the principal list responses.
@@ -227,14 +260,22 @@ class WorkspaceHelper:
         with ThreadPoolExecutor(max_workers=3) as pool:
             # See _fetch_account_principals: skip the user list entirely when the
             # org governs only groups and service principals.
-            users_f = None if self._skip_users_fetch else pool.submit(
-                lambda: list(self._client.users.list(attributes="userName")),
+            users_f = (
+                None
+                if self._skip_users_fetch
+                else pool.submit(
+                    lambda: list(self._client.users.list(attributes="userName")),
+                )
             )
             groups_f = pool.submit(
                 lambda: list(self._client.groups.list(attributes="displayName")),
             )
             sps_f = pool.submit(
-                lambda: list(self._client.service_principals.list(attributes="displayName,applicationId")),
+                lambda: list(
+                    self._client.service_principals.list(
+                        attributes="displayName,applicationId"
+                    )
+                ),
             )
             users = users_f.result() if users_f is not None else []
             groups = groups_f.result()
@@ -244,10 +285,12 @@ class WorkspaceHelper:
         # The workspace SCIM API does not surface account-level system groups, so
         # add them — they are near-universally useful as policy targets.
         self._groups = {group.display_name for group in groups} | _ACCOUNT_SYSTEM_GROUPS
-        self._build_sp_map([
-            {"displayName": sp.display_name, "applicationId": sp.application_id}
-            for sp in sps
-        ])
+        self._build_sp_map(
+            [
+                {"displayName": sp.display_name, "applicationId": sp.application_id}
+                for sp in sps
+            ]
+        )
 
     def _build_sp_map(self, sps_data: list[dict]) -> None:
         """Build the service principal maps from SCIM-format dicts."""
@@ -276,7 +319,9 @@ class WorkspaceHelper:
         for group_name in self._groups or set():
             result[group_name] = Principal(PrincipalType.GROUP, group_name, group_name)
         for sp_name, app_id in (self._service_principals or {}).items():
-            result[sp_name] = Principal(PrincipalType.SERVICE_PRINCIPAL, app_id, sp_name)
+            result[sp_name] = Principal(
+                PrincipalType.SERVICE_PRINCIPAL, app_id, sp_name
+            )
         return result
 
     def validate_principal(self, name: str) -> bool:
@@ -291,9 +336,7 @@ class WorkspaceHelper:
         """Validate a list of principal names. Raises PrincipalValidationError listing all unknown names."""
         unknown = self.find_unknown_principals(names)
         if unknown:
-            raise PrincipalValidationError(
-                f"Unknown principals: {', '.join(unknown)}"
-            )
+            raise PrincipalValidationError(f"Unknown principals: {', '.join(unknown)}")
 
     def find_unknown_principals(self, names: list[str]) -> list[str]:
         """Return the subset of principal names that do not exist in the workspace."""
@@ -311,9 +354,7 @@ class WorkspaceHelper:
             )
         if self._service_principals and display_name in self._service_principals:
             return self._service_principals[display_name]
-        raise PrincipalValidationError(
-            f"Service principal not found: {display_name}"
-        )
+        raise PrincipalValidationError(f"Service principal not found: {display_name}")
 
     def resolve_by_name(self, name: str) -> Principal:
         """Resolve a principal display name to a Principal object.
@@ -359,7 +400,9 @@ class WorkspaceHelper:
                 identifier,
                 sp_reverse[identifier],
             )
-        raise PrincipalValidationError(f"Principal not found by identifier: {identifier}")
+        raise PrincipalValidationError(
+            f"Principal not found by identifier: {identifier}"
+        )
 
     def _fetch_group_by_id(self, group_id: str) -> dict:
         """GET a single account group (with its members) via the SCIM proxy.
@@ -369,7 +412,8 @@ class WorkspaceHelper:
         the individual-group endpoint (members carry `value`; the group carries
         `externalId`)."""
         return self._client.api_client.do(
-            "GET", f"/api/2.0/account/scim/v2/Groups/{group_id}",
+            "GET",
+            f"/api/2.0/account/scim/v2/Groups/{group_id}",
         )
 
     def _build_group_from_response(self, resp: dict) -> Group:
@@ -378,10 +422,12 @@ class WorkspaceHelper:
         Member SCIM ids are mapped back to canonical identifiers via the cache
         built during fetch_principals; untranslatable members are dropped."""
         members = frozenset(
-            p for p in (
+            p
+            for p in (
                 _member_dict_to_principal(m, self._identifier_by_scim_id)
                 for m in (resp.get("members") or [])
-            ) if p is not None
+            )
+            if p is not None
         )
         return Group(
             display_name=resp.get("displayName") or "",
@@ -416,7 +462,7 @@ class WorkspaceHelper:
         names = set(self._group_id_by_name)
         if desired_names is not None:
             names &= desired_names
-        for scim_id in (desired_ids or set()):
+        for scim_id in desired_ids or set():
             actual_name = self._group_name_by_id.get(scim_id)
             if actual_name is not None:
                 names.add(actual_name)
@@ -464,11 +510,13 @@ class WorkspaceHelper:
             self._scim_id_by_identifier.pop(rename.old_display_name, None)
             self._scim_id_by_identifier[rename.new_display_name] = scim_id
             self._identifier_by_scim_id[scim_id] = rename.new_display_name
-            self._renamed_group_new_by_old[rename.old_display_name] = rename.new_display_name
+            self._renamed_group_new_by_old[rename.old_display_name] = (
+                rename.new_display_name
+            )
             if self._groups is not None:
-                self._groups = (
-                    self._groups - {rename.old_display_name}
-                ) | {rename.new_display_name}
+                self._groups = (self._groups - {rename.old_display_name}) | {
+                    rename.new_display_name
+                }
 
     def rename_group(self, group_id: str, new_display_name: str) -> None:
         """Rename a Databricks-managed account group via a SCIM PatchOp (replace
@@ -510,7 +558,9 @@ class WorkspaceHelper:
             },
         )
 
-    def add_group_members(self, display_name: str, members: Iterable[Principal]) -> None:
+    def add_group_members(
+        self, display_name: str, members: Iterable[Principal]
+    ) -> None:
         """Add members to an existing Databricks-managed account group via SCIM PatchOp.
 
         TBD: verify in integration testing; the exact SCIM PatchOp body shape for
@@ -532,7 +582,9 @@ class WorkspaceHelper:
             },
         )
 
-    def remove_group_members(self, display_name: str, members: Iterable[Principal]) -> None:
+    def remove_group_members(
+        self, display_name: str, members: Iterable[Principal]
+    ) -> None:
         """Remove members from an existing Databricks-managed account group via a
         SCIM PatchOp. Requires the engine principal to hold the MANAGER role on the
         group.
@@ -543,7 +595,10 @@ class WorkspaceHelper:
         """
         group_id = self._group_id_by_name[display_name]
         operations = [
-            {"op": "remove", "path": f'members[value eq "{_principal_to_member_dict(m, self._scim_id_by_identifier)["value"]}"]'}
+            {
+                "op": "remove",
+                "path": f'members[value eq "{_principal_to_member_dict(m, self._scim_id_by_identifier)["value"]}"]',
+            }
             for m in members
         ]
         if not operations:
@@ -563,11 +618,14 @@ class WorkspaceHelper:
             if self._tag_policies is None:
                 policies = list(self._client.tag_policies.list_tag_policies())
                 self._tag_policies = policies
-                self._tag_policy_id_by_name = {p.tag_key: p.id for p in policies if p.id}
+                self._tag_policy_id_by_name = {
+                    p.tag_key: p.id for p in policies if p.id
+                }
             return self._tag_policies
 
     def fetch_actual_governed_tags(
-        self, desired_names: set[str] | None = None,
+        self,
+        desired_names: set[str] | None = None,
     ) -> set[GovernedTag]:
         """Fetch the account's current tag policies and convert them to GovernedTag state.
 
@@ -601,7 +659,8 @@ class WorkspaceHelper:
         }
 
     def _fetch_assigners_for(
-        self, policies: list[TagPolicy],
+        self,
+        policies: list[TagPolicy],
     ) -> dict[str, frozenset[Principal]]:
         """Concurrently fetch the assigners (ASSIGN-role principals) for each tag policy."""
         if not policies:
@@ -623,14 +682,16 @@ class WorkspaceHelper:
         """Read the ASSIGN grant_rule from a rule-set response and return its
         assigners as unresolved Principal objects. Non-ASSIGN rules are ignored."""
         assigners: set[Principal] = set()
-        for rule in (resp.grant_rules or []):
+        for rule in resp.grant_rules or []:
             if rule.role != _TAG_POLICY_ASSIGN_ROLE:
                 continue
-            for raw in (rule.principals or []):
-                assigners.add(Principal(
-                    PrincipalType.UNKNOWN,
-                    identifier=_parse_ruleset_principal(raw),
-                ))
+            for raw in rule.principals or []:
+                assigners.add(
+                    Principal(
+                        PrincipalType.UNKNOWN,
+                        identifier=_parse_ruleset_principal(raw),
+                    )
+                )
         return frozenset(assigners)
 
     def get_tag_policy_rule_set(self, tag_id: str) -> RuleSetResponse:
@@ -638,7 +699,9 @@ class WorkspaceHelper:
         state) — callers performing read-modify-write should pass the returned
         etag back into ``update_tag_policy_rule_set``."""
         name = _ruleset_name(self._account_id(), tag_id)
-        return self._client.account_access_control_proxy.get_rule_set(name=name, etag="")
+        return self._client.account_access_control_proxy.get_rule_set(
+            name=name, etag=""
+        )
 
     def get_tag_policy_rule_set_by_name(self, tag_name: str) -> RuleSetResponse:
         """Look up the tag's id from the cache, then fetch its default rule set."""
@@ -651,14 +714,18 @@ class WorkspaceHelper:
         return self.get_tag_policy_rule_set(tag_id)
 
     def update_tag_policy_rule_set(
-        self, tag_id: str, etag: str, grant_rules: list[GrantRule],
+        self,
+        tag_id: str,
+        etag: str,
+        grant_rules: list[GrantRule],
     ) -> RuleSetResponse:
         """Replace the rule set for a tag policy. ``etag`` must come from a prior
         ``get_tag_policy_rule_set`` call (read-modify-write for optimistic concurrency)."""
         name = _ruleset_name(self._account_id(), tag_id)
         request = RuleSetUpdateRequest(name=name, etag=etag, grant_rules=grant_rules)
         return self._client.account_access_control_proxy.update_rule_set(
-            name=name, rule_set=request,
+            name=name,
+            rule_set=request,
         )
 
     def register_created_tag_policy(self, tag_policy: TagPolicy) -> None:
@@ -685,11 +752,15 @@ class WorkspaceHelper:
         """Create a new tag policy in the account. Thin passthrough to the SDK."""
         return self._client.tag_policies.create_tag_policy(policy)
 
-    def update_tag_policy(self, tag_key: str, policy: TagPolicy, update_mask: str) -> TagPolicy:
+    def update_tag_policy(
+        self, tag_key: str, policy: TagPolicy, update_mask: str
+    ) -> TagPolicy:
         """Update an existing tag policy. `update_mask` is a comma-separated list
         of field names (e.g. 'description,values'); `*` is discouraged by the SDK."""
         return self._client.tag_policies.update_tag_policy(
-            tag_key=tag_key, tag_policy=policy, update_mask=update_mask,
+            tag_key=tag_key,
+            tag_policy=policy,
+            update_mask=update_mask,
         )
 
     def delete_tag_policy(self, tag_key: str) -> None:

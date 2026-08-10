@@ -12,7 +12,6 @@ from uc_declarative_abac.types import SecurableType
 from uc_declarative_abac.utils import DuplicateResourceError
 
 
-
 def _minimal_catalog(**overrides):
     """Return a minimal valid catalog dict, with optional overrides."""
     base = {"name": "test_catalog"}
@@ -287,11 +286,7 @@ def test_fgac_policy_config_preserves_explicit_to():
 
 def test_catalog_config_allows_optional_fields():
     """A catalog with only 'name' and no tags, schemas, or policies validates successfully."""
-    data = {
-        "catalogs": {
-            "bare": {"name": "bare"}
-        }
-    }
+    data = {"catalogs": {"bare": {"name": "bare"}}}
     config = ResourcesConfig.model_validate(data)
 
     catalog = config.catalogs["bare"]
@@ -654,30 +649,28 @@ def test_grant_policy_config_defaults_expiry_date_to_none():
 
 def test_catalog_config_injects_catalog_name_into_schemas():
     """Schemas inherit catalog_name from their parent catalog."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_catalog": {
-                "schemas": [{"name": "sales"}]
-            }
-        }
-    })
+    config = ResourcesConfig.model_validate(
+        {"catalogs": {"my_catalog": {"schemas": [{"name": "sales"}]}}}
+    )
     assert config.catalogs["my_catalog"].schemas[0].catalog_name == "my_catalog"
 
 
 def test_schema_config_injects_names_into_tables():
     """Tables inherit catalog_name and schema_name from their parent schema."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_catalog": {
-                "schemas": [
-                    {
-                        "name": "sales",
-                        "tables": [{"name": "orders"}],
-                    }
-                ]
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [{"name": "orders"}],
+                        }
+                    ]
+                }
             }
         }
-    })
+    )
     table = config.catalogs["my_catalog"].schemas[0].tables[0]
     assert table.catalog_name == "my_catalog"
     assert table.schema_name == "sales"
@@ -685,23 +678,25 @@ def test_schema_config_injects_names_into_tables():
 
 def test_table_config_injects_names_into_columns():
     """Columns inherit catalog_name, schema_name, and table_name from their parent table."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_catalog": {
-                "schemas": [
-                    {
-                        "name": "sales",
-                        "tables": [
-                            {
-                                "name": "orders",
-                                "columns": [{"name": "email"}],
-                            }
-                        ],
-                    }
-                ]
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "columns": [{"name": "email"}],
+                                }
+                            ],
+                        }
+                    ]
+                }
             }
         }
-    })
+    )
     column = config.catalogs["my_catalog"].schemas[0].tables[0].columns[0]
     assert column.catalog_name == "my_catalog"
     assert column.schema_name == "sales"
@@ -710,35 +705,51 @@ def test_table_config_injects_names_into_columns():
 
 def test_catalog_config_injects_catalog_name_into_policies():
     """Catalog-level grant policies inherit catalog_name from their parent catalog."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_catalog": {
-                "policies": [
-                    {"name": "g1", "type": "grant", "privileges": ["select"], "to": ["team"], "tags": {"env": "prod"}}
-                ]
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "policies": [
+                        {
+                            "name": "g1",
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["team"],
+                            "tags": {"env": "prod"},
+                        }
+                    ]
+                }
             }
         }
-    })
+    )
     policy = config.catalogs["my_catalog"].policies[0]
     assert policy.catalog_name == "my_catalog"
 
 
 def test_schema_config_injects_names_into_policies():
     """Schema-level grant policies inherit catalog_name and schema_name from their parents."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_catalog": {
-                "schemas": [
-                    {
-                        "name": "sales",
-                        "policies": [
-                            {"name": "g1", "type": "grant", "privileges": ["select"], "to": ["team"], "tags": {"env": "prod"}}
-                        ],
-                    }
-                ]
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "policies": [
+                                {
+                                    "name": "g1",
+                                    "type": "grant",
+                                    "privileges": ["select"],
+                                    "to": ["team"],
+                                    "tags": {"env": "prod"},
+                                }
+                            ],
+                        }
+                    ]
+                }
             }
         }
-    })
+    )
     policy = config.catalogs["my_catalog"].schemas[0].policies[0]
     assert policy.catalog_name == "my_catalog"
     assert policy.schema_name == "sales"
@@ -746,80 +757,87 @@ def test_schema_config_injects_names_into_policies():
 
 def test_catalog_config_has_full_name():
     """CatalogConfig.full_name returns the catalog name."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_catalog": {}
-        }
-    })
+    config = ResourcesConfig.model_validate({"catalogs": {"my_catalog": {}}})
     assert config.catalogs["my_catalog"].full_name == "my_catalog"
 
 
 def test_schema_config_has_full_name():
     """SchemaConfig.full_name returns catalog.schema."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_catalog": {
-                "schemas": [{"name": "sales"}]
-            }
-        }
-    })
+    config = ResourcesConfig.model_validate(
+        {"catalogs": {"my_catalog": {"schemas": [{"name": "sales"}]}}}
+    )
     assert config.catalogs["my_catalog"].schemas[0].full_name == "my_catalog.sales"
 
 
 def test_table_config_has_full_name():
     """TableConfig.full_name returns catalog.schema.table."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_catalog": {
-                "schemas": [
-                    {
-                        "name": "sales",
-                        "tables": [{"name": "orders"}],
-                    }
-                ]
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [{"name": "orders"}],
+                        }
+                    ]
+                }
             }
         }
-    })
-    assert config.catalogs["my_catalog"].schemas[0].tables[0].full_name == "my_catalog.sales.orders"
+    )
+    assert (
+        config.catalogs["my_catalog"].schemas[0].tables[0].full_name
+        == "my_catalog.sales.orders"
+    )
 
 
 def test_volume_config_has_full_name():
     """VolumeConfig.full_name returns catalog.schema.volume."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_catalog": {
-                "schemas": [
-                    {
-                        "name": "landing",
-                        "volumes": [{"name": "files"}],
-                    }
-                ]
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "landing",
+                            "volumes": [{"name": "files"}],
+                        }
+                    ]
+                }
             }
         }
-    })
-    assert config.catalogs["my_catalog"].schemas[0].volumes[0].full_name == "my_catalog.landing.files"
+    )
+    assert (
+        config.catalogs["my_catalog"].schemas[0].volumes[0].full_name
+        == "my_catalog.landing.files"
+    )
 
 
 def test_column_config_has_full_name():
     """ColumnConfig.full_name returns catalog.schema.table.column."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_catalog": {
-                "schemas": [
-                    {
-                        "name": "sales",
-                        "tables": [
-                            {
-                                "name": "orders",
-                                "columns": [{"name": "email"}],
-                            }
-                        ],
-                    }
-                ]
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "columns": [{"name": "email"}],
+                                }
+                            ],
+                        }
+                    ]
+                }
             }
         }
-    })
-    assert config.catalogs["my_catalog"].schemas[0].tables[0].columns[0].full_name == "my_catalog.sales.orders.email"
+    )
+    assert (
+        config.catalogs["my_catalog"].schemas[0].tables[0].columns[0].full_name
+        == "my_catalog.sales.orders.email"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -831,33 +849,39 @@ def test_resources_config_rejects_duplicate_catalog_names():
     """Two catalog entries keyed under different dict keys but sharing the same
     explicit ``name`` raise DuplicateResourceError."""
     with pytest.raises(DuplicateResourceError):
-        ResourcesConfig.model_validate({
-            "catalogs": {
-                "entry_one": {"name": "same_catalog"},
-                "entry_two": {"name": "same_catalog"},
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {
+                    "entry_one": {"name": "same_catalog"},
+                    "entry_two": {"name": "same_catalog"},
+                }
             }
-        })
+        )
 
 
 def test_resources_config_rejects_duplicate_governed_tag_names():
     """Two governed tag entries sharing the same explicit ``name`` raise
     DuplicateResourceError."""
     with pytest.raises(DuplicateResourceError):
-        ResourcesConfig.model_validate({
-            "catalogs": {"cat": {}},
-            "governed_tags": {
-                "entry_one": {"name": "shared_tag"},
-                "entry_two": {"name": "shared_tag"},
-            },
-        })
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {"cat": {}},
+                "governed_tags": {
+                    "entry_one": {"name": "shared_tag"},
+                    "entry_two": {"name": "shared_tag"},
+                },
+            }
+        )
 
 
 def test_resources_config_derives_group_name_from_dict_key():
     """A groups entry without an explicit ``name`` takes the dict key as its name."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {"cat": {}},
-        "groups": {"data_engineers": {"members": ["alice@example.com"]}},
-    })
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {"cat": {}},
+            "groups": {"data_engineers": {"members": ["alice@example.com"]}},
+        }
+    )
 
     assert config.groups is not None
     assert config.groups["data_engineers"].name == "data_engineers"
@@ -866,10 +890,12 @@ def test_resources_config_derives_group_name_from_dict_key():
 
 def test_resources_config_defaults_group_members_to_empty():
     """A groups entry without a ``members`` field defaults to an empty member list."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {"cat": {}},
-        "groups": {"data_engineers": {}},
-    })
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {"cat": {}},
+            "groups": {"data_engineers": {}},
+        }
+    )
 
     assert config.groups is not None
     assert config.groups["data_engineers"].members == []
@@ -878,25 +904,29 @@ def test_resources_config_defaults_group_members_to_empty():
 def test_resources_config_rejects_duplicate_group_names():
     """Two group entries sharing the same explicit ``name`` raise DuplicateResourceError."""
     with pytest.raises(DuplicateResourceError):
-        ResourcesConfig.model_validate({
-            "catalogs": {"cat": {}},
-            "groups": {
-                "entry_one": {"name": "shared_group"},
-                "entry_two": {"name": "shared_group"},
-            },
-        })
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {"cat": {}},
+                "groups": {
+                    "entry_one": {"name": "shared_group"},
+                    "entry_two": {"name": "shared_group"},
+                },
+            }
+        )
 
 
 def test_group_config_accepts_optional_id():
     """A group declaring an ``id`` parses it onto GroupConfig.id; a group without
     ``id`` has ``id is None``."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {"cat": {}},
-        "groups": {
-            "with_id": {"id": "abc-123"},
-            "without_id": {},
-        },
-    })
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {"cat": {}},
+            "groups": {
+                "with_id": {"id": "abc-123"},
+                "without_id": {},
+            },
+        }
+    )
 
     assert config.groups is not None
     assert config.groups["with_id"].id == "abc-123"
@@ -907,25 +937,29 @@ def test_group_config_rejects_duplicate_ids_when_two_groups_share_id():
     """Two group entries (different keys/names) sharing the same ``id`` raise
     DuplicateResourceError."""
     with pytest.raises(DuplicateResourceError):
-        ResourcesConfig.model_validate({
-            "catalogs": {"cat": {}},
-            "groups": {
-                "entry_one": {"name": "group_one", "id": "shared-id"},
-                "entry_two": {"name": "group_two", "id": "shared-id"},
-            },
-        })
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {"cat": {}},
+                "groups": {
+                    "entry_one": {"name": "group_one", "id": "shared-id"},
+                    "entry_two": {"name": "group_two", "id": "shared-id"},
+                },
+            }
+        )
 
 
 def test_group_config_allows_multiple_groups_without_ids():
     """Multiple group entries all omitting ``id`` validate fine — ``None`` ids
     are not treated as duplicates."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {"cat": {}},
-        "groups": {
-            "entry_one": {"name": "group_one"},
-            "entry_two": {"name": "group_two"},
-        },
-    })
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {"cat": {}},
+            "groups": {
+                "entry_one": {"name": "group_one"},
+                "entry_two": {"name": "group_two"},
+            },
+        }
+    )
 
     assert config.groups is not None
     assert config.groups["entry_one"].id is None
@@ -935,10 +969,12 @@ def test_group_config_allows_multiple_groups_without_ids():
 def test_group_config_coerces_integer_id_to_string():
     """An ``id`` given as an integer (an unquoted numeric id in YAML) is stored as
     its string form."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {"cat": {}},
-        "groups": {"with_int_id": {"id": 1234567890123456}},
-    })
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {"cat": {}},
+            "groups": {"with_int_id": {"id": 1234567890123456}},
+        }
+    )
 
     assert config.groups is not None
     assert config.groups["with_int_id"].id == "1234567890123456"
@@ -948,113 +984,125 @@ def test_group_config_rejects_duplicate_ids_across_int_and_string_forms():
     """A group whose ``id`` is an integer collides with another whose ``id`` is the
     equivalent string — both normalise to the same string id."""
     with pytest.raises(DuplicateResourceError):
-        ResourcesConfig.model_validate({
-            "catalogs": {"cat": {}},
-            "groups": {
-                "entry_one": {"name": "group_one", "id": 123},
-                "entry_two": {"name": "group_two", "id": "123"},
-            },
-        })
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {"cat": {}},
+                "groups": {
+                    "entry_one": {"name": "group_one", "id": 123},
+                    "entry_two": {"name": "group_two", "id": "123"},
+                },
+            }
+        )
 
 
 def test_catalog_config_rejects_duplicate_schema_names():
     """Two schemas with the same name under one catalog raise DuplicateResourceError."""
     with pytest.raises(DuplicateResourceError):
-        ResourcesConfig.model_validate({
-            "catalogs": {
-                "my_cat": {
-                    "schemas": [
-                        {"name": "sales"},
-                        {"name": "sales"},
-                    ],
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {
+                    "my_cat": {
+                        "schemas": [
+                            {"name": "sales"},
+                            {"name": "sales"},
+                        ],
+                    }
                 }
             }
-        })
+        )
 
 
 def test_schema_config_rejects_duplicate_table_names():
     """Two tables with the same name under one schema raise DuplicateResourceError."""
     with pytest.raises(DuplicateResourceError):
-        ResourcesConfig.model_validate({
-            "catalogs": {
-                "my_cat": {
-                    "schemas": [
-                        {
-                            "name": "sales",
-                            "tables": [
-                                {"name": "orders"},
-                                {"name": "orders"},
-                            ],
-                        }
-                    ],
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {
+                    "my_cat": {
+                        "schemas": [
+                            {
+                                "name": "sales",
+                                "tables": [
+                                    {"name": "orders"},
+                                    {"name": "orders"},
+                                ],
+                            }
+                        ],
+                    }
                 }
             }
-        })
+        )
 
 
 def test_schema_config_rejects_duplicate_volume_names():
     """Two volumes with the same name under one schema raise DuplicateResourceError."""
     with pytest.raises(DuplicateResourceError):
-        ResourcesConfig.model_validate({
-            "catalogs": {
-                "my_cat": {
-                    "schemas": [
-                        {
-                            "name": "landing",
-                            "volumes": [
-                                {"name": "files"},
-                                {"name": "files"},
-                            ],
-                        }
-                    ],
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {
+                    "my_cat": {
+                        "schemas": [
+                            {
+                                "name": "landing",
+                                "volumes": [
+                                    {"name": "files"},
+                                    {"name": "files"},
+                                ],
+                            }
+                        ],
+                    }
                 }
             }
-        })
+        )
 
 
 def test_table_config_rejects_duplicate_column_names():
     """Two columns with the same name under one table raise DuplicateResourceError."""
     with pytest.raises(DuplicateResourceError):
-        ResourcesConfig.model_validate({
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {
+                    "my_cat": {
+                        "schemas": [
+                            {
+                                "name": "sales",
+                                "tables": [
+                                    {
+                                        "name": "orders",
+                                        "columns": [
+                                            {"name": "email"},
+                                            {"name": "email"},
+                                        ],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                }
+            }
+        )
+
+
+def test_catalog_config_allows_same_name_in_different_parents():
+    """Two tables named 'orders' in different schemas should NOT raise an error."""
+    config = ResourcesConfig.model_validate(
+        {
             "catalogs": {
                 "my_cat": {
                     "schemas": [
                         {
                             "name": "sales",
-                            "tables": [
-                                {
-                                    "name": "orders",
-                                    "columns": [
-                                        {"name": "email"},
-                                        {"name": "email"},
-                                    ],
-                                }
-                            ],
-                        }
+                            "tables": [{"name": "orders"}],
+                        },
+                        {
+                            "name": "marketing",
+                            "tables": [{"name": "orders"}],
+                        },
                     ],
                 }
             }
-        })
-
-
-def test_catalog_config_allows_same_name_in_different_parents():
-    """Two tables named 'orders' in different schemas should NOT raise an error."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "schemas": [
-                    {
-                        "name": "sales",
-                        "tables": [{"name": "orders"}],
-                    },
-                    {
-                        "name": "marketing",
-                        "tables": [{"name": "orders"}],
-                    },
-                ],
-            }
         }
-    })
+    )
     assert len(config.catalogs["my_cat"].schemas) == 2
 
 
@@ -1062,39 +1110,44 @@ def test_table_config_rejects_duplicate_policy_names():
     """Two policies sharing a name on one table raise DuplicateResourceError —
     the namespace spans all policy types (a grant and a mask cannot share a name)."""
     with pytest.raises(DuplicateResourceError):
-        ResourcesConfig.model_validate({
-            "catalogs": {
-                "my_cat": {
-                    "schemas": [
-                        {
-                            "name": "sales",
-                            "tables": [
-                                {
-                                    "name": "orders",
-                                    "policies": [
-                                        {
-                                            "name": "dup",
-                                            "type": "grant",
-                                            "privileges": ["select"],
-                                            "to": ["analysts"],
-                                            "has_tags": {"domain": "analytics"},
-                                        },
-                                        {
-                                            "name": "dup",
-                                            "type": "mask",
-                                            "function": "my_cat.sales.fn",
-                                            "columns": [
-                                                {"alias": "c", "has_tags": {"pii": "email"}}
-                                            ],
-                                        },
-                                    ],
-                                }
-                            ],
-                        }
-                    ],
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {
+                    "my_cat": {
+                        "schemas": [
+                            {
+                                "name": "sales",
+                                "tables": [
+                                    {
+                                        "name": "orders",
+                                        "policies": [
+                                            {
+                                                "name": "dup",
+                                                "type": "grant",
+                                                "privileges": ["select"],
+                                                "to": ["analysts"],
+                                                "has_tags": {"domain": "analytics"},
+                                            },
+                                            {
+                                                "name": "dup",
+                                                "type": "mask",
+                                                "function": "my_cat.sales.fn",
+                                                "columns": [
+                                                    {
+                                                        "alias": "c",
+                                                        "has_tags": {"pii": "email"},
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
                 }
             }
-        })
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1126,97 +1179,110 @@ def test_column_config_rejects_explicit_owner():
     with pytest.raises(ValidationError) as exc_info:
         ResourcesConfig.model_validate(data)
 
-    assert "inherited" in str(exc_info.value).lower() or "table" in str(exc_info.value).lower()
+    assert (
+        "inherited" in str(exc_info.value).lower()
+        or "table" in str(exc_info.value).lower()
+    )
 
 
 def test_column_config_allows_omitted_owner():
     """A column without an 'owner' field validates successfully with owner as None."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_catalog": {
-                "schemas": [
-                    {
-                        "name": "sales",
-                        "tables": [
-                            {
-                                "name": "orders",
-                                "columns": [{"name": "email"}],
-                            }
-                        ],
-                    }
-                ]
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "columns": [{"name": "email"}],
+                                }
+                            ],
+                        }
+                    ]
+                }
             }
         }
-    })
+    )
     column = config.catalogs["my_catalog"].schemas[0].tables[0].columns[0]
     assert column.owner is None
 
 
 def test_column_config_accepts_optional_data_type():
     """ColumnConfig carries a 'data_type' string when declared (used for table creation)."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_catalog": {
-                "schemas": [
-                    {
-                        "name": "sales",
-                        "tables": [
-                            {
-                                "name": "orders",
-                                "columns": [{"name": "email", "data_type": "STRING"}],
-                            }
-                        ],
-                    }
-                ]
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "columns": [
+                                        {"name": "email", "data_type": "STRING"}
+                                    ],
+                                }
+                            ],
+                        }
+                    ]
+                }
             }
         }
-    })
+    )
     column = config.catalogs["my_catalog"].schemas[0].tables[0].columns[0]
     assert column.data_type == "STRING"
 
 
 def test_column_config_accepts_type_as_alias_for_data_type():
     """'type' is accepted on input as a backward-compatible alias of 'data_type'."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_catalog": {
-                "schemas": [
-                    {
-                        "name": "sales",
-                        "tables": [
-                            {
-                                "name": "orders",
-                                "columns": [{"name": "email", "type": "STRING"}],
-                            }
-                        ],
-                    }
-                ]
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "columns": [{"name": "email", "type": "STRING"}],
+                                }
+                            ],
+                        }
+                    ]
+                }
             }
         }
-    })
+    )
     column = config.catalogs["my_catalog"].schemas[0].tables[0].columns[0]
     assert column.data_type == "STRING"
 
 
 def test_column_config_data_type_defaults_to_none():
     """ColumnConfig.data_type is None when not declared."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_catalog": {
-                "schemas": [
-                    {
-                        "name": "sales",
-                        "tables": [
-                            {
-                                "name": "orders",
-                                "columns": [{"name": "email"}],
-                            }
-                        ],
-                    }
-                ]
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "columns": [{"name": "email"}],
+                                }
+                            ],
+                        }
+                    ]
+                }
             }
         }
-    })
+    )
     column = config.catalogs["my_catalog"].schemas[0].tables[0].columns[0]
     assert column.data_type is None
 
@@ -1228,14 +1294,16 @@ def test_column_config_data_type_defaults_to_none():
 
 def test_catalog_config_accepts_comment_and_location():
     """Catalog configs round-trip 'comment' and 'location' (managed location, CREATE-only)."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "comment": "Prod analytics catalog",
-                "location": "s3://prod-bucket/my_cat",
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "comment": "Prod analytics catalog",
+                    "location": "s3://prod-bucket/my_cat",
+                },
             },
-        },
-    })
+        }
+    )
     cat = config.catalogs["my_cat"]
     assert cat.comment == "Prod analytics catalog"
     assert cat.location == "s3://prod-bucket/my_cat"
@@ -1243,19 +1311,21 @@ def test_catalog_config_accepts_comment_and_location():
 
 def test_schema_config_accepts_comment_and_location():
     """Schema configs round-trip 'comment' and 'location' (managed location, CREATE-only)."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "schemas": [
-                    {
-                        "name": "sales",
-                        "comment": "Sales data",
-                        "location": "s3://prod-bucket/my_cat/sales",
-                    },
-                ],
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "comment": "Sales data",
+                            "location": "s3://prod-bucket/my_cat/sales",
+                        },
+                    ],
+                },
             },
-        },
-    })
+        }
+    )
     schema = config.catalogs["my_cat"].schemas[0]
     assert schema.comment == "Sales data"
     assert schema.location == "s3://prod-bucket/my_cat/sales"
@@ -1263,24 +1333,26 @@ def test_schema_config_accepts_comment_and_location():
 
 def test_table_config_accepts_comment_and_location():
     """Table configs round-trip 'comment' and 'location' (external location)."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "schemas": [
-                    {
-                        "name": "sales",
-                        "tables": [
-                            {
-                                "name": "orders",
-                                "comment": "Orders fact table",
-                                "location": "s3://external/orders",
-                            },
-                        ],
-                    },
-                ],
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "comment": "Orders fact table",
+                                    "location": "s3://external/orders",
+                                },
+                            ],
+                        },
+                    ],
+                },
             },
-        },
-    })
+        }
+    )
     table = config.catalogs["my_cat"].schemas[0].tables[0]
     assert table.comment == "Orders fact table"
     assert table.location == "s3://external/orders"
@@ -1288,24 +1360,26 @@ def test_table_config_accepts_comment_and_location():
 
 def test_volume_config_accepts_comment_and_location():
     """Volume configs round-trip 'comment' and 'location' (external location)."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "schemas": [
-                    {
-                        "name": "landing",
-                        "volumes": [
-                            {
-                                "name": "raw",
-                                "comment": "Raw landing volume",
-                                "location": "s3://external/raw_volumes/raw",
-                            },
-                        ],
-                    },
-                ],
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "landing",
+                            "volumes": [
+                                {
+                                    "name": "raw",
+                                    "comment": "Raw landing volume",
+                                    "location": "s3://external/raw_volumes/raw",
+                                },
+                            ],
+                        },
+                    ],
+                },
             },
-        },
-    })
+        }
+    )
     volume = config.catalogs["my_cat"].schemas[0].volumes[0]
     assert volume.comment == "Raw landing volume"
     assert volume.location == "s3://external/raw_volumes/raw"
@@ -1313,19 +1387,21 @@ def test_volume_config_accepts_comment_and_location():
 
 def test_taggable_configs_default_comment_and_location_to_none():
     """When 'comment'/'location' are omitted, they default to None."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "schemas": [
-                    {
-                        "name": "sales",
-                        "tables": [{"name": "orders"}],
-                        "volumes": [{"name": "raw"}],
-                    },
-                ],
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [{"name": "orders"}],
+                            "volumes": [{"name": "raw"}],
+                        },
+                    ],
+                },
             },
-        },
-    })
+        }
+    )
     cat = config.catalogs["my_cat"]
     schema = cat.schemas[0]
     assert cat.comment is None and cat.location is None
@@ -1348,114 +1424,128 @@ def test_taggable_configs_default_comment_and_location_to_none():
 
 def test_catalog_config_accepts_comment_without_double_quote():
     """A catalog comment containing no '\"' character validates successfully."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "comment": "Hello world",
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "comment": "Hello world",
+                },
             },
-        },
-    })
+        }
+    )
     assert config.catalogs["my_cat"].comment == "Hello world"
 
 
 def test_catalog_config_accepts_comment_with_single_quote():
     """Regression guard: single quotes (') in comments must still validate —
     only double quotes are rejected."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "comment": "It's fine",
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "comment": "It's fine",
+                },
             },
-        },
-    })
+        }
+    )
     assert config.catalogs["my_cat"].comment == "It's fine"
 
 
 def test_catalog_config_rejects_comment_containing_double_quote():
     """A catalog comment containing a '\"' character raises ValidationError."""
     with pytest.raises(ValidationError):
-        ResourcesConfig.model_validate({
-            "catalogs": {
-                "my_cat": {
-                    "comment": 'A "quoted" word',
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {
+                    "my_cat": {
+                        "comment": 'A "quoted" word',
+                    },
                 },
-            },
-        })
+            }
+        )
 
 
 def test_schema_config_rejects_comment_containing_double_quote():
     """A schema comment containing a '\"' character raises ValidationError."""
     with pytest.raises(ValidationError):
-        ResourcesConfig.model_validate({
-            "catalogs": {
-                "my_cat": {
-                    "schemas": [
-                        {
-                            "name": "sales",
-                            "comment": 'A "quoted" word',
-                        },
-                    ],
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {
+                    "my_cat": {
+                        "schemas": [
+                            {
+                                "name": "sales",
+                                "comment": 'A "quoted" word',
+                            },
+                        ],
+                    },
                 },
-            },
-        })
+            }
+        )
 
 
 def test_table_config_rejects_comment_containing_double_quote():
     """A table comment containing a '\"' character raises ValidationError."""
     with pytest.raises(ValidationError):
-        ResourcesConfig.model_validate({
-            "catalogs": {
-                "my_cat": {
-                    "schemas": [
-                        {
-                            "name": "sales",
-                            "tables": [
-                                {
-                                    "name": "orders",
-                                    "comment": 'A "quoted" word',
-                                },
-                            ],
-                        },
-                    ],
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {
+                    "my_cat": {
+                        "schemas": [
+                            {
+                                "name": "sales",
+                                "tables": [
+                                    {
+                                        "name": "orders",
+                                        "comment": 'A "quoted" word',
+                                    },
+                                ],
+                            },
+                        ],
+                    },
                 },
-            },
-        })
+            }
+        )
 
 
 def test_volume_config_rejects_comment_containing_double_quote():
     """A volume comment containing a '\"' character raises ValidationError."""
     with pytest.raises(ValidationError):
-        ResourcesConfig.model_validate({
-            "catalogs": {
-                "my_cat": {
-                    "schemas": [
-                        {
-                            "name": "landing",
-                            "volumes": [
-                                {
-                                    "name": "raw",
-                                    "comment": 'A "quoted" word',
-                                },
-                            ],
-                        },
-                    ],
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {
+                    "my_cat": {
+                        "schemas": [
+                            {
+                                "name": "landing",
+                                "volumes": [
+                                    {
+                                        "name": "raw",
+                                        "comment": 'A "quoted" word',
+                                    },
+                                ],
+                            },
+                        ],
+                    },
                 },
-            },
-        })
+            }
+        )
 
 
 def test_function_config_rejects_comment_containing_double_quote():
     """A function comment containing a '\"' character raises ValidationError."""
     with pytest.raises(ValidationError):
-        FunctionConfig.model_validate({
-            "name": "mask_pii_email",
-            "owner": None,
-            "catalog_name": "my_catalog",
-            "schema_name": "shared",
-            "parameters": [{"name": "col", "type": "STRING"}],
-            "return": "CASE WHEN is_member('admins') THEN col ELSE '***' END",
-            "comment": 'A "quoted" word',
-        })
+        FunctionConfig.model_validate(
+            {
+                "name": "mask_pii_email",
+                "owner": None,
+                "catalog_name": "my_catalog",
+                "schema_name": "shared",
+                "parameters": [{"name": "col", "type": "STRING"}],
+                "return": "CASE WHEN is_member('admins') THEN col ELSE '***' END",
+                "comment": 'A "quoted" word',
+            }
+        )
 
 
 def test_catalog_config_comment_validation_message_mentions_double_quote():
@@ -1463,13 +1553,15 @@ def test_catalog_config_comment_validation_message_mentions_double_quote():
     operator-friendly — it must mention the double-quote character, the
     phrase 'double-quote', or 'comment' so the cause is obvious."""
     with pytest.raises(ValidationError) as exc_info:
-        ResourcesConfig.model_validate({
-            "catalogs": {
-                "my_cat": {
-                    "comment": 'Says "hi" inside',
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {
+                    "my_cat": {
+                        "comment": 'Says "hi" inside',
+                    },
                 },
-            },
-        })
+            }
+        )
     rendered = str(exc_info.value).lower()
     assert '"' in rendered or "double-quote" in rendered or "comment" in rendered
 
@@ -1495,7 +1587,9 @@ def test_parameter_config_accepts_data_type_alias():
 def test_parameter_config_accepts_parameterised_data_type():
     """ParameterConfig accepts a data_type with trailing parameters/arguments
     (e.g. DECIMAL(10,2)) as long as the prefix is a known column type."""
-    param = ParameterConfig.model_validate({"name": "col", "data_type": "decimal(10,2)"})
+    param = ParameterConfig.model_validate(
+        {"name": "col", "data_type": "decimal(10,2)"}
+    )
     assert param.data_type.startswith("DECIMAL")
 
 
@@ -1584,9 +1678,7 @@ def _mask_or_filter_policy_catalog(policy_type: str, **policy_overrides) -> dict
                 "schemas": [
                     {
                         "name": "s",
-                        "tables": [
-                            {"name": "t", "policies": [policy]}
-                        ],
+                        "tables": [{"name": "t", "policies": [policy]}],
                     }
                 ],
             }
@@ -1760,7 +1852,10 @@ def test_fgac_policy_allows_multiple_constant_columns():
     config = ResourcesConfig.model_validate(data)
 
     columns = config.catalogs["cat"].schemas[0].tables[0].policies[0].columns
-    assert [getattr(c, "constant", None) for c in columns[1:]] == ["REDACTED", "REDACTED"]
+    assert [getattr(c, "constant", None) for c in columns[1:]] == [
+        "REDACTED",
+        "REDACTED",
+    ]
 
 
 def test_policy_column_constant_preserves_native_types():
@@ -1834,12 +1929,14 @@ def _catalog_level_fgac_policy(function: str) -> dict:
 @pytest.mark.parametrize(
     "given, expected",
     [
-        ("fn", "cat.s.fn"),           # bare → catalog.schema.fn
+        ("fn", "cat.s.fn"),  # bare → catalog.schema.fn
         ("myschema.fn", "cat.myschema.fn"),  # schema.fn → catalog.schema.fn
-        ("cat.s.fn", "cat.s.fn"),     # already qualified → unchanged
+        ("cat.s.fn", "cat.s.fn"),  # already qualified → unchanged
     ],
 )
-def test_fgac_policy_config_qualifies_partial_function_name(policy_type, given, expected):
+def test_fgac_policy_config_qualifies_partial_function_name(
+    policy_type, given, expected
+):
     """A partially-qualified function is completed from the policy's own
     catalog/schema; a fully-qualified name is preserved."""
     data = _mask_or_filter_policy_catalog(policy_type, function=given)
@@ -2111,92 +2208,102 @@ _VALID_RFA_DESTINATIONS = [
 
 def test_catalog_config_accepts_rfa_destinations_list():
     """A CatalogConfig with rfa_destinations: [email, url, uuid] validates."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "rfa_destinations": list(_VALID_RFA_DESTINATIONS),
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "rfa_destinations": list(_VALID_RFA_DESTINATIONS),
+                },
             },
-        },
-    })
+        }
+    )
     cat = config.catalogs["my_cat"]
     assert list(cat.rfa_destinations) == list(_VALID_RFA_DESTINATIONS)
 
 
 def test_schema_config_accepts_rfa_destinations_list():
     """A SchemaConfig with rfa_destinations: [email, url, uuid] validates."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "schemas": [
-                    {
-                        "name": "sales",
-                        "rfa_destinations": list(_VALID_RFA_DESTINATIONS),
-                    },
-                ],
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "rfa_destinations": list(_VALID_RFA_DESTINATIONS),
+                        },
+                    ],
+                },
             },
-        },
-    })
+        }
+    )
     schema = config.catalogs["my_cat"].schemas[0]
     assert list(schema.rfa_destinations) == list(_VALID_RFA_DESTINATIONS)
 
 
 def test_table_config_accepts_rfa_destinations_list():
     """A TableConfig with rfa_destinations: [email, url, uuid] validates."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "schemas": [
-                    {
-                        "name": "sales",
-                        "tables": [
-                            {
-                                "name": "orders",
-                                "rfa_destinations": list(_VALID_RFA_DESTINATIONS),
-                            },
-                        ],
-                    },
-                ],
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "rfa_destinations": list(_VALID_RFA_DESTINATIONS),
+                                },
+                            ],
+                        },
+                    ],
+                },
             },
-        },
-    })
+        }
+    )
     table = config.catalogs["my_cat"].schemas[0].tables[0]
     assert list(table.rfa_destinations) == list(_VALID_RFA_DESTINATIONS)
 
 
 def test_volume_config_accepts_rfa_destinations_list():
     """A VolumeConfig with rfa_destinations: [email, url, uuid] validates."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "schemas": [
-                    {
-                        "name": "landing",
-                        "volumes": [
-                            {
-                                "name": "raw",
-                                "rfa_destinations": list(_VALID_RFA_DESTINATIONS),
-                            },
-                        ],
-                    },
-                ],
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "landing",
+                            "volumes": [
+                                {
+                                    "name": "raw",
+                                    "rfa_destinations": list(_VALID_RFA_DESTINATIONS),
+                                },
+                            ],
+                        },
+                    ],
+                },
             },
-        },
-    })
+        }
+    )
     volume = config.catalogs["my_cat"].schemas[0].volumes[0]
     assert list(volume.rfa_destinations) == list(_VALID_RFA_DESTINATIONS)
 
 
 def test_function_config_accepts_rfa_destinations_list():
     """A FunctionConfig with rfa_destinations: [email, url, uuid] validates."""
-    function = FunctionConfig.model_validate({
-        "name": "mask_pii_email",
-        "owner": None,
-        "catalog_name": "my_catalog",
-        "schema_name": "shared",
-        "parameters": [{"name": "col", "type": "STRING"}],
-        "return": "CASE WHEN is_member('admins') THEN col ELSE '***' END",
-        "rfa_destinations": list(_VALID_RFA_DESTINATIONS),
-    })
+    function = FunctionConfig.model_validate(
+        {
+            "name": "mask_pii_email",
+            "owner": None,
+            "catalog_name": "my_catalog",
+            "schema_name": "shared",
+            "parameters": [{"name": "col", "type": "STRING"}],
+            "return": "CASE WHEN is_member('admins') THEN col ELSE '***' END",
+            "rfa_destinations": list(_VALID_RFA_DESTINATIONS),
+        }
+    )
     assert list(function.rfa_destinations) == list(_VALID_RFA_DESTINATIONS)
 
 
@@ -2205,13 +2312,15 @@ def test_catalog_config_rejects_unrecognised_rfa_destination():
     error message mentions the offending value."""
     bogus = "not-a-real-destination"
     with pytest.raises(ValidationError) as exc_info:
-        ResourcesConfig.model_validate({
-            "catalogs": {
-                "my_cat": {
-                    "rfa_destinations": [bogus],
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {
+                    "my_cat": {
+                        "rfa_destinations": [bogus],
+                    },
                 },
-            },
-        })
+            }
+        )
     assert bogus in str(exc_info.value)
 
 
@@ -2221,17 +2330,19 @@ def test_catalog_config_lists_every_offender_when_multiple_invalid():
     bogus_one = "garbage-one"
     bogus_two = "garbage-two"
     with pytest.raises(ValidationError) as exc_info:
-        ResourcesConfig.model_validate({
-            "catalogs": {
-                "my_cat": {
-                    "rfa_destinations": [
-                        "valid@example.com",
-                        bogus_one,
-                        bogus_two,
-                    ],
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {
+                    "my_cat": {
+                        "rfa_destinations": [
+                            "valid@example.com",
+                            bogus_one,
+                            bogus_two,
+                        ],
+                    },
                 },
-            },
-        })
+            }
+        )
     rendered = str(exc_info.value)
     assert bogus_one in rendered
     assert bogus_two in rendered
@@ -2239,11 +2350,13 @@ def test_catalog_config_lists_every_offender_when_multiple_invalid():
 
 def test_catalog_config_rfa_destinations_defaults_to_none():
     """When 'rfa_destinations' is omitted, the model attribute defaults to None."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {},
-        },
-    })
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {},
+            },
+        }
+    )
     assert config.catalogs["my_cat"].rfa_destinations is None
 
 
@@ -2252,28 +2365,32 @@ def test_column_config_rejects_rfa_destinations_entirely():
     valid one — raises ValidationError with a message that mentions
     rfa_destinations / not being supported on columns."""
     with pytest.raises(ValidationError) as exc_info:
-        ResourcesConfig.model_validate({
-            "catalogs": {
-                "my_cat": {
-                    "schemas": [
-                        {
-                            "name": "sales",
-                            "tables": [
-                                {
-                                    "name": "orders",
-                                    "columns": [
-                                        {
-                                            "name": "email",
-                                            "rfa_destinations": ["data-gov@example.com"],
-                                        },
-                                    ],
-                                },
-                            ],
-                        },
-                    ],
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {
+                    "my_cat": {
+                        "schemas": [
+                            {
+                                "name": "sales",
+                                "tables": [
+                                    {
+                                        "name": "orders",
+                                        "columns": [
+                                            {
+                                                "name": "email",
+                                                "rfa_destinations": [
+                                                    "data-gov@example.com"
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
                 },
-            },
-        })
+            }
+        )
     rendered = str(exc_info.value).lower()
     assert "rfa_destinations" in rendered or "not supported on columns" in rendered
 
@@ -2301,7 +2418,11 @@ def test_resources_config_rejects_table_name_with_double_underscore():
     """A table whose name starts with '__' is rejected."""
     with pytest.raises(ValidationError, match="__"):
         ResourcesConfig.model_validate(
-            {"catalogs": {"cat": {"schemas": [{"name": "s", "tables": [{"name": "__t"}]}]}}}
+            {
+                "catalogs": {
+                    "cat": {"schemas": [{"name": "s", "tables": [{"name": "__t"}]}]}
+                }
+            }
         )
 
 
@@ -2309,7 +2430,11 @@ def test_resources_config_rejects_volume_name_with_double_underscore():
     """A volume whose name starts with '__' is rejected."""
     with pytest.raises(ValidationError, match="__"):
         ResourcesConfig.model_validate(
-            {"catalogs": {"cat": {"schemas": [{"name": "s", "volumes": [{"name": "__v"}]}]}}}
+            {
+                "catalogs": {
+                    "cat": {"schemas": [{"name": "s", "volumes": [{"name": "__v"}]}]}
+                }
+            }
         )
 
 
@@ -2317,18 +2442,36 @@ def test_resources_config_rejects_function_name_with_double_underscore():
     """A function whose name starts with '__' is rejected."""
     with pytest.raises(ValidationError, match="__"):
         ResourcesConfig.model_validate(
-            {"catalogs": {"cat": {"schemas": [
-                {"name": "s", "functions": [{"name": "__fn", "return": "1"}]}
-            ]}}}
+            {
+                "catalogs": {
+                    "cat": {
+                        "schemas": [
+                            {
+                                "name": "s",
+                                "functions": [{"name": "__fn", "return": "1"}],
+                            }
+                        ]
+                    }
+                }
+            }
         )
 
 
 def test_resources_config_allows_column_name_with_double_underscore():
     """Columns are exempt from the '__' securable-name restriction."""
     config = ResourcesConfig.model_validate(
-        {"catalogs": {"cat": {"schemas": [
-            {"name": "s", "tables": [{"name": "t", "columns": [{"name": "__c"}]}]}
-        ]}}}
+        {
+            "catalogs": {
+                "cat": {
+                    "schemas": [
+                        {
+                            "name": "s",
+                            "tables": [{"name": "t", "columns": [{"name": "__c"}]}],
+                        }
+                    ]
+                }
+            }
+        }
     )
     assert config.catalogs["cat"].schemas[0].tables[0].columns[0].name == "__c"
 
@@ -2354,10 +2497,15 @@ def _grant_policy_in_catalog(policy: dict) -> dict:
 def test_policy_config_normalises_for_securable_type_case():
     """'for' accepts any case and resolves to the canonical SecurableType."""
     config = ResourcesConfig.model_validate(
-        _grant_policy_in_catalog({
-            "name": "g", "type": "grant", "privileges": ["use_schema"],
-            "to": ["analysts"], "for": "Schema",
-        })
+        _grant_policy_in_catalog(
+            {
+                "name": "g",
+                "type": "grant",
+                "privileges": ["use_schema"],
+                "to": ["analysts"],
+                "for": "Schema",
+            }
+        )
     )
     assert config.catalogs["cat"].policies[0].for_securable_type == SecurableType.SCHEMA
 
@@ -2376,10 +2524,15 @@ def test_policy_config_normalises_for_securable_type_plural(plural, expected):
 
     Uses 'manage' as the privilege since it is valid for every securable type."""
     config = ResourcesConfig.model_validate(
-        _grant_policy_in_catalog({
-            "name": "g", "type": "grant", "privileges": ["manage"],
-            "to": ["analysts"], "for": plural,
-        })
+        _grant_policy_in_catalog(
+            {
+                "name": "g",
+                "type": "grant",
+                "privileges": ["manage"],
+                "to": ["analysts"],
+                "for": plural,
+            }
+        )
     )
     assert config.catalogs["cat"].policies[0].for_securable_type == expected
 
@@ -2387,11 +2540,14 @@ def test_policy_config_normalises_for_securable_type_plural(plural, expected):
 def test_grant_policy_config_allows_all_privileges_when_for_omitted():
     """With 'for' omitted, any privilege list is accepted (no type constraint)."""
     config = ResourcesConfig.model_validate(
-        _grant_policy_in_catalog({
-            "name": "g", "type": "grant",
-            "privileges": ["select", "read_volume", "use_catalog"],
-            "to": ["analysts"],
-        })
+        _grant_policy_in_catalog(
+            {
+                "name": "g",
+                "type": "grant",
+                "privileges": ["select", "read_volume", "use_catalog"],
+                "to": ["analysts"],
+            }
+        )
     )
     assert config.catalogs["cat"].policies[0].for_securable_type is None
 
@@ -2399,11 +2555,15 @@ def test_grant_policy_config_allows_all_privileges_when_for_omitted():
 def test_grant_policy_config_accepts_privileges_matching_for_securable_type():
     """Privileges applicable to the 'for' type validate successfully."""
     config = ResourcesConfig.model_validate(
-        _grant_policy_in_catalog({
-            "name": "g", "type": "grant",
-            "privileges": ["read_volume", "write_volume"],
-            "to": ["analysts"], "for": "volume",
-        })
+        _grant_policy_in_catalog(
+            {
+                "name": "g",
+                "type": "grant",
+                "privileges": ["read_volume", "write_volume"],
+                "to": ["analysts"],
+                "for": "volume",
+            }
+        )
     )
     assert config.catalogs["cat"].policies[0].for_securable_type == SecurableType.VOLUME
 
@@ -2412,10 +2572,15 @@ def test_grant_policy_config_rejects_privileges_mismatching_for_securable_type()
     """A privilege not applicable to the 'for' type raises a validation error."""
     with pytest.raises(ValidationError) as exc_info:
         ResourcesConfig.model_validate(
-            _grant_policy_in_catalog({
-                "name": "g", "type": "grant", "privileges": ["select"],
-                "to": ["analysts"], "for": "volume",
-            })
+            _grant_policy_in_catalog(
+                {
+                    "name": "g",
+                    "type": "grant",
+                    "privileges": ["select"],
+                    "to": ["analysts"],
+                    "for": "volume",
+                }
+            )
         )
     assert "volume" in str(exc_info.value).lower()
 
@@ -2424,10 +2589,15 @@ def test_grant_policy_config_accepts_abstraction_with_partial_overlap():
     """An abstraction validates when at least one expanded privilege applies
     (read -> read_volume is applicable to volume)."""
     config = ResourcesConfig.model_validate(
-        _grant_policy_in_catalog({
-            "name": "g", "type": "grant", "privileges": ["read"],
-            "to": ["analysts"], "for": "volume",
-        })
+        _grant_policy_in_catalog(
+            {
+                "name": "g",
+                "type": "grant",
+                "privileges": ["read"],
+                "to": ["analysts"],
+                "for": "volume",
+            }
+        )
     )
     assert config.catalogs["cat"].policies[0].for_securable_type == SecurableType.VOLUME
 
@@ -2437,10 +2607,15 @@ def test_grant_policy_config_rejects_abstraction_with_no_overlap():
     (use -> use_catalog/use_schema, neither applicable to table)."""
     with pytest.raises(ValidationError):
         ResourcesConfig.model_validate(
-            _grant_policy_in_catalog({
-                "name": "g", "type": "grant", "privileges": ["use"],
-                "to": ["analysts"], "for": "table",
-            })
+            _grant_policy_in_catalog(
+                {
+                    "name": "g",
+                    "type": "grant",
+                    "privileges": ["use"],
+                    "to": ["analysts"],
+                    "for": "table",
+                }
+            )
         )
 
 
@@ -2449,10 +2624,15 @@ def test_grant_policy_config_rejects_unsupported_for_securable_type():
     cleanly rather than crashing."""
     with pytest.raises(ValidationError):
         ResourcesConfig.model_validate(
-            _grant_policy_in_catalog({
-                "name": "g", "type": "grant", "privileges": ["execute"],
-                "to": ["analysts"], "for": "function",
-            })
+            _grant_policy_in_catalog(
+                {
+                    "name": "g",
+                    "type": "grant",
+                    "privileges": ["execute"],
+                    "to": ["analysts"],
+                    "for": "function",
+                }
+            )
         )
 
 
@@ -2460,11 +2640,15 @@ def test_mask_policy_config_accepts_for_table_aliases():
     """A mask policy accepts 'for' written as a case-variant or plural of table."""
     for value in ("Table", "tables", "TABLE"):
         config = ResourcesConfig.model_validate(
-            _fgac_policy_in_table({
-                "name": "p", "type": "mask", "function": "cat.s.fn",
-                "columns": [{"alias": "c", "has_tags": {"pii": "email"}}],
-                "for": value,
-            })
+            _fgac_policy_in_table(
+                {
+                    "name": "p",
+                    "type": "mask",
+                    "function": "cat.s.fn",
+                    "columns": [{"alias": "c", "has_tags": {"pii": "email"}}],
+                    "for": value,
+                }
+            )
         )
         policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
         assert policy.for_securable_type == SecurableType.TABLE
@@ -2474,11 +2658,15 @@ def test_mask_policy_config_rejects_non_table_for():
     """A mask policy may only target TABLE; any other 'for' is rejected."""
     with pytest.raises(ValidationError):
         ResourcesConfig.model_validate(
-            _fgac_policy_in_table({
-                "name": "p", "type": "mask", "function": "cat.s.fn",
-                "columns": [{"alias": "c", "has_tags": {"pii": "email"}}],
-                "for": "schema",
-            })
+            _fgac_policy_in_table(
+                {
+                    "name": "p",
+                    "type": "mask",
+                    "function": "cat.s.fn",
+                    "columns": [{"alias": "c", "has_tags": {"pii": "email"}}],
+                    "for": "schema",
+                }
+            )
         )
 
 
@@ -2486,10 +2674,17 @@ def test_fgac_policy_config_allows_null_for():
     """An explicit 'for: null' is accepted on an FGAC policy (coalesced to TABLE
     downstream by the compiler)."""
     config = ResourcesConfig.model_validate(
-        _fgac_policy_in_table({
-            "name": "p", "type": "mask", "function": "cat.s.fn",
-            "columns": [{"alias": "c", "has_tags": {"pii": "email"}}],
-            "for": None,
-        })
+        _fgac_policy_in_table(
+            {
+                "name": "p",
+                "type": "mask",
+                "function": "cat.s.fn",
+                "columns": [{"alias": "c", "has_tags": {"pii": "email"}}],
+                "for": None,
+            }
+        )
     )
-    assert config.catalogs["cat"].schemas[0].tables[0].policies[0].for_securable_type is None
+    assert (
+        config.catalogs["cat"].schemas[0].tables[0].policies[0].for_securable_type
+        is None
+    )

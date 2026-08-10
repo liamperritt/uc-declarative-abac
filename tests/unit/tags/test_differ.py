@@ -292,7 +292,11 @@ def test_tag_differ_leaves_adds_and_updates_unchanged_when_retaining():
         tag_value="",
     )
     old_values = {
-        (SecurableType.COLUMN, "catalog.sales.orders.phone", "class.phone_number"): "old",
+        (
+            SecurableType.COLUMN,
+            "catalog.sales.orders.phone",
+            "class.phone_number",
+        ): "old",
     }
     diff = TagDiff(
         to_add={add_tag},

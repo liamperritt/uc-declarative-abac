@@ -7,7 +7,11 @@ if TYPE_CHECKING:
     from uc_declarative_abac.logger import ChangeLogger
 
 from uc_declarative_abac.principals.state import GroupDiff, GroupRename
-from uc_declarative_abac.utils import ExecutionError, OrchestratorError, parallel_for_each
+from uc_declarative_abac.utils import (
+    ExecutionError,
+    OrchestratorError,
+    parallel_for_each,
+)
 
 
 def _group_membership_error(group_name: str, error: Exception) -> Exception:
@@ -50,9 +54,12 @@ def _execute_creates(
     def on_complete(item: tuple[str, frozenset], _result, error) -> None:
         name, members = item
         if error is not None:
-            change_logger.log_error(ExecutionError(
-                context=f"create_group({name})", exception=error,
-            ))
+            change_logger.log_error(
+                ExecutionError(
+                    context=f"create_group({name})",
+                    exception=error,
+                )
+            )
             return
         change_logger.log_group_create(name, members)
 
@@ -85,14 +92,17 @@ def _execute_renames(
 
     def on_complete(rename: GroupRename, _result, error) -> None:
         if error is not None:
-            change_logger.log_error(ExecutionError(
-                context=f"rename_group({rename.old_display_name} -> "
-                        f"{rename.new_display_name})",
-                exception=error,
-            ))
+            change_logger.log_error(
+                ExecutionError(
+                    context=f"rename_group({rename.old_display_name} -> "
+                    f"{rename.new_display_name})",
+                    exception=error,
+                )
+            )
             return
         change_logger.log_group_rename(
-            rename.old_display_name, rename.new_display_name,
+            rename.old_display_name,
+            rename.new_display_name,
         )
 
     parallel_for_each(
@@ -125,10 +135,12 @@ def _execute_member_adds(
     def on_complete(item: tuple[str, frozenset], _result, error) -> None:
         name, members = item
         if error is not None:
-            change_logger.log_error(ExecutionError(
-                context=f"add_group_members({name})",
-                exception=_group_membership_error(name, error),
-            ))
+            change_logger.log_error(
+                ExecutionError(
+                    context=f"add_group_members({name})",
+                    exception=_group_membership_error(name, error),
+                )
+            )
             return
         change_logger.log_group_member_add(name, members)
 
@@ -163,10 +175,12 @@ def _execute_member_removes(
     def on_complete(item: tuple[str, frozenset], _result, error) -> None:
         name, members = item
         if error is not None:
-            change_logger.log_error(ExecutionError(
-                context=f"remove_group_members({name})",
-                exception=_group_membership_error(name, error),
-            ))
+            change_logger.log_error(
+                ExecutionError(
+                    context=f"remove_group_members({name})",
+                    exception=_group_membership_error(name, error),
+                )
+            )
             return
         change_logger.log_group_member_remove(name, members)
 

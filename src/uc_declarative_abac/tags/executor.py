@@ -114,7 +114,9 @@ def _prompt_remove_confirmation(removes: list[SecurableTag]) -> bool:
     """
     print(f"\nAbout to remove {len(removes)} governed tag(s) from securables:")
     for tag in removes:
-        print(f"  - {tag.securable_type.value} {tag.securable_full_name}  {tag.tag_name}")
+        print(
+            f"  - {tag.securable_type.value} {tag.securable_full_name}  {tag.tag_name}"
+        )
     print()
     try:
         response = input(
@@ -142,6 +144,7 @@ def _run_set_tags_batch(
     so progress streams to the operator. The returned ``statements`` list is in
     input order via the in-order result returned by ``parallel_for_each``.
     """
+
     def worker(item: TagWorkItem) -> None:
         _key, _tags, stmt = item
         if not dry_run:
@@ -164,7 +167,10 @@ def _run_set_tags_batch(
                 )
 
     results = parallel_for_each(
-        work_items, worker, max_workers=max_workers, on_complete=on_complete,
+        work_items,
+        worker,
+        max_workers=max_workers,
+        on_complete=on_complete,
     )
     if dry_run:
         return []
@@ -183,6 +189,7 @@ def _run_unset_tags_batch(
     Per-item logging fires via ``on_complete`` as each worker finishes;
     returned ``statements`` list is in input order.
     """
+
     def worker(item: TagWorkItem) -> None:
         _key, _tags, stmt = item
         if not dry_run:
@@ -197,7 +204,10 @@ def _run_unset_tags_batch(
             change_logger.log_tag_remove(tag)
 
     results = parallel_for_each(
-        work_items, worker, max_workers=max_workers, on_complete=on_complete,
+        work_items,
+        worker,
+        max_workers=max_workers,
+        on_complete=on_complete,
     )
     if dry_run:
         return []
@@ -223,7 +233,9 @@ def _apply_set_tags(
             for key, tags in groups
         ]
         statements.extend(
-            _run_set_tags_batch(uc_helper, work_items, diff, change_logger, dry_run, workers)
+            _run_set_tags_batch(
+                uc_helper, work_items, diff, change_logger, dry_run, workers
+            )
         )
     return statements
 
@@ -246,7 +258,9 @@ def _apply_unset_tags(
             for key, tags in groups
         ]
         statements.extend(
-            _run_unset_tags_batch(uc_helper, work_items, change_logger, dry_run, workers)
+            _run_unset_tags_batch(
+                uc_helper, work_items, change_logger, dry_run, workers
+            )
         )
     return statements
 
@@ -303,13 +317,24 @@ def execute_tag_diff(
     governed_keys = governed_tag_names or set()
     statements: list[str] = []
 
-    statements.extend(_apply_set_tags(uc_helper, diff, change_logger, dry_run, max_parallel_changes))
+    statements.extend(
+        _apply_set_tags(uc_helper, diff, change_logger, dry_run, max_parallel_changes)
+    )
 
     governed_removes, nongoverned_removes = _partition_governed_removes(
-        diff.to_remove, governed_keys,
+        diff.to_remove,
+        governed_keys,
     )
-    statements.extend(_apply_unset_tags(uc_helper, nongoverned_removes, change_logger, dry_run, max_parallel_changes))
+    statements.extend(
+        _apply_unset_tags(
+            uc_helper, nongoverned_removes, change_logger, dry_run, max_parallel_changes
+        )
+    )
     _confirm_governed_removes_or_exit(governed_removes, dry_run, force)
-    statements.extend(_apply_unset_tags(uc_helper, governed_removes, change_logger, dry_run, max_parallel_changes))
+    statements.extend(
+        _apply_unset_tags(
+            uc_helper, governed_removes, change_logger, dry_run, max_parallel_changes
+        )
+    )
 
     return statements

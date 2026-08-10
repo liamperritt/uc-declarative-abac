@@ -21,8 +21,19 @@ from uc_declarative_abac.types import (
 # Permissive superset of every tag key used across the fixtures in this file.
 # Tests that target the "ungoverned tag" validation pass a narrower set explicitly.
 _GOVERNED_TAGS_IN_FIXTURES = {
-    "sales", "a", "b", "env", "public", "writable", "pii",
-    "team", "dept", "zone", "domain", "other", "level",
+    "sales",
+    "a",
+    "b",
+    "env",
+    "public",
+    "writable",
+    "pii",
+    "team",
+    "dept",
+    "zone",
+    "domain",
+    "other",
+    "level",
 }
 
 
@@ -37,10 +48,16 @@ def _compile(
     change_logger: ChangeLogger | None = None,
     run_date: date | None = None,
 ) -> set[SecurablePrivilege]:
-    names = _GOVERNED_TAGS_IN_FIXTURES if governed_tag_names is None else governed_tag_names
+    names = (
+        _GOVERNED_TAGS_IN_FIXTURES if governed_tag_names is None else governed_tag_names
+    )
     logger = change_logger if change_logger is not None else _change_logger()
     return compile_desired_privileges(
-        config, desired_tags, names, logger, run_date=run_date,
+        config,
+        desired_tags,
+        names,
+        logger,
+        run_date=run_date,
     )
 
 
@@ -447,12 +464,17 @@ def test_privilege_compiler_matches_schema_level_policy():
 
     result = _compile(config, desired_tags)
 
-    assert SecurablePrivilege(
-        securable_type=SecurableType.SCHEMA,
-        securable_full_name="my_catalog.sales",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="data_engineers"),
-        privilege_type=PrivilegeType.SELECT,
-    ) in result
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="my_catalog.sales",
+            principal=Principal(
+                principal_type=PrincipalType.UNKNOWN, name="data_engineers"
+            ),
+            privilege_type=PrivilegeType.SELECT,
+        )
+        in result
+    )
 
 
 def test_privilege_compiler_matches_table_level_policy():
@@ -497,12 +519,17 @@ def test_privilege_compiler_matches_table_level_policy():
 
     result = _compile(config, desired_tags)
 
-    assert SecurablePrivilege(
-        securable_type=SecurableType.TABLE,
-        securable_full_name="my_catalog.sales.orders",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="sales_team"),
-        privilege_type=PrivilegeType.MODIFY,
-    ) in result
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="my_catalog.sales.orders",
+            principal=Principal(
+                principal_type=PrincipalType.UNKNOWN, name="sales_team"
+            ),
+            privilege_type=PrivilegeType.MODIFY,
+        )
+        in result
+    )
 
 
 def test_privilege_compiler_collects_policies_from_all_levels():
@@ -577,25 +604,37 @@ def test_privilege_compiler_collects_policies_from_all_levels():
     result = _compile(config, desired_tags)
 
     assert len(result) >= 3
-    assert SecurablePrivilege(
-        securable_type=SecurableType.CATALOG,
-        securable_full_name="my_catalog",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="all_users"),
-        privilege_type=PrivilegeType.USE_CATALOG,
-    ) in result
-    assert SecurablePrivilege(
-        securable_type=SecurableType.SCHEMA,
-        securable_full_name="my_catalog.sales",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="data_engineers"),
-        privilege_type=PrivilegeType.SELECT,
-    ) in result
-    assert SecurablePrivilege(
-        securable_type=SecurableType.TABLE,
-        securable_full_name="my_catalog.sales.orders",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="sales_team"),
-        privilege_type=PrivilegeType.MODIFY,
-    ) in result
-
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="my_catalog",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="all_users"),
+            privilege_type=PrivilegeType.USE_CATALOG,
+        )
+        in result
+    )
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="my_catalog.sales",
+            principal=Principal(
+                principal_type=PrincipalType.UNKNOWN, name="data_engineers"
+            ),
+            privilege_type=PrivilegeType.SELECT,
+        )
+        in result
+    )
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="my_catalog.sales.orders",
+            principal=Principal(
+                principal_type=PrincipalType.UNKNOWN, name="sales_team"
+            ),
+            privilege_type=PrivilegeType.MODIFY,
+        )
+        in result
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -722,12 +761,15 @@ def test_privilege_compiler_filters_incompatible_privilege_for_volume():
 
     result = _compile(config, desired_tags)
 
-    assert SecurablePrivilege(
-        securable_type=SecurableType.VOLUME,
-        securable_full_name="cat.raw.events",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.READ_VOLUME,
-    ) in result
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.VOLUME,
+            securable_full_name="cat.raw.events",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.READ_VOLUME,
+        )
+        in result
+    )
 
     # SELECT is not valid on a VOLUME — must be excluded
     select_privileges = {p for p in result if p.privilege_type == PrivilegeType.SELECT}
@@ -765,15 +807,20 @@ def test_privilege_compiler_allows_select_on_table():
 
     result = _compile(config, desired_tags)
 
-    assert SecurablePrivilege(
-        securable_type=SecurableType.TABLE,
-        securable_full_name="cat.raw.events",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.SELECT,
-    ) in result
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="cat.raw.events",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.SELECT,
+        )
+        in result
+    )
 
     # READ_VOLUME is not valid on a TABLE — must be excluded
-    read_volume_privileges = {p for p in result if p.privilege_type == PrivilegeType.READ_VOLUME}
+    read_volume_privileges = {
+        p for p in result if p.privilege_type == PrivilegeType.READ_VOLUME
+    }
     assert read_volume_privileges == set()
 
 
@@ -808,12 +855,15 @@ def test_privilege_compiler_allows_all_privileges_on_any_securable():
 
     result = _compile(config, desired_tags)
 
-    assert SecurablePrivilege(
-        securable_type=SecurableType.VOLUME,
-        securable_full_name="cat.raw.files",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.ALL_PRIVILEGES,
-    ) in result
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.VOLUME,
+            securable_full_name="cat.raw.files",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.ALL_PRIVILEGES,
+        )
+        in result
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -958,12 +1008,15 @@ def test_privilege_compiler_grants_directly_when_policy_has_no_tags():
 
     result = _compile(config, set())
 
-    assert SecurablePrivilege(
-        securable_type=SecurableType.CATALOG,
-        securable_full_name="my_cat",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.USE_CATALOG,
-    ) in result
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="my_cat",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.USE_CATALOG,
+        )
+        in result
+    )
 
 
 def test_privilege_compiler_grants_directly_to_schema_when_policy_has_no_tags():
@@ -993,12 +1046,15 @@ def test_privilege_compiler_grants_directly_to_schema_when_policy_has_no_tags():
 
     result = _compile(config, set())
 
-    assert SecurablePrivilege(
-        securable_type=SecurableType.SCHEMA,
-        securable_full_name="my_cat.sales",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.USE_SCHEMA,
-    ) in result
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="my_cat.sales",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.USE_SCHEMA,
+        )
+        in result
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1056,20 +1112,26 @@ def test_privilege_compiler_scopes_policy_to_attached_securable():
     result = _compile(config, desired_tags)
 
     # Policy is on schema 'sales' — should match its child table only
-    assert SecurablePrivilege(
-        securable_type=SecurableType.TABLE,
-        securable_full_name="my_cat.sales.orders",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.SELECT,
-    ) in result
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="my_cat.sales.orders",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.SELECT,
+        )
+        in result
+    )
 
     # Should NOT match table in sibling schema 'hr'
-    assert SecurablePrivilege(
-        securable_type=SecurableType.TABLE,
-        securable_full_name="my_cat.hr.employees",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.SELECT,
-    ) not in result
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="my_cat.hr.employees",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.SELECT,
+        )
+        not in result
+    )
 
 
 def test_privilege_compiler_scopes_catalog_policy_to_all_children():
@@ -1121,19 +1183,25 @@ def test_privilege_compiler_scopes_catalog_policy_to_all_children():
     result = _compile(config, desired_tags)
 
     # Catalog-level policy should match tables in BOTH schemas
-    assert SecurablePrivilege(
-        securable_type=SecurableType.TABLE,
-        securable_full_name="my_cat.sales.orders",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.SELECT,
-    ) in result
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="my_cat.sales.orders",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.SELECT,
+        )
+        in result
+    )
 
-    assert SecurablePrivilege(
-        securable_type=SecurableType.TABLE,
-        securable_full_name="my_cat.hr.employees",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.SELECT,
-    ) in result
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="my_cat.hr.employees",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.SELECT,
+        )
+        in result
+    )
 
 
 def test_privilege_compiler_and_semantics_with_scoped_policy():
@@ -1156,7 +1224,10 @@ def test_privilege_compiler_and_semantics_with_scoped_policy():
                                 }
                             ],
                             "tables": [
-                                {"name": "orders", "tags": {"dept": "eng", "level": "senior"}},
+                                {
+                                    "name": "orders",
+                                    "tags": {"dept": "eng", "level": "senior"},
+                                },
                                 {"name": "users", "tags": {"dept": "eng"}},
                             ],
                         }
@@ -1192,20 +1263,26 @@ def test_privilege_compiler_and_semantics_with_scoped_policy():
     result = _compile(config, desired_tags)
 
     # orders should match — has both tags
-    assert SecurablePrivilege(
-        securable_type=SecurableType.TABLE,
-        securable_full_name="my_cat.sales.orders",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.SELECT,
-    ) in result
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="my_cat.sales.orders",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.SELECT,
+        )
+        in result
+    )
 
     # users should NOT match — missing 'level: senior' tag
-    assert SecurablePrivilege(
-        securable_type=SecurableType.TABLE,
-        securable_full_name="my_cat.sales.users",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.SELECT,
-    ) not in result
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="my_cat.sales.users",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.SELECT,
+        )
+        not in result
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1330,15 +1407,19 @@ def test_privilege_compiler_cascades_use_catalog_up_to_parent_when_match_is_sche
 
     result = _compile(config, desired_tags)
 
-    assert SecurablePrivilege(
-        securable_type=SecurableType.CATALOG,
-        securable_full_name="cat",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.USE_CATALOG,
-    ) in result
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.USE_CATALOG,
+        )
+        in result
+    )
     # USE_CATALOG must not land on the schema itself
     assert not any(
-        p.securable_type == SecurableType.SCHEMA and p.privilege_type == PrivilegeType.USE_CATALOG
+        p.securable_type == SecurableType.SCHEMA
+        and p.privilege_type == PrivilegeType.USE_CATALOG
         for p in result
     )
 
@@ -1368,15 +1449,19 @@ def test_privilege_compiler_cascades_use_catalog_up_to_parent_when_match_is_tabl
 
     result = _compile(config, desired_tags)
 
-    assert SecurablePrivilege(
-        securable_type=SecurableType.CATALOG,
-        securable_full_name="cat",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.USE_CATALOG,
-    ) in result
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.USE_CATALOG,
+        )
+        in result
+    )
     # USE_CATALOG must not land on the table
     assert not any(
-        p.securable_type == SecurableType.TABLE and p.privilege_type == PrivilegeType.USE_CATALOG
+        p.securable_type == SecurableType.TABLE
+        and p.privilege_type == PrivilegeType.USE_CATALOG
         for p in result
     )
 
@@ -1406,14 +1491,18 @@ def test_privilege_compiler_cascades_use_catalog_up_to_parent_when_match_is_volu
 
     result = _compile(config, desired_tags)
 
-    assert SecurablePrivilege(
-        securable_type=SecurableType.CATALOG,
-        securable_full_name="cat",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.USE_CATALOG,
-    ) in result
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.USE_CATALOG,
+        )
+        in result
+    )
     assert not any(
-        p.securable_type == SecurableType.VOLUME and p.privilege_type == PrivilegeType.USE_CATALOG
+        p.securable_type == SecurableType.VOLUME
+        and p.privilege_type == PrivilegeType.USE_CATALOG
         for p in result
     )
 
@@ -1443,14 +1532,18 @@ def test_privilege_compiler_cascades_use_schema_up_to_parent_when_match_is_table
 
     result = _compile(config, desired_tags)
 
-    assert SecurablePrivilege(
-        securable_type=SecurableType.SCHEMA,
-        securable_full_name="cat.sales",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.USE_SCHEMA,
-    ) in result
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="cat.sales",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.USE_SCHEMA,
+        )
+        in result
+    )
     assert not any(
-        p.securable_type == SecurableType.TABLE and p.privilege_type == PrivilegeType.USE_SCHEMA
+        p.securable_type == SecurableType.TABLE
+        and p.privilege_type == PrivilegeType.USE_SCHEMA
         for p in result
     )
 
@@ -1480,14 +1573,18 @@ def test_privilege_compiler_cascades_use_schema_up_to_parent_when_match_is_volum
 
     result = _compile(config, desired_tags)
 
-    assert SecurablePrivilege(
-        securable_type=SecurableType.SCHEMA,
-        securable_full_name="cat.raw",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.USE_SCHEMA,
-    ) in result
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="cat.raw",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.USE_SCHEMA,
+        )
+        in result
+    )
     assert not any(
-        p.securable_type == SecurableType.VOLUME and p.privilege_type == PrivilegeType.USE_SCHEMA
+        p.securable_type == SecurableType.VOLUME
+        and p.privilege_type == PrivilegeType.USE_SCHEMA
         for p in result
     )
 
@@ -1517,12 +1614,15 @@ def test_privilege_compiler_emits_use_catalog_on_catalog_when_match_is_catalog()
 
     result = _compile(config, desired_tags)
 
-    assert SecurablePrivilege(
-        securable_type=SecurableType.CATALOG,
-        securable_full_name="cat",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.USE_CATALOG,
-    ) in result
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.USE_CATALOG,
+        )
+        in result
+    )
 
 
 def test_privilege_compiler_emits_use_schema_on_schema_when_match_is_schema():
@@ -1550,12 +1650,15 @@ def test_privilege_compiler_emits_use_schema_on_schema_when_match_is_schema():
 
     result = _compile(config, desired_tags)
 
-    assert SecurablePrivilege(
-        securable_type=SecurableType.SCHEMA,
-        securable_full_name="cat.sales",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.USE_SCHEMA,
-    ) in result
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="cat.sales",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.USE_SCHEMA,
+        )
+        in result
+    )
 
 
 def test_privilege_compiler_emits_use_schema_on_catalog_when_match_is_catalog():
@@ -1584,12 +1687,15 @@ def test_privilege_compiler_emits_use_schema_on_catalog_when_match_is_catalog():
 
     result = _compile(config, desired_tags)
 
-    assert SecurablePrivilege(
-        securable_type=SecurableType.CATALOG,
-        securable_full_name="cat",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.USE_SCHEMA,
-    ) in result
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.USE_SCHEMA,
+        )
+        in result
+    )
 
 
 def test_privilege_compiler_deduplicates_cascaded_use_catalog_when_many_children_match_same_policy():
@@ -1689,24 +1795,33 @@ def test_privilege_compiler_emits_select_on_table_and_cascades_use_catalog_and_u
 
     result = _compile(config, desired_tags)
 
-    assert SecurablePrivilege(
-        securable_type=SecurableType.TABLE,
-        securable_full_name="cat.sales.orders",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.SELECT,
-    ) in result
-    assert SecurablePrivilege(
-        securable_type=SecurableType.SCHEMA,
-        securable_full_name="cat.sales",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.USE_SCHEMA,
-    ) in result
-    assert SecurablePrivilege(
-        securable_type=SecurableType.CATALOG,
-        securable_full_name="cat",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.USE_CATALOG,
-    ) in result
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="cat.sales.orders",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.SELECT,
+        )
+        in result
+    )
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="cat.sales",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.USE_SCHEMA,
+        )
+        in result
+    )
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.CATALOG,
+            securable_full_name="cat",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.USE_CATALOG,
+        )
+        in result
+    )
 
 
 def test_privilege_compiler_drops_use_catalog_when_policy_attached_at_table_level():
@@ -1727,7 +1842,11 @@ def test_privilege_compiler_drops_use_catalog_when_policy_attached_at_table_leve
                                         {
                                             "name": "g",
                                             "type": "grant",
-                                            "privileges": ["select", "use_catalog", "use_schema"],
+                                            "privileges": [
+                                                "select",
+                                                "use_catalog",
+                                                "use_schema",
+                                            ],
                                             "to": ["team"],
                                             "has_tags": {},
                                         }
@@ -1743,12 +1862,15 @@ def test_privilege_compiler_drops_use_catalog_when_policy_attached_at_table_leve
 
     result = _compile(config, set())
 
-    assert SecurablePrivilege(
-        securable_type=SecurableType.TABLE,
-        securable_full_name="cat.sales.orders",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.SELECT,
-    ) in result
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="cat.sales.orders",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.SELECT,
+        )
+        in result
+    )
     # USE_CATALOG and USE_SCHEMA must not leak outside the table-level scope.
     assert not any(p.privilege_type == PrivilegeType.USE_CATALOG for p in result)
     assert not any(p.privilege_type == PrivilegeType.USE_SCHEMA for p in result)
@@ -1769,7 +1891,11 @@ def test_privilege_compiler_drops_use_catalog_when_policy_attached_at_schema_lev
                                 {
                                     "name": "g",
                                     "type": "grant",
-                                    "privileges": ["select", "use_catalog", "use_schema"],
+                                    "privileges": [
+                                        "select",
+                                        "use_catalog",
+                                        "use_schema",
+                                    ],
                                     "to": ["team"],
                                     "has_tags": {"env": "prod"},
                                 }
@@ -1786,18 +1912,24 @@ def test_privilege_compiler_drops_use_catalog_when_policy_attached_at_schema_lev
 
     result = _compile(config, desired_tags)
 
-    assert SecurablePrivilege(
-        securable_type=SecurableType.TABLE,
-        securable_full_name="cat.sales.orders",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.SELECT,
-    ) in result
-    assert SecurablePrivilege(
-        securable_type=SecurableType.SCHEMA,
-        securable_full_name="cat.sales",
-        principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
-        privilege_type=PrivilegeType.USE_SCHEMA,
-    ) in result
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="cat.sales.orders",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.SELECT,
+        )
+        in result
+    )
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="cat.sales",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.USE_SCHEMA,
+        )
+        in result
+    )
     # Parent catalog is outside the policy's scope.
     assert not any(p.privilege_type == PrivilegeType.USE_CATALOG for p in result)
 
@@ -1828,12 +1960,17 @@ def test_privilege_compiler_cascades_use_catalog_for_each_principal_when_policy_
     result = _compile(config, desired_tags)
 
     for principal_name in ("analysts", "engineers", "auditors"):
-        assert SecurablePrivilege(
-            securable_type=SecurableType.CATALOG,
-            securable_full_name="cat",
-            principal=Principal(principal_type=PrincipalType.UNKNOWN, name=principal_name),
-            privilege_type=PrivilegeType.USE_CATALOG,
-        ) in result
+        assert (
+            SecurablePrivilege(
+                securable_type=SecurableType.CATALOG,
+                securable_full_name="cat",
+                principal=Principal(
+                    principal_type=PrincipalType.UNKNOWN, name=principal_name
+                ),
+                privilege_type=PrivilegeType.USE_CATALOG,
+            )
+            in result
+        )
 
 
 # ---------------------------------------------------------------------------

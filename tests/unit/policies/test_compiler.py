@@ -20,7 +20,14 @@ from uc_declarative_abac.types import (
 # Permissive superset of every tag key used across the fixtures in this file.
 # Tests that target the "ungoverned tag" validation pass a narrower set explicitly.
 _GOVERNED_TAGS_IN_FIXTURES = {
-    "pii", "domain", "a_tag", "b_tag", "a", "b", "geo", "lvl",
+    "pii",
+    "domain",
+    "a_tag",
+    "b_tag",
+    "a",
+    "b",
+    "geo",
+    "lvl",
 }
 
 
@@ -33,7 +40,9 @@ def _compile(
     governed_tag_names: set[str] | None = None,
     change_logger: ChangeLogger | None = None,
 ) -> set[Policy]:
-    names = _GOVERNED_TAGS_IN_FIXTURES if governed_tag_names is None else governed_tag_names
+    names = (
+        _GOVERNED_TAGS_IN_FIXTURES if governed_tag_names is None else governed_tag_names
+    )
     logger = change_logger if change_logger is not None else _change_logger()
     return compile_desired_policies(config, names, logger)
 
@@ -65,9 +74,7 @@ def _catalog_with_policy(policy: dict, level: str = "table") -> dict:
             "catalogs": {
                 "cat": {
                     "name": "cat",
-                    "schemas": [
-                        {"name": "s", "policies": [policy]}
-                    ],
+                    "schemas": [{"name": "s", "policies": [policy]}],
                 }
             }
         }
@@ -78,9 +85,7 @@ def _catalog_with_policy(policy: dict, level: str = "table") -> dict:
                 "schemas": [
                     {
                         "name": "s",
-                        "tables": [
-                            {"name": "t", "policies": [policy]}
-                        ],
+                        "tables": [{"name": "t", "policies": [policy]}],
                     }
                 ],
             }
@@ -144,7 +149,9 @@ def test_policy_compiler_emits_principals_as_unresolved():
     Canonical sorting by (identifier, name) happens post-resolution in the
     domain resolver, not in the compiler.
     """
-    policy_dict = _fgac_policy(to=["z_group", "a_group"], **{"except": ["z_adm", "a_adm"]})
+    policy_dict = _fgac_policy(
+        to=["z_group", "a_group"], **{"except": ["z_adm", "a_adm"]}
+    )
     config = ResourcesConfig.model_validate(
         _catalog_with_policy(policy_dict, level="table")
     )
@@ -459,9 +466,7 @@ def test_policy_compiler_mask_constant_column_goes_to_using_as_quoted_string():
     (policy,) = _compile(config)
     assert policy.on_column == "email"
     assert policy.using_columns == ("'REDACTED'",)
-    assert policy.match_columns == (
-        ("email", "has_tag_value('pii', 'email')"),
-    )
+    assert policy.match_columns == (("email", "has_tag_value('pii', 'email')"),)
 
 
 def test_policy_compiler_filter_constant_column_goes_to_using():
@@ -482,9 +487,7 @@ def test_policy_compiler_filter_constant_column_goes_to_using():
     (policy,) = _compile(config)
     assert policy.on_column is None
     assert policy.using_columns == ("region", "'EU'")
-    assert policy.match_columns == (
-        ("region", "has_tag('geo')"),
-    )
+    assert policy.match_columns == (("region", "has_tag('geo')"),)
 
 
 @pytest.mark.parametrize(
@@ -502,7 +505,9 @@ def test_policy_compiler_filter_constant_column_goes_to_using():
         (datetime(2026, 6, 5, 12, 30, 0), "'2026-06-05 12:30:00'"),
     ],
 )
-def test_policy_compiler_renders_constant_column_by_type(constant_value, expected_token):
+def test_policy_compiler_renders_constant_column_by_type(
+    constant_value, expected_token
+):
     """A constant column is rendered as the SQL literal matching its Python type."""
     policy_dict = _fgac_policy(
         columns=[
@@ -601,9 +606,15 @@ def test_policy_compiler_ignores_grant_policies():
 
 def test_policy_compiler_walks_full_tree():
     """Policies at catalog, schema, and table levels are all collected."""
-    catalog_policy = _fgac_policy(name="cat_p", columns=[{"alias": "c", "has_tags": {"pii": "email"}}])
-    schema_policy = _fgac_policy(name="sch_p", columns=[{"alias": "c", "has_tags": {"pii": "phone"}}])
-    table_policy = _fgac_policy(name="tab_p", columns=[{"alias": "c", "has_tags": {"pii": "ssn"}}])
+    catalog_policy = _fgac_policy(
+        name="cat_p", columns=[{"alias": "c", "has_tags": {"pii": "email"}}]
+    )
+    schema_policy = _fgac_policy(
+        name="sch_p", columns=[{"alias": "c", "has_tags": {"pii": "phone"}}]
+    )
+    table_policy = _fgac_policy(
+        name="tab_p", columns=[{"alias": "c", "has_tags": {"pii": "ssn"}}]
+    )
     config = ResourcesConfig.model_validate(
         {
             "catalogs": {
@@ -614,9 +625,7 @@ def test_policy_compiler_walks_full_tree():
                         {
                             "name": "s",
                             "policies": [schema_policy],
-                            "tables": [
-                                {"name": "t", "policies": [table_policy]}
-                            ],
+                            "tables": [{"name": "t", "policies": [table_policy]}],
                         }
                     ],
                 }
@@ -635,9 +644,7 @@ def test_policy_compiler_walks_full_tree():
 
 def test_policy_compiler_returns_empty_when_no_policies():
     """A config without any mask/filter policies returns an empty set."""
-    config = ResourcesConfig.model_validate(
-        {"catalogs": {"cat": {"name": "cat"}}}
-    )
+    config = ResourcesConfig.model_validate({"catalogs": {"cat": {"name": "cat"}}})
     assert _compile(config) == set()
 
 

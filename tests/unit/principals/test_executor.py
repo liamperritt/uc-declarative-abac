@@ -1,11 +1,16 @@
 from __future__ import annotations
 
-from unittest.mock import call, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
 from uc_declarative_abac.logger import ChangeLogger
-from uc_declarative_abac.principals import execute_group_diff, GroupDiff, GroupRename, Principal
+from uc_declarative_abac.principals import (
+    execute_group_diff,
+    GroupDiff,
+    GroupRename,
+    Principal,
+)
 from uc_declarative_abac.types import PrincipalType
 
 
@@ -101,7 +106,9 @@ def test_group_executor_skips_mutations_in_dry_run(ws_helper, change_logger):
     diff = GroupDiff(
         groups_to_create={"new_group": frozenset({_resolved_user("alice@co.com")})},
         members_to_add={"existing_group": frozenset({_resolved_user("bob@co.com")})},
-        members_to_remove={"existing_group": frozenset({_resolved_user("carol@co.com")})},
+        members_to_remove={
+            "existing_group": frozenset({_resolved_user("carol@co.com")})
+        },
     )
 
     execute_group_diff(ws_helper, diff, change_logger, dry_run=True)
@@ -117,7 +124,9 @@ def test_group_executor_skips_mutations_in_dry_run(ws_helper, change_logger):
 # ---------------------------------------------------------------------------
 
 
-def test_group_executor_removes_members_for_each_group_to_remove(ws_helper, change_logger):
+def test_group_executor_removes_members_for_each_group_to_remove(
+    ws_helper, change_logger
+):
     """Each entry in members_to_remove triggers one remove_group_members call."""
     members = frozenset({_resolved_user("carol@co.com")})
     diff = GroupDiff(members_to_remove={"existing_group": members})
@@ -134,7 +143,9 @@ def test_group_executor_adds_before_removes_after_creates(ws_helper, change_logg
     diff = GroupDiff(
         groups_to_create={"new_group": frozenset({_resolved_user("alice@co.com")})},
         members_to_add={"existing_group": frozenset({_resolved_user("bob@co.com")})},
-        members_to_remove={"existing_group": frozenset({_resolved_user("carol@co.com")})},
+        members_to_remove={
+            "existing_group": frozenset({_resolved_user("carol@co.com")})
+        },
     )
 
     execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
@@ -147,18 +158,23 @@ def test_group_executor_adds_before_removes_after_creates(ws_helper, change_logg
     )
 
 
-def test_group_executor_logs_error_and_continues_on_remove_members_failure(ws_helper, change_logger):
+def test_group_executor_logs_error_and_continues_on_remove_members_failure(
+    ws_helper, change_logger
+):
     """A failing remove_group_members for one group is logged; other groups still proceed."""
+
     def _fail_for_one(name, members):
         if name == "fail_group":
             raise RuntimeError("boom")
         return None
 
     ws_helper.remove_group_members.side_effect = _fail_for_one
-    diff = GroupDiff(members_to_remove={
-        "fail_group": frozenset({_resolved_user("alice@co.com")}),
-        "ok_group": frozenset({_resolved_user("bob@co.com")}),
-    })
+    diff = GroupDiff(
+        members_to_remove={
+            "fail_group": frozenset({_resolved_user("alice@co.com")}),
+            "ok_group": frozenset({_resolved_user("bob@co.com")}),
+        }
+    )
 
     execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
 
@@ -172,18 +188,23 @@ def test_group_executor_logs_error_and_continues_on_remove_members_failure(ws_he
 # ---------------------------------------------------------------------------
 
 
-def test_group_executor_logs_error_and_continues_on_add_members_failure(ws_helper, change_logger):
+def test_group_executor_logs_error_and_continues_on_add_members_failure(
+    ws_helper, change_logger
+):
     """A failing add_group_members for one group is logged; other groups still proceed."""
+
     def _fail_for_one(name, members):
         if name == "fail_group":
             raise RuntimeError("boom")
         return None
 
     ws_helper.add_group_members.side_effect = _fail_for_one
-    diff = GroupDiff(members_to_add={
-        "fail_group": frozenset({_resolved_user("alice@co.com")}),
-        "ok_group": frozenset({_resolved_user("bob@co.com")}),
-    })
+    diff = GroupDiff(
+        members_to_add={
+            "fail_group": frozenset({_resolved_user("alice@co.com")}),
+            "ok_group": frozenset({_resolved_user("bob@co.com")}),
+        }
+    )
 
     execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
 
@@ -192,13 +213,17 @@ def test_group_executor_logs_error_and_continues_on_add_members_failure(ws_helpe
     assert "ok_group" in called_names
 
 
-def test_group_executor_rewrites_permission_denied_on_add_with_manager_hint(ws_helper, change_logger):
+def test_group_executor_rewrites_permission_denied_on_add_with_manager_hint(
+    ws_helper, change_logger
+):
     """A PERMISSION_DENIED failure adding members is rewritten to point at the
     missing MANAGER role on the specific group."""
     ws_helper.add_group_members.side_effect = RuntimeError(
         'PERMISSION_DENIED: Requesting user does not have securable_type: "group"'
     )
-    diff = GroupDiff(members_to_add={"data_engineers": frozenset({_resolved_user("alice@co.com")})})
+    diff = GroupDiff(
+        members_to_add={"data_engineers": frozenset({_resolved_user("alice@co.com")})}
+    )
 
     execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
 
@@ -208,12 +233,16 @@ def test_group_executor_rewrites_permission_denied_on_add_with_manager_hint(ws_h
     assert "data_engineers" in message
 
 
-def test_group_executor_rewrites_permission_denied_on_remove_with_manager_hint(ws_helper, change_logger):
+def test_group_executor_rewrites_permission_denied_on_remove_with_manager_hint(
+    ws_helper, change_logger
+):
     """A PERMISSION_DENIED failure removing members is rewritten with the MANAGER hint."""
     ws_helper.remove_group_members.side_effect = RuntimeError(
         'PERMISSION_DENIED: Requesting user does not have securable_type: "group"'
     )
-    diff = GroupDiff(members_to_remove={"data_engineers": frozenset({_resolved_user("bob@co.com")})})
+    diff = GroupDiff(
+        members_to_remove={"data_engineers": frozenset({_resolved_user("bob@co.com")})}
+    )
 
     execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
 
@@ -226,7 +255,9 @@ def test_group_executor_rewrites_permission_denied_on_remove_with_manager_hint(w
 def test_group_executor_passes_through_non_permission_errors(ws_helper, change_logger):
     """A non-permission failure is logged unchanged (no MANAGER hint)."""
     ws_helper.add_group_members.side_effect = RuntimeError("boom: something else")
-    diff = GroupDiff(members_to_add={"data_engineers": frozenset({_resolved_user("alice@co.com")})})
+    diff = GroupDiff(
+        members_to_add={"data_engineers": frozenset({_resolved_user("alice@co.com")})}
+    )
 
     execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
 
@@ -236,7 +267,9 @@ def test_group_executor_passes_through_non_permission_errors(ws_helper, change_l
     assert "MANAGER" not in message
 
 
-def test_group_executor_logs_error_and_continues_on_create_group_failure(ws_helper, change_logger):
+def test_group_executor_logs_error_and_continues_on_create_group_failure(
+    ws_helper, change_logger
+):
     """A failing create_group is recorded; member-addition work still proceeds."""
     ws_helper.create_group.side_effect = RuntimeError("boom")
     diff = GroupDiff(
@@ -258,10 +291,16 @@ def test_group_executor_logs_error_and_continues_on_create_group_failure(ws_help
 
 def test_group_executor_renames_each_group_to_rename(ws_helper, change_logger):
     """Each entry in groups_to_rename triggers one rename_group call with (id, new_name)."""
-    diff = GroupDiff(groups_to_rename=[
-        GroupRename(id="g1", old_display_name="old_one", new_display_name="new_one"),
-        GroupRename(id="g2", old_display_name="old_two", new_display_name="new_two"),
-    ])
+    diff = GroupDiff(
+        groups_to_rename=[
+            GroupRename(
+                id="g1", old_display_name="old_one", new_display_name="new_one"
+            ),
+            GroupRename(
+                id="g2", old_display_name="old_two", new_display_name="new_two"
+            ),
+        ]
+    )
 
     execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
 
@@ -274,7 +313,9 @@ def test_group_executor_renames_before_adding_members(ws_helper, change_logger):
     """Renames are applied before members are added to existing groups."""
     diff = GroupDiff(
         groups_to_rename=[
-            GroupRename(id="g1", old_display_name="old_one", new_display_name="new_one"),
+            GroupRename(
+                id="g1", old_display_name="old_one", new_display_name="new_one"
+            ),
         ],
         members_to_add={"existing_group": frozenset({_resolved_user("bob@co.com")})},
     )
@@ -291,9 +332,13 @@ def test_group_executor_skips_rename_patch_in_dry_run(ws_helper):
     """In dry-run mode rename_group is not invoked, but the rename is still recorded."""
     logger_mock = MagicMock()
     change_logger = ChangeLogger(dry_run=True, logger=logger_mock)
-    diff = GroupDiff(groups_to_rename=[
-        GroupRename(id="g1", old_display_name="old_one", new_display_name="new_one"),
-    ])
+    diff = GroupDiff(
+        groups_to_rename=[
+            GroupRename(
+                id="g1", old_display_name="old_one", new_display_name="new_one"
+            ),
+        ]
+    )
 
     execute_group_diff(ws_helper, diff, change_logger, dry_run=True)
 
@@ -307,9 +352,13 @@ def test_group_executor_logs_rename_on_success(ws_helper):
     """A successful rename is recorded in the change logger's summary."""
     logger_mock = MagicMock()
     change_logger = ChangeLogger(dry_run=False, logger=logger_mock)
-    diff = GroupDiff(groups_to_rename=[
-        GroupRename(id="g1", old_display_name="old_one", new_display_name="new_one"),
-    ])
+    diff = GroupDiff(
+        groups_to_rename=[
+            GroupRename(
+                id="g1", old_display_name="old_one", new_display_name="new_one"
+            ),
+        ]
+    )
 
     execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
 
@@ -321,9 +370,13 @@ def test_group_executor_logs_rename_on_success(ws_helper):
 def test_group_executor_collects_error_when_rename_fails(ws_helper, change_logger):
     """A failing rename_group is logged as an error without crashing execution."""
     ws_helper.rename_group.side_effect = RuntimeError("boom")
-    diff = GroupDiff(groups_to_rename=[
-        GroupRename(id="g1", old_display_name="old_one", new_display_name="new_one"),
-    ])
+    diff = GroupDiff(
+        groups_to_rename=[
+            GroupRename(
+                id="g1", old_display_name="old_one", new_display_name="new_one"
+            ),
+        ]
+    )
 
     execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
 

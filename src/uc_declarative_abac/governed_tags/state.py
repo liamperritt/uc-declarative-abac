@@ -8,6 +8,7 @@ from uc_declarative_abac.principals import Principal
 @dataclass(frozen=True)
 class GovernedTag:
     """Desired or actual state of an account-level governed tag (tag policy)."""
+
     name: str
     description: str = ""
     allowed_values: frozenset[str] = frozenset()

@@ -4,8 +4,6 @@ from uc_declarative_abac.utils import OrchestratorError
 from typing import Iterable
 
 
-
-
 _DEFAULT_SCHEMA_NAME = "default"
 _DERIVED_FUNCTION_NAME_PREFIX = "abac_"
 
@@ -58,7 +56,10 @@ def _iter_nested_policies_with_target_schema(
 
 
 def _resolve_inline_function_target(
-    catalogs: dict, policy_catalog_name: str, default_schema_name: str, function: dict,
+    catalogs: dict,
+    policy_catalog_name: str,
+    default_schema_name: str,
+    function: dict,
 ) -> tuple[str, dict]:
     """Resolve the catalog name and schema dict where an inline function should
     be created. Optional ``catalog_name`` / ``schema_name`` fields on the function
@@ -70,12 +71,17 @@ def _resolve_inline_function_target(
     target_catalog_name = function.get("catalog_name") or policy_catalog_name
     target_schema_name = function.get("schema_name") or default_schema_name
     _ensure_catalog(catalogs, target_catalog_name)
-    target_schema = _find_or_create_schema(catalogs[target_catalog_name], target_schema_name)
+    target_schema = _find_or_create_schema(
+        catalogs[target_catalog_name], target_schema_name
+    )
     return target_catalog_name, target_schema
 
 
 def _rewrite_policy_function_to_full_name(
-    policy: dict, catalogs: dict, policy_catalog_name: str, default_schema_name: str,
+    policy: dict,
+    catalogs: dict,
+    policy_catalog_name: str,
+    default_schema_name: str,
 ) -> None:
     """If policy['function'] is an inline function dict, move the function
     definition into its target schema's functions list and rewrite
@@ -99,7 +105,10 @@ def _rewrite_policy_function_to_full_name(
     fn_name = _inline_function_name(policy, function)
     function["name"] = fn_name
     target_catalog_name, target_schema = _resolve_inline_function_target(
-        catalogs, policy_catalog_name, default_schema_name, function,
+        catalogs,
+        policy_catalog_name,
+        default_schema_name,
+        function,
     )
     function["catalog_name"] = target_catalog_name
     function["schema_name"] = target_schema.get("name")
@@ -118,8 +127,12 @@ def _extract_inline_policy_functions(catalogs: dict) -> None:
     """
     # Materialise before rewriting: a catalog_name override may add a catalog,
     # which would otherwise mutate `catalogs` mid-iteration of the generator.
-    for policy, catalog_name, default_schema_name in list(_iter_nested_policies_with_target_schema(catalogs)):
-        _rewrite_policy_function_to_full_name(policy, catalogs, catalog_name, default_schema_name)
+    for policy, catalog_name, default_schema_name in list(
+        _iter_nested_policies_with_target_schema(catalogs)
+    ):
+        _rewrite_policy_function_to_full_name(
+            policy, catalogs, catalog_name, default_schema_name
+        )
 
 
 def consolidate_resources(resolved: dict) -> dict:
@@ -136,7 +149,9 @@ def consolidate_resources(resolved: dict) -> dict:
     for key, schema in resolved.pop("schemas", {}).items():
         cat_name = schema.get("catalog_name")
         if not cat_name:
-            raise OrchestratorError(f"Standalone schema '{key}' is missing required 'catalog_name'")
+            raise OrchestratorError(
+                f"Standalone schema '{key}' is missing required 'catalog_name'"
+            )
         _ensure_catalog(catalogs, cat_name)
         catalogs[cat_name].setdefault("schemas", []).append(schema)
 
@@ -144,9 +159,13 @@ def consolidate_resources(resolved: dict) -> dict:
         cat_name = table.get("catalog_name")
         schema_name = table.get("schema_name")
         if not cat_name:
-            raise OrchestratorError(f"Standalone table '{key}' is missing required 'catalog_name'")
+            raise OrchestratorError(
+                f"Standalone table '{key}' is missing required 'catalog_name'"
+            )
         if not schema_name:
-            raise OrchestratorError(f"Standalone table '{key}' is missing required 'schema_name'")
+            raise OrchestratorError(
+                f"Standalone table '{key}' is missing required 'schema_name'"
+            )
         _ensure_catalog(catalogs, cat_name)
         schema = _find_or_create_schema(catalogs[cat_name], schema_name)
         schema.setdefault("tables", []).append(table)
@@ -155,9 +174,13 @@ def consolidate_resources(resolved: dict) -> dict:
         cat_name = volume.get("catalog_name")
         schema_name = volume.get("schema_name")
         if not cat_name:
-            raise OrchestratorError(f"Standalone volume '{key}' is missing required 'catalog_name'")
+            raise OrchestratorError(
+                f"Standalone volume '{key}' is missing required 'catalog_name'"
+            )
         if not schema_name:
-            raise OrchestratorError(f"Standalone volume '{key}' is missing required 'schema_name'")
+            raise OrchestratorError(
+                f"Standalone volume '{key}' is missing required 'schema_name'"
+            )
         _ensure_catalog(catalogs, cat_name)
         schema = _find_or_create_schema(catalogs[cat_name], schema_name)
         schema.setdefault("volumes", []).append(volume)
@@ -165,7 +188,9 @@ def consolidate_resources(resolved: dict) -> dict:
     for key, policy in resolved.pop("policies", {}).items():
         cat_name = policy.get("catalog_name")
         if not cat_name:
-            raise OrchestratorError(f"Standalone policy '{key}' is missing required 'catalog_name'")
+            raise OrchestratorError(
+                f"Standalone policy '{key}' is missing required 'catalog_name'"
+            )
         schema_name = policy.get("schema_name")
         table_name = policy.get("table_name")
         _ensure_catalog(catalogs, cat_name)

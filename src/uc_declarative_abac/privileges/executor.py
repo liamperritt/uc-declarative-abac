@@ -92,7 +92,10 @@ def _run_privilege_batch(
             change_logger.log_revoke(priv)
 
     results = parallel_for_each(
-        work_items, worker, max_workers=max_workers, on_complete=on_complete,
+        work_items,
+        worker,
+        max_workers=max_workers,
+        on_complete=on_complete,
     )
     if dry_run:
         return []
@@ -120,18 +123,28 @@ def execute_privilege_diff(
 
     grants_by_type = _bucket_by_sec_type(diff.to_grant)
     for sec_type in sorted(grants_by_type, key=lambda t: t.value):
-        statements.extend(_run_privilege_batch(
-            uc_helper, grants_by_type[sec_type],
-            is_grant=True,
-            change_logger=change_logger, dry_run=dry_run, max_workers=workers,
-        ))
+        statements.extend(
+            _run_privilege_batch(
+                uc_helper,
+                grants_by_type[sec_type],
+                is_grant=True,
+                change_logger=change_logger,
+                dry_run=dry_run,
+                max_workers=workers,
+            )
+        )
 
     revokes_by_type = _bucket_by_sec_type(diff.to_revoke)
     for sec_type in sorted(revokes_by_type, key=lambda t: t.value):
-        statements.extend(_run_privilege_batch(
-            uc_helper, revokes_by_type[sec_type],
-            is_grant=False,
-            change_logger=change_logger, dry_run=dry_run, max_workers=workers,
-        ))
+        statements.extend(
+            _run_privilege_batch(
+                uc_helper,
+                revokes_by_type[sec_type],
+                is_grant=False,
+                change_logger=change_logger,
+                dry_run=dry_run,
+                max_workers=workers,
+            )
+        )
 
     return statements

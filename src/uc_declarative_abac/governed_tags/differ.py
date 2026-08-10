@@ -22,7 +22,6 @@ from uc_declarative_abac.principals import (
 )
 
 
-
 def _resolve_governed_tag_assigners(
     tag: GovernedTag,
     resolver: PrincipalResolver,
@@ -73,13 +72,15 @@ def _diff_governed_tag_creates(
         if name in actual_by_name:
             continue
         if is_system_governed_tag(name):
-            change_logger.log_error(ExecutionError(
-                context=f"Governed tag '{name}'",
-                exception=OrchestratorError(
-                    f"System governed tag '{name}' is declared in config but does not "
-                    "exist in the account; system tags cannot be created."
-                ),
-            ))
+            change_logger.log_error(
+                ExecutionError(
+                    context=f"Governed tag '{name}'",
+                    exception=OrchestratorError(
+                        f"System governed tag '{name}' is declared in config but does not "
+                        "exist in the account; system tags cannot be created."
+                    ),
+                )
+            )
             continue
         to_create.add(gt)
     return to_create
@@ -100,12 +101,14 @@ def _diff_governed_tag_updates(
         actual_gt = actual_by_name[name]
         if is_system_governed_tag(name):
             if desired_gt.assigners != actual_gt.assigners:
-                to_update.add(GovernedTag(
-                    name=name,
-                    description=actual_gt.description,
-                    allowed_values=actual_gt.allowed_values,
-                    assigners=desired_gt.assigners,
-                ))
+                to_update.add(
+                    GovernedTag(
+                        name=name,
+                        description=actual_gt.description,
+                        allowed_values=actual_gt.allowed_values,
+                        assigners=desired_gt.assigners,
+                    )
+                )
                 old_values[name] = actual_gt
         elif desired_gt != actual_gt:
             to_update.add(desired_gt)
@@ -123,7 +126,8 @@ def _diff_governed_tag_deletes(
     if not enable_deletion:
         return set()
     return {
-        gt for name, gt in actual_by_name.items()
+        gt
+        for name, gt in actual_by_name.items()
         if name not in desired_by_name and not is_system_governed_tag(name)
     }
 
@@ -153,18 +157,24 @@ def compute_governed_tag_diff(
     Databricks-owned definition is left untouched. See ``is_system_governed_tag``.
     """
     desired_resolved = {
-        _resolve_governed_tag_assigners(t, resolver, change_logger, ignore_unresolvable) for t in desired
+        _resolve_governed_tag_assigners(t, resolver, change_logger, ignore_unresolvable)
+        for t in desired
     }
     actual_resolved = {
-        _resolve_governed_tag_assigners(t, resolver, change_logger, ignore_unresolvable) for t in actual
+        _resolve_governed_tag_assigners(t, resolver, change_logger, ignore_unresolvable)
+        for t in actual
     }
 
     desired_by_name = {gt.name: gt for gt in desired_resolved}
     actual_by_name = {gt.name: gt for gt in actual_resolved}
 
-    to_create = _diff_governed_tag_creates(desired_by_name, actual_by_name, change_logger)
+    to_create = _diff_governed_tag_creates(
+        desired_by_name, actual_by_name, change_logger
+    )
     to_update, old_values = _diff_governed_tag_updates(desired_by_name, actual_by_name)
-    to_delete = _diff_governed_tag_deletes(desired_by_name, actual_by_name, enable_deletion)
+    to_delete = _diff_governed_tag_deletes(
+        desired_by_name, actual_by_name, enable_deletion
+    )
 
     return GovernedTagDiff(
         to_create=to_create,

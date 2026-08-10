@@ -49,7 +49,11 @@ def parallel_for_each(
         for future in as_completed(future_to_idx):
             idx, item = future_to_idx[future]
             try:
-                triple: tuple[T, R | None, Exception | None] = (item, future.result(), None)
+                triple: tuple[T, R | None, Exception | None] = (
+                    item,
+                    future.result(),
+                    None,
+                )
             except Exception as exc:
                 triple = (item, None, exc)
             if on_complete is not None:
@@ -105,7 +109,9 @@ def in_namespace_scope(full_name: str, scope: frozenset[str]) -> bool:
     return len(parts) >= 2 and ".".join(parts[:2]) in scope
 
 
-def parse_namespace_filter(spec: str, configured_namespaces: set[str]) -> frozenset[str]:
+def parse_namespace_filter(
+    spec: str, configured_namespaces: set[str]
+) -> frozenset[str]:
     """Parse a comma-separated namespace filter spec.
 
     Each entry is either a bare catalog name or a qualified ``catalog.schema``
@@ -121,7 +127,9 @@ def parse_namespace_filter(spec: str, configured_namespaces: set[str]) -> frozen
     names = [n.strip() for n in spec.split(",") if n.strip()]
     unknown = [n for n in names if n not in configured_namespaces]
     if unknown:
-        configured_list = ", ".join(configured_catalogs) if configured_catalogs else "(none)"
+        configured_list = (
+            ", ".join(configured_catalogs) if configured_catalogs else "(none)"
+        )
         raise ValueError(
             f"Namespace filter references unknown catalog(s) or schema(s): "
             f"{', '.join(unknown)}. Configured catalogs: {configured_list}"

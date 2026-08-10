@@ -111,7 +111,9 @@ def test_utils_parse_namespace_filter_accepts_mix_of_catalog_and_qualified_schem
 
 
 def test_utils_parse_namespace_filter_trims_whitespace_around_names():
-    result = parse_namespace_filter(" cat_a , cat_b.sch1 ", {"cat_a", "cat_b", "cat_b.sch1"})
+    result = parse_namespace_filter(
+        " cat_a , cat_b.sch1 ", {"cat_a", "cat_b", "cat_b.sch1"}
+    )
     assert result == frozenset({"cat_a", "cat_b.sch1"})
 
 
@@ -257,6 +259,7 @@ def test_utils_parallel_for_each_returns_result_for_success():
 
 def test_utils_parallel_for_each_preserves_input_order():
     """Output order matches input order even when faster work_fn calls finish first."""
+
     # Earlier items sleep longer; output should still be in input order.
     def work(x: int) -> int:
         time.sleep(0.05 * (5 - x))
@@ -316,7 +319,9 @@ def test_utils_parallel_for_each_on_complete_fires_per_item():
     def cb(item, result, error):
         seen.append((item, result, error))
 
-    results = parallel_for_each([1, 2, 3], lambda x: x * 10, max_workers=4, on_complete=cb)
+    results = parallel_for_each(
+        [1, 2, 3], lambda x: x * 10, max_workers=4, on_complete=cb
+    )
 
     assert len(seen) == 3
     assert sorted(seen, key=lambda t: t[0]) == sorted(results, key=lambda t: t[0])
@@ -382,12 +387,16 @@ def test_utils_parallel_for_each_on_complete_fires_before_helper_returns():
 
 def test_utils_parallel_for_each_returns_list_in_input_order_with_callback():
     """Even when callbacks fire in completion order, the returned list stays in input order."""
+
     def work(x: int) -> int:
         time.sleep(0.05 * (5 - x))
         return x
 
     results = parallel_for_each(
-        [1, 2, 3, 4], work, max_workers=4, on_complete=lambda _i, _r, _e: None,
+        [1, 2, 3, 4],
+        work,
+        max_workers=4,
+        on_complete=lambda _i, _r, _e: None,
     )
 
     assert [item for item, _, _ in results] == [1, 2, 3, 4]
@@ -404,11 +413,17 @@ def test_utils_parallel_for_each_on_complete_receives_exceptions():
 
     seen: list[tuple] = []
     parallel_for_each(
-        [1, 2, 3], work, max_workers=4,
+        [1, 2, 3],
+        work,
+        max_workers=4,
         on_complete=lambda i, r, e: seen.append((i, r, e)),
     )
 
     by_item = {triple[0]: triple for triple in seen}
     assert by_item[1] == (1, 10, None)
-    assert by_item[2][0] == 2 and by_item[2][1] is None and isinstance(by_item[2][2], RuntimeError)
+    assert (
+        by_item[2][0] == 2
+        and by_item[2][1] is None
+        and isinstance(by_item[2][2], RuntimeError)
+    )
     assert by_item[3] == (3, 30, None)

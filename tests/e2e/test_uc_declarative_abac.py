@@ -14,6 +14,7 @@ Prerequisites:
 Run with:
   .venv/bin/python -m pytest tests/e2e/ -v
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -23,7 +24,6 @@ from databricks.sdk import WorkspaceClient
 from uc_declarative_abac.orchestrator import run
 from uc_declarative_abac.governed_tags import GovernedTag
 from uc_declarative_abac.securables import (
-    AttributeUpdate,
     Function,
     SecurableAttributes,
 )
@@ -44,52 +44,205 @@ from uc_declarative_abac.types import (
 EXPECTED_TAGS = {
     # Catalog
     SecurableTag(SecurableType.CATALOG, "liam_perritt", "uc_gov_env", "test"),
-    SecurableTag(SecurableType.CATALOG, "liam_perritt", "uc_gov_managed_by", "uc_declarative_abac"),
+    SecurableTag(
+        SecurableType.CATALOG,
+        "liam_perritt",
+        "uc_gov_managed_by",
+        "uc_declarative_abac",
+    ),
     # Schema: default
-    SecurableTag(SecurableType.SCHEMA, "liam_perritt.default", "uc_gov_team", "platform"),
+    SecurableTag(
+        SecurableType.SCHEMA, "liam_perritt.default", "uc_gov_team", "platform"
+    ),
     # Schema: lff_sqlserver_bronze
-    SecurableTag(SecurableType.SCHEMA, "liam_perritt.lff_sqlserver_bronze", "uc_gov_team", "data_engineering"),
-    SecurableTag(SecurableType.SCHEMA, "liam_perritt.lff_sqlserver_bronze", "uc_gov_zone", "bronze"),
+    SecurableTag(
+        SecurableType.SCHEMA,
+        "liam_perritt.lff_sqlserver_bronze",
+        "uc_gov_team",
+        "data_engineering",
+    ),
+    SecurableTag(
+        SecurableType.SCHEMA,
+        "liam_perritt.lff_sqlserver_bronze",
+        "uc_gov_zone",
+        "bronze",
+    ),
     # Schema: sqlserver_lff
-    SecurableTag(SecurableType.SCHEMA, "liam_perritt.sqlserver_lff", "uc_gov_team", "data_engineering"),
+    SecurableTag(
+        SecurableType.SCHEMA,
+        "liam_perritt.sqlserver_lff",
+        "uc_gov_team",
+        "data_engineering",
+    ),
     # Table: default.batch_table
-    SecurableTag(SecurableType.TABLE, "liam_perritt.default.batch_table", "uc_gov_classification", "internal"),
+    SecurableTag(
+        SecurableType.TABLE,
+        "liam_perritt.default.batch_table",
+        "uc_gov_classification",
+        "internal",
+    ),
     # Table: lff_sqlserver_bronze.dummy_cdc_sink
-    SecurableTag(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_cdc_sink", "uc_gov_classification", "internal"),
-    SecurableTag(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_cdc_sink", "uc_gov_pipeline", "lff"),
+    SecurableTag(
+        SecurableType.TABLE,
+        "liam_perritt.lff_sqlserver_bronze.dummy_cdc_sink",
+        "uc_gov_classification",
+        "internal",
+    ),
+    SecurableTag(
+        SecurableType.TABLE,
+        "liam_perritt.lff_sqlserver_bronze.dummy_cdc_sink",
+        "uc_gov_pipeline",
+        "lff",
+    ),
     # Column: lff_sqlserver_bronze.dummy_cdc_sink.data
-    SecurableTag(SecurableType.COLUMN, "liam_perritt.lff_sqlserver_bronze.dummy_cdc_sink.data", "uc_gov_classification", "internal"),
+    SecurableTag(
+        SecurableType.COLUMN,
+        "liam_perritt.lff_sqlserver_bronze.dummy_cdc_sink.data",
+        "uc_gov_classification",
+        "internal",
+    ),
     # Table: lff_sqlserver_bronze.dummy_table_cdc_st
-    SecurableTag(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_table_cdc_st", "uc_gov_classification", "internal"),
-    SecurableTag(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_table_cdc_st", "uc_gov_pipeline", "lff"),
+    SecurableTag(
+        SecurableType.TABLE,
+        "liam_perritt.lff_sqlserver_bronze.dummy_table_cdc_st",
+        "uc_gov_classification",
+        "internal",
+    ),
+    SecurableTag(
+        SecurableType.TABLE,
+        "liam_perritt.lff_sqlserver_bronze.dummy_table_cdc_st",
+        "uc_gov_pipeline",
+        "lff",
+    ),
     # Table: sqlserver_lff.feature_python_extension_source
-    SecurableTag(SecurableType.TABLE, "liam_perritt.sqlserver_lff.feature_python_extension_source", "uc_gov_classification", "internal"),
+    SecurableTag(
+        SecurableType.TABLE,
+        "liam_perritt.sqlserver_lff.feature_python_extension_source",
+        "uc_gov_classification",
+        "internal",
+    ),
     # Volume: lff_sqlserver_bronze.test
-    SecurableTag(SecurableType.VOLUME, "liam_perritt.lff_sqlserver_bronze.test", "uc_gov_zone", "landing"),
+    SecurableTag(
+        SecurableType.VOLUME,
+        "liam_perritt.lff_sqlserver_bronze.test",
+        "uc_gov_zone",
+        "landing",
+    ),
 }
 
 EXPECTED_PRIVILEGES = {
     # Catalog-level policy: USE_CATALOG to test group (matches uc_gov_managed_by=uc_declarative_abac)
-    SecurablePrivilege(SecurableType.CATALOG, "liam_perritt", Principal(PrincipalType.GROUP, "uc_governor_test_team", "uc_governor_test_team"), PrivilegeType.USE_CATALOG),
+    SecurablePrivilege(
+        SecurableType.CATALOG,
+        "liam_perritt",
+        Principal(
+            PrincipalType.GROUP, "uc_governor_test_team", "uc_governor_test_team"
+        ),
+        PrivilegeType.USE_CATALOG,
+    ),
     # Catalog-level policy: SELECT to test user (AND semantics — matches both uc_gov_env=test AND uc_gov_managed_by=uc_declarative_abac)
-    SecurablePrivilege(SecurableType.CATALOG, "liam_perritt", Principal(PrincipalType.USER, "liam.perritt@databricks.com", "liam.perritt@databricks.com"), PrivilegeType.SELECT),
+    SecurablePrivilege(
+        SecurableType.CATALOG,
+        "liam_perritt",
+        Principal(
+            PrincipalType.USER,
+            "liam.perritt@databricks.com",
+            "liam.perritt@databricks.com",
+        ),
+        PrivilegeType.SELECT,
+    ),
     # Schema-level policy on default: USE_SCHEMA + SELECT to test user (matches uc_gov_team=platform)
-    SecurablePrivilege(SecurableType.SCHEMA, "liam_perritt.default", Principal(PrincipalType.USER, "liam.perritt@databricks.com", "liam.perritt@databricks.com"), PrivilegeType.USE_SCHEMA),
-    SecurablePrivilege(SecurableType.SCHEMA, "liam_perritt.default", Principal(PrincipalType.USER, "liam.perritt@databricks.com", "liam.perritt@databricks.com"), PrivilegeType.SELECT),
+    SecurablePrivilege(
+        SecurableType.SCHEMA,
+        "liam_perritt.default",
+        Principal(
+            PrincipalType.USER,
+            "liam.perritt@databricks.com",
+            "liam.perritt@databricks.com",
+        ),
+        PrivilegeType.USE_SCHEMA,
+    ),
+    SecurablePrivilege(
+        SecurableType.SCHEMA,
+        "liam_perritt.default",
+        Principal(
+            PrincipalType.USER,
+            "liam.perritt@databricks.com",
+            "liam.perritt@databricks.com",
+        ),
+        PrivilegeType.SELECT,
+    ),
     # Schema-level policy on lff_sqlserver_bronze: USE_SCHEMA to test SP (matches uc_gov_zone=bronze)
-    SecurablePrivilege(SecurableType.SCHEMA, "liam_perritt.lff_sqlserver_bronze", Principal(PrincipalType.SERVICE_PRINCIPAL, "72a5956b-8469-4c26-b414-bfc1a7e279c4", "sp_uc_governor_test"), PrivilegeType.USE_SCHEMA),
+    SecurablePrivilege(
+        SecurableType.SCHEMA,
+        "liam_perritt.lff_sqlserver_bronze",
+        Principal(
+            PrincipalType.SERVICE_PRINCIPAL,
+            "72a5956b-8469-4c26-b414-bfc1a7e279c4",
+            "sp_uc_governor_test",
+        ),
+        PrivilegeType.USE_SCHEMA,
+    ),
     # Table-level policy on dummy_cdc_sink: SELECT to test group (matches uc_gov_pipeline=lff)
-    SecurablePrivilege(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_cdc_sink", Principal(PrincipalType.GROUP, "uc_governor_test_team", "uc_governor_test_team"), PrivilegeType.SELECT),
+    SecurablePrivilege(
+        SecurableType.TABLE,
+        "liam_perritt.lff_sqlserver_bronze.dummy_cdc_sink",
+        Principal(
+            PrincipalType.GROUP, "uc_governor_test_team", "uc_governor_test_team"
+        ),
+        PrivilegeType.SELECT,
+    ),
     # dummy_table_cdc_st also has uc_gov_pipeline=lff, so the grant_pipeline_select policy matches it too
-    SecurablePrivilege(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_table_cdc_st", Principal(PrincipalType.GROUP, "uc_governor_test_team", "uc_governor_test_team"), PrivilegeType.SELECT),
+    SecurablePrivilege(
+        SecurableType.TABLE,
+        "liam_perritt.lff_sqlserver_bronze.dummy_table_cdc_st",
+        Principal(
+            PrincipalType.GROUP, "uc_governor_test_team", "uc_governor_test_team"
+        ),
+        PrivilegeType.SELECT,
+    ),
     # Volume-level policy: READ_VOLUME to test group (matches uc_gov_zone=landing)
-    SecurablePrivilege(SecurableType.VOLUME, "liam_perritt.lff_sqlserver_bronze.test", Principal(PrincipalType.GROUP, "uc_governor_test_team", "uc_governor_test_team"), PrivilegeType.READ_VOLUME),
+    SecurablePrivilege(
+        SecurableType.VOLUME,
+        "liam_perritt.lff_sqlserver_bronze.test",
+        Principal(
+            PrincipalType.GROUP, "uc_governor_test_team", "uc_governor_test_team"
+        ),
+        PrivilegeType.READ_VOLUME,
+    ),
     # Catalog-level cascade policy (matches uc_gov_pipeline=lff on tables):
     # SELECT lands on each matched table; USE_SCHEMA cascades to the parent
     # schema; USE_CATALOG cascades to the catalog. All emitted for the SP.
-    SecurablePrivilege(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_cdc_sink", Principal(PrincipalType.SERVICE_PRINCIPAL, "72a5956b-8469-4c26-b414-bfc1a7e279c4", "sp_uc_governor_test"), PrivilegeType.SELECT),
-    SecurablePrivilege(SecurableType.TABLE, "liam_perritt.lff_sqlserver_bronze.dummy_table_cdc_st", Principal(PrincipalType.SERVICE_PRINCIPAL, "72a5956b-8469-4c26-b414-bfc1a7e279c4", "sp_uc_governor_test"), PrivilegeType.SELECT),
-    SecurablePrivilege(SecurableType.CATALOG, "liam_perritt", Principal(PrincipalType.SERVICE_PRINCIPAL, "72a5956b-8469-4c26-b414-bfc1a7e279c4", "sp_uc_governor_test"), PrivilegeType.USE_CATALOG),
+    SecurablePrivilege(
+        SecurableType.TABLE,
+        "liam_perritt.lff_sqlserver_bronze.dummy_cdc_sink",
+        Principal(
+            PrincipalType.SERVICE_PRINCIPAL,
+            "72a5956b-8469-4c26-b414-bfc1a7e279c4",
+            "sp_uc_governor_test",
+        ),
+        PrivilegeType.SELECT,
+    ),
+    SecurablePrivilege(
+        SecurableType.TABLE,
+        "liam_perritt.lff_sqlserver_bronze.dummy_table_cdc_st",
+        Principal(
+            PrincipalType.SERVICE_PRINCIPAL,
+            "72a5956b-8469-4c26-b414-bfc1a7e279c4",
+            "sp_uc_governor_test",
+        ),
+        PrivilegeType.SELECT,
+    ),
+    SecurablePrivilege(
+        SecurableType.CATALOG,
+        "liam_perritt",
+        Principal(
+            PrincipalType.SERVICE_PRINCIPAL,
+            "72a5956b-8469-4c26-b414-bfc1a7e279c4",
+            "sp_uc_governor_test",
+        ),
+        PrivilegeType.USE_CATALOG,
+    ),
     # USE_SCHEMA on liam_perritt.lff_sqlserver_bronze for the SP is already
     # declared above via grant_bronze_access; the cascade produces the same
     # entry and is deduplicated at the set level.
@@ -112,9 +265,17 @@ EXPECTED_FUNCTIONS = {
 
 EXPECTED_ATTRIBUTES = {
     # Table owner set to a group
-    SecurableAttributes(SecurableType.TABLE, "liam_perritt.default.batch_table", owner="uc_governor_test_team"),
+    SecurableAttributes(
+        SecurableType.TABLE,
+        "liam_perritt.default.batch_table",
+        owner="uc_governor_test_team",
+    ),
     # Function owner set to a service principal
-    SecurableAttributes(SecurableType.FUNCTION, "liam_perritt.default.mask_pii_email", owner="sp_uc_governor_test"),
+    SecurableAttributes(
+        SecurableType.FUNCTION,
+        "liam_perritt.default.mask_pii_email",
+        owner="sp_uc_governor_test",
+    ),
 }
 
 EXPECTED_GOVERNED_TAGS = {
@@ -141,7 +302,6 @@ def test_uc_declarative_abac_dry_run(
     result = run(
         config_dir=config_dir,
         workspace_client=workspace_client,
-
         warehouse_id=warehouse_id,
         dry_run=True,
         use_workspace_scim=True,
@@ -152,7 +312,9 @@ def test_uc_declarative_abac_dry_run(
     )
 
     # All expected governed tags should be pending create/update or already in sync
-    pending_governed_tags = result.governed_tag_diff.to_create | result.governed_tag_diff.to_update
+    pending_governed_tags = (
+        result.governed_tag_diff.to_create | result.governed_tag_diff.to_update
+    )
     for gt in EXPECTED_GOVERNED_TAGS:
         in_diff = gt in pending_governed_tags
         already_in_sync = gt not in pending_governed_tags
@@ -161,7 +323,9 @@ def test_uc_declarative_abac_dry_run(
         )
 
     # All expected functions should be pending create/replace or already in sync
-    pending_securables = set(result.securable_diff.securables_to_create) | set(result.securable_diff.securables_to_replace)
+    pending_securables = set(result.securable_diff.securables_to_create) | set(
+        result.securable_diff.securables_to_replace
+    )
     for func in EXPECTED_FUNCTIONS:
         in_diff = func in pending_securables
         assert in_diff or func not in pending_securables, (
@@ -169,7 +333,10 @@ def test_uc_declarative_abac_dry_run(
         )
 
     # All expected attribute updates should be pending
-    pending_attrs = {(u.securable_type, u.full_name, u.attribute) for u in result.securable_diff.attributes_to_update}
+    pending_attrs = {
+        (u.securable_type, u.full_name, u.attribute)
+        for u in result.securable_diff.attributes_to_update
+    }
     for attr in EXPECTED_ATTRIBUTES:
         if attr.owner:
             key = (attr.securable_type, attr.full_name, "owner")
@@ -217,7 +384,6 @@ def test_uc_declarative_abac_deploy(
     result = run(
         config_dir=config_dir,
         workspace_client=workspace_client,
-
         warehouse_id=warehouse_id,
         dry_run=False,
         use_workspace_scim=True,
@@ -228,7 +394,9 @@ def test_uc_declarative_abac_deploy(
     )
 
     # All expected governed tags should have been created/updated (or already in sync)
-    applied_governed_tags = result.governed_tag_diff.to_create | result.governed_tag_diff.to_update
+    applied_governed_tags = (
+        result.governed_tag_diff.to_create | result.governed_tag_diff.to_update
+    )
     for gt in EXPECTED_GOVERNED_TAGS:
         in_applied = gt in applied_governed_tags
         already_in_sync = gt not in applied_governed_tags
@@ -237,7 +405,9 @@ def test_uc_declarative_abac_deploy(
         )
 
     # All expected functions should have been created/replaced (or already in sync)
-    applied_securables = set(result.securable_diff.securables_to_create) | set(result.securable_diff.securables_to_replace)
+    applied_securables = set(result.securable_diff.securables_to_create) | set(
+        result.securable_diff.securables_to_replace
+    )
     for func in EXPECTED_FUNCTIONS:
         in_applied = func in applied_securables
         already_in_sync = func not in applied_securables
@@ -249,7 +419,9 @@ def test_uc_declarative_abac_deploy(
     applied_tags = result.tag_diff.to_add | result.tag_diff.to_update
     for tag in EXPECTED_TAGS:
         in_applied = tag in applied_tags
-        already_in_sync = tag not in applied_tags and tag not in result.tag_diff.to_remove
+        already_in_sync = (
+            tag not in applied_tags and tag not in result.tag_diff.to_remove
+        )
         assert in_applied or already_in_sync, (
             f"Expected tag was not applied and not already in sync: {tag}"
         )

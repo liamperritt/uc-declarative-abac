@@ -42,11 +42,7 @@ def _allowed_values_by_name(
     constraint means any value is allowed, so they don't participate in
     validation.
     """
-    return {
-        gt.name: gt.allowed_values
-        for gt in governed_tags
-        if gt.allowed_values
-    }
+    return {gt.name: gt.allowed_values for gt in governed_tags if gt.allowed_values}
 
 
 def _is_value_allowed(
@@ -71,17 +67,18 @@ def _log_disallowed_value(
 ) -> None:
     """Log one DisallowedTagValueError for an invalid governed-tag assignment."""
     context = (
-        f"Tag '{tag.tag_name}' on {tag.securable_type.value} "
-        f"{tag.securable_full_name}"
+        f"Tag '{tag.tag_name}' on {tag.securable_type.value} {tag.securable_full_name}"
     )
-    change_logger.log_error(ExecutionError(
-        context=context,
-        exception=DisallowedTagValueError(
-            f"{context} uses value '{tag.tag_value}' which is not in "
-            f"allowed_values {sorted(allowed)} for governed tag "
-            f"'{tag.tag_name}'"
-        ),
-    ))
+    change_logger.log_error(
+        ExecutionError(
+            context=context,
+            exception=DisallowedTagValueError(
+                f"{context} uses value '{tag.tag_value}' which is not in "
+                f"allowed_values {sorted(allowed)} for governed tag "
+                f"'{tag.tag_name}'"
+            ),
+        )
+    )
 
 
 def _validate_against_governed(

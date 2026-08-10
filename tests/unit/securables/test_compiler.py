@@ -68,11 +68,14 @@ def test_securable_compiler_emits_schema_owner():
 
     result = compile_desired_attributes(config)
 
-    assert SecurableAttributes(
-        securable_type=SecurableType.SCHEMA,
-        full_name="my_catalog.sales",
-        owner=_unknown_owner("schema_owner"),
-    ) in result
+    assert (
+        SecurableAttributes(
+            securable_type=SecurableType.SCHEMA,
+            full_name="my_catalog.sales",
+            owner=_unknown_owner("schema_owner"),
+        )
+        in result
+    )
 
 
 def test_securable_compiler_emits_table_owner():
@@ -99,11 +102,14 @@ def test_securable_compiler_emits_table_owner():
 
     result = compile_desired_attributes(config)
 
-    assert SecurableAttributes(
-        securable_type=SecurableType.TABLE,
-        full_name="my_catalog.sales.orders",
-        owner=_unknown_owner("table_owner"),
-    ) in result
+    assert (
+        SecurableAttributes(
+            securable_type=SecurableType.TABLE,
+            full_name="my_catalog.sales.orders",
+            owner=_unknown_owner("table_owner"),
+        )
+        in result
+    )
 
 
 def test_securable_compiler_emits_volume_owner():
@@ -130,11 +136,14 @@ def test_securable_compiler_emits_volume_owner():
 
     result = compile_desired_attributes(config)
 
-    assert SecurableAttributes(
-        securable_type=SecurableType.VOLUME,
-        full_name="my_catalog.landing.files",
-        owner=_unknown_owner("vol_owner"),
-    ) in result
+    assert (
+        SecurableAttributes(
+            securable_type=SecurableType.VOLUME,
+            full_name="my_catalog.landing.files",
+            owner=_unknown_owner("vol_owner"),
+        )
+        in result
+    )
 
 
 def test_securable_compiler_emits_function_owner():
@@ -163,22 +172,19 @@ def test_securable_compiler_emits_function_owner():
 
     result = compile_desired_attributes(config)
 
-    assert SecurableAttributes(
-        securable_type=SecurableType.FUNCTION,
-        full_name="my_catalog.shared.mask_email",
-        owner=_unknown_owner("func_owner"),
-    ) in result
+    assert (
+        SecurableAttributes(
+            securable_type=SecurableType.FUNCTION,
+            full_name="my_catalog.shared.mask_email",
+            owner=_unknown_owner("func_owner"),
+        )
+        in result
+    )
 
 
 def test_securable_compiler_skips_securables_without_managed_attributes():
     """A catalog with no owner/comment/location is not emitted in the attributes set."""
-    config = ResourcesConfig.model_validate(
-        {
-            "catalogs": {
-                "my_catalog": {}
-            }
-        }
-    )
+    config = ResourcesConfig.model_validate({"catalogs": {"my_catalog": {}}})
 
     result = compile_desired_attributes(config)
 
@@ -193,47 +199,57 @@ def test_securable_compiler_skips_securables_without_managed_attributes():
 def test_securable_compiler_emits_catalog_comment_in_attributes():
     """A catalog with a comment produces a SecurableAttributes carrying it. Catalogs
     do not currently support ``location`` (managed location)."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "comment": "Prod catalog",
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "comment": "Prod catalog",
+                },
             },
-        },
-    })
+        }
+    )
 
     result = compile_desired_attributes(config)
 
-    assert SecurableAttributes(
-        securable_type=SecurableType.CATALOG,
-        full_name="my_cat",
-        owner=None,
-        comment="Prod catalog",
-    ) in result
+    assert (
+        SecurableAttributes(
+            securable_type=SecurableType.CATALOG,
+            full_name="my_cat",
+            owner=None,
+            comment="Prod catalog",
+        )
+        in result
+    )
 
 
 def test_securable_compiler_emits_schema_comment_in_attributes():
     """A schema with a comment produces a SecurableAttributes carrying it. Schemas
     do not currently support ``location`` (managed location)."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "schemas": [
-                    {
-                        "name": "sales",
-                        "comment": "Sales data",
-                    },
-                ],
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "comment": "Sales data",
+                        },
+                    ],
+                },
             },
-        },
-    })
+        }
+    )
 
     result = compile_desired_attributes(config)
 
-    assert SecurableAttributes(
-        securable_type=SecurableType.SCHEMA,
-        full_name="my_cat.sales",
-        comment="Sales data",
-    ) in result
+    assert (
+        SecurableAttributes(
+            securable_type=SecurableType.SCHEMA,
+            full_name="my_cat.sales",
+            comment="Sales data",
+        )
+        in result
+    )
 
 
 def test_securable_compiler_emits_table_comment_in_attributes():
@@ -242,32 +258,37 @@ def test_securable_compiler_emits_table_comment_in_attributes():
     ``location`` is creation-only (not part of SecurableAttributes); see
     ``test_securables_compiler_plumbs_*_onto_*_securable`` for CREATE-time plumbing.
     """
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "schemas": [
-                    {
-                        "name": "sales",
-                        "tables": [
-                            {
-                                "name": "orders",
-                                "comment": "Orders fact",
-                                "location": "s3://ext/orders",
-                            },
-                        ],
-                    },
-                ],
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "comment": "Orders fact",
+                                    "location": "s3://ext/orders",
+                                },
+                            ],
+                        },
+                    ],
+                },
             },
-        },
-    })
+        }
+    )
 
     result = compile_desired_attributes(config)
 
-    assert SecurableAttributes(
-        securable_type=SecurableType.TABLE,
-        full_name="my_cat.sales.orders",
-        comment="Orders fact",
-    ) in result
+    assert (
+        SecurableAttributes(
+            securable_type=SecurableType.TABLE,
+            full_name="my_cat.sales.orders",
+            comment="Orders fact",
+        )
+        in result
+    )
 
 
 def test_securable_compiler_emits_volume_comment_in_attributes():
@@ -275,69 +296,81 @@ def test_securable_compiler_emits_volume_comment_in_attributes():
 
     ``location`` is creation-only (not part of SecurableAttributes).
     """
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "schemas": [
-                    {
-                        "name": "landing",
-                        "volumes": [
-                            {
-                                "name": "raw",
-                                "comment": "Raw landing",
-                                "location": "s3://ext/raw",
-                            },
-                        ],
-                    },
-                ],
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "landing",
+                            "volumes": [
+                                {
+                                    "name": "raw",
+                                    "comment": "Raw landing",
+                                    "location": "s3://ext/raw",
+                                },
+                            ],
+                        },
+                    ],
+                },
             },
-        },
-    })
+        }
+    )
 
     result = compile_desired_attributes(config)
 
-    assert SecurableAttributes(
-        securable_type=SecurableType.VOLUME,
-        full_name="my_cat.landing.raw",
-        comment="Raw landing",
-    ) in result
+    assert (
+        SecurableAttributes(
+            securable_type=SecurableType.VOLUME,
+            full_name="my_cat.landing.raw",
+            comment="Raw landing",
+        )
+        in result
+    )
 
 
 def test_securable_compiler_emits_attributes_when_only_comment_is_set():
     """A catalog with only a comment (no owner) still produces a SecurableAttributes."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {"comment": "Just a comment"},
-        },
-    })
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {"comment": "Just a comment"},
+            },
+        }
+    )
 
     result = compile_desired_attributes(config)
 
-    assert SecurableAttributes(
-        securable_type=SecurableType.CATALOG,
-        full_name="my_cat",
-        comment="Just a comment",
-    ) in result
+    assert (
+        SecurableAttributes(
+            securable_type=SecurableType.CATALOG,
+            full_name="my_cat",
+            comment="Just a comment",
+        )
+        in result
+    )
 
 
 def test_securable_compiler_emits_no_attributes_when_only_location_is_set():
     """A volume with only a location (no owner, no comment) does NOT produce a
     SecurableAttributes — ``location`` is creation-only and isn't tracked as a
     managed attribute."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "schemas": [
-                    {
-                        "name": "landing",
-                        "volumes": [
-                            {"name": "raw", "location": "s3://ext/raw"},
-                        ],
-                    },
-                ],
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "landing",
+                            "volumes": [
+                                {"name": "raw", "location": "s3://ext/raw"},
+                            ],
+                        },
+                    ],
+                },
             },
-        },
-    })
+        }
+    )
 
     result = compile_desired_attributes(config)
 
@@ -346,25 +379,27 @@ def test_securable_compiler_emits_no_attributes_when_only_location_is_set():
 
 def test_securable_compiler_does_not_emit_function_comment_into_attributes():
     """Function comments live on the Function securable itself, not on SecurableAttributes."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "schemas": [
-                    {
-                        "name": "shared",
-                        "functions": [
-                            {
-                                "name": "mask_pii",
-                                "parameters": [{"name": "x", "type": "STRING"}],
-                                "return": "x",
-                                "comment": "Mask helper",
-                            },
-                        ],
-                    },
-                ],
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "shared",
+                            "functions": [
+                                {
+                                    "name": "mask_pii",
+                                    "parameters": [{"name": "x", "type": "STRING"}],
+                                    "return": "x",
+                                    "comment": "Mask helper",
+                                },
+                            ],
+                        },
+                    ],
+                },
             },
-        },
-    })
+        }
+    )
 
     result = compile_desired_attributes(config)
 
@@ -390,149 +425,177 @@ _RFA_DESTINATIONS = [
 def test_securable_compiler_emits_catalog_rfa_destinations():
     """A catalog with rfa_destinations produces a SecurableAttributes carrying the
     destinations as a frozenset (order-insensitive)."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "rfa_destinations": list(_RFA_DESTINATIONS),
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "rfa_destinations": list(_RFA_DESTINATIONS),
+                },
             },
-        },
-    })
+        }
+    )
 
     result = compile_desired_attributes(config)
 
-    assert SecurableAttributes(
-        securable_type=SecurableType.CATALOG,
-        full_name="my_cat",
-        rfa_destinations=frozenset(_RFA_DESTINATIONS),
-    ) in result
+    assert (
+        SecurableAttributes(
+            securable_type=SecurableType.CATALOG,
+            full_name="my_cat",
+            rfa_destinations=frozenset(_RFA_DESTINATIONS),
+        )
+        in result
+    )
 
 
 def test_securable_compiler_emits_schema_rfa_destinations():
     """A schema with rfa_destinations produces a SecurableAttributes carrying them."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "schemas": [
-                    {
-                        "name": "sales",
-                        "rfa_destinations": list(_RFA_DESTINATIONS),
-                    },
-                ],
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "rfa_destinations": list(_RFA_DESTINATIONS),
+                        },
+                    ],
+                },
             },
-        },
-    })
+        }
+    )
 
     result = compile_desired_attributes(config)
 
-    assert SecurableAttributes(
-        securable_type=SecurableType.SCHEMA,
-        full_name="my_cat.sales",
-        rfa_destinations=frozenset(_RFA_DESTINATIONS),
-    ) in result
+    assert (
+        SecurableAttributes(
+            securable_type=SecurableType.SCHEMA,
+            full_name="my_cat.sales",
+            rfa_destinations=frozenset(_RFA_DESTINATIONS),
+        )
+        in result
+    )
 
 
 def test_securable_compiler_emits_table_rfa_destinations():
     """A table with rfa_destinations produces a SecurableAttributes carrying them."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "schemas": [
-                    {
-                        "name": "sales",
-                        "tables": [
-                            {
-                                "name": "orders",
-                                "rfa_destinations": list(_RFA_DESTINATIONS),
-                            },
-                        ],
-                    },
-                ],
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "rfa_destinations": list(_RFA_DESTINATIONS),
+                                },
+                            ],
+                        },
+                    ],
+                },
             },
-        },
-    })
+        }
+    )
 
     result = compile_desired_attributes(config)
 
-    assert SecurableAttributes(
-        securable_type=SecurableType.TABLE,
-        full_name="my_cat.sales.orders",
-        rfa_destinations=frozenset(_RFA_DESTINATIONS),
-    ) in result
+    assert (
+        SecurableAttributes(
+            securable_type=SecurableType.TABLE,
+            full_name="my_cat.sales.orders",
+            rfa_destinations=frozenset(_RFA_DESTINATIONS),
+        )
+        in result
+    )
 
 
 def test_securable_compiler_emits_volume_rfa_destinations():
     """A volume with rfa_destinations produces a SecurableAttributes carrying them."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "schemas": [
-                    {
-                        "name": "landing",
-                        "volumes": [
-                            {
-                                "name": "raw",
-                                "rfa_destinations": list(_RFA_DESTINATIONS),
-                            },
-                        ],
-                    },
-                ],
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "landing",
+                            "volumes": [
+                                {
+                                    "name": "raw",
+                                    "rfa_destinations": list(_RFA_DESTINATIONS),
+                                },
+                            ],
+                        },
+                    ],
+                },
             },
-        },
-    })
+        }
+    )
 
     result = compile_desired_attributes(config)
 
-    assert SecurableAttributes(
-        securable_type=SecurableType.VOLUME,
-        full_name="my_cat.landing.raw",
-        rfa_destinations=frozenset(_RFA_DESTINATIONS),
-    ) in result
+    assert (
+        SecurableAttributes(
+            securable_type=SecurableType.VOLUME,
+            full_name="my_cat.landing.raw",
+            rfa_destinations=frozenset(_RFA_DESTINATIONS),
+        )
+        in result
+    )
 
 
 def test_securable_compiler_emits_function_rfa_destinations():
     """A function with rfa_destinations produces a SecurableAttributes carrying them."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "schemas": [
-                    {
-                        "name": "shared",
-                        "functions": [
-                            {
-                                "name": "mask_email",
-                                "parameters": [{"name": "col", "type": "STRING"}],
-                                "return": "col",
-                                "rfa_destinations": list(_RFA_DESTINATIONS),
-                            },
-                        ],
-                    },
-                ],
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "shared",
+                            "functions": [
+                                {
+                                    "name": "mask_email",
+                                    "parameters": [{"name": "col", "type": "STRING"}],
+                                    "return": "col",
+                                    "rfa_destinations": list(_RFA_DESTINATIONS),
+                                },
+                            ],
+                        },
+                    ],
+                },
             },
-        },
-    })
+        }
+    )
 
     result = compile_desired_attributes(config)
 
-    assert SecurableAttributes(
-        securable_type=SecurableType.FUNCTION,
-        full_name="my_cat.shared.mask_email",
-        rfa_destinations=frozenset(_RFA_DESTINATIONS),
-    ) in result
+    assert (
+        SecurableAttributes(
+            securable_type=SecurableType.FUNCTION,
+            full_name="my_cat.shared.mask_email",
+            rfa_destinations=frozenset(_RFA_DESTINATIONS),
+        )
+        in result
+    )
 
 
 def test_securable_compiler_rfa_destinations_is_none_when_absent():
     """A catalog with an owner but no rfa_destinations leaves
     SecurableAttributes.rfa_destinations as None (not an empty frozenset)."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {"owner": "admin_user"},
-        },
-    })
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {"owner": "admin_user"},
+            },
+        }
+    )
 
     result = compile_desired_attributes(config)
 
     catalog_attrs = next(
-        a for a in result
+        a
+        for a in result
         if a.securable_type == SecurableType.CATALOG and a.full_name == "my_cat"
     )
     assert catalog_attrs.rfa_destinations is None
@@ -542,22 +605,27 @@ def test_securable_compiler_emits_attributes_when_only_rfa_destinations_set():
     """A catalog with only rfa_destinations (no owner, no comment) still produces
     a SecurableAttributes — and a sibling catalog with no managed attributes at
     all does not."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "with_rfa": {
-                "rfa_destinations": list(_RFA_DESTINATIONS),
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "with_rfa": {
+                    "rfa_destinations": list(_RFA_DESTINATIONS),
+                },
+                "without_anything": {},
             },
-            "without_anything": {},
-        },
-    })
+        }
+    )
 
     result = compile_desired_attributes(config)
 
-    assert SecurableAttributes(
-        securable_type=SecurableType.CATALOG,
-        full_name="with_rfa",
-        rfa_destinations=frozenset(_RFA_DESTINATIONS),
-    ) in result
+    assert (
+        SecurableAttributes(
+            securable_type=SecurableType.CATALOG,
+            full_name="with_rfa",
+            rfa_destinations=frozenset(_RFA_DESTINATIONS),
+        )
+        in result
+    )
     assert not any(a.full_name == "without_anything" for a in result)
 
 
@@ -566,16 +634,19 @@ def test_securable_compiler_emits_empty_rfa_destinations_when_explicitly_empty_l
     SecurableAttributes whose rfa_destinations is an empty frozenset (not None) —
     signalling "remove all", distinct from the absent/unmanaged case. This holds
     even when no other managed attribute (owner/comment) is set."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {"rfa_destinations": []},
-        },
-    })
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {"rfa_destinations": []},
+            },
+        }
+    )
 
     result = compile_desired_attributes(config)
 
     catalog_attrs = next(
-        a for a in result
+        a
+        for a in result
         if a.securable_type == SecurableType.CATALOG and a.full_name == "my_cat"
     )
     assert catalog_attrs.rfa_destinations == frozenset()
@@ -612,12 +683,15 @@ def test_securable_compiler_emits_function_info():
 
     result = compile_desired_securables(config)
 
-    assert Function(
-        securable_type=SecurableType.FUNCTION,
-        full_name="my_catalog.shared.mask_email",
-        parameters=(("col", "STRING"),),
-        definition="CASE WHEN is_member('admins') THEN col ELSE '***' END",
-    ) in result
+    assert (
+        Function(
+            securable_type=SecurableType.FUNCTION,
+            full_name="my_catalog.shared.mask_email",
+            parameters=(("col", "STRING"),),
+            definition="CASE WHEN is_member('admins') THEN col ELSE '***' END",
+        )
+        in result
+    )
 
 
 def test_securable_compiler_emits_function_info_without_parameters():
@@ -644,12 +718,15 @@ def test_securable_compiler_emits_function_info_without_parameters():
 
     result = compile_desired_securables(config)
 
-    assert Function(
-        securable_type=SecurableType.FUNCTION,
-        full_name="my_catalog.shared.get_greeting",
-        parameters=(),
-        definition="'Hello, World!'",
-    ) in result
+    assert (
+        Function(
+            securable_type=SecurableType.FUNCTION,
+            full_name="my_catalog.shared.get_greeting",
+            parameters=(),
+            definition="'Hello, World!'",
+        )
+        in result
+    )
 
 
 def test_securable_compiler_emits_function_comment_when_provided():
@@ -689,9 +766,7 @@ def test_securable_compiler_function_comment_defaults_to_none():
                     "schemas": [
                         {
                             "name": "shared",
-                            "functions": [
-                                {"name": "greet", "return": "'hi'"}
-                            ],
+                            "functions": [{"name": "greet", "return": "'hi'"}],
                         }
                     ],
                 }
@@ -743,7 +818,9 @@ def test_securables_compiler_emits_securable_for_each_declared_schema():
 
     result = compile_desired_securables(config)
 
-    assert Securable(securable_type=SecurableType.SCHEMA, full_name="cat.sales") in result
+    assert (
+        Securable(securable_type=SecurableType.SCHEMA, full_name="cat.sales") in result
+    )
     assert Securable(securable_type=SecurableType.SCHEMA, full_name="cat.hr") in result
 
 
@@ -770,8 +847,20 @@ def test_securables_compiler_emits_table_subclass_for_each_declared_table():
 
     result = compile_desired_securables(config)
 
-    assert Table(securable_type=SecurableType.TABLE, full_name="cat.sales.orders", columns=()) in result
-    assert Table(securable_type=SecurableType.TABLE, full_name="cat.sales.customers", columns=()) in result
+    assert (
+        Table(
+            securable_type=SecurableType.TABLE, full_name="cat.sales.orders", columns=()
+        )
+        in result
+    )
+    assert (
+        Table(
+            securable_type=SecurableType.TABLE,
+            full_name="cat.sales.customers",
+            columns=(),
+        )
+        in result
+    )
 
 
 def test_securables_compiler_emits_column_with_data_type_when_specified():
@@ -788,7 +877,10 @@ def test_securables_compiler_emits_column_with_data_type_when_specified():
                                     "name": "orders",
                                     "columns": [
                                         {"name": "email", "data_type": "STRING"},
-                                        {"name": "amount", "data_type": "DECIMAL(18,2)"},
+                                        {
+                                            "name": "amount",
+                                            "data_type": "DECIMAL(18,2)",
+                                        },
                                     ],
                                 }
                             ],
@@ -801,17 +893,25 @@ def test_securables_compiler_emits_column_with_data_type_when_specified():
 
     result = compile_desired_securables(config)
 
-    orders = next(s for s in result if isinstance(s, Table) and s.full_name == "cat.sales.orders")
-    assert Column(
-        securable_type=SecurableType.COLUMN,
-        full_name="cat.sales.orders.email",
-        data_type="STRING",
-    ) in orders.columns
-    assert Column(
-        securable_type=SecurableType.COLUMN,
-        full_name="cat.sales.orders.amount",
-        data_type="DECIMAL(18,2)",
-    ) in orders.columns
+    orders = next(
+        s for s in result if isinstance(s, Table) and s.full_name == "cat.sales.orders"
+    )
+    assert (
+        Column(
+            securable_type=SecurableType.COLUMN,
+            full_name="cat.sales.orders.email",
+            data_type="STRING",
+        )
+        in orders.columns
+    )
+    assert (
+        Column(
+            securable_type=SecurableType.COLUMN,
+            full_name="cat.sales.orders.amount",
+            data_type="DECIMAL(18,2)",
+        )
+        in orders.columns
+    )
 
 
 def test_securables_compiler_emits_column_with_data_type_none_when_unspecified():
@@ -838,7 +938,9 @@ def test_securables_compiler_emits_column_with_data_type_none_when_unspecified()
 
     result = compile_desired_securables(config)
 
-    orders = next(s for s in result if isinstance(s, Table) and s.full_name == "cat.sales.orders")
+    orders = next(
+        s for s in result if isinstance(s, Table) and s.full_name == "cat.sales.orders"
+    )
     (email_col,) = orders.columns
     assert email_col.data_type is None
 
@@ -871,8 +973,14 @@ def test_securables_compiler_preserves_column_declaration_order():
 
     result = compile_desired_securables(config)
 
-    orders = next(s for s in result if isinstance(s, Table) and s.full_name == "cat.sales.orders")
-    assert [c.full_name.rsplit(".", 1)[-1] for c in orders.columns] == ["c_zebra", "a_apple", "m_mango"]
+    orders = next(
+        s for s in result if isinstance(s, Table) and s.full_name == "cat.sales.orders"
+    )
+    assert [c.full_name.rsplit(".", 1)[-1] for c in orders.columns] == [
+        "c_zebra",
+        "a_apple",
+        "m_mango",
+    ]
 
 
 def test_securables_compiler_emits_securable_for_each_declared_volume():
@@ -897,8 +1005,14 @@ def test_securables_compiler_emits_securable_for_each_declared_volume():
 
     result = compile_desired_securables(config)
 
-    assert Securable(securable_type=SecurableType.VOLUME, full_name="cat.raw.events") in result
-    assert Securable(securable_type=SecurableType.VOLUME, full_name="cat.raw.files") in result
+    assert (
+        Securable(securable_type=SecurableType.VOLUME, full_name="cat.raw.events")
+        in result
+    )
+    assert (
+        Securable(securable_type=SecurableType.VOLUME, full_name="cat.raw.files")
+        in result
+    )
 
 
 def test_securables_compiler_emits_function_subclass_for_each_declared_function():
@@ -940,37 +1054,45 @@ def test_securables_compiler_emits_nothing_for_empty_config():
 
 def test_securables_compiler_plumbs_comment_and_location_onto_catalog_securable():
     """Catalog Securable carries comment and managed location for CREATE-time SQL embedding."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "comment": "Prod",
-                "location": "s3://managed/my_cat",
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "comment": "Prod",
+                    "location": "s3://managed/my_cat",
+                },
             },
-        },
-    })
+        }
+    )
 
     result = compile_desired_securables(config)
 
-    catalog = next(s for s in result if s.full_name == "my_cat" and s.securable_type == SecurableType.CATALOG)
+    catalog = next(
+        s
+        for s in result
+        if s.full_name == "my_cat" and s.securable_type == SecurableType.CATALOG
+    )
     assert catalog.comment == "Prod"
     assert catalog.location == "s3://managed/my_cat"
 
 
 def test_securables_compiler_plumbs_comment_and_location_onto_schema_securable():
     """Schema Securable carries comment and managed location for CREATE-time SQL embedding."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "schemas": [
-                    {
-                        "name": "sales",
-                        "comment": "Sales",
-                        "location": "s3://managed/sales",
-                    },
-                ],
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "comment": "Sales",
+                            "location": "s3://managed/sales",
+                        },
+                    ],
+                },
             },
-        },
-    })
+        }
+    )
 
     result = compile_desired_securables(config)
 
@@ -981,25 +1103,27 @@ def test_securables_compiler_plumbs_comment_and_location_onto_schema_securable()
 
 def test_securables_compiler_plumbs_comment_and_location_onto_table_securable():
     """Table securable carries comment and external location for CREATE-time SQL embedding."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "schemas": [
-                    {
-                        "name": "sales",
-                        "tables": [
-                            {
-                                "name": "orders",
-                                "comment": "Orders",
-                                "location": "s3://ext/orders",
-                                "columns": [{"name": "id", "type": "LONG"}],
-                            },
-                        ],
-                    },
-                ],
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "comment": "Orders",
+                                    "location": "s3://ext/orders",
+                                    "columns": [{"name": "id", "type": "LONG"}],
+                                },
+                            ],
+                        },
+                    ],
+                },
             },
-        },
-    })
+        }
+    )
 
     result = compile_desired_securables(config)
 
@@ -1011,24 +1135,26 @@ def test_securables_compiler_plumbs_comment_and_location_onto_table_securable():
 
 def test_securables_compiler_plumbs_comment_and_location_onto_volume_securable():
     """Volume Securable carries comment and external location for CREATE-time SQL embedding."""
-    config = ResourcesConfig.model_validate({
-        "catalogs": {
-            "my_cat": {
-                "schemas": [
-                    {
-                        "name": "landing",
-                        "volumes": [
-                            {
-                                "name": "raw",
-                                "comment": "Raw",
-                                "location": "s3://ext/raw",
-                            },
-                        ],
-                    },
-                ],
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "landing",
+                            "volumes": [
+                                {
+                                    "name": "raw",
+                                    "comment": "Raw",
+                                    "location": "s3://ext/raw",
+                                },
+                            ],
+                        },
+                    ],
+                },
             },
-        },
-    })
+        }
+    )
 
     result = compile_desired_securables(config)
 

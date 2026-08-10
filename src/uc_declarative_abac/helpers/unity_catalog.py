@@ -103,7 +103,13 @@ def _build_tags_query(
     # ``__``, so their tags are kept as long as the parent table/schema/catalog isn't
     # itself hidden.
     arms = {
-        "catalog_tags": ("CATALOG", "catalog_name", "catalog_name", False, ["catalog_name"]),
+        "catalog_tags": (
+            "CATALOG",
+            "catalog_name",
+            "catalog_name",
+            False,
+            ["catalog_name"],
+        ),
         "schema_tags": (
             "SCHEMA",
             "concat(catalog_name, '.', schema_name)",
@@ -134,7 +140,13 @@ def _build_tags_query(
         ),
     }
     parts = []
-    for table, (sec_type, full_name_expr, group_by_cols, has_schema, name_cols) in arms.items():
+    for table, (
+        sec_type,
+        full_name_expr,
+        group_by_cols,
+        has_schema,
+        name_cols,
+    ) in arms.items():
         where = f"catalog_name IN {in_clause}"
         if has_schema:
             where += " AND schema_name != 'information_schema'"
@@ -161,21 +173,18 @@ def _build_privileges_query(
         f"FROM {system_catalog}.information_schema.catalog_privileges "
         f"WHERE catalog_name IN {in_clause} AND inherited_from = 'NONE'"
         f"{_build_double_underscore_filter(['catalog_name'])}",
-
         f"SELECT 'SCHEMA' AS securable_type, "
         f"concat(catalog_name, '.', schema_name) AS securable_full_name, "
         f"grantee, privilege_type "
         f"FROM {system_catalog}.information_schema.schema_privileges "
         f"WHERE catalog_name IN {in_clause} AND inherited_from = 'NONE' AND schema_name != 'information_schema'"
         f"{_build_double_underscore_filter(['catalog_name', 'schema_name'])}",
-
         f"SELECT 'TABLE' AS securable_type, "
         f"concat(table_catalog, '.', table_schema, '.', table_name) AS securable_full_name, "
         f"grantee, privilege_type "
         f"FROM {system_catalog}.information_schema.table_privileges "
         f"WHERE table_catalog IN {in_clause} AND inherited_from = 'NONE' AND table_schema != 'information_schema'"
         f"{_build_double_underscore_filter(['table_catalog', 'table_schema', 'table_name'])}",
-
         f"SELECT 'VOLUME' AS securable_type, "
         f"concat(volume_catalog, '.', volume_schema, '.', volume_name) AS securable_full_name, "
         f"grantee, privilege_type "
@@ -227,13 +236,17 @@ def _parse_privilege_rows(rows: list[list[str]]) -> set[SecurablePrivilege]:
         try:
             privilege_type = PrivilegeType(row[3].lower())
         except ValueError:
-            _logger.error(f"Skipping privilege from system table: unsupported type '{row[3]}'")
+            _logger.error(
+                f"Skipping privilege from system table: unsupported type '{row[3]}'"
+            )
             continue
         result.add(
             SecurablePrivilege(
                 securable_type=SecurableType(row[0]),
                 securable_full_name=row[1],
-                principal=Principal(principal_type=PrincipalType.UNKNOWN, identifier=row[2]),
+                principal=Principal(
+                    principal_type=PrincipalType.UNKNOWN, identifier=row[2]
+                ),
                 privilege_type=privilege_type,
             )
         )
@@ -251,7 +264,9 @@ def _fetch_external_links_rows(response: StatementResponse) -> list[list[str]]:
         try:
             rows.extend(json.loads(resp.text))
         except json.JSONDecodeError as e:
-            raise OrchestratorError(f"Failed to parse external link response: {e}") from e
+            raise OrchestratorError(
+                f"Failed to parse external link response: {e}"
+            ) from e
     return rows
 
 
@@ -293,7 +308,6 @@ def _build_securables_query(
         f"FROM {system_catalog}.information_schema.catalogs "
         f"WHERE catalog_name IN {in_clause}"
         f"{_build_double_underscore_filter(['catalog_name'])}",
-
         f"SELECT 'SCHEMA' AS securable_type, "
         f"concat(catalog_name, '.', schema_name) AS full_name, "
         f"schema_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, NULL AS columns, "
@@ -301,7 +315,6 @@ def _build_securables_query(
         f"FROM {system_catalog}.information_schema.schemata "
         f"WHERE catalog_name IN {in_clause} AND schema_name != 'information_schema'"
         f"{_build_double_underscore_filter(['catalog_name', 'schema_name'])}",
-
         f"SELECT 'TABLE' AS securable_type, "
         f"concat(t.table_catalog, '.', t.table_schema, '.', t.table_name) AS full_name, "
         f"t.table_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, "
@@ -315,7 +328,6 @@ def _build_securables_query(
         f"WHERE t.table_catalog IN {in_clause} AND t.table_schema != 'information_schema'"
         f"{_build_double_underscore_filter(['t.table_catalog', 't.table_schema', 't.table_name'])} "
         f"GROUP BY t.table_catalog, t.table_schema, t.table_name, t.table_owner, t.comment, t.table_type",
-
         f"SELECT 'VOLUME' AS securable_type, "
         f"concat(volume_catalog, '.', volume_schema, '.', volume_name) AS full_name, "
         f"volume_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, NULL AS columns, "
@@ -323,7 +335,6 @@ def _build_securables_query(
         f"FROM {system_catalog}.information_schema.volumes "
         f"WHERE volume_catalog IN {in_clause} AND volume_schema != 'information_schema'"
         f"{_build_double_underscore_filter(['volume_catalog', 'volume_schema', 'volume_name'])}",
-
         f"SELECT 'FUNCTION' AS securable_type, "
         f"concat(r.specific_catalog, '.', r.specific_schema, '.', r.specific_name) AS full_name, "
         f"r.routine_owner AS owner, "
@@ -377,7 +388,8 @@ def _parse_securable_rows(
 
         owner_principal = (
             Principal(principal_type=PrincipalType.UNKNOWN, identifier=owner)
-            if owner else None
+            if owner
+            else None
         )
         attributes.add(
             SecurableAttributes(
@@ -459,11 +471,10 @@ def _build_policy_securables_query(
     the SDK's ``POLICY_TYPE_*`` used in ``_normalise_policy_info``.
     """
     in_clause = _build_catalog_in_clause(catalog_names)
-    hidden_filter = (
-        _build_double_underscore_filter(["catalog_name"])
-        + _build_double_underscore_filter(
-            ["schema_name", "securable_name"], null_safe=True
-        )
+    hidden_filter = _build_double_underscore_filter(
+        ["catalog_name"]
+    ) + _build_double_underscore_filter(
+        ["schema_name", "securable_name"], null_safe=True
     )
     return (
         "SELECT DISTINCT "
@@ -496,7 +507,9 @@ def _parse_policy_securable_rows(
         try:
             securable_type = SecurableType(row[0])
         except ValueError:
-            _logger.warning(f"Skipping policy securable from system table: unsupported type '{row[0]}'")
+            _logger.warning(
+                f"Skipping policy securable from system table: unsupported type '{row[0]}'"
+            )
             continue
         result.add((securable_type, row[1]))
     return result
@@ -542,9 +555,7 @@ def _normalise_policy_info(
         Principal(principal_type=PrincipalType.UNKNOWN, identifier=p)
         for p in (info.except_principals or [])
     )
-    match_columns = tuple(
-        (mc.alias, mc.condition) for mc in (info.match_columns or [])
-    )
+    match_columns = tuple((mc.alias, mc.condition) for mc in (info.match_columns or []))
     return Policy(
         securable_type=securable_type,
         securable_full_name=securable_full_name,
@@ -682,11 +693,15 @@ class UnityCatalogHelper:
         )
         while response.status.state in (StatementState.PENDING, StatementState.RUNNING):
             time.sleep(_POLL_INTERVAL_SECONDS)
-            response = self._client.statement_execution.get_statement(response.statement_id)
+            response = self._client.statement_execution.get_statement(
+                response.statement_id
+            )
 
         if response.status.state != StatementState.SUCCEEDED:
             error_msg = getattr(response.status.error, "message", "Unknown error")
-            raise OrchestratorError(f"SQL query failed ({response.status.state}): {error_msg}\nStatement: {statement}")
+            raise OrchestratorError(
+                f"SQL query failed ({response.status.state}): {error_msg}\nStatement: {statement}"
+            )
 
         return response
 
@@ -709,7 +724,9 @@ class UnityCatalogHelper:
         self._tags_cache = _parse_tag_rows(rows)
         return self._tags_cache
 
-    def fetch_actual_privileges(self, catalog_names: list[str]) -> set[SecurablePrivilege]:
+    def fetch_actual_privileges(
+        self, catalog_names: list[str]
+    ) -> set[SecurablePrivilege]:
         """Query system tables for all explicit privileges on securables in the given catalogs.
 
         Filters to inherited_from='NONE' to only return directly granted privileges.
@@ -723,9 +740,7 @@ class UnityCatalogHelper:
             return self._privileges_cache
 
         response = self._execute_and_poll(
-            _build_privileges_query(
-                catalog_names, system_catalog=self._system_catalog
-            )
+            _build_privileges_query(catalog_names, system_catalog=self._system_catalog)
         )
         rows = _fetch_external_links_rows(response)
         self._privileges_cache = _parse_privilege_rows(rows)
@@ -759,9 +774,7 @@ class UnityCatalogHelper:
             return self._securables_cache, self._attributes_cache
 
         response = self._execute_and_poll(
-            _build_securables_query(
-                catalog_names, system_catalog=self._system_catalog
-            )
+            _build_securables_query(catalog_names, system_catalog=self._system_catalog)
         )
         rows = _fetch_external_links_rows(response)
         securables, attributes = _parse_securable_rows(rows)
@@ -790,7 +803,9 @@ class UnityCatalogHelper:
         with ThreadPoolExecutor(max_workers=_MAX_RFA_WORKERS) as pool:
             futures = {
                 pool.submit(
-                    self._get_rfa_destination_ids, sec_type, full_name,
+                    self._get_rfa_destination_ids,
+                    sec_type,
+                    full_name,
                 ): (sec_type, full_name)
                 for sec_type, full_name in targets
             }
@@ -800,7 +815,9 @@ class UnityCatalogHelper:
         return result
 
     def _get_rfa_destination_ids(
-        self, securable_type: SecurableType, full_name: str,
+        self,
+        securable_type: SecurableType,
+        full_name: str,
     ) -> frozenset[str]:
         """Fetch destination ids for one securable; treat 404/400 as empty.
 
@@ -914,7 +931,10 @@ class UnityCatalogHelper:
         result: set[Policy] = set()
         with ThreadPoolExecutor(max_workers=_MAX_POLICY_LIST_WORKERS) as pool:
             futures = {
-                pool.submit(self._list_policies, sec_type, full_name): (sec_type, full_name)
+                pool.submit(self._list_policies, sec_type, full_name): (
+                    sec_type,
+                    full_name,
+                )
                 for sec_type, full_name in securables
             }
             for future in as_completed(futures):

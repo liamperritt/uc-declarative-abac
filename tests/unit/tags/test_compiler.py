@@ -234,12 +234,15 @@ def test_tag_compiler_emits_column_tags():
 
     result = _compile(config)
 
-    assert SecurableTag(
-        securable_type=SecurableType.COLUMN,
-        securable_full_name="my_catalog.sales.orders.email",
-        tag_name="pii",
-        tag_value="true",
-    ) in result
+    assert (
+        SecurableTag(
+            securable_type=SecurableType.COLUMN,
+            securable_full_name="my_catalog.sales.orders.email",
+            tag_name="pii",
+            tag_value="true",
+        )
+        in result
+    )
 
 
 def test_tag_compiler_emits_no_column_tags_when_columns_have_no_tags():
@@ -530,7 +533,8 @@ def test_tag_compiler_logs_one_error_per_offending_tag():
 
     assert result == set()
     disallowed = [
-        e for e in change_logger.errors
+        e
+        for e in change_logger.errors
         if isinstance(e.exception, DisallowedTagValueError)
     ]
     assert len(disallowed) == 2
@@ -565,6 +569,5 @@ def test_tag_compiler_validates_against_union_of_desired_and_actual_governed_tag
 
     assert result == set()
     assert any(
-        isinstance(e.exception, DisallowedTagValueError)
-        for e in change_logger.errors
+        isinstance(e.exception, DisallowedTagValueError) for e in change_logger.errors
     )

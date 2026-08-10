@@ -14,7 +14,6 @@ from uc_declarative_abac.privileges.state import (
 from uc_declarative_abac.utils import PrincipalValidationError
 
 
-
 def compute_privilege_diff(
     desired: set[SecurablePrivilege],
     actual: set[SecurablePrivilege],
@@ -34,8 +33,12 @@ def compute_privilege_diff(
     - to_grant: desired privileges not in actual
     - to_revoke: actual privileges not in desired
     """
-    desired_resolved = _resolve_privileges(desired, resolver, change_logger, ignore_unresolvable)
-    actual_resolved = _resolve_privileges(actual, resolver, change_logger, ignore_unresolvable)
+    desired_resolved = _resolve_privileges(
+        desired, resolver, change_logger, ignore_unresolvable
+    )
+    actual_resolved = _resolve_privileges(
+        actual, resolver, change_logger, ignore_unresolvable
+    )
     return PrivilegeDiff(
         to_grant=desired_resolved - actual_resolved,
         to_revoke=actual_resolved - desired_resolved,
@@ -68,10 +71,12 @@ def _resolve_privileges(
                 ignore_unresolvable,
             )
             continue
-        result.add(SecurablePrivilege(
-            securable_type=priv.securable_type,
-            securable_full_name=priv.securable_full_name,
-            principal=resolved_principal,
-            privilege_type=priv.privilege_type,
-        ))
+        result.add(
+            SecurablePrivilege(
+                securable_type=priv.securable_type,
+                securable_full_name=priv.securable_full_name,
+                principal=resolved_principal,
+                privilege_type=priv.privilege_type,
+            )
+        )
     return result

@@ -23,9 +23,7 @@ def _assert_sql_contains(sql: str, *fragments: str):
     """Assert that every fragment appears in the SQL string (case-insensitive, ignoring backticks)."""
     normalised = sql.upper().replace("`", "")
     for fragment in fragments:
-        assert fragment.upper() in normalised, (
-            f"Expected {fragment!r} in SQL: {sql}"
-        )
+        assert fragment.upper() in normalised, f"Expected {fragment!r} in SQL: {sql}"
 
 
 # ---------------------------------------------------------------------------
@@ -52,7 +50,9 @@ def test_securable_executor_generates_create_function_sql():
     assert len(stmts) == 1
     sql = stmts[0]
 
-    _assert_sql_contains(sql, "CREATE FUNCTION", "CAT.SCHEMA.FUNC", "COL STRING", "RETURN")
+    _assert_sql_contains(
+        sql, "CREATE FUNCTION", "CAT.SCHEMA.FUNC", "COL STRING", "RETURN"
+    )
     # Name should be backtick-quoted
     assert "`cat`.`schema`.`func`" in sql
 
@@ -285,7 +285,9 @@ def test_securable_executor_logs_changes_in_dry_run():
 def test_securable_executor_extracts_identifier_from_principal():
     """When new_value is a Principal, the executor passes .identifier to update_owner."""
     uc_helper = MagicMock()
-    sp_principal = Principal(PrincipalType.SERVICE_PRINCIPAL, "72a5956b-app-id", "sp_display_name")
+    sp_principal = Principal(
+        PrincipalType.SERVICE_PRINCIPAL, "72a5956b-app-id", "sp_display_name"
+    )
 
     diff = SecurableDiff(
         attributes_to_update=[
@@ -395,7 +397,9 @@ def test_securable_executor_builds_create_catalog_sql():
     """A base Securable(CATALOG, ...) in to_create produces CREATE CATALOG SQL."""
     uc_helper = MagicMock()
     diff = SecurableDiff(
-        securables_to_create=[Securable(securable_type=SecurableType.CATALOG, full_name="new_cat")],
+        securables_to_create=[
+            Securable(securable_type=SecurableType.CATALOG, full_name="new_cat")
+        ],
     )
 
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
@@ -408,7 +412,9 @@ def test_securable_executor_builds_create_schema_sql_with_full_name():
     """A base Securable(SCHEMA, ...) in to_create produces CREATE SCHEMA <full_name> SQL."""
     uc_helper = MagicMock()
     diff = SecurableDiff(
-        securables_to_create=[Securable(securable_type=SecurableType.SCHEMA, full_name="cat.new_sch")],
+        securables_to_create=[
+            Securable(securable_type=SecurableType.SCHEMA, full_name="cat.new_sch")
+        ],
     )
 
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
@@ -421,7 +427,9 @@ def test_securable_executor_builds_create_volume_sql():
     """A base Securable(VOLUME, ...) in to_create produces a managed CREATE VOLUME statement."""
     uc_helper = MagicMock()
     diff = SecurableDiff(
-        securables_to_create=[Securable(securable_type=SecurableType.VOLUME, full_name="cat.sch.vol")],
+        securables_to_create=[
+            Securable(securable_type=SecurableType.VOLUME, full_name="cat.sch.vol")
+        ],
     )
 
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
@@ -439,8 +447,16 @@ def test_securable_executor_builds_create_table_sql_with_columns():
         securable_type=SecurableType.TABLE,
         full_name="cat.sch.orders",
         columns=(
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.email", data_type="STRING"),
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.amount", data_type="DECIMAL(18,2)"),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.orders.email",
+                data_type="STRING",
+            ),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.orders.amount",
+                data_type="DECIMAL(18,2)",
+            ),
         ),
     )
     diff = SecurableDiff(securables_to_create=[table])
@@ -462,8 +478,17 @@ def test_securable_executor_orders_creations_parent_first():
     diff = SecurableDiff(
         securables_to_create=[
             # Deliberately out of order.
-            Table(securable_type=SecurableType.TABLE, full_name="cat.sch.tbl",
-                  columns=(Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.tbl.a", data_type="STRING"),)),
+            Table(
+                securable_type=SecurableType.TABLE,
+                full_name="cat.sch.tbl",
+                columns=(
+                    Column(
+                        securable_type=SecurableType.COLUMN,
+                        full_name="cat.sch.tbl.a",
+                        data_type="STRING",
+                    ),
+                ),
+            ),
             Securable(securable_type=SecurableType.SCHEMA, full_name="cat.sch"),
             Securable(securable_type=SecurableType.VOLUME, full_name="cat.sch.vol"),
             Securable(securable_type=SecurableType.CATALOG, full_name="cat"),
@@ -476,8 +501,12 @@ def test_securable_executor_orders_creations_parent_first():
     idx_schema = next(i for i, s in enumerate(stmts) if "CREATE SCHEMA" in s.upper())
     idx_table = next(i for i, s in enumerate(stmts) if "CREATE TABLE" in s.upper())
     idx_volume = next(i for i, s in enumerate(stmts) if "CREATE VOLUME" in s.upper())
-    assert idx_catalog < idx_schema < idx_table, f"expected catalog < schema < table, got {[idx_catalog, idx_schema, idx_table]}"
-    assert idx_schema < idx_volume, f"expected schema < volume, got schema={idx_schema}, volume={idx_volume}"
+    assert idx_catalog < idx_schema < idx_table, (
+        f"expected catalog < schema < table, got {[idx_catalog, idx_schema, idx_table]}"
+    )
+    assert idx_schema < idx_volume, (
+        f"expected schema < volume, got schema={idx_schema}, volume={idx_volume}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -503,7 +532,9 @@ def test_securable_executor_builds_alter_table_add_columns_sql_for_column():
 
     assert len(stmts) == 1
     sql = stmts[0]
-    _assert_sql_contains(sql, "ALTER TABLE", "ADD COLUMNS", "cat.sch.orders", "email", "STRING")
+    _assert_sql_contains(
+        sql, "ALTER TABLE", "ADD COLUMNS", "cat.sch.orders", "email", "STRING"
+    )
     # Backtick quoting on parent table and column name.
     assert "`cat`.`sch`.`orders`" in sql
     assert "`email`" in sql
@@ -515,8 +546,16 @@ def test_securable_executor_emits_one_alter_per_parent_table():
     uc_helper = MagicMock()
     diff = SecurableDiff(
         securables_to_create=[
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.email", data_type="STRING"),
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.amount", data_type="DECIMAL(18,2)"),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.orders.email",
+                data_type="STRING",
+            ),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.orders.amount",
+                data_type="DECIMAL(18,2)",
+            ),
         ],
     )
 
@@ -537,9 +576,21 @@ def test_securable_executor_preserves_column_declaration_order_within_a_table():
     uc_helper = MagicMock()
     diff = SecurableDiff(
         securables_to_create=[
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.t.zebra", data_type="STRING"),
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.t.apple", data_type="STRING"),
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.t.mango", data_type="STRING"),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.t.zebra",
+                data_type="STRING",
+            ),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.t.apple",
+                data_type="STRING",
+            ),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.t.mango",
+                data_type="STRING",
+            ),
         ],
     )
 
@@ -566,10 +617,26 @@ def test_securable_executor_groups_columns_by_parent_table_in_order():
     diff = SecurableDiff(
         securables_to_create=[
             # Interleaved input order across two tables.
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.t1.b", data_type="STRING"),
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.t2.x", data_type="STRING"),
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.t1.a", data_type="STRING"),
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.t2.y", data_type="STRING"),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.t1.b",
+                data_type="STRING",
+            ),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.t2.x",
+                data_type="STRING",
+            ),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.t1.a",
+                data_type="STRING",
+            ),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.t2.y",
+                data_type="STRING",
+            ),
         ],
     )
 
@@ -635,8 +702,16 @@ def test_securable_executor_logs_error_and_continues_on_other_tables_after_batch
     cl = ChangeLogger()
     diff = SecurableDiff(
         securables_to_create=[
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.fail", data_type="STRING"),
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.invoices.ok", data_type="STRING"),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.orders.fail",
+                data_type="STRING",
+            ),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.invoices.ok",
+                data_type="STRING",
+            ),
         ],
     )
 
@@ -655,9 +730,22 @@ def test_securable_executor_orders_columns_after_their_parent_table():
     diff = SecurableDiff(
         securables_to_create=[
             # Out of order on purpose.
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.tbl.new_col", data_type="STRING"),
-            Table(securable_type=SecurableType.TABLE, full_name="cat.sch.tbl",
-                  columns=(Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.tbl.a", data_type="STRING"),)),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.tbl.new_col",
+                data_type="STRING",
+            ),
+            Table(
+                securable_type=SecurableType.TABLE,
+                full_name="cat.sch.tbl",
+                columns=(
+                    Column(
+                        securable_type=SecurableType.COLUMN,
+                        full_name="cat.sch.tbl.a",
+                        data_type="STRING",
+                    ),
+                ),
+            ),
         ],
     )
 
@@ -674,9 +762,21 @@ def test_securable_executor_batches_column_creates_per_parent_table():
     uc_helper = MagicMock()
     diff = SecurableDiff(
         securables_to_create=[
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.id", data_type="BIGINT"),
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.email", data_type="STRING"),
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.amount", data_type="DECIMAL(18,2)"),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.orders.id",
+                data_type="BIGINT",
+            ),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.orders.email",
+                data_type="STRING",
+            ),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.orders.amount",
+                data_type="DECIMAL(18,2)",
+            ),
         ],
     )
 
@@ -732,7 +832,11 @@ def test_securable_executor_runs_column_batches_for_different_tables_in_parallel
     # 4 parent tables, 2 columns each = 8 columns total, but expect 4 ALTERs.
     diff = SecurableDiff(
         securables_to_create=[
-            Column(securable_type=SecurableType.COLUMN, full_name=f"cat.sch.t{t}.c{c}", data_type="STRING")
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name=f"cat.sch.t{t}.c{c}",
+                data_type="STRING",
+            )
             for t in range(4)
             for c in range(2)
         ],
@@ -754,9 +858,21 @@ def test_securable_executor_logs_each_column_create_on_batched_success():
     record even though only one ALTER runs."""
     uc_helper = MagicMock()
     columns = [
-        Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.id", data_type="BIGINT"),
-        Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.email", data_type="STRING"),
-        Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.amount", data_type="DECIMAL(18,2)"),
+        Column(
+            securable_type=SecurableType.COLUMN,
+            full_name="cat.sch.orders.id",
+            data_type="BIGINT",
+        ),
+        Column(
+            securable_type=SecurableType.COLUMN,
+            full_name="cat.sch.orders.email",
+            data_type="STRING",
+        ),
+        Column(
+            securable_type=SecurableType.COLUMN,
+            full_name="cat.sch.orders.amount",
+            data_type="DECIMAL(18,2)",
+        ),
     ]
     diff = SecurableDiff(securables_to_create=list(columns))
     change_logger = MagicMock(spec=ChangeLogger)
@@ -766,7 +882,10 @@ def test_securable_executor_logs_each_column_create_on_batched_success():
     # Only one ALTER runs (batched) but every column is still logged individually.
     assert uc_helper.execute_sql.call_count == 1
     assert change_logger.log_securable_create.call_count == 3
-    logged_full_names = {call.args[0].full_name for call in change_logger.log_securable_create.call_args_list}
+    logged_full_names = {
+        call.args[0].full_name
+        for call in change_logger.log_securable_create.call_args_list
+    }
     assert logged_full_names == {c.full_name for c in columns}
 
 
@@ -784,10 +903,26 @@ def test_securable_executor_logs_one_error_per_failed_table_batch():
 
     diff = SecurableDiff(
         securables_to_create=[
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.t1.a", data_type="STRING"),
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.t1.b", data_type="STRING"),
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.t2.x", data_type="STRING"),
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.t2.y", data_type="STRING"),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.t1.a",
+                data_type="STRING",
+            ),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.t1.b",
+                data_type="STRING",
+            ),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.t2.x",
+                data_type="STRING",
+            ),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.t2.y",
+                data_type="STRING",
+            ),
         ],
     )
 
@@ -814,25 +949,37 @@ def test_securable_executor_builds_create_catalog_sql_with_managed_location_and_
     """CREATE CATALOG embeds MANAGED LOCATION and COMMENT when set on the Securable."""
     uc_helper = MagicMock()
     diff = SecurableDiff(
-        securables_to_create=[Securable(
-            securable_type=SecurableType.CATALOG,
-            full_name="my_cat",
-            comment="Prod",
-            location="s3://prod/my_cat",
-        )],
+        securables_to_create=[
+            Securable(
+                securable_type=SecurableType.CATALOG,
+                full_name="my_cat",
+                comment="Prod",
+                location="s3://prod/my_cat",
+            )
+        ],
     )
 
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
 
     assert len(stmts) == 1
-    _assert_sql_contains(stmts[0], "CREATE CATALOG", "my_cat", "MANAGED LOCATION", "s3://prod/my_cat", "COMMENT", "Prod")
+    _assert_sql_contains(
+        stmts[0],
+        "CREATE CATALOG",
+        "my_cat",
+        "MANAGED LOCATION",
+        "s3://prod/my_cat",
+        "COMMENT",
+        "Prod",
+    )
 
 
 def test_securable_executor_builds_create_catalog_sql_minimal_when_no_attributes_set():
     """Regression: a catalog with no comment/location keeps the existing CREATE form."""
     uc_helper = MagicMock()
     diff = SecurableDiff(
-        securables_to_create=[Securable(securable_type=SecurableType.CATALOG, full_name="my_cat")],
+        securables_to_create=[
+            Securable(securable_type=SecurableType.CATALOG, full_name="my_cat")
+        ],
     )
 
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
@@ -846,18 +993,28 @@ def test_securable_executor_builds_create_schema_sql_with_managed_location_and_c
     """CREATE SCHEMA embeds MANAGED LOCATION and COMMENT when set."""
     uc_helper = MagicMock()
     diff = SecurableDiff(
-        securables_to_create=[Securable(
-            securable_type=SecurableType.SCHEMA,
-            full_name="my_cat.sales",
-            comment="Sales data",
-            location="s3://prod/sales",
-        )],
+        securables_to_create=[
+            Securable(
+                securable_type=SecurableType.SCHEMA,
+                full_name="my_cat.sales",
+                comment="Sales data",
+                location="s3://prod/sales",
+            )
+        ],
     )
 
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
 
     assert len(stmts) == 1
-    _assert_sql_contains(stmts[0], "CREATE SCHEMA", "my_cat.sales", "MANAGED LOCATION", "s3://prod/sales", "COMMENT", "Sales data")
+    _assert_sql_contains(
+        stmts[0],
+        "CREATE SCHEMA",
+        "my_cat.sales",
+        "MANAGED LOCATION",
+        "s3://prod/sales",
+        "COMMENT",
+        "Sales data",
+    )
 
 
 def test_securable_executor_builds_create_table_sql_with_external_location_and_comment():
@@ -866,7 +1023,13 @@ def test_securable_executor_builds_create_table_sql_with_external_location_and_c
     table = Table(
         securable_type=SecurableType.TABLE,
         full_name="cat.sch.orders",
-        columns=(Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.id", data_type="BIGINT"),),
+        columns=(
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.orders.id",
+                data_type="BIGINT",
+            ),
+        ),
         comment="Orders fact",
         location="s3://ext/orders",
     )
@@ -875,7 +1038,15 @@ def test_securable_executor_builds_create_table_sql_with_external_location_and_c
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
 
     assert len(stmts) == 1
-    _assert_sql_contains(stmts[0], "CREATE TABLE", "cat.sch.orders", "COMMENT", "Orders fact", "LOCATION", "s3://ext/orders")
+    _assert_sql_contains(
+        stmts[0],
+        "CREATE TABLE",
+        "cat.sch.orders",
+        "COMMENT",
+        "Orders fact",
+        "LOCATION",
+        "s3://ext/orders",
+    )
 
 
 def test_securable_executor_builds_create_table_sql_omits_location_when_unset():
@@ -884,7 +1055,13 @@ def test_securable_executor_builds_create_table_sql_omits_location_when_unset():
     table = Table(
         securable_type=SecurableType.TABLE,
         full_name="cat.sch.orders",
-        columns=(Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.orders.id", data_type="BIGINT"),),
+        columns=(
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.orders.id",
+                data_type="BIGINT",
+            ),
+        ),
     )
     diff = SecurableDiff(securables_to_create=[table])
 
@@ -898,25 +1075,37 @@ def test_securable_executor_builds_create_external_volume_sql_when_location_is_s
     """A Volume Securable with LOCATION produces CREATE EXTERNAL VOLUME with the LOCATION clause."""
     uc_helper = MagicMock()
     diff = SecurableDiff(
-        securables_to_create=[Securable(
-            securable_type=SecurableType.VOLUME,
-            full_name="cat.sch.raw",
-            comment="Raw landing",
-            location="s3://ext/raw",
-        )],
+        securables_to_create=[
+            Securable(
+                securable_type=SecurableType.VOLUME,
+                full_name="cat.sch.raw",
+                comment="Raw landing",
+                location="s3://ext/raw",
+            )
+        ],
     )
 
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
 
     assert len(stmts) == 1
-    _assert_sql_contains(stmts[0], "CREATE EXTERNAL VOLUME", "cat.sch.raw", "LOCATION", "s3://ext/raw", "COMMENT", "Raw landing")
+    _assert_sql_contains(
+        stmts[0],
+        "CREATE EXTERNAL VOLUME",
+        "cat.sch.raw",
+        "LOCATION",
+        "s3://ext/raw",
+        "COMMENT",
+        "Raw landing",
+    )
 
 
 def test_securable_executor_builds_create_managed_volume_sql_when_location_is_unset():
     """A Volume Securable without LOCATION produces a managed CREATE VOLUME (no EXTERNAL keyword)."""
     uc_helper = MagicMock()
     diff = SecurableDiff(
-        securables_to_create=[Securable(securable_type=SecurableType.VOLUME, full_name="cat.sch.raw")],
+        securables_to_create=[
+            Securable(securable_type=SecurableType.VOLUME, full_name="cat.sch.raw")
+        ],
     )
 
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
@@ -934,13 +1123,17 @@ def test_securable_executor_builds_create_managed_volume_sql_when_location_is_un
 def test_securable_executor_alters_catalog_comment_via_alter_sql():
     """A comment AttributeUpdate on a CATALOG produces ALTER CATALOG ... SET COMMENT '...'."""
     uc_helper = MagicMock()
-    diff = SecurableDiff(attributes_to_update=[AttributeUpdate(
-        securable_type=SecurableType.CATALOG,
-        full_name="my_cat",
-        attribute="comment",
-        old_value=frozenset({"Old"}),
-        new_value=frozenset({"New"}),
-    )])
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.CATALOG,
+                full_name="my_cat",
+                attribute="comment",
+                old_value=frozenset({"Old"}),
+                new_value=frozenset({"New"}),
+            )
+        ]
+    )
 
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
 
@@ -950,13 +1143,17 @@ def test_securable_executor_alters_catalog_comment_via_alter_sql():
 
 def test_securable_executor_alters_schema_comment_via_alter_sql():
     uc_helper = MagicMock()
-    diff = SecurableDiff(attributes_to_update=[AttributeUpdate(
-        securable_type=SecurableType.SCHEMA,
-        full_name="cat.sales",
-        attribute="comment",
-        old_value=frozenset({"Old"}),
-        new_value=frozenset({"New"}),
-    )])
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.SCHEMA,
+                full_name="cat.sales",
+                attribute="comment",
+                old_value=frozenset({"Old"}),
+                new_value=frozenset({"New"}),
+            )
+        ]
+    )
 
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
 
@@ -967,13 +1164,17 @@ def test_securable_executor_alters_schema_comment_via_alter_sql():
 def test_securable_executor_alters_table_comment_via_comment_on_sql():
     """Table comment uses COMMENT ON TABLE ... IS '...' (not ALTER TABLE SET COMMENT)."""
     uc_helper = MagicMock()
-    diff = SecurableDiff(attributes_to_update=[AttributeUpdate(
-        securable_type=SecurableType.TABLE,
-        full_name="cat.sales.orders",
-        attribute="comment",
-        old_value=frozenset({"Old"}),
-        new_value=frozenset({"New"}),
-    )])
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.TABLE,
+                full_name="cat.sales.orders",
+                attribute="comment",
+                old_value=frozenset({"Old"}),
+                new_value=frozenset({"New"}),
+            )
+        ]
+    )
 
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
 
@@ -983,13 +1184,17 @@ def test_securable_executor_alters_table_comment_via_comment_on_sql():
 
 def test_securable_executor_alters_volume_comment_via_comment_on_sql():
     uc_helper = MagicMock()
-    diff = SecurableDiff(attributes_to_update=[AttributeUpdate(
-        securable_type=SecurableType.VOLUME,
-        full_name="cat.landing.raw",
-        attribute="comment",
-        old_value=frozenset({"Old"}),
-        new_value=frozenset({"New"}),
-    )])
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.VOLUME,
+                full_name="cat.landing.raw",
+                attribute="comment",
+                old_value=frozenset({"Old"}),
+                new_value=frozenset({"New"}),
+            )
+        ]
+    )
 
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
 
@@ -1000,13 +1205,17 @@ def test_securable_executor_alters_volume_comment_via_comment_on_sql():
 def test_securable_executor_escapes_single_quotes_in_comment_update():
     """Comments with single quotes are SQL-escaped before embedding."""
     uc_helper = MagicMock()
-    diff = SecurableDiff(attributes_to_update=[AttributeUpdate(
-        securable_type=SecurableType.CATALOG,
-        full_name="my_cat",
-        attribute="comment",
-        old_value=frozenset({""}),
-        new_value=frozenset({"It's risky"}),
-    )])
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.CATALOG,
+                full_name="my_cat",
+                attribute="comment",
+                old_value=frozenset({""}),
+                new_value=frozenset({"It's risky"}),
+            )
+        ]
+    )
 
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
 
@@ -1022,13 +1231,17 @@ def test_securable_executor_escapes_single_quotes_in_comment_update():
 def test_securable_executor_skips_alter_comment_in_dry_run():
     """In dry-run mode, comment ALTER statements are not executed against the helper."""
     uc_helper = MagicMock()
-    diff = SecurableDiff(attributes_to_update=[AttributeUpdate(
-        securable_type=SecurableType.CATALOG,
-        full_name="my_cat",
-        attribute="comment",
-        old_value=frozenset({"Old"}),
-        new_value=frozenset({"New"}),
-    )])
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.CATALOG,
+                full_name="my_cat",
+                attribute="comment",
+                old_value=frozenset({"Old"}),
+                new_value=frozenset({"New"}),
+            )
+        ]
+    )
 
     stmts = execute_securable_diff(uc_helper, diff, ChangeLogger(), dry_run=True)
 
@@ -1041,22 +1254,24 @@ def test_securable_executor_logs_error_and_continues_on_alter_comment_failure():
     uc_helper = MagicMock()
     uc_helper.execute_sql.side_effect = [RuntimeError("boom"), None]
     logger = ChangeLogger()
-    diff = SecurableDiff(attributes_to_update=[
-        AttributeUpdate(
-            securable_type=SecurableType.CATALOG,
-            full_name="bad_cat",
-            attribute="comment",
-            old_value=frozenset({"Old"}),
-            new_value=frozenset({"New"}),
-        ),
-        AttributeUpdate(
-            securable_type=SecurableType.SCHEMA,
-            full_name="good.sch",
-            attribute="comment",
-            old_value=frozenset({"Old"}),
-            new_value=frozenset({"New"}),
-        ),
-    ])
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.CATALOG,
+                full_name="bad_cat",
+                attribute="comment",
+                old_value=frozenset({"Old"}),
+                new_value=frozenset({"New"}),
+            ),
+            AttributeUpdate(
+                securable_type=SecurableType.SCHEMA,
+                full_name="good.sch",
+                attribute="comment",
+                old_value=frozenset({"Old"}),
+                new_value=frozenset({"New"}),
+            ),
+        ]
+    )
 
     stmts = execute_securable_diff(uc_helper, diff, logger)
 
@@ -1239,7 +1454,13 @@ def test_securable_executor_creates_run_parent_first_across_depths():
             Table(
                 securable_type=SecurableType.TABLE,
                 full_name="cat.sch.tbl",
-                columns=(Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.tbl.id", data_type="INT"),),
+                columns=(
+                    Column(
+                        securable_type=SecurableType.COLUMN,
+                        full_name="cat.sch.tbl.id",
+                        data_type="INT",
+                    ),
+                ),
             ),
         ],
     )
@@ -1263,7 +1484,9 @@ def test_securable_executor_creates_within_depth_run_in_parallel():
         ],
     )
 
-    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger(), max_parallel_changes=4)
+    stmts = execute_securable_diff(
+        uc_helper, diff, ChangeLogger(), max_parallel_changes=4
+    )
 
     # All 8 schema creates were submitted, all SQL returned.
     assert uc_helper.execute_sql.call_count == 8
@@ -1285,7 +1508,9 @@ def test_securable_executor_replace_batch_runs_in_parallel():
         ],
     )
 
-    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger(), max_parallel_changes=4)
+    stmts = execute_securable_diff(
+        uc_helper, diff, ChangeLogger(), max_parallel_changes=4
+    )
 
     assert uc_helper.execute_sql.call_count == 4
     assert len(stmts) == 4
@@ -1308,7 +1533,9 @@ def test_securable_executor_attribute_updates_run_in_parallel():
         ],
     )
 
-    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger(), max_parallel_changes=4)
+    stmts = execute_securable_diff(
+        uc_helper, diff, ChangeLogger(), max_parallel_changes=4
+    )
 
     assert uc_helper.execute_sql.call_count == 5
     assert len(stmts) == 5
@@ -1333,7 +1560,9 @@ def test_securable_executor_parallel_error_in_one_create_does_not_abort_depth_ba
         ],
     )
 
-    stmts = execute_securable_diff(uc_helper, diff, change_logger, max_parallel_changes=4)
+    stmts = execute_securable_diff(
+        uc_helper, diff, change_logger, max_parallel_changes=4
+    )
 
     assert uc_helper.execute_sql.call_count == 3
     assert len(change_logger.errors) == 1
@@ -1400,12 +1629,20 @@ def test_securable_executor_runs_catalog_attribute_updates_before_schema_updates
             continue
 
         # Pull a string we can scan for catalog/schema hints out of the call.
-        combined = " ".join(str(a) for a in args) + " " + " ".join(f"{k}={v}" for k, v in kwargs.items())
+        combined = (
+            " ".join(str(a) for a in args)
+            + " "
+            + " ".join(f"{k}={v}" for k, v in kwargs.items())
+        )
         observed.append((idx, name, args))
 
         # Identify by securable_type if it's an argument; otherwise by the
         # full_name / SQL contents.
-        if SecurableType.CATALOG in args or "CATALOG" in combined.upper() and "SCHEMA" not in combined.upper():
+        if (
+            SecurableType.CATALOG in args
+            or "CATALOG" in combined.upper()
+            and "SCHEMA" not in combined.upper()
+        ):
             catalog_indices.append(idx)
         elif SecurableType.SCHEMA in args or "SCHEMA" in combined.upper():
             schema_indices.append(idx)
@@ -1455,7 +1692,12 @@ def _securable_type_of(record: tuple) -> SecurableType | None:
         return record[1]
     sql: str = record[1]
     upper = sql.upper()
-    for st in (SecurableType.CATALOG, SecurableType.SCHEMA, SecurableType.TABLE, SecurableType.VOLUME):
+    for st in (
+        SecurableType.CATALOG,
+        SecurableType.SCHEMA,
+        SecurableType.TABLE,
+        SecurableType.VOLUME,
+    ):
         if f"COMMENT ON {st.name} " in upper:
             return st
     return None
@@ -1502,10 +1744,16 @@ def test_securable_executor_runs_schema_attribute_updates_before_tvf_updates():
 
     execute_securable_diff(uc_helper, diff, ChangeLogger(), max_parallel_changes=1)
 
-    schema_idx = [i for i, r in enumerate(records) if _securable_type_of(r) == SecurableType.SCHEMA]
+    schema_idx = [
+        i
+        for i, r in enumerate(records)
+        if _securable_type_of(r) == SecurableType.SCHEMA
+    ]
     tvf_idx = [
-        i for i, r in enumerate(records)
-        if _securable_type_of(r) in {SecurableType.TABLE, SecurableType.VOLUME, SecurableType.FUNCTION}
+        i
+        for i, r in enumerate(records)
+        if _securable_type_of(r)
+        in {SecurableType.TABLE, SecurableType.VOLUME, SecurableType.FUNCTION}
     ]
     assert schema_idx and tvf_idx, f"Expected both schema and TVF calls; got: {records}"
     assert max(schema_idx) < min(tvf_idx), (

@@ -16,6 +16,7 @@ class SecurablePrivilege:
     The principal may be unresolved (principal_type=UNKNOWN) when emitted by
     the compiler or fetch helper, and is resolved before diffing.
     """
+
     securable_type: SecurableType
     securable_full_name: str
     principal: Principal

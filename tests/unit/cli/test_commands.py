@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-import pytest
 
 import uc_declarative_abac.cli.commands as cli
 from uc_declarative_abac.cli.settings import RunSettings
@@ -31,7 +30,8 @@ def _run_legacy(monkeypatch, argv: list[str]) -> dict:
 
 def test_main_passes_new_namespace_flag_through_to_run(monkeypatch):
     captured = _run_legacy(
-        monkeypatch, ["--manage-tags-for-namespaces", "cat_a.sch1"],
+        monkeypatch,
+        ["--manage-tags-for-namespaces", "cat_a.sch1"],
     )
     assert captured["manage_tags_for_namespaces"] == "cat_a.sch1"
 
@@ -45,7 +45,8 @@ def test_main_defaults_namespace_flag_to_star_when_unset(monkeypatch):
 def test_main_converts_deprecated_catalog_flag_and_warns(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING, logger="uc_declarative_abac"):
         captured = _run_legacy(
-            monkeypatch, ["--manage-tags-for-catalogs", "cat_a"],
+            monkeypatch,
+            ["--manage-tags-for-catalogs", "cat_a"],
         )
     assert captured["manage_tags_for_namespaces"] == "cat_a"
     assert any(
@@ -58,10 +59,14 @@ def test_main_converts_deprecated_catalog_flag_and_warns(monkeypatch, caplog):
 def test_main_fails_when_old_and_new_namespace_flags_combined(monkeypatch):
     exit_code = cli.run_cli(
         [
-            "--config-dir", "cfg",
-            "--warehouse-id", "wh",
-            "--manage-tags-for-catalogs", "cat_a",
-            "--manage-tags-for-namespaces", "cat_a",
+            "--config-dir",
+            "cfg",
+            "--warehouse-id",
+            "wh",
+            "--manage-tags-for-catalogs",
+            "cat_a",
+            "--manage-tags-for-namespaces",
+            "cat_a",
         ],
     )
     assert exit_code == 2
@@ -77,10 +82,14 @@ def test_main_fails_on_conflicting_namespace_flags_for_deploy(monkeypatch):
     exit_code = cli.run_cli(
         [
             "deploy",
-            "--config-dir", "cfg",
-            "--warehouse-id", "wh",
-            "--manage-tags-for-catalogs", "cat_a",
-            "--manage-tags-for-namespaces", "cat_a",
+            "--config-dir",
+            "cfg",
+            "--warehouse-id",
+            "wh",
+            "--manage-tags-for-catalogs",
+            "cat_a",
+            "--manage-tags-for-namespaces",
+            "cat_a",
         ],
     )
     assert exit_code == 2
@@ -98,7 +107,8 @@ def test_main_defaults_enable_policy_deletion_off(monkeypatch):
 
 def test_main_passes_delete_policies_namespaces_through_to_run(monkeypatch):
     captured = _run_legacy(
-        monkeypatch, ["--delete-policies-for-namespaces", "cat_a.sch1"],
+        monkeypatch,
+        ["--delete-policies-for-namespaces", "cat_a.sch1"],
     )
     assert captured["delete_policies_for_namespaces"] == "cat_a.sch1"
 
@@ -126,7 +136,9 @@ def test_cli_warns_when_invoked_with_legacy_flat_flags(monkeypatch, caplog):
     assert any("deprecated" in r.getMessage().lower() for r in caplog.records)
 
 
-def test_commands_validate_does_not_construct_workspace_client(monkeypatch, tmp_path: Path):
+def test_commands_validate_does_not_construct_workspace_client(
+    monkeypatch, tmp_path: Path
+):
     config_dir = tmp_path / "configs"
     config_dir.mkdir()
     (config_dir / "resources.yaml").write_text(
@@ -184,7 +196,9 @@ def test_commands_deploy_passes_dry_run_false(monkeypatch):
     assert captured["dry_run"] is False
 
 
-def test_commands_deploy_forwards_system_catalog_from_run_settings_to_orchestrator(monkeypatch):
+def test_commands_deploy_forwards_system_catalog_from_run_settings_to_orchestrator(
+    monkeypatch,
+):
     captured: dict = {}
     settings = RunSettings(
         config_dir=Path("cfg"),

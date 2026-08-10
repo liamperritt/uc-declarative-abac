@@ -43,4 +43,6 @@ class PolicyDiff:
     to_create: set[Policy] = field(default_factory=set)
     to_replace: set[Policy] = field(default_factory=set)
     to_delete: set[Policy] = field(default_factory=set)
-    old_policies: dict[tuple[SecurableType, str, str], Policy] = field(default_factory=dict)
+    old_policies: dict[tuple[SecurableType, str, str], Policy] = field(
+        default_factory=dict
+    )

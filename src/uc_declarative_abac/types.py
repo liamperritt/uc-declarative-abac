@@ -53,6 +53,7 @@ class PrivilegeType(str, Enum):
 class AbstractedPrivilegeType(str, Enum):
     """Shorthand for a fixed set of UC privileges. Accepted anywhere a
     ``PrivilegeType`` is accepted in a grant policy's ``privileges:`` list."""
+
     READ = "read"
     EDIT = "edit"
     USE = "use"
@@ -75,7 +76,11 @@ class PrincipalType(str, Enum):
 # Privileges valid for each securable type. Higher-level securables inherit
 # all privileges from lower levels. Unknown privileges are allowed on all types.
 _TABLE_PRIVILEGES = {PrivilegeType.SELECT, PrivilegeType.MODIFY}
-_VOLUME_PRIVILEGES = {PrivilegeType.READ_VOLUME, PrivilegeType.WRITE_VOLUME, PrivilegeType.USE_VOLUME}
+_VOLUME_PRIVILEGES = {
+    PrivilegeType.READ_VOLUME,
+    PrivilegeType.WRITE_VOLUME,
+    PrivilegeType.USE_VOLUME,
+}
 _SCHEMA_PRIVILEGES = (
     _TABLE_PRIVILEGES
     | _VOLUME_PRIVILEGES
@@ -105,8 +110,16 @@ _SCHEMA_PRIVILEGES = (
         PrivilegeType.WRITE_SECRET,
     }
 )
-_CATALOG_PRIVILEGES = _SCHEMA_PRIVILEGES | {PrivilegeType.USE_CATALOG, PrivilegeType.CREATE_SCHEMA, PrivilegeType.BROWSE}
-_UNIVERSAL_PRIVILEGES = {PrivilegeType.ALL_PRIVILEGES, PrivilegeType.MANAGE, PrivilegeType.APPLY_TAG}
+_CATALOG_PRIVILEGES = _SCHEMA_PRIVILEGES | {
+    PrivilegeType.USE_CATALOG,
+    PrivilegeType.CREATE_SCHEMA,
+    PrivilegeType.BROWSE,
+}
+_UNIVERSAL_PRIVILEGES = {
+    PrivilegeType.ALL_PRIVILEGES,
+    PrivilegeType.MANAGE,
+    PrivilegeType.APPLY_TAG,
+}
 
 SECURABLE_TYPE_PRIVILEGE_MAP: dict[SecurableType, set[PrivilegeType]] = {
     SecurableType.CATALOG: _CATALOG_PRIVILEGES | _UNIVERSAL_PRIVILEGES,
@@ -122,27 +135,35 @@ SECURABLE_TYPE_PRIVILEGE_MAP: dict[SecurableType, set[PrivilegeType]] = {
 }
 
 ABSTRACT_PRIVILEGE_MAP: dict[AbstractedPrivilegeType, frozenset[PrivilegeType]] = {
-    AbstractedPrivilegeType.READ: frozenset({
-        PrivilegeType.SELECT,
-        PrivilegeType.READ_VOLUME,
-        PrivilegeType.EXECUTE,
-    }),
-    AbstractedPrivilegeType.EDIT: frozenset({
-        PrivilegeType.MODIFY,
-        PrivilegeType.WRITE_VOLUME,
-        PrivilegeType.REFRESH,
-    }),
-    AbstractedPrivilegeType.USE: frozenset({
-        PrivilegeType.USE_CATALOG,
-        PrivilegeType.USE_SCHEMA,
-    }),
-    AbstractedPrivilegeType.CREATE: frozenset({
-        PrivilegeType.CREATE_TABLE,
-        PrivilegeType.CREATE_SCHEMA,
-        PrivilegeType.CREATE_FUNCTION,
-        PrivilegeType.CREATE_VOLUME,
-        PrivilegeType.CREATE_MATERIALIZED_VIEW,
-        PrivilegeType.CREATE_MODEL,
-        PrivilegeType.CREATE_MODEL_VERSION,
-    }),
+    AbstractedPrivilegeType.READ: frozenset(
+        {
+            PrivilegeType.SELECT,
+            PrivilegeType.READ_VOLUME,
+            PrivilegeType.EXECUTE,
+        }
+    ),
+    AbstractedPrivilegeType.EDIT: frozenset(
+        {
+            PrivilegeType.MODIFY,
+            PrivilegeType.WRITE_VOLUME,
+            PrivilegeType.REFRESH,
+        }
+    ),
+    AbstractedPrivilegeType.USE: frozenset(
+        {
+            PrivilegeType.USE_CATALOG,
+            PrivilegeType.USE_SCHEMA,
+        }
+    ),
+    AbstractedPrivilegeType.CREATE: frozenset(
+        {
+            PrivilegeType.CREATE_TABLE,
+            PrivilegeType.CREATE_SCHEMA,
+            PrivilegeType.CREATE_FUNCTION,
+            PrivilegeType.CREATE_VOLUME,
+            PrivilegeType.CREATE_MATERIALIZED_VIEW,
+            PrivilegeType.CREATE_MODEL,
+            PrivilegeType.CREATE_MODEL_VERSION,
+        }
+    ),
 }

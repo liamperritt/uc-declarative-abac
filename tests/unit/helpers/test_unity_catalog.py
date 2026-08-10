@@ -126,7 +126,12 @@ def test_uc_helper_parses_multiple_tags_from_single_securable_row(mock_fetch):
 
     assert result == {
         SecurableTag(SecurableType.TABLE, "my_catalog.sales.orders", "pii", "true"),
-        SecurableTag(SecurableType.TABLE, "my_catalog.sales.orders", "classification", "confidential"),
+        SecurableTag(
+            SecurableType.TABLE,
+            "my_catalog.sales.orders",
+            "classification",
+            "confidential",
+        ),
         SecurableTag(SecurableType.TABLE, "my_catalog.sales.orders", "team", "sales"),
     }
 
@@ -187,12 +192,8 @@ def test_uc_helper_queries_scoped_to_provided_catalog_names():
     if not statement and call_kwargs.args:
         statement = call_kwargs.args[0]
 
-    assert "alpha_catalog" in statement, (
-        f"Expected 'alpha_catalog' in SQL: {statement}"
-    )
-    assert "beta_catalog" in statement, (
-        f"Expected 'beta_catalog' in SQL: {statement}"
-    )
+    assert "alpha_catalog" in statement, f"Expected 'alpha_catalog' in SQL: {statement}"
+    assert "beta_catalog" in statement, f"Expected 'beta_catalog' in SQL: {statement}"
 
 
 def test_uc_helper_caches_tags_after_fetch():
@@ -344,10 +345,10 @@ def test_uc_helper_tags_query_excludes_double_underscore_prefixed_securables():
 
     lowered = sql.lower()
     expected_predicates = [
-        "substring(catalog_name, 1, 2) != '__'",     # CATALOG/SCHEMA/TABLE/VOLUME/COLUMN arms
-        "substring(schema_name, 1, 2) != '__'",       # all arms except CATALOG
-        "substring(table_name, 1, 2) != '__'",        # TABLE + COLUMN arms
-        "substring(volume_name, 1, 2) != '__'",       # VOLUME arm
+        "substring(catalog_name, 1, 2) != '__'",  # CATALOG/SCHEMA/TABLE/VOLUME/COLUMN arms
+        "substring(schema_name, 1, 2) != '__'",  # all arms except CATALOG
+        "substring(table_name, 1, 2) != '__'",  # TABLE + COLUMN arms
+        "substring(volume_name, 1, 2) != '__'",  # VOLUME arm
     ]
     for predicate in expected_predicates:
         assert predicate in lowered, f"Expected predicate {predicate!r} in SQL: {sql}"
@@ -382,13 +383,17 @@ def test_uc_helper_fetches_actual_privileges_from_query_results(mock_fetch):
         SecurablePrivilege(
             securable_type=SecurableType.CATALOG,
             securable_full_name="my_catalog",
-            principal=Principal(principal_type=PrincipalType.UNKNOWN, identifier="data_engineers"),
+            principal=Principal(
+                principal_type=PrincipalType.UNKNOWN, identifier="data_engineers"
+            ),
             privilege_type=PrivilegeType.USE_CATALOG,
         ),
         SecurablePrivilege(
             securable_type=SecurableType.SCHEMA,
             securable_full_name="my_catalog.sales",
-            principal=Principal(principal_type=PrincipalType.UNKNOWN, identifier="analysts"),
+            principal=Principal(
+                principal_type=PrincipalType.UNKNOWN, identifier="analysts"
+            ),
             privilege_type=PrivilegeType.SELECT,
         ),
     }
@@ -412,13 +417,17 @@ def test_uc_helper_fetches_volume_privileges_from_query_results(mock_fetch):
         SecurablePrivilege(
             securable_type=SecurableType.VOLUME,
             securable_full_name="my_catalog.landing.raw_events",
-            principal=Principal(principal_type=PrincipalType.UNKNOWN, identifier="data_engineers"),
+            principal=Principal(
+                principal_type=PrincipalType.UNKNOWN, identifier="data_engineers"
+            ),
             privilege_type=PrivilegeType.READ_VOLUME,
         ),
         SecurablePrivilege(
             securable_type=SecurableType.VOLUME,
             securable_full_name="my_catalog.landing.raw_events",
-            principal=Principal(principal_type=PrincipalType.UNKNOWN, identifier="data_engineers"),
+            principal=Principal(
+                principal_type=PrincipalType.UNKNOWN, identifier="data_engineers"
+            ),
             privilege_type=PrivilegeType.WRITE_VOLUME,
         ),
     }
@@ -495,12 +504,12 @@ def test_uc_helper_privileges_query_excludes_double_underscore_prefixed_securabl
 
     lowered = sql.lower()
     expected_predicates = [
-        "substring(catalog_name, 1, 2) != '__'",       # CATALOG + SCHEMA arms
-        "substring(schema_name, 1, 2) != '__'",        # SCHEMA arm
-        "substring(table_catalog, 1, 2) != '__'",      # TABLE arm
+        "substring(catalog_name, 1, 2) != '__'",  # CATALOG + SCHEMA arms
+        "substring(schema_name, 1, 2) != '__'",  # SCHEMA arm
+        "substring(table_catalog, 1, 2) != '__'",  # TABLE arm
         "substring(table_schema, 1, 2) != '__'",
         "substring(table_name, 1, 2) != '__'",
-        "substring(volume_catalog, 1, 2) != '__'",     # VOLUME arm
+        "substring(volume_catalog, 1, 2) != '__'",  # VOLUME arm
         "substring(volume_schema, 1, 2) != '__'",
         "substring(volume_name, 1, 2) != '__'",
     ]
@@ -596,14 +605,23 @@ def test_uc_helper_polls_for_results_when_query_exceeds_timeout(mock_fetch, mock
     ]
 
     # execute_statement returns PENDING
-    initial_response = _make_statement_response(StatementState.PENDING, statement_id="stmt-123")
+    initial_response = _make_statement_response(
+        StatementState.PENDING, statement_id="stmt-123"
+    )
     client = MagicMock()
     client.statement_execution.execute_statement.return_value = initial_response
 
     # First poll: RUNNING, second poll: SUCCEEDED
-    running_response = _make_statement_response(StatementState.RUNNING, statement_id="stmt-123")
-    succeeded_response = _make_statement_response(StatementState.SUCCEEDED, statement_id="stmt-123")
-    client.statement_execution.get_statement.side_effect = [running_response, succeeded_response]
+    running_response = _make_statement_response(
+        StatementState.RUNNING, statement_id="stmt-123"
+    )
+    succeeded_response = _make_statement_response(
+        StatementState.SUCCEEDED, statement_id="stmt-123"
+    )
+    client.statement_execution.get_statement.side_effect = [
+        running_response,
+        succeeded_response,
+    ]
 
     # _fetch_external_links_rows returns rows for the final succeeded response
     mock_fetch.return_value = tag_rows
@@ -654,7 +672,9 @@ def test_uc_helper_uses_continue_on_wait_timeout(mock_fetch):
 
     call_kwargs = client.statement_execution.execute_statement.call_args.kwargs
     on_wait_timeout = call_kwargs.get("on_wait_timeout")
-    assert on_wait_timeout is not None, "on_wait_timeout kwarg not passed to execute_statement"
+    assert on_wait_timeout is not None, (
+        "on_wait_timeout kwarg not passed to execute_statement"
+    )
     # Accept either the enum value or its string representation
     on_wait_str = str(on_wait_timeout).upper() if on_wait_timeout else ""
     assert "CONTINUE" in on_wait_str, (
@@ -677,9 +697,7 @@ def test_uc_helper_tags_query_includes_column_tags():
     sql = _get_executed_sql(client)
 
     # Should reference column_tags alongside the other tag tables
-    assert "column_tags" in sql, (
-        f"Expected 'column_tags' in SQL: {sql}"
-    )
+    assert "column_tags" in sql, f"Expected 'column_tags' in SQL: {sql}"
 
 
 # ---------------------------------------------------------------------------
@@ -733,22 +751,30 @@ def test_uc_helper_parses_securable_rows_for_attributes(mock_fetch):
         SecurableAttributes(
             securable_type=SecurableType.CATALOG,
             full_name="my_catalog",
-            owner=Principal(principal_type=PrincipalType.UNKNOWN, identifier="admin_user"),
+            owner=Principal(
+                principal_type=PrincipalType.UNKNOWN, identifier="admin_user"
+            ),
         ),
         SecurableAttributes(
             securable_type=SecurableType.SCHEMA,
             full_name="my_catalog.sales",
-            owner=Principal(principal_type=PrincipalType.UNKNOWN, identifier="schema_owner"),
+            owner=Principal(
+                principal_type=PrincipalType.UNKNOWN, identifier="schema_owner"
+            ),
         ),
         SecurableAttributes(
             securable_type=SecurableType.TABLE,
             full_name="my_catalog.sales.orders",
-            owner=Principal(principal_type=PrincipalType.UNKNOWN, identifier="table_owner"),
+            owner=Principal(
+                principal_type=PrincipalType.UNKNOWN, identifier="table_owner"
+            ),
         ),
         SecurableAttributes(
             securable_type=SecurableType.VOLUME,
             full_name="my_catalog.landing.files",
-            owner=Principal(principal_type=PrincipalType.UNKNOWN, identifier="vol_owner"),
+            owner=Principal(
+                principal_type=PrincipalType.UNKNOWN, identifier="vol_owner"
+            ),
         ),
     }
     from uc_declarative_abac.securables import Table
@@ -757,31 +783,46 @@ def test_uc_helper_parses_securable_rows_for_attributes(mock_fetch):
     assert securables == {
         Securable(securable_type=SecurableType.CATALOG, full_name="my_catalog"),
         Securable(securable_type=SecurableType.SCHEMA, full_name="my_catalog.sales"),
-        Table(securable_type=SecurableType.TABLE, full_name="my_catalog.sales.orders", columns=()),
-        Securable(securable_type=SecurableType.VOLUME, full_name="my_catalog.landing.files"),
+        Table(
+            securable_type=SecurableType.TABLE,
+            full_name="my_catalog.sales.orders",
+            columns=(),
+        ),
+        Securable(
+            securable_type=SecurableType.VOLUME, full_name="my_catalog.landing.files"
+        ),
     }
 
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
-def test_uc_helper_fetch_actual_securables_returns_base_securable_for_catalog_rows(mock_fetch):
+def test_uc_helper_fetch_actual_securables_returns_base_securable_for_catalog_rows(
+    mock_fetch,
+):
     """A CATALOG row produces a base Securable(CATALOG, full_name) in the securables set."""
     mock_fetch.return_value = [["CATALOG", "cat_a", None, None, None]]
     helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
 
     securables, _ = helper.fetch_actual_securables(["cat_a"])
 
-    assert Securable(securable_type=SecurableType.CATALOG, full_name="cat_a") in securables
+    assert (
+        Securable(securable_type=SecurableType.CATALOG, full_name="cat_a") in securables
+    )
 
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
-def test_uc_helper_fetch_actual_securables_returns_base_securable_for_schema_rows(mock_fetch):
+def test_uc_helper_fetch_actual_securables_returns_base_securable_for_schema_rows(
+    mock_fetch,
+):
     """A SCHEMA row produces a base Securable(SCHEMA, full_name)."""
     mock_fetch.return_value = [["SCHEMA", "cat.sales", None, None, None]]
     helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
 
     securables, _ = helper.fetch_actual_securables(["cat"])
 
-    assert Securable(securable_type=SecurableType.SCHEMA, full_name="cat.sales") in securables
+    assert (
+        Securable(securable_type=SecurableType.SCHEMA, full_name="cat.sales")
+        in securables
+    )
 
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
@@ -794,18 +835,28 @@ def test_uc_helper_fetch_actual_securables_returns_table_for_table_rows(mock_fet
 
     securables, _ = helper.fetch_actual_securables(["cat"])
 
-    assert Table(securable_type=SecurableType.TABLE, full_name="cat.sales.orders", columns=()) in securables
+    assert (
+        Table(
+            securable_type=SecurableType.TABLE, full_name="cat.sales.orders", columns=()
+        )
+        in securables
+    )
 
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
-def test_uc_helper_fetch_actual_securables_returns_base_securable_for_volume_rows(mock_fetch):
+def test_uc_helper_fetch_actual_securables_returns_base_securable_for_volume_rows(
+    mock_fetch,
+):
     """A VOLUME row produces a base Securable(VOLUME, full_name)."""
     mock_fetch.return_value = [["VOLUME", "cat.landing.files", None, None, None]]
     helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
 
     securables, _ = helper.fetch_actual_securables(["cat"])
 
-    assert Securable(securable_type=SecurableType.VOLUME, full_name="cat.landing.files") in securables
+    assert (
+        Securable(securable_type=SecurableType.VOLUME, full_name="cat.landing.files")
+        in securables
+    )
 
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
@@ -883,7 +934,9 @@ def test_uc_helper_parses_securable_rows_emits_function_attributes(mock_fetch):
         SecurableAttributes(
             securable_type=SecurableType.FUNCTION,
             full_name="my_catalog.shared.mask_email",
-            owner=Principal(principal_type=PrincipalType.UNKNOWN, identifier="func_owner"),
+            owner=Principal(
+                principal_type=PrincipalType.UNKNOWN, identifier="func_owner"
+            ),
         ),
     }
     assert attributes == expected
@@ -930,12 +983,12 @@ def test_uc_helper_securables_query_excludes_double_underscore_prefixed_securabl
 
     lowered = sql.lower()
     expected_predicates = [
-        "substring(catalog_name, 1, 2) != '__'",      # CATALOG + SCHEMA arms
-        "substring(schema_name, 1, 2) != '__'",       # SCHEMA arm
-        "substring(t.table_catalog, 1, 2) != '__'",   # TABLE arm
+        "substring(catalog_name, 1, 2) != '__'",  # CATALOG + SCHEMA arms
+        "substring(schema_name, 1, 2) != '__'",  # SCHEMA arm
+        "substring(t.table_catalog, 1, 2) != '__'",  # TABLE arm
         "substring(t.table_schema, 1, 2) != '__'",
         "substring(t.table_name, 1, 2) != '__'",
-        "substring(volume_catalog, 1, 2) != '__'",    # VOLUME arm
+        "substring(volume_catalog, 1, 2) != '__'",  # VOLUME arm
         "substring(volume_schema, 1, 2) != '__'",
         "substring(volume_name, 1, 2) != '__'",
         "substring(r.specific_catalog, 1, 2) != '__'",  # FUNCTION arm
@@ -977,7 +1030,15 @@ def test_uc_helper_table_row_with_columns_emits_table_with_column_objects(mock_f
     )
 
     rows = [
-        ["TABLE", "cat.sales.orders", "table_owner", None, None, None, '["id","customer_id","amount"]'],
+        [
+            "TABLE",
+            "cat.sales.orders",
+            "table_owner",
+            None,
+            None,
+            None,
+            '["id","customer_id","amount"]',
+        ],
     ]
     mock_fetch.return_value = rows
     helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
@@ -988,16 +1049,30 @@ def test_uc_helper_table_row_with_columns_emits_table_with_column_objects(mock_f
         securable_type=SecurableType.TABLE,
         full_name="cat.sales.orders",
         columns=(
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sales.orders.id", data_type=None),
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sales.orders.customer_id", data_type=None),
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sales.orders.amount", data_type=None),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sales.orders.id",
+                data_type=None,
+            ),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sales.orders.customer_id",
+                data_type=None,
+            ),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sales.orders.amount",
+                data_type=None,
+            ),
         ),
     )
     assert expected_table in securables
 
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
-def test_uc_helper_table_row_with_null_columns_emits_table_with_empty_columns(mock_fetch):
+def test_uc_helper_table_row_with_null_columns_emits_table_with_empty_columns(
+    mock_fetch,
+):
     """A TABLE row whose columns JSON is null/missing produces an empty Table.columns tuple."""
     from uc_declarative_abac.securables import Table
 
@@ -1018,7 +1093,9 @@ def test_uc_helper_table_row_with_null_columns_emits_table_with_empty_columns(mo
 
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
-def test_uc_helper_table_row_with_empty_columns_array_emits_table_with_empty_columns(mock_fetch):
+def test_uc_helper_table_row_with_empty_columns_array_emits_table_with_empty_columns(
+    mock_fetch,
+):
     """A TABLE row with an empty JSON array '[]' for columns produces an empty Table.columns."""
     from uc_declarative_abac.securables import Table
 
@@ -1066,27 +1143,38 @@ def test_uc_helper_securables_query_joins_columns_table_and_aggregates_by_ordina
 def test_uc_helper_parses_catalog_comment_into_attributes(mock_fetch):
     """A CATALOG row with comment produces SecurableAttributes carrying it."""
     mock_fetch.return_value = [
-        ["CATALOG", "my_cat", "admin", None, None, None, None,
-         "Prod catalog", None],
+        ["CATALOG", "my_cat", "admin", None, None, None, None, "Prod catalog", None],
     ]
     helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
 
     _securables, attributes = helper.fetch_actual_securables(["my_cat"])
 
-    assert SecurableAttributes(
-        securable_type=SecurableType.CATALOG,
-        full_name="my_cat",
-        owner=Principal(principal_type=PrincipalType.UNKNOWN, identifier="admin"),
-        comment="Prod catalog",
-    ) in attributes
+    assert (
+        SecurableAttributes(
+            securable_type=SecurableType.CATALOG,
+            full_name="my_cat",
+            owner=Principal(principal_type=PrincipalType.UNKNOWN, identifier="admin"),
+            comment="Prod catalog",
+        )
+        in attributes
+    )
 
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_parses_schema_comment_into_attributes(mock_fetch):
     """A SCHEMA row with comment produces SecurableAttributes carrying it."""
     mock_fetch.return_value = [
-        ["SCHEMA", "my_cat.sales", "schema_owner", None, None, None, None,
-         "Sales data", None],
+        [
+            "SCHEMA",
+            "my_cat.sales",
+            "schema_owner",
+            None,
+            None,
+            None,
+            None,
+            "Sales data",
+            None,
+        ],
     ]
     helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
 
@@ -1095,7 +1183,9 @@ def test_uc_helper_parses_schema_comment_into_attributes(mock_fetch):
     expected_attr = SecurableAttributes(
         securable_type=SecurableType.SCHEMA,
         full_name="my_cat.sales",
-        owner=Principal(principal_type=PrincipalType.UNKNOWN, identifier="schema_owner"),
+        owner=Principal(
+            principal_type=PrincipalType.UNKNOWN, identifier="schema_owner"
+        ),
         comment="Sales data",
     )
     assert expected_attr in attributes
@@ -1109,8 +1199,17 @@ def test_uc_helper_parses_table_comment_into_attributes(mock_fetch):
     SecurableAttributes.
     """
     mock_fetch.return_value = [
-        ["TABLE", "my_cat.sales.orders", "table_owner", None, None, None, "[]",
-         "Orders fact", "EXTERNAL"],
+        [
+            "TABLE",
+            "my_cat.sales.orders",
+            "table_owner",
+            None,
+            None,
+            None,
+            "[]",
+            "Orders fact",
+            "EXTERNAL",
+        ],
     ]
     helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
 
@@ -1133,8 +1232,17 @@ def test_uc_helper_parses_volume_comment_into_attributes(mock_fetch):
     SecurableAttributes.
     """
     mock_fetch.return_value = [
-        ["VOLUME", "my_cat.landing.raw", "vol_owner", None, None, None, None,
-         "Raw landing", None],
+        [
+            "VOLUME",
+            "my_cat.landing.raw",
+            "vol_owner",
+            None,
+            None,
+            None,
+            None,
+            "Raw landing",
+            None,
+        ],
     ]
     helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
 
@@ -1155,8 +1263,17 @@ def test_uc_helper_parses_table_type_view_onto_table_securable(mock_fetch):
     from uc_declarative_abac.securables import Table
 
     mock_fetch.return_value = [
-        ["TABLE", "my_cat.sales.orders_v", "view_owner", None, None, None, "[]",
-         None, "VIEW"],
+        [
+            "TABLE",
+            "my_cat.sales.orders_v",
+            "view_owner",
+            None,
+            None,
+            None,
+            "[]",
+            None,
+            "VIEW",
+        ],
     ]
     helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
 
@@ -1173,8 +1290,17 @@ def test_uc_helper_parses_table_type_managed_onto_table_securable(mock_fetch):
     from uc_declarative_abac.securables import Table
 
     mock_fetch.return_value = [
-        ["TABLE", "my_cat.sales.orders", "owner", None, None, None, "[]",
-         None, "MANAGED"],
+        [
+            "TABLE",
+            "my_cat.sales.orders",
+            "owner",
+            None,
+            None,
+            None,
+            "[]",
+            None,
+            "MANAGED",
+        ],
     ]
     helper = UnityCatalogHelper(_make_mock_workspace_client(), WAREHOUSE_ID)
 
@@ -1283,10 +1409,14 @@ def _make_rfa_response(*ids: str) -> MagicMock:
 
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
-def test_uc_helper_fetch_actual_securables_skips_rfa_fanout_when_targets_none(mock_fetch):
+def test_uc_helper_fetch_actual_securables_skips_rfa_fanout_when_targets_none(
+    mock_fetch,
+):
     """Passing rfa_targets=None must not trigger any RFA SDK fan-out and must leave
     rfa_destinations as None on every attribute row."""
-    mock_fetch.return_value = [["CATALOG", "my_catalog", "admin", None, None, None, None, None, None]]
+    mock_fetch.return_value = [
+        ["CATALOG", "my_catalog", "admin", None, None, None, None, None, None]
+    ]
     client = _make_mock_workspace_client()
     helper = UnityCatalogHelper(client, WAREHOUSE_ID)
 
@@ -1298,9 +1428,13 @@ def test_uc_helper_fetch_actual_securables_skips_rfa_fanout_when_targets_none(mo
 
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
-def test_uc_helper_fetch_actual_securables_skips_rfa_fanout_when_targets_empty(mock_fetch):
+def test_uc_helper_fetch_actual_securables_skips_rfa_fanout_when_targets_empty(
+    mock_fetch,
+):
     """An empty rfa_targets set behaves the same as None — no RFA calls fire."""
-    mock_fetch.return_value = [["CATALOG", "my_catalog", "admin", None, None, None, None, None, None]]
+    mock_fetch.return_value = [
+        ["CATALOG", "my_catalog", "admin", None, None, None, None, None, None]
+    ]
     client = _make_mock_workspace_client()
     helper = UnityCatalogHelper(client, WAREHOUSE_ID)
 
@@ -1317,7 +1451,17 @@ def test_uc_helper_fetch_actual_securables_fans_out_one_rfa_call_per_target(mock
     get_access_request_destinations SDK call."""
     mock_fetch.return_value = [
         ["CATALOG", "my_catalog", "admin", None, None, None, None, None, None],
-        ["SCHEMA", "my_catalog.sales", "schema_owner", None, None, None, None, None, None],
+        [
+            "SCHEMA",
+            "my_catalog.sales",
+            "schema_owner",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ],
     ]
     client = _make_mock_workspace_client()
     client.rfa.get_access_request_destinations.return_value = _make_rfa_response()
@@ -1333,7 +1477,9 @@ def test_uc_helper_fetch_actual_securables_fans_out_one_rfa_call_per_target(mock
 
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
-def test_uc_helper_fetch_actual_securables_populates_rfa_destinations_on_attribute_rows(mock_fetch):
+def test_uc_helper_fetch_actual_securables_populates_rfa_destinations_on_attribute_rows(
+    mock_fetch,
+):
     """Fetched destination_ids are stitched onto the matching SecurableAttributes
     row (matched by securable_type + full_name)."""
     mock_fetch.return_value = [
@@ -1349,7 +1495,8 @@ def test_uc_helper_fetch_actual_securables_populates_rfa_destinations_on_attribu
     _, attributes = helper.fetch_actual_securables(["my_catalog"], rfa_targets=targets)
 
     matching = [
-        a for a in attributes
+        a
+        for a in attributes
         if a.securable_type == SecurableType.CATALOG and a.full_name == "my_catalog"
     ]
     assert len(matching) == 1
@@ -1359,7 +1506,9 @@ def test_uc_helper_fetch_actual_securables_populates_rfa_destinations_on_attribu
 
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
-def test_uc_helper_fetch_actual_securables_inserts_attribute_row_for_target_missing_from_sql(mock_fetch):
+def test_uc_helper_fetch_actual_securables_inserts_attribute_row_for_target_missing_from_sql(
+    mock_fetch,
+):
     """When rfa_targets references a securable that didn't appear in the SQL
     result (i.e. doesn't exist yet — about to be created), a fresh
     SecurableAttributes row carrying the fetched rfa_destinations is inserted
@@ -1376,21 +1525,35 @@ def test_uc_helper_fetch_actual_securables_inserts_attribute_row_for_target_miss
     _, attributes = helper.fetch_actual_securables(["my_catalog"], rfa_targets=targets)
 
     matching = [
-        a for a in attributes
-        if a.securable_type == SecurableType.SCHEMA and a.full_name == "my_catalog.sales"
+        a
+        for a in attributes
+        if a.securable_type == SecurableType.SCHEMA
+        and a.full_name == "my_catalog.sales"
     ]
     assert len(matching) == 1
     assert matching[0].rfa_destinations == frozenset({"https://example.com/access"})
 
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
-def test_uc_helper_fetch_actual_securables_treats_404_as_empty_rfa_destinations(mock_fetch):
+def test_uc_helper_fetch_actual_securables_treats_404_as_empty_rfa_destinations(
+    mock_fetch,
+):
     """A NotFound from get_access_request_destinations must map to an empty
     frozenset on the affected row rather than aborting the fetch."""
     from databricks.sdk.errors import NotFound
 
     mock_fetch.return_value = [
-        ["TABLE", "my_catalog.sales.orders", "table_owner", None, None, None, "[]", None, "MANAGED"],
+        [
+            "TABLE",
+            "my_catalog.sales.orders",
+            "table_owner",
+            None,
+            None,
+            None,
+            "[]",
+            None,
+            "MANAGED",
+        ],
     ]
     client = _make_mock_workspace_client()
     client.rfa.get_access_request_destinations.side_effect = NotFound("missing")
@@ -1400,15 +1563,19 @@ def test_uc_helper_fetch_actual_securables_treats_404_as_empty_rfa_destinations(
     _, attributes = helper.fetch_actual_securables(["my_catalog"], rfa_targets=targets)
 
     matching = [
-        a for a in attributes
-        if a.securable_type == SecurableType.TABLE and a.full_name == "my_catalog.sales.orders"
+        a
+        for a in attributes
+        if a.securable_type == SecurableType.TABLE
+        and a.full_name == "my_catalog.sales.orders"
     ]
     assert len(matching) == 1
     assert matching[0].rfa_destinations == frozenset()
 
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
-def test_uc_helper_fetch_actual_securables_treats_400_as_empty_rfa_destinations(mock_fetch):
+def test_uc_helper_fetch_actual_securables_treats_400_as_empty_rfa_destinations(
+    mock_fetch,
+):
     """An InvalidParameterValue from get_access_request_destinations must map
     to an empty frozenset rather than aborting the fetch. The RFA API returns
     HTTP 400 (not 404) when the securable doesn't yet exist in UC — e.g., a
@@ -1416,7 +1583,17 @@ def test_uc_helper_fetch_actual_securables_treats_400_as_empty_rfa_destinations(
     from databricks.sdk.errors import InvalidParameterValue
 
     mock_fetch.return_value = [
-        ["TABLE", "my_catalog.sales.orders", "table_owner", None, None, None, "[]", None, "MANAGED"],
+        [
+            "TABLE",
+            "my_catalog.sales.orders",
+            "table_owner",
+            None,
+            None,
+            None,
+            "[]",
+            None,
+            "MANAGED",
+        ],
     ]
     client = _make_mock_workspace_client()
     client.rfa.get_access_request_destinations.side_effect = InvalidParameterValue(
@@ -1429,20 +1606,34 @@ def test_uc_helper_fetch_actual_securables_treats_400_as_empty_rfa_destinations(
     _, attributes = helper.fetch_actual_securables(["my_catalog"], rfa_targets=targets)
 
     matching = [
-        a for a in attributes
-        if a.securable_type == SecurableType.SCHEMA and a.full_name == "my_catalog.not_yet"
+        a
+        for a in attributes
+        if a.securable_type == SecurableType.SCHEMA
+        and a.full_name == "my_catalog.not_yet"
     ]
     assert len(matching) == 1
     assert matching[0].rfa_destinations == frozenset()
 
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
-def test_uc_helper_fetch_actual_securables_preserves_existing_owner_when_merging_rfa(mock_fetch):
+def test_uc_helper_fetch_actual_securables_preserves_existing_owner_when_merging_rfa(
+    mock_fetch,
+):
     """Merging RFA destinations onto an existing attribute row must preserve the
     other governed attributes (owner, comment) parsed from SQL — only
     rfa_destinations is replaced."""
     mock_fetch.return_value = [
-        ["CATALOG", "my_catalog", "admin", None, None, None, None, "Prod catalog", None],
+        [
+            "CATALOG",
+            "my_catalog",
+            "admin",
+            None,
+            None,
+            None,
+            None,
+            "Prod catalog",
+            None,
+        ],
     ]
     client = _make_mock_workspace_client()
     client.rfa.get_access_request_destinations.return_value = _make_rfa_response(
@@ -1454,7 +1645,8 @@ def test_uc_helper_fetch_actual_securables_preserves_existing_owner_when_merging
     _, attributes = helper.fetch_actual_securables(["my_catalog"], rfa_targets=targets)
 
     matching = [
-        a for a in attributes
+        a
+        for a in attributes
         if a.securable_type == SecurableType.CATALOG and a.full_name == "my_catalog"
     ]
     assert len(matching) == 1
@@ -1486,7 +1678,9 @@ def test_uc_helper_update_owner_dispatches_to_function_api():
     client = MagicMock()
     helper = UnityCatalogHelper(client, WAREHOUSE_ID)
 
-    helper.update_owner(SecurableType.FUNCTION, "my_catalog.shared.mask_email", "new_owner")
+    helper.update_owner(
+        SecurableType.FUNCTION, "my_catalog.shared.mask_email", "new_owner"
+    )
 
     client.functions.update.assert_called_once_with(
         "my_catalog.shared.mask_email", owner="new_owner"
@@ -1544,7 +1738,9 @@ def test_uc_helper_update_rfa_destinations_classifies_url_destination_id():
     helper = UnityCatalogHelper(client, WAREHOUSE_ID)
 
     helper.update_rfa_destinations(
-        SecurableType.SCHEMA, "my_catalog.sales", frozenset({"https://example.com/access"})
+        SecurableType.SCHEMA,
+        "my_catalog.sales",
+        frozenset({"https://example.com/access"}),
     )
 
     kwargs = _get_rfa_update_call(client)
@@ -1593,7 +1789,9 @@ def test_uc_helper_update_rfa_destinations_passes_securable_full_name_and_type()
 
     # Also check the set of destination_ids passed matches the input (loose
     # behavioural check — list order is unspecified for a frozenset input).
-    sent_ids = {d.destination_id for d in kwargs["access_request_destinations"].destinations}
+    sent_ids = {
+        d.destination_id for d in kwargs["access_request_destinations"].destinations
+    }
     assert sent_ids == {"data-gov@example.com"}
 
 
@@ -1624,9 +1822,7 @@ def test_uc_helper_update_rfa_destinations_clears_all_when_empty():
     client = MagicMock()
     helper = UnityCatalogHelper(client, WAREHOUSE_ID)
 
-    helper.update_rfa_destinations(
-        SecurableType.CATALOG, "my_catalog", frozenset()
-    )
+    helper.update_rfa_destinations(SecurableType.CATALOG, "my_catalog", frozenset())
 
     kwargs = _get_rfa_update_call(client)
     assert kwargs["update_mask"] == "destinations"
@@ -1649,7 +1845,9 @@ def _make_column_mask_policy_info(
     to_principals: tuple[str, ...] = ("analysts",),
     except_principals: tuple[str, ...] | None = ("admins",),
     when_condition: str | None = None,
-    match_column_defs: tuple[tuple[str, str], ...] = (("c", "has_column_tag_value('pii', 'email')"),),
+    match_column_defs: tuple[tuple[str, str], ...] = (
+        ("c", "has_column_tag_value('pii', 'email')"),
+    ),
 ) -> MagicMock:
     """Build a minimal fake PolicyInfo-like object for a column mask policy."""
     from databricks.sdk.service.catalog import PolicyType as SdkPolicyType
@@ -1663,7 +1861,9 @@ def _make_column_mask_policy_info(
     info.column_mask = MagicMock()
     info.column_mask.function_name = function_name
     info.column_mask.on_column = on_column
-    info.column_mask.using = [MagicMock(alias=a, constant=None) for a in using_column_aliases]
+    info.column_mask.using = [
+        MagicMock(alias=a, constant=None) for a in using_column_aliases
+    ]
     info.row_filter = None
     info.to_principals = list(to_principals)
     info.except_principals = list(except_principals) if except_principals else None
@@ -1683,7 +1883,9 @@ def _make_row_filter_policy_info(
     to_principals: tuple[str, ...] = ("analysts",),
     except_principals: tuple[str, ...] | None = None,
     when_condition: str | None = None,
-    match_column_defs: tuple[tuple[str, str], ...] = (("c_region", "has_column_tag('geo')"),),
+    match_column_defs: tuple[tuple[str, str], ...] = (
+        ("c_region", "has_column_tag('geo')"),
+    ),
 ) -> MagicMock:
     from databricks.sdk.service.catalog import PolicyType as SdkPolicyType
 
@@ -1696,7 +1898,9 @@ def _make_row_filter_policy_info(
     info.column_mask = None
     info.row_filter = MagicMock()
     info.row_filter.function_name = function_name
-    info.row_filter.using = [MagicMock(alias=a, constant=None) for a in using_column_aliases]
+    info.row_filter.using = [
+        MagicMock(alias=a, constant=None) for a in using_column_aliases
+    ]
     info.to_principals = list(to_principals)
     info.except_principals = list(except_principals) if except_principals else None
     info.when_condition = when_condition
@@ -1720,7 +1924,9 @@ def test_build_policy_securables_query_parses_as_valid_sql():
 
     # Should reference abac_policy_definitions
     tables = _get_table_names(stmt)
-    assert "abac_policy_definitions" in tables, f"Expected 'abac_policy_definitions' in {tables}"
+    assert "abac_policy_definitions" in tables, (
+        f"Expected 'abac_policy_definitions' in {tables}"
+    )
 
 
 def test_build_policy_securables_query_filters_to_mask_and_filter_types():
@@ -1749,7 +1955,9 @@ def test_build_policy_securables_query_null_guards_schema_and_securable_predicat
 
     # Both NULL guards must be present
     assert "schema_name is null" in sql_lower, "Expected 'schema_name IS NULL' in query"
-    assert "securable_name is null" in sql_lower, "Expected 'securable_name IS NULL' in query"
+    assert "securable_name is null" in sql_lower, (
+        "Expected 'securable_name IS NULL' in query"
+    )
 
 
 def test_build_policy_securables_query_scopes_to_given_catalogs():
@@ -1853,7 +2061,9 @@ def test_uc_helper_fetch_actual_policies_lists_per_discovered_securable(mock_fet
         ("SCHEMA", "cat.s"),
         ("TABLE", "cat.s.t"),
     }
-    assert call_targets == expected_targets, f"Expected {expected_targets}, got {call_targets}"
+    assert call_targets == expected_targets, (
+        f"Expected {expected_targets}, got {call_targets}"
+    )
 
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
@@ -1862,15 +2072,17 @@ def test_uc_helper_fetch_actual_policies_normalises_column_mask(mock_fetch):
     rows = [["TABLE", "cat.s.t"]]
     mock_fetch.return_value = rows
     client = _make_mock_workspace_client()
-    client.policies.list_policies.return_value = iter([
-        _make_column_mask_policy_info(
-            using_column_aliases=("c_extra",),
-            match_column_defs=(
-                ("c", "has_column_tag_value('pii', 'email')"),
-                ("c_extra", "has_column_tag('geo')"),
-            ),
-        )
-    ])
+    client.policies.list_policies.return_value = iter(
+        [
+            _make_column_mask_policy_info(
+                using_column_aliases=("c_extra",),
+                match_column_defs=(
+                    ("c", "has_column_tag_value('pii', 'email')"),
+                    ("c_extra", "has_column_tag('geo')"),
+                ),
+            )
+        ]
+    )
     helper = UnityCatalogHelper(client, WAREHOUSE_ID)
 
     result = helper.fetch_actual_policies(["cat"])
@@ -1933,7 +2145,9 @@ def test_uc_helper_fetch_actual_policies_preserves_constant_using_columns(mock_f
 
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
-def test_uc_helper_fetch_actual_policies_preserves_constant_using_columns_in_row_filter(mock_fetch):
+def test_uc_helper_fetch_actual_policies_preserves_constant_using_columns_in_row_filter(
+    mock_fetch,
+):
     """Discovery [["TABLE","cat.s.t"]]; row filter with constant using columns."""
     rows = [["TABLE", "cat.s.t"]]
     mock_fetch.return_value = rows
@@ -1967,7 +2181,9 @@ def test_uc_helper_fetch_actual_policies_filters_out_unknown_policy_types(mock_f
 
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
-def test_uc_helper_fetch_actual_policies_treats_missing_securable_as_no_policies(mock_fetch):
+def test_uc_helper_fetch_actual_policies_treats_missing_securable_as_no_policies(
+    mock_fetch,
+):
     """Discovery two rows; list_policies raises NotFound for first; assert len(result) == 1."""
     from databricks.sdk.errors import NotFound
 
@@ -1985,7 +2201,9 @@ def test_uc_helper_fetch_actual_policies_treats_missing_securable_as_no_policies
     def list_side_effect(*, on_securable_fullname, **_):
         if on_securable_fullname == "cat.missing":
             return _missing_paginator()
-        return iter([_make_column_mask_policy_info(on_securable_fullname="cat.present")])
+        return iter(
+            [_make_column_mask_policy_info(on_securable_fullname="cat.present")]
+        )
 
     client.policies.list_policies.side_effect = list_side_effect
     helper = UnityCatalogHelper(client, WAREHOUSE_ID)
@@ -2000,9 +2218,9 @@ def test_uc_helper_fetch_actual_policies_handles_empty_except_principals(mock_fe
     rows = [["TABLE", "cat.s.t"]]
     mock_fetch.return_value = rows
     client = _make_mock_workspace_client()
-    client.policies.list_policies.return_value = iter([
-        _make_column_mask_policy_info(except_principals=None)
-    ])
+    client.policies.list_policies.return_value = iter(
+        [_make_column_mask_policy_info(except_principals=None)]
+    )
     helper = UnityCatalogHelper(client, WAREHOUSE_ID)
 
     (policy,) = helper.fetch_actual_policies(["cat"])
@@ -2015,7 +2233,9 @@ def test_uc_helper_fetch_actual_policies_caches_result(mock_fetch):
     rows = [["TABLE", "cat.s.t"]]
     mock_fetch.return_value = rows
     client = _make_mock_workspace_client()
-    client.policies.list_policies.side_effect = [iter([_make_column_mask_policy_info()])]
+    client.policies.list_policies.side_effect = [
+        iter([_make_column_mask_policy_info()])
+    ]
     helper = UnityCatalogHelper(client, WAREHOUSE_ID)
 
     first = helper.fetch_actual_policies(["cat"])

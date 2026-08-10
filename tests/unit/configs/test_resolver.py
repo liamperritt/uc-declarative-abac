@@ -9,7 +9,6 @@ from uc_declarative_abac.utils import (
 )
 
 
-
 # ---------------------------------------------------------------------------
 # Basic ref resolution
 # ---------------------------------------------------------------------------
@@ -119,7 +118,9 @@ def test_resolver_replace_strategy_behaves_like_legacy_update():
 def test_resolver_accepts_override_strategy_kwarg():
     """resolve_refs accepts override_strategy='merge' and override_strategy='replace'."""
     definitions = {"schemas": {"ops|sales": {"name": "sales"}}}
-    resources = {"catalogs": {"main": {"schemas": [{"$ref": "$defs/schemas/ops|sales"}]}}}
+    resources = {
+        "catalogs": {"main": {"schemas": [{"$ref": "$defs/schemas/ops|sales"}]}}
+    }
 
     # Both explicit values should succeed.
     result_merge = resolve_refs(definitions, resources, override_strategy="merge")

@@ -9,8 +9,6 @@ from pathlib import Path
 import yaml
 
 
-
-
 def discover_yaml_files(root: Path) -> list[Path]:
     """Recursively find all .yaml and .yml files under root."""
     return sorted(
@@ -34,10 +32,12 @@ def _merge_block(namespace: str, block: dict, registry: dict) -> dict:
         existing = {**merged.get(sub_key, {})}
         for entry_key, entry_val in entries.items():
             if entry_key in existing:
-                exc_cls = DuplicateResourceError if namespace == "resources" else DuplicateKeyError
-                raise exc_cls(
-                    f"Duplicate key '{entry_key}' in {namespace}.{sub_key}"
+                exc_cls = (
+                    DuplicateResourceError
+                    if namespace == "resources"
+                    else DuplicateKeyError
                 )
+                raise exc_cls(f"Duplicate key '{entry_key}' in {namespace}.{sub_key}")
             existing[entry_key] = entry_val
         merged[sub_key] = existing
     return merged

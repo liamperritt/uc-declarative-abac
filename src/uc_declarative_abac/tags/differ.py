@@ -7,7 +7,8 @@ from uc_declarative_abac.tags.state import (
 
 
 def filter_retained_removals(
-    diff: TagDiff, retain_prefixes: frozenset[str],
+    diff: TagDiff,
+    retain_prefixes: frozenset[str],
 ) -> tuple[TagDiff, set[SecurableTag]]:
     """Strip removals whose tag key starts with any retained prefix.
 
@@ -22,7 +23,8 @@ def filter_retained_removals(
         return diff, set()
 
     retained = {
-        tag for tag in diff.to_remove
+        tag
+        for tag in diff.to_remove
         if any(tag.tag_name.startswith(prefix) for prefix in retain_prefixes)
     }
     if not retained:
@@ -45,6 +47,7 @@ def compute_tag_diff(desired: set[SecurableTag], actual: set[SecurableTag]) -> T
     - to_update: tag key present in both but value differs (desired value shown)
     - to_remove: tag key present in actual but absent from desired
     """
+
     def _tag_key(tag: SecurableTag) -> tuple:
         return (tag.securable_type, tag.securable_full_name, tag.tag_name)
 
@@ -57,10 +60,13 @@ def compute_tag_diff(desired: set[SecurableTag], actual: set[SecurableTag]) -> T
     to_add = {desired_by_key[k] for k in desired_keys - actual_keys}
     to_remove = {actual_by_key[k] for k in actual_keys - desired_keys}
     update_keys = {
-        k for k in desired_keys & actual_keys
+        k
+        for k in desired_keys & actual_keys
         if desired_by_key[k].tag_value != actual_by_key[k].tag_value
     }
     to_update = {desired_by_key[k] for k in update_keys}
     old_values = {k: actual_by_key[k].tag_value for k in update_keys}
 
-    return TagDiff(to_add=to_add, to_update=to_update, to_remove=to_remove, old_values=old_values)
+    return TagDiff(
+        to_add=to_add, to_update=to_update, to_remove=to_remove, old_values=old_values
+    )

@@ -17,7 +17,9 @@ from uc_declarative_abac.types import (
 )
 
 
-def _resolved(name: str, principal_type: PrincipalType = PrincipalType.GROUP) -> Principal:
+def _resolved(
+    name: str, principal_type: PrincipalType = PrincipalType.GROUP
+) -> Principal:
     """Construct a resolved Principal with identifier == name (for GROUP/USER)."""
     return Principal(principal_type=principal_type, name=name, identifier=name)
 
@@ -107,7 +109,9 @@ def test_policy_executor_passes_old_policy_to_logger_on_replace():
 
 def test_policy_executor_attaches_to_catalog():
     uc_helper = MagicMock()
-    policy = _make_policy(securable_type=SecurableType.CATALOG, securable_full_name="cat")
+    policy = _make_policy(
+        securable_type=SecurableType.CATALOG, securable_full_name="cat"
+    )
     diff = PolicyDiff(to_create={policy})
 
     (sql,) = execute_policy_diff(uc_helper, diff, ChangeLogger())
@@ -116,7 +120,9 @@ def test_policy_executor_attaches_to_catalog():
 
 def test_policy_executor_attaches_to_schema():
     uc_helper = MagicMock()
-    policy = _make_policy(securable_type=SecurableType.SCHEMA, securable_full_name="cat.s")
+    policy = _make_policy(
+        securable_type=SecurableType.SCHEMA, securable_full_name="cat.s"
+    )
     diff = PolicyDiff(to_create={policy})
 
     (sql,) = execute_policy_diff(uc_helper, diff, ChangeLogger())
@@ -201,7 +207,9 @@ def test_policy_executor_row_filter_body_omits_on_column():
     diff = PolicyDiff(to_create={policy})
 
     (sql,) = execute_policy_diff(uc_helper, diff, ChangeLogger())
-    _assert_sql_contains(sql, "ROW FILTER `cat`.`default`.`filter_fn`", "USING COLUMNS (c_region)")
+    _assert_sql_contains(
+        sql, "ROW FILTER `cat`.`default`.`filter_fn`", "USING COLUMNS (c_region)"
+    )
     _assert_sql_excludes(sql, "ON COLUMN")
 
 
@@ -227,7 +235,11 @@ def test_policy_executor_row_filter_omits_using_when_no_columns():
 
 def test_policy_executor_includes_to_principals():
     uc_helper = MagicMock()
-    diff = PolicyDiff(to_create={_make_policy(to_principals=(_resolved("a_group"), _resolved("b_group")))})
+    diff = PolicyDiff(
+        to_create={
+            _make_policy(to_principals=(_resolved("a_group"), _resolved("b_group")))
+        }
+    )
 
     (sql,) = execute_policy_diff(uc_helper, diff, ChangeLogger())
     _assert_sql_contains(sql, "TO `a_group`, `b_group`")
@@ -251,7 +263,9 @@ def test_policy_executor_omits_except_when_empty():
 
 def test_policy_executor_includes_when_condition():
     uc_helper = MagicMock()
-    diff = PolicyDiff(to_create={_make_policy(when_condition="has_tag_value('env', 'prod')")})
+    diff = PolicyDiff(
+        to_create={_make_policy(when_condition="has_tag_value('env', 'prod')")}
+    )
 
     (sql,) = execute_policy_diff(uc_helper, diff, ChangeLogger())
     _assert_sql_contains(sql, "WHEN has_tag_value('env', 'prod')")
@@ -377,10 +391,12 @@ def test_policy_executor_comment_appears_between_on_and_body():
 def test_policy_executor_parallel_creates_run_as_batch():
     """Multiple creates run in one (sec_type, change_type) parallel batch."""
     uc_helper = MagicMock()
-    diff = PolicyDiff(to_create={
-        _make_policy(securable_full_name=f"cat.s.t{i}", name=f"p{i}")
-        for i in range(6)
-    })
+    diff = PolicyDiff(
+        to_create={
+            _make_policy(securable_full_name=f"cat.s.t{i}", name=f"p{i}")
+            for i in range(6)
+        }
+    )
 
     stmts = execute_policy_diff(uc_helper, diff, ChangeLogger(), max_parallel_changes=4)
 
@@ -391,12 +407,16 @@ def test_policy_executor_parallel_creates_run_as_batch():
 def test_policy_executor_parallel_error_isolated_per_item():
     """A failing policy create is logged; siblings still execute."""
     uc_helper = MagicMock()
-    uc_helper.execute_sql.side_effect = lambda sql: (_ for _ in ()).throw(RuntimeError("boom")) if "p1" in sql else None
+    uc_helper.execute_sql.side_effect = lambda sql: (
+        (_ for _ in ()).throw(RuntimeError("boom")) if "p1" in sql else None
+    )
     change_logger = ChangeLogger()
-    diff = PolicyDiff(to_create={
-        _make_policy(securable_full_name=f"cat.s.t{i}", name=f"p{i}")
-        for i in range(3)
-    })
+    diff = PolicyDiff(
+        to_create={
+            _make_policy(securable_full_name=f"cat.s.t{i}", name=f"p{i}")
+            for i in range(3)
+        }
+    )
 
     stmts = execute_policy_diff(uc_helper, diff, change_logger, max_parallel_changes=4)
 
@@ -453,7 +473,9 @@ def test_policy_executor_skips_delete_sql_in_dry_run():
     uc_helper = MagicMock()
     diff = PolicyDiff(to_delete={_make_policy(name="stale")})
 
-    stmts = execute_policy_diff(uc_helper, diff, ChangeLogger(dry_run=True), dry_run=True)
+    stmts = execute_policy_diff(
+        uc_helper, diff, ChangeLogger(dry_run=True), dry_run=True
+    )
 
     assert stmts == []
     uc_helper.execute_sql.assert_not_called()
@@ -473,6 +495,7 @@ def test_policy_executor_deletes_after_yes_confirmation(monkeypatch):
 def test_policy_executor_exits_when_delete_confirmation_denied(monkeypatch):
     """A 'no' answer aborts the run via SystemExit and issues no DROP."""
     import pytest
+
     monkeypatch.setattr("builtins.input", lambda *_: "no")
     uc_helper = MagicMock()
     diff = PolicyDiff(to_delete={_make_policy(name="stale")})
@@ -485,8 +508,10 @@ def test_policy_executor_exits_when_delete_confirmation_denied(monkeypatch):
 
 def test_policy_executor_does_not_prompt_when_force_enabled(monkeypatch):
     """force=True bypasses the interactive prompt entirely."""
+
     def _should_not_be_called(*_):
         raise AssertionError("input() was called even though force=True")
+
     monkeypatch.setattr("builtins.input", _should_not_be_called)
     uc_helper = MagicMock()
     diff = PolicyDiff(to_delete={_make_policy(name="stale")})
@@ -504,6 +529,7 @@ def test_policy_executor_raises_interactive_error_on_eof_when_not_forced(monkeyp
 
     def _raise_eof(*_):
         raise EOFError
+
     monkeypatch.setattr("builtins.input", _raise_eof)
     uc_helper = MagicMock()
     diff = PolicyDiff(to_delete={_make_policy(name="stale")})

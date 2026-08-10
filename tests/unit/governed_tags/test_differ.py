@@ -34,8 +34,10 @@ def _resolver_passthrough() -> PrincipalResolver:
     return PrincipalResolver(MagicMock())
 
 
-def _resolver(name_to_principal: dict[str, Principal] | None = None,
-              identifier_to_principal: dict[str, Principal] | None = None) -> PrincipalResolver:
+def _resolver(
+    name_to_principal: dict[str, Principal] | None = None,
+    identifier_to_principal: dict[str, Principal] | None = None,
+) -> PrincipalResolver:
     """Build a resolver backed by a ws_helper mock that knows specific principals."""
     ws_helper = MagicMock()
     name_to_principal = name_to_principal or {}
@@ -49,7 +51,9 @@ def _resolver(name_to_principal: dict[str, Principal] | None = None,
     def _by_identifier(identifier: str) -> Principal:
         if identifier in identifier_to_principal:
             return identifier_to_principal[identifier]
-        raise PrincipalValidationError(f"Principal not found by identifier: {identifier}")
+        raise PrincipalValidationError(
+            f"Principal not found by identifier: {identifier}"
+        )
 
     ws_helper.resolve_by_name.side_effect = _by_name
     ws_helper.resolve_by_identifier.side_effect = _by_identifier
@@ -61,7 +65,9 @@ def test_governed_tag_differ_creates_tag_when_missing_in_actual():
     desired = {_gt("pii", "PII", {"name", "email"})}
     actual: set[GovernedTag] = set()
 
-    diff = compute_governed_tag_diff(desired, actual, _resolver_passthrough(), ChangeLogger())
+    diff = compute_governed_tag_diff(
+        desired, actual, _resolver_passthrough(), ChangeLogger()
+    )
 
     assert _gt("pii", "PII", {"name", "email"}) in diff.to_create
     assert diff.to_update == set()
@@ -72,7 +78,9 @@ def test_governed_tag_differ_updates_tag_when_description_changes():
     desired = {_gt("pii", "Updated description", {"name"})}
     actual = {_gt("pii", "Original description", {"name"})}
 
-    diff = compute_governed_tag_diff(desired, actual, _resolver_passthrough(), ChangeLogger())
+    diff = compute_governed_tag_diff(
+        desired, actual, _resolver_passthrough(), ChangeLogger()
+    )
 
     assert _gt("pii", "Updated description", {"name"}) in diff.to_update
     assert diff.to_create == set()
@@ -83,7 +91,9 @@ def test_governed_tag_differ_updates_tag_when_allowed_values_change():
     desired = {_gt("pii", "PII", {"name", "email", "phone"})}
     actual = {_gt("pii", "PII", {"name", "email"})}
 
-    diff = compute_governed_tag_diff(desired, actual, _resolver_passthrough(), ChangeLogger())
+    diff = compute_governed_tag_diff(
+        desired, actual, _resolver_passthrough(), ChangeLogger()
+    )
 
     update = next(iter(diff.to_update))
     assert update.name == "pii"
@@ -97,7 +107,9 @@ def test_governed_tag_differ_treats_reordered_allowed_values_as_unchanged():
     desired = {_gt("pii", "PII", {"phone", "name", "email"})}
     actual = {_gt("pii", "PII", {"email", "name", "phone"})}
 
-    diff = compute_governed_tag_diff(desired, actual, _resolver_passthrough(), ChangeLogger())
+    diff = compute_governed_tag_diff(
+        desired, actual, _resolver_passthrough(), ChangeLogger()
+    )
 
     assert diff.to_update == set()
     assert diff.to_create == set()
@@ -108,7 +120,9 @@ def test_governed_tag_differ_ignores_tag_when_in_actual_but_not_desired():
     desired: set[GovernedTag] = set()
     actual = {_gt("legacy", "legacy tag", {"a", "b"})}
 
-    diff = compute_governed_tag_diff(desired, actual, _resolver_passthrough(), ChangeLogger())
+    diff = compute_governed_tag_diff(
+        desired, actual, _resolver_passthrough(), ChangeLogger()
+    )
 
     assert diff.to_create == set()
     assert diff.to_update == set()
@@ -118,7 +132,9 @@ def test_governed_tag_differ_produces_empty_diff_when_in_sync():
     """When desired == actual, both to_create and to_update are empty."""
     gt = _gt("pii", "PII", {"name", "email"})
 
-    diff = compute_governed_tag_diff({gt}, {gt}, _resolver_passthrough(), ChangeLogger())
+    diff = compute_governed_tag_diff(
+        {gt}, {gt}, _resolver_passthrough(), ChangeLogger()
+    )
 
     assert diff.to_create == set()
     assert diff.to_update == set()
@@ -129,7 +145,9 @@ def test_governed_tag_differ_records_old_values_for_updates():
     desired = {_gt("pii", "New comment", {"name"})}
     actual = {_gt("pii", "Old comment", {"name"})}
 
-    diff = compute_governed_tag_diff(desired, actual, _resolver_passthrough(), ChangeLogger())
+    diff = compute_governed_tag_diff(
+        desired, actual, _resolver_passthrough(), ChangeLogger()
+    )
 
     assert diff.old_values["pii"] == _gt("pii", "Old comment", {"name"})
 
@@ -147,7 +165,9 @@ def test_governed_tag_differ_does_not_mark_for_deletion_when_flag_disabled():
         _gt("legacy_tag", "legacy", set()),  # present in UC only
     }
 
-    diff = compute_governed_tag_diff(desired, actual, _resolver_passthrough(), ChangeLogger())
+    diff = compute_governed_tag_diff(
+        desired, actual, _resolver_passthrough(), ChangeLogger()
+    )
 
     assert diff.to_delete == set()
 
@@ -161,7 +181,9 @@ def test_governed_tag_differ_marks_tag_for_deletion_when_flag_enabled_and_tag_ab
         legacy,
     }
 
-    diff = compute_governed_tag_diff(desired, actual, _resolver_passthrough(), ChangeLogger(), enable_deletion=True)
+    diff = compute_governed_tag_diff(
+        desired, actual, _resolver_passthrough(), ChangeLogger(), enable_deletion=True
+    )
 
     assert legacy in diff.to_delete
     assert diff.to_create == set()
@@ -173,7 +195,9 @@ def test_governed_tag_differ_does_not_mark_for_deletion_when_tag_is_in_desired()
     desired = {_gt("pii", "PII", {"name"})}
     actual = {_gt("pii", "PII", {"name"})}
 
-    diff = compute_governed_tag_diff(desired, actual, _resolver_passthrough(), ChangeLogger(), enable_deletion=True)
+    diff = compute_governed_tag_diff(
+        desired, actual, _resolver_passthrough(), ChangeLogger(), enable_deletion=True
+    )
 
     assert diff.to_delete == set()
 
@@ -183,16 +207,24 @@ def test_governed_tag_differ_does_not_mark_for_deletion_when_tag_is_in_desired()
 # ---------------------------------------------------------------------------
 
 
-_alice_resolved = Principal(PrincipalType.USER, identifier="alice@example.com", name="alice@example.com")
-_engineers_resolved = Principal(PrincipalType.GROUP, identifier="data_engineers", name="data_engineers")
+_alice_resolved = Principal(
+    PrincipalType.USER, identifier="alice@example.com", name="alice@example.com"
+)
+_engineers_resolved = Principal(
+    PrincipalType.GROUP, identifier="data_engineers", name="data_engineers"
+)
 
 
 def test_governed_tag_differ_marks_update_when_only_assigners_change():
     """Adding an assigner on an otherwise unchanged tag triggers to_update."""
-    desired = {_gt(
-        "pii", "PII", {"name"},
-        assigners={Principal(PrincipalType.UNKNOWN, name="data_engineers")},
-    )}
+    desired = {
+        _gt(
+            "pii",
+            "PII",
+            {"name"},
+            assigners={Principal(PrincipalType.UNKNOWN, name="data_engineers")},
+        )
+    }
     actual = {_gt("pii", "PII", {"name"}, assigners=set())}
     resolver = _resolver(name_to_principal={"data_engineers": _engineers_resolved})
 
@@ -205,14 +237,24 @@ def test_governed_tag_differ_marks_update_when_only_assigners_change():
 
 def test_governed_tag_differ_resolves_actual_principals_via_identifier():
     """Actual-state principals (UNKNOWN with identifier set) are resolved before equality comparison."""
-    desired = {_gt(
-        "pii", "PII", {"name"},
-        assigners={Principal(PrincipalType.UNKNOWN, name="alice@example.com")},
-    )}
-    actual = {_gt(
-        "pii", "PII", {"name"},
-        assigners={Principal(PrincipalType.UNKNOWN, identifier="alice@example.com")},
-    )}
+    desired = {
+        _gt(
+            "pii",
+            "PII",
+            {"name"},
+            assigners={Principal(PrincipalType.UNKNOWN, name="alice@example.com")},
+        )
+    }
+    actual = {
+        _gt(
+            "pii",
+            "PII",
+            {"name"},
+            assigners={
+                Principal(PrincipalType.UNKNOWN, identifier="alice@example.com")
+            },
+        )
+    }
     resolver = _resolver(
         name_to_principal={"alice@example.com": _alice_resolved},
         identifier_to_principal={"alice@example.com": _alice_resolved},
@@ -230,10 +272,19 @@ def test_governed_tag_differ_actual_side_unresolvable_assigner_is_warning():
     principal) that can't be resolved is dropped and logged as a non-fatal warning,
     not a fatal error."""
     desired = {_gt("pii", "PII", {"name"}, assigners=set())}
-    actual = {_gt(
-        "pii", "PII", {"name"},
-        assigners={Principal(PrincipalType.UNKNOWN, identifier="dd4ded68-9a65-4df9-ad70-832718d36e10")},
-    )}
+    actual = {
+        _gt(
+            "pii",
+            "PII",
+            {"name"},
+            assigners={
+                Principal(
+                    PrincipalType.UNKNOWN,
+                    identifier="dd4ded68-9a65-4df9-ad70-832718d36e10",
+                )
+            },
+        )
+    }
     resolver = _resolver()  # nothing resolves
     change_logger = ChangeLogger()
 
@@ -251,15 +302,22 @@ def test_governed_tag_differ_suppresses_warning_for_ignored_unresolvable_assigne
     resolution-failure warning is suppressed."""
     ignored_id = "dd4ded68-9a65-4df9-ad70-832718d36e10"
     desired = {_gt("pii", "PII", {"name"}, assigners=set())}
-    actual = {_gt(
-        "pii", "PII", {"name"},
-        assigners={Principal(PrincipalType.UNKNOWN, identifier=ignored_id)},
-    )}
+    actual = {
+        _gt(
+            "pii",
+            "PII",
+            {"name"},
+            assigners={Principal(PrincipalType.UNKNOWN, identifier=ignored_id)},
+        )
+    }
     resolver = _resolver()  # nothing resolves
     change_logger = ChangeLogger()
 
     diff = compute_governed_tag_diff(
-        desired, actual, resolver, change_logger,
+        desired,
+        actual,
+        resolver,
+        change_logger,
         ignore_unresolvable=frozenset({ignored_id}),
     )
 
@@ -272,10 +330,14 @@ def test_governed_tag_differ_suppresses_warning_for_ignored_unresolvable_assigne
 def test_governed_tag_differ_drops_unresolvable_principal_and_logs_error():
     """A principal that can't be resolved is dropped from the tag's assigners
     and logged via change_logger.log_error — it never produces a phantom diff."""
-    desired = {_gt(
-        "pii", "PII", {"name"},
-        assigners={Principal(PrincipalType.UNKNOWN, name="ghost_user")},
-    )}
+    desired = {
+        _gt(
+            "pii",
+            "PII",
+            {"name"},
+            assigners={Principal(PrincipalType.UNKNOWN, name="ghost_user")},
+        )
+    }
     actual = {_gt("pii", "PII", {"name"}, assigners=set())}
     resolver = _resolver()  # nothing resolves
     change_logger = ChangeLogger()
@@ -292,7 +354,9 @@ def test_governed_tag_differ_treats_reordered_assigners_as_unchanged():
     """assigners is a frozenset — order on either side is irrelevant."""
     p_alice = Principal(PrincipalType.UNKNOWN, name="alice@example.com")
     p_bob = Principal(PrincipalType.UNKNOWN, name="bob@example.com")
-    bob_resolved = Principal(PrincipalType.USER, identifier="bob@example.com", name="bob@example.com")
+    bob_resolved = Principal(
+        PrincipalType.USER, identifier="bob@example.com", name="bob@example.com"
+    )
 
     desired = {_gt("pii", "PII", {"name"}, assigners={p_alice, p_bob})}
     actual = {_gt("pii", "PII", {"name"}, assigners={p_bob, p_alice})}
@@ -326,7 +390,11 @@ def test_governed_tag_differ_does_not_delete_system_tag_when_flag_enabled():
     actual = {_gt("pii", "PII", {"name"}), user_legacy, system_tag}
 
     diff = compute_governed_tag_diff(
-        desired, actual, _resolver_passthrough(), ChangeLogger(), enable_deletion=True,
+        desired,
+        actual,
+        _resolver_passthrough(),
+        ChangeLogger(),
+        enable_deletion=True,
     )
 
     assert user_legacy in diff.to_delete
@@ -340,7 +408,9 @@ def test_governed_tag_differ_fails_when_system_tag_absent_from_account():
     desired = {_gt("class.email_address", assigners=set())}
     actual: set[GovernedTag] = set()
 
-    diff = compute_governed_tag_diff(desired, actual, _resolver_passthrough(), change_logger)
+    diff = compute_governed_tag_diff(
+        desired, actual, _resolver_passthrough(), change_logger
+    )
 
     assert change_logger.has_errors
     assert diff.to_create == set()
@@ -350,14 +420,23 @@ def test_governed_tag_differ_updates_system_tag_assigners_only():
     """A system tag present on both sides with differing assigners flows into
     to_update; the entry carries the resolved assigners and the ACTUAL definition
     (config-side description/allowed_values are ignored for system tags)."""
-    stewards = Principal(PrincipalType.GROUP, identifier="data_stewards", name="data_stewards")
-    desired = {_gt(
-        "class.email_address",
-        assigners={Principal(PrincipalType.UNKNOWN, name="data_stewards")},
-    )}
-    actual = {_gt(
-        "class.email_address", "databricks-owned", {"work", "personal"}, assigners=set(),
-    )}
+    stewards = Principal(
+        PrincipalType.GROUP, identifier="data_stewards", name="data_stewards"
+    )
+    desired = {
+        _gt(
+            "class.email_address",
+            assigners={Principal(PrincipalType.UNKNOWN, name="data_stewards")},
+        )
+    }
+    actual = {
+        _gt(
+            "class.email_address",
+            "databricks-owned",
+            {"work", "personal"},
+            assigners=set(),
+        )
+    }
     resolver = _resolver(name_to_principal={"data_stewards": stewards})
 
     diff = compute_governed_tag_diff(desired, actual, resolver, ChangeLogger())
@@ -374,7 +453,9 @@ def test_governed_tag_differ_ignores_system_tag_definition_differences():
     desired = {_gt("class.email_address", "my label")}
     actual = {_gt("class.email_address", "databricks label", {"work"})}
 
-    diff = compute_governed_tag_diff(desired, actual, _resolver_passthrough(), ChangeLogger())
+    diff = compute_governed_tag_diff(
+        desired, actual, _resolver_passthrough(), ChangeLogger()
+    )
 
     assert diff.to_update == set()
     assert diff.to_create == set()

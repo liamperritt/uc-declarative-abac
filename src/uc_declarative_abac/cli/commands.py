@@ -129,7 +129,9 @@ def _require_warehouse_id(settings: RunSettings) -> str:
     return settings.warehouse_id
 
 
-def _run_kwargs(settings: RunSettings, namespaces: dict[str, str], *, dry_run: bool) -> dict:
+def _run_kwargs(
+    settings: RunSettings, namespaces: dict[str, str], *, dry_run: bool
+) -> dict:
     delete_policies = settings.delete_policies_for_namespaces or "*"
     return {
         "config_dir": _require_config_dir(settings),
@@ -148,9 +150,15 @@ def _run_kwargs(settings: RunSettings, namespaces: dict[str, str], *, dry_run: b
         "enable_group_management": settings.enable_group_management,
         "ignore_unresolvable_principals": settings.ignore_unresolvable_principals,
         "manage_tags_for_namespaces": namespaces["manage_tags_for_namespaces"],
-        "manage_privileges_for_namespaces": namespaces["manage_privileges_for_namespaces"],
-        "manage_taggables_for_namespaces": namespaces["manage_taggables_for_namespaces"],
-        "create_taggables_for_namespaces": namespaces["create_taggables_for_namespaces"],
+        "manage_privileges_for_namespaces": namespaces[
+            "manage_privileges_for_namespaces"
+        ],
+        "manage_taggables_for_namespaces": namespaces[
+            "manage_taggables_for_namespaces"
+        ],
+        "create_taggables_for_namespaces": namespaces[
+            "create_taggables_for_namespaces"
+        ],
         "delete_policies_for_namespaces": delete_policies,
         "retain_tag_prefixes": settings.retain_tag_prefixes,
         "force": settings.force,
@@ -188,7 +196,9 @@ def _handle_cli_error(exc: BaseException, *, verbose: bool) -> int:
     if isinstance(exc, ExecutionBatchError):
         _print_error(str(exc), verbose=verbose)
         return EXIT_EXECUTION_ERROR
-    if isinstance(exc, (OrchestratorError, ValidationError, ValueError, yaml.YAMLError)):
+    if isinstance(
+        exc, (OrchestratorError, ValidationError, ValueError, yaml.YAMLError)
+    ):
         _print_error(str(exc), verbose=verbose)
         return EXIT_CONFIG_ERROR
     if isinstance(exc, DatabricksError):
@@ -213,7 +223,8 @@ def run_cli(argv: list[str] | None = None) -> int:
     cli_overrides = {
         key: value
         for key, value in vars(namespace).items()
-        if key not in {"command", "legacy", "settings_file", "verbose", "quiet", "dry_run"}
+        if key
+        not in {"command", "legacy", "settings_file", "verbose", "quiet", "dry_run"}
         and key not in _DEPRECATED_CATALOG_FLAGS
     }
     settings_file = getattr(namespace, "settings_file", None)
