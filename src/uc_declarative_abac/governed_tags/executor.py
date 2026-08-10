@@ -78,15 +78,21 @@ def _build_grant_rules(
     for rule in existing_grant_rules or []:
         if rule.role == _TAG_POLICY_ASSIGN_ROLE:
             continue
-        new_rules.append(GrantRule(
-            role=rule.role,
-            principals=list(rule.principals or []),
-        ))
+        new_rules.append(
+            GrantRule(
+                role=rule.role,
+                principals=list(rule.principals or []),
+            )
+        )
     if desired_assigners:
-        new_rules.append(GrantRule(
-            role=_TAG_POLICY_ASSIGN_ROLE,
-            principals=sorted(_principal_to_ruleset_string(p) for p in desired_assigners),
-        ))
+        new_rules.append(
+            GrantRule(
+                role=_TAG_POLICY_ASSIGN_ROLE,
+                principals=sorted(
+                    _principal_to_ruleset_string(p) for p in desired_assigners
+                ),
+            )
+        )
     return new_rules
 
 
@@ -103,21 +109,30 @@ def _apply_assigners(
     on the success path so dry-run and real-run produce identical output."""
     tag_id = ws_helper.get_tag_policy_id(gt.name)
     if not tag_id:
-        change_logger.log_error(ExecutionError(
-            context=f"update_rule_set({gt.name})",
-            exception=OrchestratorError(f"Tag policy id not cached for {gt.name!r}"),
-        ))
+        change_logger.log_error(
+            ExecutionError(
+                context=f"update_rule_set({gt.name})",
+                exception=OrchestratorError(
+                    f"Tag policy id not cached for {gt.name!r}"
+                ),
+            )
+        )
         return
     try:
         current = ws_helper.get_tag_policy_rule_set_by_name(gt.name)
         new_rules = _build_grant_rules(gt.assigners, current.grant_rules or [])
         ws_helper.update_tag_policy_rule_set(
-            tag_id=tag_id, etag=current.etag, grant_rules=new_rules,
+            tag_id=tag_id,
+            etag=current.etag,
+            grant_rules=new_rules,
         )
     except Exception as exc:
-        change_logger.log_error(ExecutionError(
-            context=f"update_rule_set({gt.name})", exception=exc,
-        ))
+        change_logger.log_error(
+            ExecutionError(
+                context=f"update_rule_set({gt.name})",
+                exception=exc,
+            )
+        )
 
 
 def _create_tag_policy_worker(
@@ -149,9 +164,12 @@ def _execute_creates(
 
     def on_complete(gt: GovernedTag, created, error) -> None:
         if error is not None:
-            change_logger.log_error(ExecutionError(
-                context=f"create_tag_policy({gt.name})", exception=error,
-            ))
+            change_logger.log_error(
+                ExecutionError(
+                    context=f"create_tag_policy({gt.name})",
+                    exception=error,
+                )
+            )
             return
         if not dry_run and created is not None:
             ws_helper.register_created_tag_policy(created)
@@ -202,20 +220,22 @@ def _execute_updates(
     for gt in sorted(diff.to_update, key=lambda g: g.name):
         old = diff.old_values.get(gt.name)
         update_mask = _compute_tag_policy_update_mask(gt, old)
-        assigners_changed = gt.assigners != (
-            old.assigners if old else frozenset()
-        )
+        assigners_changed = gt.assigners != (old.assigners if old else frozenset())
         work_items.append((gt, old, update_mask, assigners_changed))
 
     def on_complete(
         item: tuple[GovernedTag, GovernedTag | None, str, bool],
-        _result, error,
+        _result,
+        error,
     ) -> None:
         gt, old, update_mask, assigners_changed = item
         if error is not None:
-            change_logger.log_error(ExecutionError(
-                context=f"update_tag_policy({gt.name})", exception=error,
-            ))
+            change_logger.log_error(
+                ExecutionError(
+                    context=f"update_tag_policy({gt.name})",
+                    exception=error,
+                )
+            )
             return
         if assigners_changed and not dry_run:
             _apply_assigners(ws_helper, gt, change_logger)
@@ -277,11 +297,15 @@ def _execute_deletes(
     if not force and not _prompt_delete_confirmation(tags_sorted):
         _logger.info("Governed tag deletion cancelled — aborting run.")
         sys.exit(1)
+
     def on_complete(gt: GovernedTag, _result, error) -> None:
         if error is not None:
-            change_logger.log_error(ExecutionError(
-                context=f"delete_tag_policy({gt.name})", exception=error,
-            ))
+            change_logger.log_error(
+                ExecutionError(
+                    context=f"delete_tag_policy({gt.name})",
+                    exception=error,
+                )
+            )
             return
         change_logger.log_governed_tag_delete(gt)
 

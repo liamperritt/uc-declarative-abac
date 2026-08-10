@@ -48,10 +48,12 @@ def _build_policy_sql(policy: Policy, or_replace: bool) -> str:
     if policy.comment:
         escaped = policy.comment.replace("'", "\\'")
         lines.append(f'COMMENT "{escaped}"')
-    lines.extend([
-        f"{body_type} {quote_securable(policy.function_name)}",
-        f"TO {_quote_principals(policy.to_principals)}",
-    ])
+    lines.extend(
+        [
+            f"{body_type} {quote_securable(policy.function_name)}",
+            f"TO {_quote_principals(policy.to_principals)}",
+        ]
+    )
     if policy.except_principals:
         lines.append(f"EXCEPT {_quote_principals(policy.except_principals)}")
     lines.append(f"FOR {policy.for_securable_type.value}S")
@@ -128,7 +130,9 @@ def _execute_policy_deletes(
         _logger.info("Policy deletion cancelled — aborting run.")
         sys.exit(1)
 
-    work_items = [(policy, _build_drop_policy_sql(policy)) for policy in policies_sorted]
+    work_items = [
+        (policy, _build_drop_policy_sql(policy)) for policy in policies_sorted
+    ]
 
     def worker(item: tuple[Policy, str]) -> None:
         _policy, stmt = item
@@ -142,7 +146,10 @@ def _execute_policy_deletes(
         change_logger.log_policy_delete(policy)
 
     results = parallel_for_each(
-        work_items, worker, max_workers=max_workers, on_complete=on_complete,
+        work_items,
+        worker,
+        max_workers=max_workers,
+        on_complete=on_complete,
     )
     return [stmt for (_policy, stmt), _result, error in results if error is None]
 
@@ -173,7 +180,8 @@ def _run_policy_batch(
     in input order.
     """
     work_items: list[tuple[Policy, str]] = [
-        (policy, _build_policy_sql(policy, or_replace=or_replace)) for policy in policies
+        (policy, _build_policy_sql(policy, or_replace=or_replace))
+        for policy in policies
     ]
 
     def worker(item: tuple[Policy, str]) -> None:
@@ -195,7 +203,10 @@ def _run_policy_batch(
             change_logger.log_policy_create(policy)
 
     results = parallel_for_each(
-        work_items, worker, max_workers=max_workers, on_complete=on_complete,
+        work_items,
+        worker,
+        max_workers=max_workers,
+        on_complete=on_complete,
     )
     if dry_run:
         return []
@@ -227,23 +238,41 @@ def execute_policy_diff(
 
     creates_by_type = _bucket_by_sec_type(diff.to_create)
     for sec_type in sorted(creates_by_type, key=lambda t: t.value):
-        statements.extend(_run_policy_batch(
-            uc_helper, creates_by_type[sec_type], diff.old_policies,
-            or_replace=False,
-            change_logger=change_logger, dry_run=dry_run, max_workers=workers,
-        ))
+        statements.extend(
+            _run_policy_batch(
+                uc_helper,
+                creates_by_type[sec_type],
+                diff.old_policies,
+                or_replace=False,
+                change_logger=change_logger,
+                dry_run=dry_run,
+                max_workers=workers,
+            )
+        )
 
     replaces_by_type = _bucket_by_sec_type(diff.to_replace)
     for sec_type in sorted(replaces_by_type, key=lambda t: t.value):
-        statements.extend(_run_policy_batch(
-            uc_helper, replaces_by_type[sec_type], diff.old_policies,
-            or_replace=True,
-            change_logger=change_logger, dry_run=dry_run, max_workers=workers,
-        ))
+        statements.extend(
+            _run_policy_batch(
+                uc_helper,
+                replaces_by_type[sec_type],
+                diff.old_policies,
+                or_replace=True,
+                change_logger=change_logger,
+                dry_run=dry_run,
+                max_workers=workers,
+            )
+        )
 
-    statements.extend(_execute_policy_deletes(
-        uc_helper, diff, change_logger,
-        dry_run=dry_run, force=force, max_workers=workers,
-    ))
+    statements.extend(
+        _execute_policy_deletes(
+            uc_helper,
+            diff,
+            change_logger,
+            dry_run=dry_run,
+            force=force,
+            max_workers=workers,
+        )
+    )
 
     return statements

@@ -22,8 +22,7 @@ def compile_desired_groups(config: ResourcesConfig) -> set[Group]:
             display_name=group.name,
             id=group.id or "",
             members=frozenset(
-                Principal(PrincipalType.UNKNOWN, name=m)
-                for m in (group.members or ())
+                Principal(PrincipalType.UNKNOWN, name=m) for m in (group.members or ())
             ),
         )
         for group in config.groups.values()

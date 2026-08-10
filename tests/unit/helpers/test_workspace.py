@@ -12,7 +12,6 @@ from uc_declarative_abac.utils import (
 )
 
 
-
 # ---------------------------------------------------------------------------
 # Mock helpers
 # ---------------------------------------------------------------------------
@@ -267,7 +266,9 @@ def test_workspace_helper_find_unknown_principals_returns_unknown_names() -> Non
     assert result == ["ghost_team"]
 
 
-def test_workspace_helper_find_unknown_principals_returns_empty_when_all_valid() -> None:
+def test_workspace_helper_find_unknown_principals_returns_empty_when_all_valid() -> (
+    None
+):
     """Returns an empty list when every principal exists in the account."""
     client = _make_workspace_client(
         users=[_make_user("alice@example.com")],
@@ -503,7 +504,9 @@ def test_workspace_helper_appends_account_system_groups_in_workspace_scim() -> N
         assert resolved.identifier == group_name
 
 
-def test_workspace_helper_does_not_duplicate_account_system_group_in_workspace_scim() -> None:
+def test_workspace_helper_does_not_duplicate_account_system_group_in_workspace_scim() -> (
+    None
+):
     """If the workspace SCIM API already returns a system group, it is present
     exactly once alongside the normal workspace groups."""
     client = MagicMock()
@@ -523,11 +526,17 @@ def test_workspace_helper_does_not_duplicate_account_system_group_in_workspace_s
     assert principals["account users"].principal_type == PrincipalType.GROUP
     assert principals["account admins"].principal_type == PrincipalType.GROUP
     assert principals["data_engineers"].principal_type == PrincipalType.GROUP
-    group_names = [name for name, p in principals.items() if p.principal_type == PrincipalType.GROUP]
+    group_names = [
+        name
+        for name, p in principals.items()
+        if p.principal_type == PrincipalType.GROUP
+    ]
     assert group_names.count("account users") == 1
 
 
-def test_workspace_helper_does_not_synthesize_account_system_groups_in_account_scim() -> None:
+def test_workspace_helper_does_not_synthesize_account_system_groups_in_account_scim() -> (
+    None
+):
     """In the default account-SCIM mode the helper does not synthesize the system
     groups — the account SCIM proxy already returns every account group, so only
     what the proxy returns is present."""
@@ -551,13 +560,19 @@ def test_workspace_helper_fetches_account_principal_types_in_parallel() -> None:
     """Users, groups, and service principals are fetched concurrently — total wall
     time should be close to one delay, not three."""
     import time
+
     client = MagicMock()
 
     delay_seconds = 0.3
 
     def _slow_do(method, path, **kwargs):
         time.sleep(delay_seconds)
-        return {"totalResults": 0, "startIndex": 1, "itemsPerPage": 100, "Resources": []}
+        return {
+            "totalResults": 0,
+            "startIndex": 1,
+            "itemsPerPage": 100,
+            "Resources": [],
+        }
 
     client.api_client.do.side_effect = _slow_do
 
@@ -577,6 +592,7 @@ def test_workspace_helper_fetches_account_principal_types_in_parallel() -> None:
 def test_workspace_helper_fetches_workspace_principal_types_in_parallel() -> None:
     """Same parallelism check for the use_workspace_scim=True code path."""
     import time
+
     client = MagicMock()
 
     delay_seconds = 0.3
@@ -635,7 +651,9 @@ def _make_grant_rule(role: str, principals: list[str]) -> MagicMock:
     return rule
 
 
-def _make_rule_set_response(etag: str = "etag-1", grant_rules: list[MagicMock] | None = None) -> MagicMock:
+def _make_rule_set_response(
+    etag: str = "etag-1", grant_rules: list[MagicMock] | None = None
+) -> MagicMock:
     resp = MagicMock()
     resp.etag = etag
     resp.grant_rules = grant_rules or []
@@ -654,25 +672,39 @@ def test_workspace_helper_fetch_actual_governed_tags_returns_policies() -> None:
     from uc_declarative_abac.governed_tags import GovernedTag
 
     client = MagicMock()
-    client.tag_policies.list_tag_policies.return_value = iter([
-        _make_tag_policy_mock("pii", "PII data", ["name", "email"]),
-        _make_tag_policy_mock("classification", "Data classification", ["public", "internal"]),
-    ])
+    client.tag_policies.list_tag_policies.return_value = iter(
+        [
+            _make_tag_policy_mock("pii", "PII data", ["name", "email"]),
+            _make_tag_policy_mock(
+                "classification", "Data classification", ["public", "internal"]
+            ),
+        ]
+    )
 
     helper = WorkspaceHelper(client)
     result = helper.fetch_actual_governed_tags()
 
-    assert GovernedTag(
-        name="pii", description="PII data", allowed_values=frozenset({"name", "email"}),
-    ) in result
-    assert GovernedTag(
-        name="classification",
-        description="Data classification",
-        allowed_values=frozenset({"public", "internal"}),
-    ) in result
+    assert (
+        GovernedTag(
+            name="pii",
+            description="PII data",
+            allowed_values=frozenset({"name", "email"}),
+        )
+        in result
+    )
+    assert (
+        GovernedTag(
+            name="classification",
+            description="Data classification",
+            allowed_values=frozenset({"public", "internal"}),
+        )
+        in result
+    )
 
 
-def test_workspace_helper_fetch_actual_governed_tags_is_empty_when_no_policies() -> None:
+def test_workspace_helper_fetch_actual_governed_tags_is_empty_when_no_policies() -> (
+    None
+):
     """When the account has no tag policies, fetch returns an empty set."""
     client = MagicMock()
     client.tag_policies.list_tag_policies.return_value = iter([])
@@ -682,19 +714,25 @@ def test_workspace_helper_fetch_actual_governed_tags_is_empty_when_no_policies()
     assert helper.fetch_actual_governed_tags() == set()
 
 
-def test_workspace_helper_fetch_actual_governed_tags_parses_description_and_values() -> None:
+def test_workspace_helper_fetch_actual_governed_tags_parses_description_and_values() -> (
+    None
+):
     """Null description becomes empty string; absent values becomes empty frozenset."""
     from uc_declarative_abac.governed_tags import GovernedTag
 
     client = MagicMock()
-    client.tag_policies.list_tag_policies.return_value = iter([
-        _make_tag_policy_mock("bare", None, None),
-    ])
+    client.tag_policies.list_tag_policies.return_value = iter(
+        [
+            _make_tag_policy_mock("bare", None, None),
+        ]
+    )
 
     helper = WorkspaceHelper(client)
     result = helper.fetch_actual_governed_tags()
 
-    assert GovernedTag(name="bare", description="", allowed_values=frozenset()) in result
+    assert (
+        GovernedTag(name="bare", description="", allowed_values=frozenset()) in result
+    )
 
 
 def test_workspace_helper_create_tag_policy_passes_sdk_args() -> None:
@@ -717,11 +755,15 @@ def test_workspace_helper_update_tag_policy_uses_provided_update_mask() -> None:
     client = MagicMock()
     helper = WorkspaceHelper(client)
 
-    policy = TagPolicy(tag_key="pii", description="New desc", values=[Value(name="email")])
+    policy = TagPolicy(
+        tag_key="pii", description="New desc", values=[Value(name="email")]
+    )
     helper.update_tag_policy("pii", policy, update_mask="description,values")
 
     client.tag_policies.update_tag_policy.assert_called_once_with(
-        tag_key="pii", tag_policy=policy, update_mask="description,values",
+        tag_key="pii",
+        tag_policy=policy,
+        update_mask="description,values",
     )
 
 
@@ -743,9 +785,11 @@ def test_workspace_helper_delete_tag_policy_passes_sdk_args() -> None:
 def test_workspace_helper_caches_list_tag_policies_across_calls() -> None:
     """Repeated fetch_actual_governed_tags calls share one list_tag_policies round-trip."""
     client = _client_with_account_id()
-    client.tag_policies.list_tag_policies.return_value = iter([
-        _make_tag_policy_mock("pii", "PII", ["name"], id="tp-1"),
-    ])
+    client.tag_policies.list_tag_policies.return_value = iter(
+        [
+            _make_tag_policy_mock("pii", "PII", ["name"], id="tp-1"),
+        ]
+    )
 
     helper = WorkspaceHelper(client)
     helper.fetch_actual_governed_tags()
@@ -757,9 +801,11 @@ def test_workspace_helper_caches_list_tag_policies_across_calls() -> None:
 def test_workspace_helper_fetch_skips_rulesets_when_desired_names_is_none() -> None:
     """Passing no desired_names omits per-tag get_rule_set calls entirely."""
     client = _client_with_account_id()
-    client.tag_policies.list_tag_policies.return_value = iter([
-        _make_tag_policy_mock("pii", "PII", ["name"], id="tp-1"),
-    ])
+    client.tag_policies.list_tag_policies.return_value = iter(
+        [
+            _make_tag_policy_mock("pii", "PII", ["name"], id="tp-1"),
+        ]
+    )
 
     helper = WorkspaceHelper(client)
     helper.fetch_actual_governed_tags()
@@ -770,9 +816,11 @@ def test_workspace_helper_fetch_skips_rulesets_when_desired_names_is_none() -> N
 def test_workspace_helper_fetch_skips_rulesets_when_no_intersection() -> None:
     """desired_names with no overlap to actual still skips per-tag get_rule_set calls."""
     client = _client_with_account_id()
-    client.tag_policies.list_tag_policies.return_value = iter([
-        _make_tag_policy_mock("legacy", "L", ["a"], id="tp-leg"),
-    ])
+    client.tag_policies.list_tag_policies.return_value = iter(
+        [
+            _make_tag_policy_mock("legacy", "L", ["a"], id="tp-leg"),
+        ]
+    )
 
     helper = WorkspaceHelper(client)
     helper.fetch_actual_governed_tags(desired_names={"pii", "classification"})
@@ -783,11 +831,15 @@ def test_workspace_helper_fetch_skips_rulesets_when_no_intersection() -> None:
 def test_workspace_helper_fetch_calls_get_rule_set_for_intersection_only() -> None:
     """get_rule_set is called once per tag in (actual ∩ desired_names) — not for tags outside the intersection."""
     client = _client_with_account_id()
-    client.tag_policies.list_tag_policies.return_value = iter([
-        _make_tag_policy_mock("pii", "PII", ["name"], id="tp-pii"),
-        _make_tag_policy_mock("legacy", "L", ["a"], id="tp-leg"),
-    ])
-    client.account_access_control_proxy.get_rule_set.return_value = _make_rule_set_response()
+    client.tag_policies.list_tag_policies.return_value = iter(
+        [
+            _make_tag_policy_mock("pii", "PII", ["name"], id="tp-pii"),
+            _make_tag_policy_mock("legacy", "L", ["a"], id="tp-leg"),
+        ]
+    )
+    client.account_access_control_proxy.get_rule_set.return_value = (
+        _make_rule_set_response()
+    )
 
     helper = WorkspaceHelper(client)
     helper.fetch_actual_governed_tags(desired_names={"pii"})
@@ -801,10 +853,14 @@ def test_workspace_helper_fetch_calls_get_rule_set_for_intersection_only() -> No
 def test_workspace_helper_fetch_uses_correct_ruleset_name_format() -> None:
     """The ruleset name is accounts/<account_id>/tagPolicies/<id>/ruleSets/default."""
     client = _client_with_account_id(account_id="acct-xyz")
-    client.tag_policies.list_tag_policies.return_value = iter([
-        _make_tag_policy_mock("pii", "PII", ["name"], id="tp-pii"),
-    ])
-    client.account_access_control_proxy.get_rule_set.return_value = _make_rule_set_response()
+    client.tag_policies.list_tag_policies.return_value = iter(
+        [
+            _make_tag_policy_mock("pii", "PII", ["name"], id="tp-pii"),
+        ]
+    )
+    client.account_access_control_proxy.get_rule_set.return_value = (
+        _make_rule_set_response()
+    )
 
     helper = WorkspaceHelper(client)
     helper.fetch_actual_governed_tags(desired_names={"pii"})
@@ -816,26 +872,34 @@ def test_workspace_helper_fetch_uses_correct_ruleset_name_format() -> None:
 
 def test_workspace_helper_fetch_parses_user_principal_string() -> None:
     """`users/<username>` in grant_rules becomes Principal(UNKNOWN, identifier=<username>)."""
-    from uc_declarative_abac.governed_tags import GovernedTag
     from uc_declarative_abac.principals import Principal
     from uc_declarative_abac.types import PrincipalType
 
     client = _client_with_account_id()
-    client.tag_policies.list_tag_policies.return_value = iter([
-        _make_tag_policy_mock("pii", "PII", ["name"], id="tp-pii"),
-    ])
-    client.account_access_control_proxy.get_rule_set.return_value = _make_rule_set_response(
-        grant_rules=[_make_grant_rule(
-            role="roles/tagPolicy.assigner",
-            principals=["users/alice@example.com"],
-        )],
+    client.tag_policies.list_tag_policies.return_value = iter(
+        [
+            _make_tag_policy_mock("pii", "PII", ["name"], id="tp-pii"),
+        ]
+    )
+    client.account_access_control_proxy.get_rule_set.return_value = (
+        _make_rule_set_response(
+            grant_rules=[
+                _make_grant_rule(
+                    role="roles/tagPolicy.assigner",
+                    principals=["users/alice@example.com"],
+                )
+            ],
+        )
     )
 
     helper = WorkspaceHelper(client)
     result = helper.fetch_actual_governed_tags(desired_names={"pii"})
 
     pii = next(gt for gt in result if gt.name == "pii")
-    assert Principal(PrincipalType.UNKNOWN, identifier="alice@example.com") in pii.assigners
+    assert (
+        Principal(PrincipalType.UNKNOWN, identifier="alice@example.com")
+        in pii.assigners
+    )
 
 
 def test_workspace_helper_fetch_parses_group_principal_string() -> None:
@@ -844,21 +908,29 @@ def test_workspace_helper_fetch_parses_group_principal_string() -> None:
     from uc_declarative_abac.types import PrincipalType
 
     client = _client_with_account_id()
-    client.tag_policies.list_tag_policies.return_value = iter([
-        _make_tag_policy_mock("pii", "PII", ["name"], id="tp-pii"),
-    ])
-    client.account_access_control_proxy.get_rule_set.return_value = _make_rule_set_response(
-        grant_rules=[_make_grant_rule(
-            role="roles/tagPolicy.assigner",
-            principals=["groups/data_engineers"],
-        )],
+    client.tag_policies.list_tag_policies.return_value = iter(
+        [
+            _make_tag_policy_mock("pii", "PII", ["name"], id="tp-pii"),
+        ]
+    )
+    client.account_access_control_proxy.get_rule_set.return_value = (
+        _make_rule_set_response(
+            grant_rules=[
+                _make_grant_rule(
+                    role="roles/tagPolicy.assigner",
+                    principals=["groups/data_engineers"],
+                )
+            ],
+        )
     )
 
     helper = WorkspaceHelper(client)
     result = helper.fetch_actual_governed_tags(desired_names={"pii"})
 
     pii = next(gt for gt in result if gt.name == "pii")
-    assert Principal(PrincipalType.UNKNOWN, identifier="data_engineers") in pii.assigners
+    assert (
+        Principal(PrincipalType.UNKNOWN, identifier="data_engineers") in pii.assigners
+    )
 
 
 def test_workspace_helper_fetch_parses_sp_principal_string() -> None:
@@ -867,14 +939,20 @@ def test_workspace_helper_fetch_parses_sp_principal_string() -> None:
     from uc_declarative_abac.types import PrincipalType
 
     client = _client_with_account_id()
-    client.tag_policies.list_tag_policies.return_value = iter([
-        _make_tag_policy_mock("pii", "PII", ["name"], id="tp-pii"),
-    ])
-    client.account_access_control_proxy.get_rule_set.return_value = _make_rule_set_response(
-        grant_rules=[_make_grant_rule(
-            role="roles/tagPolicy.assigner",
-            principals=["servicePrincipals/app-123-uuid"],
-        )],
+    client.tag_policies.list_tag_policies.return_value = iter(
+        [
+            _make_tag_policy_mock("pii", "PII", ["name"], id="tp-pii"),
+        ]
+    )
+    client.account_access_control_proxy.get_rule_set.return_value = (
+        _make_rule_set_response(
+            grant_rules=[
+                _make_grant_rule(
+                    role="roles/tagPolicy.assigner",
+                    principals=["servicePrincipals/app-123-uuid"],
+                )
+            ],
+        )
     )
 
     helper = WorkspaceHelper(client)
@@ -887,14 +965,24 @@ def test_workspace_helper_fetch_parses_sp_principal_string() -> None:
 def test_workspace_helper_fetch_filters_non_assign_grant_rules() -> None:
     """Grant rules whose role is not the ASSIGN role are skipped — they don't contribute to assigners."""
     client = _client_with_account_id()
-    client.tag_policies.list_tag_policies.return_value = iter([
-        _make_tag_policy_mock("pii", "PII", ["name"], id="tp-pii"),
-    ])
-    client.account_access_control_proxy.get_rule_set.return_value = _make_rule_set_response(
-        grant_rules=[
-            _make_grant_rule(role="roles/tagPolicy.someOtherRole", principals=["users/bob@example.com"]),
-            _make_grant_rule(role="roles/tagPolicy.assigner", principals=["users/alice@example.com"]),
-        ],
+    client.tag_policies.list_tag_policies.return_value = iter(
+        [
+            _make_tag_policy_mock("pii", "PII", ["name"], id="tp-pii"),
+        ]
+    )
+    client.account_access_control_proxy.get_rule_set.return_value = (
+        _make_rule_set_response(
+            grant_rules=[
+                _make_grant_rule(
+                    role="roles/tagPolicy.someOtherRole",
+                    principals=["users/bob@example.com"],
+                ),
+                _make_grant_rule(
+                    role="roles/tagPolicy.assigner",
+                    principals=["users/alice@example.com"],
+                ),
+            ],
+        )
     )
 
     helper = WorkspaceHelper(client)
@@ -913,7 +1001,9 @@ def test_workspace_helper_fetch_filters_non_assign_grant_rules() -> None:
 def test_workspace_helper_get_tag_policy_rule_set_passes_through() -> None:
     """get_tag_policy_rule_set forwards to the SDK with empty etag for fresh state."""
     client = _client_with_account_id()
-    client.account_access_control_proxy.get_rule_set.return_value = _make_rule_set_response()
+    client.account_access_control_proxy.get_rule_set.return_value = (
+        _make_rule_set_response()
+    )
 
     helper = WorkspaceHelper(client)
     helper.get_tag_policy_rule_set("tp-pii")
@@ -932,7 +1022,11 @@ def test_workspace_helper_update_tag_policy_rule_set_builds_update_request() -> 
     client = _client_with_account_id()
     helper = WorkspaceHelper(client)
 
-    rules = [GrantRule(role="roles/tagPolicy.assigner", principals=["users/alice@example.com"])]
+    rules = [
+        GrantRule(
+            role="roles/tagPolicy.assigner", principals=["users/alice@example.com"]
+        )
+    ]
     helper.update_tag_policy_rule_set("tp-pii", etag="etag-42", grant_rules=rules)
 
     client.account_access_control_proxy.update_rule_set.assert_called_once()
@@ -948,6 +1042,7 @@ def test_workspace_helper_update_tag_policy_rule_set_builds_update_request() -> 
 def test_workspace_helper_raises_when_account_id_unset_for_rule_set_call() -> None:
     """Building a ruleset name without account_id raises a clear OrchestratorError."""
     from uc_declarative_abac.utils import OrchestratorError
+
     client = _client_with_account_id(account_id=None)
     helper = WorkspaceHelper(client)
 
@@ -959,7 +1054,9 @@ def test_workspace_helper_register_created_tag_policy_updates_id_cache() -> None
     """register_created_tag_policy makes the new tag's id available to subsequent rule-set calls."""
     client = _client_with_account_id()
     new_policy = _make_tag_policy_mock("brand_new", "Bnd", ["a"], id="tp-new")
-    client.account_access_control_proxy.get_rule_set.return_value = _make_rule_set_response()
+    client.account_access_control_proxy.get_rule_set.return_value = (
+        _make_rule_set_response()
+    )
 
     helper = WorkspaceHelper(client)
     helper.register_created_tag_policy(new_policy)
@@ -975,10 +1072,14 @@ def test_workspace_helper_register_created_tag_policy_updates_id_cache() -> None
 def test_workspace_helper_get_tag_policy_rule_set_by_name_uses_cached_id() -> None:
     """get_tag_policy_rule_set_by_name resolves name → id from the cache populated by list_tag_policies."""
     client = _client_with_account_id()
-    client.tag_policies.list_tag_policies.return_value = iter([
-        _make_tag_policy_mock("pii", "PII", ["name"], id="tp-pii"),
-    ])
-    client.account_access_control_proxy.get_rule_set.return_value = _make_rule_set_response()
+    client.tag_policies.list_tag_policies.return_value = iter(
+        [
+            _make_tag_policy_mock("pii", "PII", ["name"], id="tp-pii"),
+        ]
+    )
+    client.account_access_control_proxy.get_rule_set.return_value = (
+        _make_rule_set_response()
+    )
 
     helper = WorkspaceHelper(client)
     helper.fetch_actual_governed_tags()  # populates id cache

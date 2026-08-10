@@ -6,7 +6,12 @@ from uc_declarative_abac.principals.resolver import (
     log_principal_resolution_failure,
     PrincipalResolver,
 )
-from uc_declarative_abac.principals.state import Group, GroupDiff, GroupRename, Principal
+from uc_declarative_abac.principals.state import (
+    Group,
+    GroupDiff,
+    GroupRename,
+    Principal,
+)
 from uc_declarative_abac.principals.compiler import compile_desired_groups
 from uc_declarative_abac.principals.differ import compute_group_diff
 from uc_declarative_abac.principals.executor import execute_group_diff

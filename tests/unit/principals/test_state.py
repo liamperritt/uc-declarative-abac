@@ -26,13 +26,19 @@ def test_principal_rejects_both_name_and_identifier_empty_when_resolved():
 def test_principal_rejects_resolved_with_empty_name():
     """A resolved Principal with an empty name raises."""
     with pytest.raises(ValueError, match="both name and identifier"):
-        Principal(principal_type=PrincipalType.SERVICE_PRINCIPAL, name="", identifier="app-id")
+        Principal(
+            principal_type=PrincipalType.SERVICE_PRINCIPAL, name="", identifier="app-id"
+        )
 
 
 def test_principal_rejects_resolved_with_empty_identifier():
     """A resolved Principal with an empty identifier raises."""
     with pytest.raises(ValueError, match="both name and identifier"):
-        Principal(principal_type=PrincipalType.SERVICE_PRINCIPAL, name="sp_name", identifier="")
+        Principal(
+            principal_type=PrincipalType.SERVICE_PRINCIPAL,
+            name="sp_name",
+            identifier="",
+        )
 
 
 def test_principal_allows_unresolved_with_only_name():
@@ -116,5 +122,9 @@ def test_principal_inequality_across_types():
 def test_principal_inequality_across_resolution_states():
     """An unresolved Principal and a resolved Principal are not equal even with the same name."""
     unresolved = Principal(principal_type=PrincipalType.UNKNOWN, name="data_engineers")
-    resolved = Principal(principal_type=PrincipalType.GROUP, name="data_engineers", identifier="data_engineers")
+    resolved = Principal(
+        principal_type=PrincipalType.GROUP,
+        name="data_engineers",
+        identifier="data_engineers",
+    )
     assert unresolved != resolved

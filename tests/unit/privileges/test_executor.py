@@ -20,9 +20,7 @@ def _assert_sql_contains(sql: str, *fragments: str):
     """Assert that every fragment appears in the SQL string (case-insensitive, ignoring backticks)."""
     normalised = sql.upper().replace("`", "")
     for fragment in fragments:
-        assert fragment.upper() in normalised, (
-            f"Expected {fragment!r} in SQL: {sql}"
-        )
+        assert fragment.upper() in normalised, f"Expected {fragment!r} in SQL: {sql}"
 
 
 # ---------------------------------------------------------------------------
@@ -34,13 +32,14 @@ def test_privilege_executor_generates_grant_sql():
     """to_grant privileges produce GRANT statements with correct components."""
     uc_helper = MagicMock()
 
-
     diff = PrivilegeDiff(
         to_grant={
             SecurablePrivilege(
                 securable_type=SecurableType.TABLE,
                 securable_full_name="catalog.schema.orders",
-                principal=Principal(PrincipalType.GROUP, "data_analysts", "data_analysts"),
+                principal=Principal(
+                    PrincipalType.GROUP, "data_analysts", "data_analysts"
+                ),
                 privilege_type=PrivilegeType.SELECT,
             ),
         },
@@ -51,7 +50,9 @@ def test_privilege_executor_generates_grant_sql():
     assert len(stmts) == 1
     sql = stmts[0]
 
-    _assert_sql_contains(sql, "GRANT", "SELECT", "TABLE", "catalog.schema.orders", "data_analysts")
+    _assert_sql_contains(
+        sql, "GRANT", "SELECT", "TABLE", "catalog.schema.orders", "data_analysts"
+    )
     _assert_sql_contains(sql, "TO")
     # Securable name should be backtick-quoted
     assert "`catalog`.`schema`.`orders`" in sql
@@ -61,7 +62,6 @@ def test_privilege_executor_generates_grant_sql():
 def test_privilege_executor_generates_revoke_sql():
     """to_revoke privileges produce REVOKE statements with correct components."""
     uc_helper = MagicMock()
-
 
     diff = PrivilegeDiff(
         to_revoke={
@@ -79,7 +79,9 @@ def test_privilege_executor_generates_revoke_sql():
     assert len(stmts) == 1
     sql = stmts[0]
 
-    _assert_sql_contains(sql, "REVOKE", "USE_SCHEMA", "SCHEMA", "catalog.sales", "temp_users")
+    _assert_sql_contains(
+        sql, "REVOKE", "USE_SCHEMA", "SCHEMA", "catalog.sales", "temp_users"
+    )
     # REVOKE statements use the FROM keyword
     _assert_sql_contains(sql, "FROM")
     uc_helper.execute_sql.assert_called_once_with(sql)
@@ -94,13 +96,16 @@ def test_privilege_executor_resolves_sp_display_name_to_application_id():
     """When a principal is a service principal, the executor uses its application_id."""
     uc_helper = MagicMock()
 
-
     diff = PrivilegeDiff(
         to_grant={
             SecurablePrivilege(
                 securable_type=SecurableType.CATALOG,
                 securable_full_name="my_catalog",
-                principal=Principal(PrincipalType.SERVICE_PRINCIPAL, "abcd1234-0000-0000-0000-000000000001", "my-etl-service"),
+                principal=Principal(
+                    PrincipalType.SERVICE_PRINCIPAL,
+                    "abcd1234-0000-0000-0000-000000000001",
+                    "my-etl-service",
+                ),
                 privilege_type=PrivilegeType.USE_CATALOG,
             ),
         },
@@ -123,7 +128,6 @@ def test_privilege_executor_uses_principal_identifier_in_grant_sql():
     from uc_declarative_abac.types import PrincipalType
 
     uc_helper = MagicMock()
-
 
     priv = SecurablePrivilege(
         securable_type=SecurableType.TABLE,
@@ -154,13 +158,14 @@ def test_privilege_executor_returns_all_executed_statements():
     """The return list contains every SQL statement that was executed."""
     uc_helper = MagicMock()
 
-
     diff = PrivilegeDiff(
         to_grant={
             SecurablePrivilege(
                 securable_type=SecurableType.TABLE,
                 securable_full_name="catalog.schema.orders",
-                principal=Principal(PrincipalType.GROUP, "data_analysts", "data_analysts"),
+                principal=Principal(
+                    PrincipalType.GROUP, "data_analysts", "data_analysts"
+                ),
                 privilege_type=PrivilegeType.SELECT,
             ),
         },
@@ -168,7 +173,9 @@ def test_privilege_executor_returns_all_executed_statements():
             SecurablePrivilege(
                 securable_type=SecurableType.VOLUME,
                 securable_full_name="catalog.landing.raw_events",
-                principal=Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
+                principal=Principal(
+                    PrincipalType.GROUP, "data_engineers", "data_engineers"
+                ),
                 privilege_type=PrivilegeType.READ_VOLUME,
             ),
         },
@@ -179,11 +186,17 @@ def test_privilege_executor_returns_all_executed_statements():
     # Exactly two statements: one GRANT, one REVOKE.
     assert len(stmts) == 2
 
-    grant_stmts = [s for s in stmts if "GRANT" in s.upper() and "REVOKE" not in s.upper()]
+    grant_stmts = [
+        s for s in stmts if "GRANT" in s.upper() and "REVOKE" not in s.upper()
+    ]
     revoke_stmts = [s for s in stmts if "REVOKE" in s.upper()]
 
-    assert len(grant_stmts) == 1, f"Expected exactly one GRANT statement, got {len(grant_stmts)}"
-    assert len(revoke_stmts) == 1, f"Expected exactly one REVOKE statement, got {len(revoke_stmts)}"
+    assert len(grant_stmts) == 1, (
+        f"Expected exactly one GRANT statement, got {len(grant_stmts)}"
+    )
+    assert len(revoke_stmts) == 1, (
+        f"Expected exactly one REVOKE statement, got {len(revoke_stmts)}"
+    )
 
     # Every returned statement must have been passed to execute_sql.
     executed_sqls = [call.args[0] for call in uc_helper.execute_sql.call_args_list]
@@ -193,7 +206,6 @@ def test_privilege_executor_returns_all_executed_statements():
 def test_privilege_executor_executes_nothing_given_empty_diff():
     """An empty PrivilegeDiff should produce no SQL and no execute_sql calls."""
     uc_helper = MagicMock()
-
 
     diff = PrivilegeDiff()
 
@@ -243,8 +255,12 @@ def test_privilege_executor_executes_sql_in_securable_order():
     # Expected order: CATALOG cat_a, CATALOG cat_b, TABLE cat.s.table_a, TABLE cat.s.table_b
     assert "cat_a" in stmts[0]
     assert "cat_b" in stmts[1]
-    assert "cat.s.table_a".replace(".", "`.`") in stmts[2] or "cat.s.table_a" in stmts[2].replace("`", "")
-    assert "cat.s.table_b".replace(".", "`.`") in stmts[3] or "cat.s.table_b" in stmts[3].replace("`", "")
+    assert "cat.s.table_a".replace(".", "`.`") in stmts[2] or "cat.s.table_a" in stmts[
+        2
+    ].replace("`", "")
+    assert "cat.s.table_b".replace(".", "`.`") in stmts[3] or "cat.s.table_b" in stmts[
+        3
+    ].replace("`", "")
 
 
 # ---------------------------------------------------------------------------
@@ -272,13 +288,17 @@ def test_privilege_executor_continues_after_sql_failure():
             SecurablePrivilege(
                 securable_type=SecurableType.TABLE,
                 securable_full_name="catalog.schema.orders",
-                principal=Principal(PrincipalType.GROUP, "data_analysts", "data_analysts"),
+                principal=Principal(
+                    PrincipalType.GROUP, "data_analysts", "data_analysts"
+                ),
                 privilege_type=PrivilegeType.SELECT,
             ),
             SecurablePrivilege(
                 securable_type=SecurableType.SCHEMA,
                 securable_full_name="catalog.sales",
-                principal=Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
+                principal=Principal(
+                    PrincipalType.GROUP, "data_engineers", "data_engineers"
+                ),
                 privilege_type=PrivilegeType.USE_SCHEMA,
             ),
         },
@@ -308,13 +328,17 @@ def test_privilege_executor_collects_all_errors():
             SecurablePrivilege(
                 securable_type=SecurableType.TABLE,
                 securable_full_name="catalog.schema.orders",
-                principal=Principal(PrincipalType.GROUP, "data_analysts", "data_analysts"),
+                principal=Principal(
+                    PrincipalType.GROUP, "data_analysts", "data_analysts"
+                ),
                 privilege_type=PrivilegeType.SELECT,
             ),
             SecurablePrivilege(
                 securable_type=SecurableType.SCHEMA,
                 securable_full_name="catalog.sales",
-                principal=Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
+                principal=Principal(
+                    PrincipalType.GROUP, "data_engineers", "data_engineers"
+                ),
                 privilege_type=PrivilegeType.USE_SCHEMA,
             ),
         },
@@ -345,7 +369,9 @@ def test_privilege_executor_logs_changes_in_dry_run():
             SecurablePrivilege(
                 securable_type=SecurableType.SCHEMA,
                 securable_full_name="catalog.sales",
-                principal=Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
+                principal=Principal(
+                    PrincipalType.GROUP, "data_engineers", "data_engineers"
+                ),
                 privilege_type=PrivilegeType.USE_SCHEMA,
             ),
         },
@@ -378,17 +404,21 @@ def test_privilege_executor_logs_changes_in_dry_run():
 def test_privilege_executor_parallel_grants_run_as_batch():
     """Multiple grants on the same securable_type run in one parallel batch."""
     uc_helper = MagicMock()
-    diff = PrivilegeDiff(to_grant={
-        SecurablePrivilege(
-            securable_type=SecurableType.TABLE,
-            securable_full_name=f"cat.s.t{i}",
-            principal=Principal(PrincipalType.GROUP, "g", "g"),
-            privilege_type=PrivilegeType.SELECT,
-        )
-        for i in range(6)
-    })
+    diff = PrivilegeDiff(
+        to_grant={
+            SecurablePrivilege(
+                securable_type=SecurableType.TABLE,
+                securable_full_name=f"cat.s.t{i}",
+                principal=Principal(PrincipalType.GROUP, "g", "g"),
+                privilege_type=PrivilegeType.SELECT,
+            )
+            for i in range(6)
+        }
+    )
 
-    stmts = execute_privilege_diff(uc_helper, diff, ChangeLogger(), max_parallel_changes=4)
+    stmts = execute_privilege_diff(
+        uc_helper, diff, ChangeLogger(), max_parallel_changes=4
+    )
 
     assert uc_helper.execute_sql.call_count == 6
     assert len(stmts) == 6
@@ -397,19 +427,25 @@ def test_privilege_executor_parallel_grants_run_as_batch():
 def test_privilege_executor_parallel_error_isolated_per_item():
     """A failing GRANT is logged; siblings still execute."""
     uc_helper = MagicMock()
-    uc_helper.execute_sql.side_effect = lambda sql: (_ for _ in ()).throw(RuntimeError("boom")) if "t1" in sql else None
+    uc_helper.execute_sql.side_effect = lambda sql: (
+        (_ for _ in ()).throw(RuntimeError("boom")) if "t1" in sql else None
+    )
     change_logger = ChangeLogger()
-    diff = PrivilegeDiff(to_grant={
-        SecurablePrivilege(
-            securable_type=SecurableType.TABLE,
-            securable_full_name=f"cat.s.t{i}",
-            principal=Principal(PrincipalType.GROUP, "g", "g"),
-            privilege_type=PrivilegeType.SELECT,
-        )
-        for i in range(3)
-    })
+    diff = PrivilegeDiff(
+        to_grant={
+            SecurablePrivilege(
+                securable_type=SecurableType.TABLE,
+                securable_full_name=f"cat.s.t{i}",
+                principal=Principal(PrincipalType.GROUP, "g", "g"),
+                privilege_type=PrivilegeType.SELECT,
+            )
+            for i in range(3)
+        }
+    )
 
-    stmts = execute_privilege_diff(uc_helper, diff, change_logger, max_parallel_changes=4)
+    stmts = execute_privilege_diff(
+        uc_helper, diff, change_logger, max_parallel_changes=4
+    )
 
     assert uc_helper.execute_sql.call_count == 3
     assert len(change_logger.errors) == 1

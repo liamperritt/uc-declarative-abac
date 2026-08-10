@@ -85,7 +85,9 @@ def test_principal_resolver_resolves_sp_by_identifier():
     ws_helper = _make_ws_helper(service_principals={"sp_sales": "app-id-123"})
     resolver = PrincipalResolver(ws_helper)
 
-    unresolved = Principal(principal_type=PrincipalType.UNKNOWN, identifier="app-id-123")
+    unresolved = Principal(
+        principal_type=PrincipalType.UNKNOWN, identifier="app-id-123"
+    )
     resolved = resolver.resolve_principal(unresolved)
 
     assert resolved.principal_type == PrincipalType.SERVICE_PRINCIPAL
@@ -125,7 +127,9 @@ def test_principal_resolver_raises_for_unknown_name():
     resolver = PrincipalResolver(ws_helper)
 
     with pytest.raises(PrincipalValidationError, match="ghost_team"):
-        resolver.resolve_principal(Principal(principal_type=PrincipalType.UNKNOWN, name="ghost_team"))
+        resolver.resolve_principal(
+            Principal(principal_type=PrincipalType.UNKNOWN, name="ghost_team")
+        )
 
 
 def test_principal_resolver_raises_for_unknown_identifier():
@@ -133,7 +137,9 @@ def test_principal_resolver_raises_for_unknown_identifier():
     resolver = PrincipalResolver(ws_helper)
 
     with pytest.raises(PrincipalValidationError, match="unknown-app-id"):
-        resolver.resolve_principal(Principal(principal_type=PrincipalType.UNKNOWN, identifier="unknown-app-id"))
+        resolver.resolve_principal(
+            Principal(principal_type=PrincipalType.UNKNOWN, identifier="unknown-app-id")
+        )
 
 
 def test_principal_resolver_sp_round_trip_display_name_to_app_id():
@@ -172,7 +178,11 @@ def test_principal_resolver_batch_resolves_all():
 
     assert len(resolved) == 3
     types = {p.principal_type for p in resolved}
-    assert types == {PrincipalType.USER, PrincipalType.GROUP, PrincipalType.SERVICE_PRINCIPAL}
+    assert types == {
+        PrincipalType.USER,
+        PrincipalType.GROUP,
+        PrincipalType.SERVICE_PRINCIPAL,
+    }
 
 
 def test_principal_resolver_batch_all_or_nothing_on_failure():
@@ -198,9 +208,9 @@ def test_principal_resolver_batch_single_failure_listed():
     resolver = PrincipalResolver(ws_helper)
 
     with pytest.raises(PrincipalValidationError) as exc_info:
-        resolver.resolve_principals([
-            Principal(principal_type=PrincipalType.UNKNOWN, name="ghost_team")
-        ])
+        resolver.resolve_principals(
+            [Principal(principal_type=PrincipalType.UNKNOWN, name="ghost_team")]
+        )
 
     assert "ghost_team" in str(exc_info.value)
 
@@ -254,7 +264,10 @@ def test_log_principal_resolution_failure_warns_for_actual_side_failure():
     principal = Principal(PrincipalType.UNKNOWN, identifier="app-id-123")
 
     log_principal_resolution_failure(
-        change_logger, "Resolve X", principal, PrincipalValidationError("nope"),
+        change_logger,
+        "Resolve X",
+        principal,
+        PrincipalValidationError("nope"),
     )
 
     assert change_logger.has_errors is False
@@ -268,7 +281,10 @@ def test_log_principal_resolution_failure_suppresses_warning_for_ignored_identif
     principal = Principal(PrincipalType.UNKNOWN, identifier="app-id-123")
 
     log_principal_resolution_failure(
-        change_logger, "Resolve X", principal, PrincipalValidationError("nope"),
+        change_logger,
+        "Resolve X",
+        principal,
+        PrincipalValidationError("nope"),
         frozenset({"app-id-123"}),
     )
 
@@ -283,7 +299,10 @@ def test_log_principal_resolution_failure_config_side_always_errors():
     principal = Principal(PrincipalType.UNKNOWN, name="typo_group")
 
     log_principal_resolution_failure(
-        change_logger, "Resolve X", principal, PrincipalValidationError("nope"),
+        change_logger,
+        "Resolve X",
+        principal,
+        PrincipalValidationError("nope"),
         frozenset({"typo_group"}),
     )
 

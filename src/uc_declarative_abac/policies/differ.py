@@ -20,7 +20,6 @@ from uc_declarative_abac.principals import (
 )
 
 
-
 def compute_policy_diff(
     desired: set[Policy],
     actual: set[Policy],
@@ -78,7 +77,8 @@ def compute_policy_diff(
             old_policies[identity] = existing
 
     to_delete = {
-        p for p in actual_resolved
+        p
+        for p in actual_resolved
         if in_namespace_scope(p.securable_full_name, delete_scope)
         and _identity(p) not in desired_ids
     }
@@ -121,7 +121,11 @@ def _resolve_principal_list(
             resolved.append(resolver.resolve_principal(principal))
         except PrincipalValidationError as exc:
             log_principal_resolution_failure(
-                change_logger, context, principal, exc, ignore_unresolvable,
+                change_logger,
+                context,
+                principal,
+                exc,
+                ignore_unresolvable,
             )
     return resolved
 
@@ -143,26 +147,38 @@ def _resolve_policy_principals(
     result: set[Policy] = set()
     for policy in unresolved:
         to_resolved = _resolve_principal_list(
-            policy.to_principals, policy, resolver, change_logger, ignore_unresolvable,
+            policy.to_principals,
+            policy,
+            resolver,
+            change_logger,
+            ignore_unresolvable,
         )
         except_resolved = _resolve_principal_list(
-            policy.except_principals, policy, resolver, change_logger, ignore_unresolvable,
+            policy.except_principals,
+            policy,
+            resolver,
+            change_logger,
+            ignore_unresolvable,
         )
-        result.add(Policy(
-            securable_type=policy.securable_type,
-            securable_full_name=policy.securable_full_name,
-            name=policy.name,
-            policy_type=policy.policy_type,
-            function_name=policy.function_name,
-            to_principals=tuple(sorted(to_resolved, key=_principal_sort_key)),
-            except_principals=tuple(sorted(except_resolved, key=_principal_sort_key)),
-            when_condition=policy.when_condition,
-            match_columns=policy.match_columns,
-            on_column=policy.on_column,
-            using_columns=policy.using_columns,
-            comment=policy.comment,
-            for_securable_type=policy.for_securable_type,
-        ))
+        result.add(
+            Policy(
+                securable_type=policy.securable_type,
+                securable_full_name=policy.securable_full_name,
+                name=policy.name,
+                policy_type=policy.policy_type,
+                function_name=policy.function_name,
+                to_principals=tuple(sorted(to_resolved, key=_principal_sort_key)),
+                except_principals=tuple(
+                    sorted(except_resolved, key=_principal_sort_key)
+                ),
+                when_condition=policy.when_condition,
+                match_columns=policy.match_columns,
+                on_column=policy.on_column,
+                using_columns=policy.using_columns,
+                comment=policy.comment,
+                for_securable_type=policy.for_securable_type,
+            )
+        )
     return result
 
 

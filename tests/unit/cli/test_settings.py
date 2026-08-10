@@ -13,8 +13,12 @@ from uc_declarative_abac.cli.settings import resolve_settings
     [
         pytest.param(None, None, None, "system", id="default"),
         pytest.param("from-file", None, None, "from-file", id="settings-file"),
-        pytest.param("from-file", "from-env", None, "from-env", id="environment-over-file"),
-        pytest.param("from-file", "from-env", "from-cli", "from-cli", id="cli-over-environment"),
+        pytest.param(
+            "from-file", "from-env", None, "from-env", id="environment-over-file"
+        ),
+        pytest.param(
+            "from-file", "from-env", "from-cli", "from-cli", id="cli-over-environment"
+        ),
     ],
 )
 def test_given_system_catalog_sources_when_settings_are_resolved_then_normal_precedence_applies(

@@ -67,11 +67,12 @@ def compile_desired_privileges(
     tag_index = _build_tag_index(desired_tags)
     policies = _collect_policies(config)
     active_policies = [
-        p for p in policies
-        if p.expiry_date is None or p.expiry_date > run_date
+        p for p in policies if p.expiry_date is None or p.expiry_date > run_date
     ]
     valid_policies = _drop_policies_with_ungoverned_tags(
-        active_policies, governed_tag_names, change_logger,
+        active_policies,
+        governed_tag_names,
+        change_logger,
     )
     return _match_policies(valid_policies, tag_index)
 
@@ -210,7 +211,9 @@ def _emit_privileges(
     for principal_name in policy.to:
         for entry in policy.privileges:
             for privilege in _expand_privilege(entry):
-                target_type, target_full_name = _target_for_privilege(privilege, sec_type, full_name)
+                target_type, target_full_name = _target_for_privilege(
+                    privilege, sec_type, full_name
+                )
                 if not _is_within_scope(target_full_name, policy):
                     continue
                 allowed = SECURABLE_TYPE_PRIVILEGE_MAP.get(target_type)
@@ -220,7 +223,9 @@ def _emit_privileges(
                     SecurablePrivilege(
                         securable_type=target_type,
                         securable_full_name=target_full_name,
-                        principal=Principal(principal_type=PrincipalType.UNKNOWN, name=principal_name),
+                        principal=Principal(
+                            principal_type=PrincipalType.UNKNOWN, name=principal_name
+                        ),
                         privilege_type=privilege,
                     )
                 )
@@ -277,7 +282,9 @@ def _policy_tags_match(
     Combining both fields is AND-of-groups."""
     if policy.has_tags and not _tags_match(policy.has_tags, actual_tags):
         return False
-    if policy.has_any_of_tags and not _tags_match_any(policy.has_any_of_tags, actual_tags):
+    if policy.has_any_of_tags and not _tags_match_any(
+        policy.has_any_of_tags, actual_tags
+    ):
         return False
     return True
 
@@ -314,6 +321,9 @@ def _tags_match_any(
     for key, required_value in required.items():
         if key not in actual_by_key:
             continue
-        if required_value == _TAG_VALUE_WILDCARD or actual_by_key[key] == required_value:
+        if (
+            required_value == _TAG_VALUE_WILDCARD
+            or actual_by_key[key] == required_value
+        ):
             return True
     return False

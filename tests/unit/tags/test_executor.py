@@ -27,9 +27,7 @@ def _assert_sql_contains(sql: str, *fragments: str):
     """Assert that every fragment appears in the SQL string (case-insensitive, ignoring backticks)."""
     normalised = sql.upper().replace("`", "")
     for fragment in fragments:
-        assert fragment.upper() in normalised, (
-            f"Expected {fragment!r} in SQL: {sql}"
-        )
+        assert fragment.upper() in normalised, f"Expected {fragment!r} in SQL: {sql}"
 
 
 # ---------------------------------------------------------------------------
@@ -63,7 +61,9 @@ def test_tag_executor_generates_set_tags_sql_for_adds():
         sql_text = parsed.sql(dialect="databricks")
         _assert_sql_contains(sql_text, "SET TAGS", "my_catalog", "env", "prod")
     else:
-        _assert_sql_contains(sql, "ALTER", "CATALOG", "SET TAGS", "my_catalog", "env", "prod")
+        _assert_sql_contains(
+            sql, "ALTER", "CATALOG", "SET TAGS", "my_catalog", "env", "prod"
+        )
 
     # Securable name should be backtick-quoted
     assert "`my_catalog`" in sql
@@ -95,7 +95,9 @@ def test_tag_executor_generates_set_tags_sql_for_updates():
         sql_text = parsed.sql(dialect="databricks")
         _assert_sql_contains(sql_text, "SET TAGS", "cat.schema.orders", "pii", "true")
     else:
-        _assert_sql_contains(sql, "ALTER", "TABLE", "SET TAGS", "cat.schema.orders", "pii", "true")
+        _assert_sql_contains(
+            sql, "ALTER", "TABLE", "SET TAGS", "cat.schema.orders", "pii", "true"
+        )
 
     uc_helper.execute_sql.assert_called_once_with(sql)
 
@@ -230,11 +232,17 @@ def test_tag_executor_returns_all_executed_statements():
     # Exactly two statements: one SET TAGS, one UNSET TAGS.
     assert len(stmts) == 2
 
-    set_stmts = [s for s in stmts if "SET TAGS" in s.upper() and "UNSET" not in s.upper()]
+    set_stmts = [
+        s for s in stmts if "SET TAGS" in s.upper() and "UNSET" not in s.upper()
+    ]
     unset_stmts = [s for s in stmts if "UNSET TAGS" in s.upper()]
 
-    assert len(set_stmts) == 1, f"Expected exactly one SET TAGS statement, got {len(set_stmts)}"
-    assert len(unset_stmts) == 1, f"Expected exactly one UNSET TAGS statement, got {len(unset_stmts)}"
+    assert len(set_stmts) == 1, (
+        f"Expected exactly one SET TAGS statement, got {len(set_stmts)}"
+    )
+    assert len(unset_stmts) == 1, (
+        f"Expected exactly one UNSET TAGS statement, got {len(unset_stmts)}"
+    )
 
     # Every returned statement must have been passed to execute_sql.
     executed_sqls = [call.args[0] for call in uc_helper.execute_sql.call_args_list]
@@ -294,8 +302,12 @@ def test_tag_executor_executes_sql_in_securable_order():
     # Expected order: CATALOG cat_a, CATALOG cat_b, TABLE cat.s.table_a, TABLE cat.s.table_b
     assert "cat_a" in normalised[0], f"Expected cat_a in first stmt: {stmts[0]}"
     assert "cat_b" in normalised[1], f"Expected cat_b in second stmt: {stmts[1]}"
-    assert "cat.s.table_a" in normalised[2], f"Expected cat.s.table_a in third stmt: {stmts[2]}"
-    assert "cat.s.table_b" in normalised[3], f"Expected cat.s.table_b in fourth stmt: {stmts[3]}"
+    assert "cat.s.table_a" in normalised[2], (
+        f"Expected cat.s.table_a in third stmt: {stmts[2]}"
+    )
+    assert "cat.s.table_b" in normalised[3], (
+        f"Expected cat.s.table_b in fourth stmt: {stmts[3]}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -443,7 +455,11 @@ def test_tag_executor_logs_changes_in_dry_run():
         to_update={tag_update},
         to_remove={tag_remove},
         old_values={
-            (tag_update.securable_type, tag_update.securable_full_name, tag_update.tag_name): "false",
+            (
+                tag_update.securable_type,
+                tag_update.securable_full_name,
+                tag_update.tag_name,
+            ): "false",
         },
     )
 
@@ -478,7 +494,9 @@ def test_tag_executor_generates_alter_column_unset_tags_sql():
     assert len(stmts) == 1
     sql = stmts[0]
 
-    _assert_sql_contains(sql, "ALTER TABLE", "ALTER COLUMN", "UNSET TAGS", "email", "pii")
+    _assert_sql_contains(
+        sql, "ALTER TABLE", "ALTER COLUMN", "UNSET TAGS", "email", "pii"
+    )
 
     uc_helper.execute_sql.assert_called_once_with(sql)
 
@@ -521,7 +539,9 @@ def test_tag_executor_prompts_before_removing_governed_tag(monkeypatch):
     diff = TagDiff(to_remove={_governed_remove()})
 
     stmts = execute_tag_diff(
-        uc_helper, diff, ChangeLogger(),
+        uc_helper,
+        diff,
+        ChangeLogger(),
         governed_tag_names={"uc_gov_pii"},
     )
 
@@ -540,7 +560,9 @@ def test_tag_executor_exits_when_prompt_rejected(monkeypatch):
 
     with pytest.raises(SystemExit):
         execute_tag_diff(
-            uc_helper, diff, ChangeLogger(),
+            uc_helper,
+            diff,
+            ChangeLogger(),
             governed_tag_names={"uc_gov_pii"},
         )
 
@@ -566,7 +588,9 @@ def test_tag_executor_does_not_prompt_when_no_governed_tags_in_removes(monkeypat
     diff = TagDiff(to_remove={_nongoverned_remove()})
 
     execute_tag_diff(
-        uc_helper, diff, ChangeLogger(),
+        uc_helper,
+        diff,
+        ChangeLogger(),
         governed_tag_names={"uc_gov_pii"},
     )
 
@@ -587,7 +611,9 @@ def test_tag_executor_bypasses_prompt_when_force_true(monkeypatch):
     diff = TagDiff(to_remove={_governed_remove()})
 
     stmts = execute_tag_diff(
-        uc_helper, diff, ChangeLogger(),
+        uc_helper,
+        diff,
+        ChangeLogger(),
         governed_tag_names={"uc_gov_pii"},
         force=True,
     )
@@ -612,7 +638,9 @@ def test_tag_executor_skips_prompt_in_dry_run(monkeypatch):
     diff = TagDiff(to_remove={_governed_remove()})
 
     stmts = execute_tag_diff(
-        uc_helper, diff, change_logger,
+        uc_helper,
+        diff,
+        change_logger,
         governed_tag_names={"uc_gov_pii"},
         dry_run=True,
     )
@@ -638,7 +666,9 @@ def test_tag_executor_raises_interactive_confirmation_required_on_non_tty(monkey
 
     with pytest.raises(InteractiveConfirmationRequiredError):
         execute_tag_diff(
-            uc_helper, diff, ChangeLogger(),
+            uc_helper,
+            diff,
+            ChangeLogger(),
             governed_tag_names={"uc_gov_pii"},
         )
 
@@ -689,7 +719,6 @@ def test_tag_executor_parallel_logs_in_deterministic_order():
 
 def test_tag_executor_logs_each_change_as_worker_finishes():
     """log_tag_add fires for the fast worker while the slow worker is still running."""
-    import threading
     import time
 
     fast_logged_at: list[float] = []

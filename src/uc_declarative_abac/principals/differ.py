@@ -73,13 +73,15 @@ def _find_actual_group(
     if desired_group.id:
         actual_group = actual_by_id.get(desired_group.id)
         if actual_group is None:
-            change_logger.log_error(ExecutionError(
-                context=f"Configure GROUP {desired_group.display_name}",
-                exception=OrchestratorError(
-                    f"Group id '{desired_group.id}' (declared for "
-                    f"'{desired_group.display_name}') does not exist in the account."
-                ),
-            ))
+            change_logger.log_error(
+                ExecutionError(
+                    context=f"Configure GROUP {desired_group.display_name}",
+                    exception=OrchestratorError(
+                        f"Group id '{desired_group.id}' (declared for "
+                        f"'{desired_group.display_name}') does not exist in the account."
+                    ),
+                )
+            )
             return None, False
         return actual_group, True
     return actual_by_name.get(desired_group.display_name), True
@@ -107,13 +109,15 @@ def _handle_missing_group(
         )
         diff.groups_to_create[name] = resolved_desired.members
     elif enable_group_management:
-        change_logger.log_error(ExecutionError(
-            context=f"Configure GROUP {name}",
-            exception=OrchestratorError(
-                f"Group '{name}' does not exist. Pass "
-                "--enable-group-creation to create it."
-            ),
-        ))
+        change_logger.log_error(
+            ExecutionError(
+                context=f"Configure GROUP {name}",
+                exception=OrchestratorError(
+                    f"Group '{name}' does not exist. Pass "
+                    "--enable-group-creation to create it."
+                ),
+            )
+        )
 
 
 def _emit_rename_if_needed(
@@ -135,19 +139,23 @@ def _emit_rename_if_needed(
         return True
     collision = actual_by_name.get(name)
     if collision is not None and collision.id != desired_group.id:
-        change_logger.log_error(ExecutionError(
-            context=f"Configure GROUP {name}",
-            exception=OrchestratorError(
-                f"Cannot rename group id '{desired_group.id}' to '{name}': another "
-                "group already uses that display name."
-            ),
-        ))
+        change_logger.log_error(
+            ExecutionError(
+                context=f"Configure GROUP {name}",
+                exception=OrchestratorError(
+                    f"Cannot rename group id '{desired_group.id}' to '{name}': another "
+                    "group already uses that display name."
+                ),
+            )
+        )
         return False
-    diff.groups_to_rename.append(GroupRename(
-        id=desired_group.id,
-        old_display_name=actual_group.display_name,
-        new_display_name=name,
-    ))
+    diff.groups_to_rename.append(
+        GroupRename(
+            id=desired_group.id,
+            old_display_name=actual_group.display_name,
+            new_display_name=name,
+        )
+    )
     return True
 
 
@@ -227,8 +235,13 @@ def compute_group_diff(
 
         if actual_group is None:
             _handle_missing_group(
-                desired_group, resolver, change_logger, ignore_unresolvable,
-                enable_group_creation, enable_group_management, diff,
+                desired_group,
+                resolver,
+                change_logger,
+                ignore_unresolvable,
+                enable_group_creation,
+                enable_group_management,
+                diff,
             )
             continue
 
@@ -236,13 +249,15 @@ def compute_group_diff(
         if not enable_group_management:
             continue
         if actual_group.external_id:
-            change_logger.log_error(ExecutionError(
-                context=f"Configure GROUP {desired_group.display_name}",
-                exception=OrchestratorError(
-                    f"Group '{actual_group.display_name}' is externally managed "
-                    "(IdP-provisioned) and cannot be configured by this engine."
-                ),
-            ))
+            change_logger.log_error(
+                ExecutionError(
+                    context=f"Configure GROUP {desired_group.display_name}",
+                    exception=OrchestratorError(
+                        f"Group '{actual_group.display_name}' is externally managed "
+                        "(IdP-provisioned) and cannot be configured by this engine."
+                    ),
+                )
+            )
             continue
 
         if not _emit_rename_if_needed(
@@ -250,8 +265,12 @@ def compute_group_diff(
         ):
             continue  # rename target collision — fatal, skip membership
         _reconcile_membership(
-            desired_group, actual_group, resolver, change_logger,
-            ignore_unresolvable, diff,
+            desired_group,
+            actual_group,
+            resolver,
+            change_logger,
+            ignore_unresolvable,
+            diff,
         )
 
     return diff

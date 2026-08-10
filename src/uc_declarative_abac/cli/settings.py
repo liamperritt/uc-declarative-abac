@@ -95,7 +95,9 @@ def _load_settings_file(path: Path) -> dict[str, Any]:
     with path.open(encoding="utf-8") as handle:
         data = yaml.safe_load(handle) or {}
     if not isinstance(data, dict):
-        raise ValueError(f"Settings file {path} must contain a YAML mapping at the top level.")
+        raise ValueError(
+            f"Settings file {path} must contain a YAML mapping at the top level."
+        )
     return data
 
 
@@ -108,7 +110,9 @@ def _load_env_settings() -> dict[str, Any]:
             continue
         if raw == "" and field_name not in _EMPTY_MEANINGFUL_FIELDS:
             continue
-        loaded[field_name] = _coerce_env_value(field_name, raw, field_lookup[field_name])
+        loaded[field_name] = _coerce_env_value(
+            field_name, raw, field_lookup[field_name]
+        )
     return loaded
 
 

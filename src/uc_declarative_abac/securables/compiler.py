@@ -45,7 +45,8 @@ def _emit_attributes(
     """
     owner = (
         Principal(principal_type=PrincipalType.UNKNOWN, name=obj.owner)
-        if obj.owner else None
+        if obj.owner
+        else None
     )
     if securable_type == SecurableType.FUNCTION:
         comment = None
@@ -95,9 +96,11 @@ def compile_desired_attributes(config: ResourcesConfig) -> set[SecurableAttribut
 
 def _compile_function(func: FunctionConfig) -> Function:
     """Build a Function from a FunctionConfig."""
-    parameters = tuple(
-        (param.name, param.data_type) for param in func.parameters
-    ) if func.parameters else ()
+    parameters = (
+        tuple((param.name, param.data_type) for param in func.parameters)
+        if func.parameters
+        else ()
+    )
     return Function(
         securable_type=SecurableType.FUNCTION,
         full_name=func.full_name,
@@ -150,28 +153,34 @@ def compile_desired_securables(config: ResourcesConfig) -> set[Securable]:
     securables: set[Securable] = set()
 
     for catalog in config.catalogs.values():
-        securables.add(Securable(
-            securable_type=SecurableType.CATALOG,
-            full_name=catalog.full_name,
-            comment=catalog.comment,
-            location=catalog.location,
-        ))
+        securables.add(
+            Securable(
+                securable_type=SecurableType.CATALOG,
+                full_name=catalog.full_name,
+                comment=catalog.comment,
+                location=catalog.location,
+            )
+        )
         for schema in catalog.schemas or []:
-            securables.add(Securable(
-                securable_type=SecurableType.SCHEMA,
-                full_name=schema.full_name,
-                comment=schema.comment,
-                location=schema.location,
-            ))
+            securables.add(
+                Securable(
+                    securable_type=SecurableType.SCHEMA,
+                    full_name=schema.full_name,
+                    comment=schema.comment,
+                    location=schema.location,
+                )
+            )
             for table in schema.tables or []:
                 securables.add(_compile_table(table))
             for volume in schema.volumes or []:
-                securables.add(Securable(
-                    securable_type=SecurableType.VOLUME,
-                    full_name=volume.full_name,
-                    comment=volume.comment,
-                    location=volume.location,
-                ))
+                securables.add(
+                    Securable(
+                        securable_type=SecurableType.VOLUME,
+                        full_name=volume.full_name,
+                        comment=volume.comment,
+                        location=volume.location,
+                    )
+                )
             for func in schema.functions or []:
                 securables.add(_compile_function(func))
 

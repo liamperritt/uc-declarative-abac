@@ -153,7 +153,9 @@ def resolve_refs(
     """
     referenced: set[str] = set()
     visited: set[str] = set()
-    result = _resolve_node(definitions, resources, referenced, visited, override_strategy)
+    result = _resolve_node(
+        definitions, resources, referenced, visited, override_strategy
+    )
 
     all_refs = {
         f"$defs/{def_type}/{def_key}"
@@ -187,7 +189,9 @@ def _resolve_node(
             for item in node
         ]
     if isinstance(node, str) and node.startswith("$defs/"):
-        return _resolve_inline_defs_string(definitions, node, referenced, visited, override_strategy)
+        return _resolve_inline_defs_string(
+            definitions, node, referenced, visited, override_strategy
+        )
     return node
 
 
@@ -231,16 +235,22 @@ def _resolve_inline_defs_strings(
         if "$ref" in node:
             return node
         return {
-            key: _resolve_inline_defs_strings(definitions, value, referenced, visited, override_strategy)
+            key: _resolve_inline_defs_strings(
+                definitions, value, referenced, visited, override_strategy
+            )
             for key, value in node.items()
         }
     if isinstance(node, list):
         return [
-            _resolve_inline_defs_strings(definitions, item, referenced, visited, override_strategy)
+            _resolve_inline_defs_strings(
+                definitions, item, referenced, visited, override_strategy
+            )
             for item in node
         ]
     if isinstance(node, str) and node.startswith("$defs/"):
-        return _resolve_inline_defs_string(definitions, node, referenced, visited, override_strategy)
+        return _resolve_inline_defs_string(
+            definitions, node, referenced, visited, override_strategy
+        )
     return node
 
 
@@ -267,17 +277,23 @@ def _resolve_ref(
     referenced.add(ref_path)
     definition = _lookup_definition(definitions, ref_path)
     resolved = copy.deepcopy(definition)
-    resolved = _resolve_inline_defs_strings(definitions, resolved, referenced, visited, override_strategy)
+    resolved = _resolve_inline_defs_strings(
+        definitions, resolved, referenced, visited, override_strategy
+    )
 
     overrides = {k: v for k, v in node.items() if k != "$ref"}
-    overrides = _resolve_inline_defs_strings(definitions, overrides, referenced, visited, override_strategy)
+    overrides = _resolve_inline_defs_strings(
+        definitions, overrides, referenced, visited, override_strategy
+    )
 
     if override_strategy == "replace":
         resolved.update(overrides)
     else:
         resolved = _merge_dicts(resolved, overrides)
 
-    result = _resolve_node(definitions, resolved, referenced, visited, override_strategy)
+    result = _resolve_node(
+        definitions, resolved, referenced, visited, override_strategy
+    )
     visited.discard(ref_path)
     return result
 
@@ -296,7 +312,9 @@ def _resolve_inline_defs_string(
     referenced.add(ref_path)
     definition = _lookup_definition(definitions, ref_path)
     resolved = copy.deepcopy(definition)
-    result = _resolve_node(definitions, resolved, referenced, visited, override_strategy)
+    result = _resolve_node(
+        definitions, resolved, referenced, visited, override_strategy
+    )
     visited.discard(ref_path)
     return result
 
@@ -310,16 +328,20 @@ def _lookup_definition(definitions: dict, ref: str) -> dict:
     if not ref.startswith(prefix):
         raise ResolutionError(f"Invalid $ref format: {ref}")
 
-    remainder = ref[len(prefix):]
+    remainder = ref[len(prefix) :]
     try:
         slash_idx = remainder.index("/")
     except ValueError:
-        raise ResolutionError(f"Invalid $ref format (missing type/key separator): {ref}")
+        raise ResolutionError(
+            f"Invalid $ref format (missing type/key separator): {ref}"
+        )
     def_type = remainder[:slash_idx]
-    def_key = remainder[slash_idx + 1:]
+    def_key = remainder[slash_idx + 1 :]
 
     type_defs = definitions.get(def_type, {})
     if def_key not in type_defs:
-        raise ResolutionError(f"Unresolved $ref: {ref} (key '{def_key}' not found in '{def_type}')")
+        raise ResolutionError(
+            f"Unresolved $ref: {ref} (key '{def_key}' not found in '{def_type}')"
+        )
 
     return type_defs[def_key]

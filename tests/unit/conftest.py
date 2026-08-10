@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, PropertyMock
+from unittest.mock import MagicMock
 
 import pytest
 import yaml
@@ -12,6 +12,7 @@ from databricks.sdk.service.sql import StatementState
 # ---------------------------------------------------------------------------
 # WorkspaceClient mock
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def mock_workspace_client() -> MagicMock:
@@ -24,8 +25,6 @@ def mock_workspace_client() -> MagicMock:
 
     # Track all SQL statements passed to execute_statement
     client.executed_sql: list[str] = []
-
-    original_execute = client.statement_execution.execute_statement
 
     def _capture_sql(*args: Any, **kwargs: Any) -> MagicMock:
         statement = kwargs.get("statement", args[0] if args else None)
@@ -49,6 +48,7 @@ def mock_workspace_client() -> MagicMock:
 # ---------------------------------------------------------------------------
 # AccountClient mock
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def mock_account_client() -> MagicMock:
@@ -94,6 +94,7 @@ def make_mock_service_principal(display_name: str, application_id: str) -> Magic
 # YAML temp directory helper
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def tmp_yaml_dir(tmp_path: Path):
     """Factory fixture that writes YAML content to files in a temp directory.
@@ -119,6 +120,7 @@ def tmp_yaml_dir(tmp_path: Path):
 # ---------------------------------------------------------------------------
 # Sample config fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def sample_definitions() -> dict:

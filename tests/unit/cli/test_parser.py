@@ -42,7 +42,15 @@ def test_parser_legacy_without_dry_run_maps_to_deploy():
 @pytest.mark.parametrize(
     "args",
     [
-        ["deploy", "--config-dir", "cfg", "--warehouse-id", "wh", "--system-catalog", "system"],
+        [
+            "deploy",
+            "--config-dir",
+            "cfg",
+            "--warehouse-id",
+            "wh",
+            "--system-catalog",
+            "system",
+        ],
         ["--config-dir", "cfg", "--warehouse-id", "wh", "--system-catalog", "system"],
     ],
     ids=["modern-deploy", "legacy-invocation"],

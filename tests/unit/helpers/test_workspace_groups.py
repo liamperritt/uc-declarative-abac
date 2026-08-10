@@ -136,8 +136,12 @@ def test_workspace_helper_actual_group_includes_existing_members() -> None:
         service_principals=[_make_sp("sp_uc_governor_test", "app-uuid", "sp-1")],
         groups=[
             _make_group(
-                "uc_governor_test_team", "g-1",
-                members=[_make_member("u-1", "User"), _make_member("sp-1", "ServicePrincipal")],
+                "uc_governor_test_team",
+                "g-1",
+                members=[
+                    _make_member("u-1", "User"),
+                    _make_member("sp-1", "ServicePrincipal"),
+                ],
             ),
         ],
     )
@@ -181,7 +185,9 @@ def test_workspace_helper_translates_user_member_to_username_identifier() -> Non
         users=[_make_user("alice@example.com", "u-1")],
         groups=[
             _make_group(
-                "data_engineers", "g-1", members=[_make_member("u-1", "User")],
+                "data_engineers",
+                "g-1",
+                members=[_make_member("u-1", "User")],
             ),
         ],
     )
@@ -191,7 +197,10 @@ def test_workspace_helper_translates_user_member_to_username_identifier() -> Non
     result = helper.fetch_actual_groups()
 
     group = next(g for g in result if g.display_name == "data_engineers")
-    assert Principal(PrincipalType.UNKNOWN, identifier="alice@example.com") in group.members
+    assert (
+        Principal(PrincipalType.UNKNOWN, identifier="alice@example.com")
+        in group.members
+    )
 
 
 def test_workspace_helper_translates_sp_member_to_application_id_identifier() -> None:
@@ -201,7 +210,8 @@ def test_workspace_helper_translates_sp_member_to_application_id_identifier() ->
         service_principals=[_make_sp("etl-sp", "abc-123-uuid", "sp-1")],
         groups=[
             _make_group(
-                "automation", "g-1",
+                "automation",
+                "g-1",
                 members=[_make_member("sp-1", "ServicePrincipal")],
             ),
         ],
@@ -260,7 +270,8 @@ def test_workspace_helper_drops_untranslatable_members() -> None:
         users=[_make_user("alice@example.com", "u-1")],
         groups=[
             _make_group(
-                "data_engineers", "g-1",
+                "data_engineers",
+                "g-1",
                 members=[
                     _make_member("u-1", "User"),
                     _make_member("u-ghost", "User"),
@@ -293,10 +304,14 @@ def test_workspace_helper_register_pending_groups_resolves_as_group() -> None:
     helper.register_pending_groups({"new_team"})
 
     assert helper.resolve_by_name("new_team") == Principal(
-        PrincipalType.GROUP, "new_team", "new_team",
+        PrincipalType.GROUP,
+        "new_team",
+        "new_team",
     )
     assert helper.resolve_by_identifier("new_team") == Principal(
-        PrincipalType.GROUP, "new_team", "new_team",
+        PrincipalType.GROUP,
+        "new_team",
+        "new_team",
     )
 
 
@@ -319,7 +334,8 @@ def test_workspace_helper_add_group_members_issues_patch() -> None:
     helper.add_group_members("data_engineers", [member])
 
     patch_calls = [
-        call for call in client.api_client.do.call_args_list
+        call
+        for call in client.api_client.do.call_args_list
         if call.args and call.args[0] == "PATCH"
     ]
     assert len(patch_calls) == 1
@@ -349,7 +365,8 @@ def test_workspace_helper_remove_group_members_issues_patch() -> None:
     helper.remove_group_members("data_engineers", [member])
 
     patch_calls = [
-        call for call in client.api_client.do.call_args_list
+        call
+        for call in client.api_client.do.call_args_list
         if call.args and call.args[0] == "PATCH"
     ]
     assert len(patch_calls) == 1
@@ -379,7 +396,8 @@ def test_workspace_helper_create_group_issues_post() -> None:
     helper.create_group("new_team", [member])
 
     post_calls = [
-        call for call in client.api_client.do.call_args_list
+        call
+        for call in client.api_client.do.call_args_list
         if call.args and call.args[0] == "POST"
     ]
     assert len(post_calls) == 1
@@ -396,7 +414,9 @@ def test_workspace_helper_create_group_issues_post() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_workspace_helper_fetches_renamed_group_by_id_when_name_not_in_desired_names() -> None:
+def test_workspace_helper_fetches_renamed_group_by_id_when_name_not_in_desired_names() -> (
+    None
+):
     """A group whose SCIM id is in desired_ids is fetched under its CURRENT (actual)
     display name even when that name is not in desired_names — config wants the new
     name, but the account still returns the old name with the matching id."""
@@ -407,7 +427,8 @@ def test_workspace_helper_fetches_renamed_group_by_id_when_name_not_in_desired_n
     helper.fetch_principals()
 
     result = helper.fetch_actual_groups(
-        desired_names={"new_name"}, desired_ids={"g-1"},
+        desired_names={"new_name"},
+        desired_ids={"g-1"},
     )
 
     # Located by id and returned under its current (old) display name.
@@ -434,7 +455,9 @@ def test_workspace_helper_sets_id_on_actual_group_from_response() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_workspace_helper_register_pending_renames_adds_new_name_and_removes_old() -> None:
+def test_workspace_helper_register_pending_renames_adds_new_name_and_removes_old() -> (
+    None
+):
     """After register_pending_renames, the NEW display name resolves as a GROUP
     principal and the OLD name no longer resolves."""
     client = _make_workspace_client(
@@ -444,7 +467,11 @@ def test_workspace_helper_register_pending_renames_adds_new_name_and_removes_old
     helper.fetch_principals()
 
     helper.register_pending_renames(
-        [GroupRename(id="g-1", old_display_name="old_name", new_display_name="new_name")],
+        [
+            GroupRename(
+                id="g-1", old_display_name="old_name", new_display_name="new_name"
+            )
+        ],
     )
 
     resolved = helper.resolve_by_name("new_name")
@@ -454,7 +481,9 @@ def test_workspace_helper_register_pending_renames_adds_new_name_and_removes_old
         helper.resolve_by_name("old_name")
 
 
-def test_workspace_helper_register_pending_renames_remaps_group_id_to_new_name() -> None:
+def test_workspace_helper_register_pending_renames_remaps_group_id_to_new_name() -> (
+    None
+):
     """After the rename, a member add against the NEW name resolves the group's SCIM
     id — the PATCH targets the same id that previously belonged to the old name."""
     client = _make_workspace_client(
@@ -465,14 +494,19 @@ def test_workspace_helper_register_pending_renames_remaps_group_id_to_new_name()
     helper.fetch_principals()
 
     helper.register_pending_renames(
-        [GroupRename(id="g-1", old_display_name="old_name", new_display_name="new_name")],
+        [
+            GroupRename(
+                id="g-1", old_display_name="old_name", new_display_name="new_name"
+            )
+        ],
     )
 
     member = Principal(PrincipalType.USER, "alice@example.com", "alice@example.com")
     helper.add_group_members("new_name", [member])
 
     patch_calls = [
-        call for call in client.api_client.do.call_args_list
+        call
+        for call in client.api_client.do.call_args_list
         if call.args and call.args[0] == "PATCH"
     ]
     assert len(patch_calls) == 1
@@ -488,7 +522,11 @@ def test_workspace_helper_resolves_new_name_after_pending_rename() -> None:
     helper.fetch_principals()
 
     helper.register_pending_renames(
-        [GroupRename(id="g-1", old_display_name="old_name", new_display_name="new_name")],
+        [
+            GroupRename(
+                id="g-1", old_display_name="old_name", new_display_name="new_name"
+            )
+        ],
     )
 
     assert helper.resolve_by_name("new_name").principal_type == PrincipalType.GROUP
@@ -503,14 +541,20 @@ def test_workspace_helper_rejects_old_name_after_pending_rename() -> None:
     helper.fetch_principals()
 
     helper.register_pending_renames(
-        [GroupRename(id="g-1", old_display_name="old_name", new_display_name="new_name")],
+        [
+            GroupRename(
+                id="g-1", old_display_name="old_name", new_display_name="new_name"
+            )
+        ],
     )
 
     with pytest.raises(PrincipalValidationError):
         helper.resolve_by_name("old_name")
 
 
-def test_workspace_helper_resolves_old_name_by_identifier_to_new_group_after_pending_rename() -> None:
+def test_workspace_helper_resolves_old_name_by_identifier_to_new_group_after_pending_rename() -> (
+    None
+):
     """resolve_by_identifier(old_name) returns the NEW group principal after a
     pending rename — deployed actual-state references to the old display name must
     map onto the renamed group rather than failing or showing a spurious diff."""
@@ -521,7 +565,11 @@ def test_workspace_helper_resolves_old_name_by_identifier_to_new_group_after_pen
     helper.fetch_principals()
 
     helper.register_pending_renames(
-        [GroupRename(id="g-1", old_display_name="old_name", new_display_name="new_name")],
+        [
+            GroupRename(
+                id="g-1", old_display_name="old_name", new_display_name="new_name"
+            )
+        ],
     )
 
     resolved = helper.resolve_by_identifier("old_name")
@@ -547,7 +595,8 @@ def test_workspace_helper_rename_group_issues_replace_displayname_patch() -> Non
     helper.rename_group("g-1", "new")
 
     patch_calls = [
-        call for call in client.api_client.do.call_args_list
+        call
+        for call in client.api_client.do.call_args_list
         if call.args and call.args[0] == "PATCH"
     ]
     assert len(patch_calls) == 1

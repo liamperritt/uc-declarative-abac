@@ -11,7 +11,6 @@ from uc_declarative_abac.utils import (
 )
 
 
-
 def _inline_fn_dict(name: str, return_expr: str = "col") -> dict:
     return {
         "name": name,
@@ -37,9 +36,7 @@ def _fgac_policy(name: str = "p1", function=None) -> dict:
 
 def test_consolidator_moves_standalone_schema_into_catalog():
     data = {
-        "catalogs": {
-            "my_cat": {"name": "my_cat"}
-        },
+        "catalogs": {"my_cat": {"name": "my_cat"}},
         "schemas": {
             "my_schema": {
                 "catalog_name": "my_cat",
@@ -177,9 +174,7 @@ def test_consolidator_passes_through_when_no_standalone_resources():
 def test_consolidator_rejects_schema_without_catalog_name():
     data = {
         "catalogs": {},
-        "schemas": {
-            "my_schema": {"name": "sales"}
-        },
+        "schemas": {"my_schema": {"name": "sales"}},
     }
     with pytest.raises(OrchestratorError):
         consolidate_resources(data)
@@ -258,7 +253,9 @@ def test_consolidator_extracts_inline_function_from_table_level_policy():
                         "tables": [
                             {
                                 "name": "t1",
-                                "policies": [_fgac_policy(function=_inline_fn_dict("mask_pii"))],
+                                "policies": [
+                                    _fgac_policy(function=_inline_fn_dict("mask_pii"))
+                                ],
                             }
                         ],
                     }
@@ -288,7 +285,9 @@ def test_consolidator_extracts_inline_function_from_schema_level_policy():
                 "schemas": [
                     {
                         "name": "s1",
-                        "policies": [_fgac_policy(function=_inline_fn_dict("mask_pii"))],
+                        "policies": [
+                            _fgac_policy(function=_inline_fn_dict("mask_pii"))
+                        ],
                     }
                 ],
             }
@@ -392,7 +391,11 @@ def test_consolidator_extracts_inline_function_from_defs_string_after_resolution
                         "tables": [
                             {
                                 "name": "t1",
-                                "policies": [_fgac_policy(function="$defs/functions/shared|mask_pii")],
+                                "policies": [
+                                    _fgac_policy(
+                                        function="$defs/functions/shared|mask_pii"
+                                    )
+                                ],
                             }
                         ],
                     }
@@ -427,7 +430,11 @@ def test_consolidator_extracts_inline_function_from_ref_dict_after_resolution():
                             {
                                 "name": "t1",
                                 "policies": [
-                                    _fgac_policy(function={"$ref": "$defs/functions/shared|mask_pii"})
+                                    _fgac_policy(
+                                        function={
+                                            "$ref": "$defs/functions/shared|mask_pii"
+                                        }
+                                    )
                                 ],
                             }
                         ],
@@ -461,8 +468,14 @@ def test_consolidator_derives_distinct_names_for_shared_unnamed_ref_function():
                     {
                         "name": "s1",
                         "policies": [
-                            _fgac_policy(name="mask_a", function={"$ref": "$defs/functions/shared|base"}),
-                            _fgac_policy(name="mask_b", function={"$ref": "$defs/functions/shared|base"}),
+                            _fgac_policy(
+                                name="mask_a",
+                                function={"$ref": "$defs/functions/shared|base"},
+                            ),
+                            _fgac_policy(
+                                name="mask_b",
+                                function={"$ref": "$defs/functions/shared|base"},
+                            ),
                         ],
                     }
                 ],
@@ -473,7 +486,10 @@ def test_consolidator_derives_distinct_names_for_shared_unnamed_ref_function():
     result = consolidate_resources(resolved)
 
     schema = result["catalogs"]["c1"]["schemas"][0]
-    assert sorted(f["name"] for f in schema.get("functions", [])) == ["abac_mask_a", "abac_mask_b"]
+    assert sorted(f["name"] for f in schema.get("functions", [])) == [
+        "abac_mask_a",
+        "abac_mask_b",
+    ]
     assert schema["policies"][0]["function"] == "c1.s1.abac_mask_a"
     assert schema["policies"][1]["function"] == "c1.s1.abac_mask_b"
 
@@ -497,7 +513,12 @@ def test_consolidator_uses_overridden_name_from_ref_function():
                             {
                                 "name": "t1",
                                 "policies": [
-                                    _fgac_policy(function={"$ref": "$defs/functions/shared|base_fn", "name": "alt_fn"})
+                                    _fgac_policy(
+                                        function={
+                                            "$ref": "$defs/functions/shared|base_fn",
+                                            "name": "alt_fn",
+                                        }
+                                    )
                                 ],
                             }
                         ],
@@ -533,7 +554,11 @@ def test_consolidator_derives_inline_function_name_from_policy_when_name_omitted
                 "schemas": [
                     {
                         "name": "s1",
-                        "policies": [_fgac_policy(name="mask_pii", function=_unnamed_inline_fn_dict())],
+                        "policies": [
+                            _fgac_policy(
+                                name="mask_pii", function=_unnamed_inline_fn_dict()
+                            )
+                        ],
                     }
                 ],
             }
@@ -553,7 +578,9 @@ def test_consolidator_derives_inline_function_name_for_catalog_level_policy():
         "catalogs": {
             "c1": {
                 "name": "c1",
-                "policies": [_fgac_policy(name="mask_pii", function=_unnamed_inline_fn_dict())],
+                "policies": [
+                    _fgac_policy(name="mask_pii", function=_unnamed_inline_fn_dict())
+                ],
             }
         }
     }
@@ -563,7 +590,10 @@ def test_consolidator_derives_inline_function_name_for_catalog_level_policy():
         s for s in result["catalogs"]["c1"]["schemas"] if s["name"] == "default"
     )
     assert [f["name"] for f in default_schema.get("functions", [])] == ["abac_mask_pii"]
-    assert result["catalogs"]["c1"]["policies"][0]["function"] == "c1.default.abac_mask_pii"
+    assert (
+        result["catalogs"]["c1"]["policies"][0]["function"]
+        == "c1.default.abac_mask_pii"
+    )
 
 
 def test_consolidator_derived_inline_function_validates_as_model():
@@ -576,7 +606,11 @@ def test_consolidator_derived_inline_function_validates_as_model():
                 "schemas": [
                     {
                         "name": "s1",
-                        "policies": [_fgac_policy(name="mask_pii", function=_unnamed_inline_fn_dict())],
+                        "policies": [
+                            _fgac_policy(
+                                name="mask_pii", function=_unnamed_inline_fn_dict()
+                            )
+                        ],
                     }
                 ],
             }
@@ -652,7 +686,9 @@ def test_consolidator_handles_mixed_inline_and_string_functions_in_same_schema()
                     {
                         "name": "s1",
                         "policies": [
-                            _fgac_policy(name="inlined", function=_inline_fn_dict("mask_inlined")),
+                            _fgac_policy(
+                                name="inlined", function=_inline_fn_dict("mask_inlined")
+                            ),
                             _fgac_policy(name="external", function="c1.s1.other_fn"),
                         ],
                     }
@@ -679,8 +715,12 @@ def test_consolidator_duplicate_inline_function_names_surface_at_model_validatio
                     {
                         "name": "s1",
                         "policies": [
-                            _fgac_policy(name="policy_a", function=_inline_fn_dict("dup")),
-                            _fgac_policy(name="policy_b", function=_inline_fn_dict("dup")),
+                            _fgac_policy(
+                                name="policy_a", function=_inline_fn_dict("dup")
+                            ),
+                            _fgac_policy(
+                                name="policy_b", function=_inline_fn_dict("dup")
+                            ),
                         ],
                     }
                 ],
@@ -710,7 +750,10 @@ def test_consolidator_places_inline_function_in_overridden_schema_when_schema_na
                 "name": "c1",
                 "policies": [
                     _fgac_policy(
-                        function={**_inline_fn_dict("mask_pii"), "schema_name": "shared"}
+                        function={
+                            **_inline_fn_dict("mask_pii"),
+                            "schema_name": "shared",
+                        }
                     )
                 ],
             }
@@ -740,7 +783,10 @@ def test_consolidator_overrides_schema_on_schema_level_policy():
                         "name": "s1",
                         "policies": [
                             _fgac_policy(
-                                function={**_inline_fn_dict("mask_pii"), "schema_name": "shared"}
+                                function={
+                                    **_inline_fn_dict("mask_pii"),
+                                    "schema_name": "shared",
+                                }
                             )
                         ],
                     }
@@ -786,7 +832,9 @@ def test_consolidator_places_inline_function_in_overridden_catalog_and_schema_wh
     }
     result = consolidate_resources(data)
 
-    shared = next(s for s in result["catalogs"]["c2"]["schemas"] if s["name"] == "shared")
+    shared = next(
+        s for s in result["catalogs"]["c2"]["schemas"] if s["name"] == "shared"
+    )
     assert [f["name"] for f in shared.get("functions", [])] == ["mask_pii"]
     s1 = next(s for s in result["catalogs"]["c1"]["schemas"] if s["name"] == "s1")
     assert s1.get("functions", []) == []
@@ -806,7 +854,10 @@ def test_consolidator_overrides_catalog_only_uses_default_target_schema_name():
                         "name": "s1",
                         "policies": [
                             _fgac_policy(
-                                function={**_inline_fn_dict("mask_pii"), "catalog_name": "c2"}
+                                function={
+                                    **_inline_fn_dict("mask_pii"),
+                                    "catalog_name": "c2",
+                                }
                             )
                         ],
                     }
@@ -851,7 +902,9 @@ def test_consolidator_autocreates_overridden_catalog_and_schema_when_absent():
 
     assert "c2" in result["catalogs"]
     assert result["catalogs"]["c2"]["name"] == "c2"
-    shared = next(s for s in result["catalogs"]["c2"]["schemas"] if s["name"] == "shared")
+    shared = next(
+        s for s in result["catalogs"]["c2"]["schemas"] if s["name"] == "shared"
+    )
     assert [f["name"] for f in shared.get("functions", [])] == ["mask_pii"]
 
 
@@ -868,7 +921,10 @@ def test_consolidator_reuses_existing_overridden_schema():
                         "name": "s1",
                         "policies": [
                             _fgac_policy(
-                                function={**_inline_fn_dict("mask_pii"), "schema_name": "shared"}
+                                function={
+                                    **_inline_fn_dict("mask_pii"),
+                                    "schema_name": "shared",
+                                }
                             )
                         ],
                     },
@@ -897,7 +953,10 @@ def test_consolidator_duplicate_inline_functions_in_overridden_schema_surface_at
                         "policies": [
                             _fgac_policy(
                                 name="policy_a",
-                                function={**_inline_fn_dict("dup"), "schema_name": "shared"},
+                                function={
+                                    **_inline_fn_dict("dup"),
+                                    "schema_name": "shared",
+                                },
                             ),
                         ],
                     },
@@ -906,7 +965,10 @@ def test_consolidator_duplicate_inline_functions_in_overridden_schema_surface_at
                         "policies": [
                             _fgac_policy(
                                 name="policy_b",
-                                function={**_inline_fn_dict("dup"), "schema_name": "shared"},
+                                function={
+                                    **_inline_fn_dict("dup"),
+                                    "schema_name": "shared",
+                                },
                             ),
                         ],
                     },
@@ -916,7 +978,9 @@ def test_consolidator_duplicate_inline_functions_in_overridden_schema_surface_at
     }
     result = consolidate_resources(data)
 
-    shared = next(s for s in result["catalogs"]["c1"]["schemas"] if s["name"] == "shared")
+    shared = next(
+        s for s in result["catalogs"]["c1"]["schemas"] if s["name"] == "shared"
+    )
     assert len(shared.get("functions", [])) == 2
     with pytest.raises(DuplicateResourceError, match="dup"):
         ResourcesConfig.model_validate(result)

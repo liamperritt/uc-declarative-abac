@@ -56,7 +56,10 @@ def _coerce_null_tag_values(tags: dict | None) -> dict | None:
 
 
 def _check_duplicate_names(
-    items: list, child_label: str, parent_label: str, key: str = "name",
+    items: list,
+    child_label: str,
+    parent_label: str,
+    key: str = "name",
 ) -> None:
     """Raise DuplicateResourceError if any two dicts in items share the same value
     for ``key``. Defaults to the 'name' key so existing call sites are unchanged."""
@@ -74,9 +77,7 @@ def _check_duplicate_names(
 def _validate_double_quote_not_in_comment(comment: str | None) -> str | None:
     """Reject double-quote characters in comments"""
     if isinstance(comment, str) and '"' in comment:
-        raise ValueError(
-            'comment must not contain a double-quote (") character'
-        )
+        raise ValueError('comment must not contain a double-quote (") character')
     return comment
 
 
@@ -96,7 +97,9 @@ def _validate_data_type_prefix(v: str | None) -> str | None:
     return v
 
 
-def _qualify_function_name(function: str, catalog_name: str, schema_name: str | None) -> str:
+def _qualify_function_name(
+    function: str, catalog_name: str, schema_name: str | None
+) -> str:
     """Complete a partially-qualified UC function name from the policy's own
     catalog/schema. 2+ dots → already qualified (unchanged); 1 dot (``schema.fn``)
     → prepend catalog; 0 dots (bare ``fn``) → prepend catalog.schema. A bare name
@@ -167,6 +170,7 @@ PolicyColumnConfig = Union[PolicyColumnAliasConfig, PolicyColumnConstantConfig]
 
 class BasePolicyConfig(BaseModel, ABC):
     """Base model for all policy configs. Not intended to be instantiated directly."""
+
     catalog_name: str
     schema_name: str | None = None
     table_name: str | None = None
@@ -218,12 +222,15 @@ class BasePolicyConfig(BaseModel, ABC):
 
 class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
     """Base model for Fine-Grained Access Control (FGAC) policy configs. Not intended to be instantiated directly."""
+
     type: Union[Literal[PolicyType.MASK], Literal[PolicyType.FILTER]]
     function: str
     to: list[str] = Field(default_factory=lambda: list(_DEFAULT_FGAC_TO))
     exceptions: list[str] | None = Field(default=None, alias="except")
     columns: list[PolicyColumnConfig] | None = None
-    for_securable_type: Literal[SecurableType.TABLE] | None = Field(default=SecurableType.TABLE, alias="for")
+    for_securable_type: Literal[SecurableType.TABLE] | None = Field(
+        default=SecurableType.TABLE, alias="for"
+    )
 
     @field_validator("to", mode="before")
     @classmethod
@@ -249,9 +256,7 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
         if not isinstance(data, dict) or "column" not in data:
             return data
         if "columns" in data:
-            raise ValueError(
-                "cannot specify both 'column' and 'columns' on a policy"
-            )
+            raise ValueError("cannot specify both 'column' and 'columns' on a policy")
         column = data["column"]
         if not isinstance(column, dict):
             raise ValueError(
@@ -365,6 +370,7 @@ class ParameterConfig(BaseModel):
 
 class BaseSecurableConfig(BaseModel, ABC):
     """Base model for all UC securable configs. Not intended to be instantiated directly."""
+
     name: SecurableName
     owner: str | None = None
     comment: str | None = None
@@ -398,6 +404,7 @@ class BaseSecurableConfig(BaseModel, ABC):
 
 class BaseTaggableConfig(BaseSecurableConfig, ABC):
     """Base model for all UC securable taggable configs. Not intended to be instantiated directly."""
+
     tags: dict[str, str] | None = None
 
     @field_validator("tags", mode="before")
@@ -445,9 +452,7 @@ class ColumnConfig(BaseTaggableConfig):
     @field_validator("comment", mode="before")
     @classmethod
     def _reject_comment(cls, v):
-        raise ValueError(
-            "Column-level comments are not currently supported"
-        )
+        raise ValueError("Column-level comments are not currently supported")
 
     @field_validator("rfa_destinations", mode="before")
     @classmethod
@@ -608,13 +613,16 @@ class CatalogConfig(BaseTaggableConfig):
         return self.name
 
 
-TaggableConfig = Union[CatalogConfig, SchemaConfig, TableConfig, VolumeConfig, ColumnConfig]
+TaggableConfig = Union[
+    CatalogConfig, SchemaConfig, TableConfig, VolumeConfig, ColumnConfig
+]
 
 SecurableConfig = Union[TaggableConfig, FunctionConfig]
 
 
 class GovernedTagConfig(BaseModel):
     """Account-level governed tag declaration. Serialised under `resources.governed_tags`."""
+
     name: str
     description: str | None = Field(
         default=None,
@@ -644,6 +652,7 @@ class GroupConfig(BaseModel):
     group's display name instead of treating it as a new group. It is accepted as
     either a string or an integer (a numeric id in YAML) and stored as a string.
     """
+
     name: str
     id: str | None = None
     members: list[str] = Field(default_factory=list)
@@ -676,7 +685,9 @@ class ResourcesConfig(BaseModel):
                 if isinstance(catalog, dict):
                     catalog.setdefault("name", key)
             _check_duplicate_names(
-                list(catalogs.values()), "catalog", "resources",
+                list(catalogs.values()),
+                "catalog",
+                "resources",
             )
         governed_tags = data.get("governed_tags")
         if isinstance(governed_tags, dict):
@@ -684,7 +695,9 @@ class ResourcesConfig(BaseModel):
                 if isinstance(gt, dict):
                     gt.setdefault("name", key)
             _check_duplicate_names(
-                list(governed_tags.values()), "governed tag", "resources",
+                list(governed_tags.values()),
+                "governed tag",
+                "resources",
             )
         groups = data.get("groups")
         if isinstance(groups, dict):
@@ -694,10 +707,14 @@ class ResourcesConfig(BaseModel):
                     if isinstance(grp.get("id"), int):
                         grp["id"] = str(grp["id"])
             _check_duplicate_names(
-                list(groups.values()), "group", "resources",
+                list(groups.values()),
+                "group",
+                "resources",
             )
             _check_duplicate_names(
                 [g for g in groups.values() if isinstance(g, dict) and g.get("id")],
-                "group", "resources", key="id",
+                "group",
+                "resources",
+                key="id",
             )
         return data

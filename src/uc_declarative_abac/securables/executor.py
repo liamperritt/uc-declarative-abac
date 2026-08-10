@@ -175,7 +175,9 @@ def _group_columns_by_parent(columns: list[Column]) -> list[tuple[str, list[Colu
     return list(groups.items())
 
 
-def _build_alter_table_add_columns_sql(parent_full_name: str, columns: list[Column]) -> str:
+def _build_alter_table_add_columns_sql(
+    parent_full_name: str, columns: list[Column]
+) -> str:
     """``ALTER TABLE <parent> ADD COLUMNS (`c1` T1, `c2` T2, ...)`` — adds one or
     more columns to an existing table in a single atomic Delta commit. Batching
     eliminates ``DELTA_METADATA_CHANGED`` conflicts between concurrent ADD
@@ -185,8 +187,7 @@ def _build_alter_table_add_columns_sql(parent_full_name: str, columns: list[Colu
         f"`{c.full_name.rpartition('.')[-1]}` {c.data_type}" for c in columns
     )
     return (
-        f"ALTER TABLE {quote_securable(parent_full_name)} "
-        f"ADD COLUMNS ({column_defs})"
+        f"ALTER TABLE {quote_securable(parent_full_name)} ADD COLUMNS ({column_defs})"
     )
 
 
@@ -196,7 +197,9 @@ def _build_replace_sql(info: Securable) -> str:
         case Function():
             return _build_replace_function_sql(info)
         case _:
-            raise NotImplementedError(f"Replace not supported for {type(info).__name__}")
+            raise NotImplementedError(
+                f"Replace not supported for {type(info).__name__}"
+            )
 
 
 def _build_function_params(parameters: tuple[tuple[str, str], ...]) -> str:
@@ -230,10 +233,14 @@ def _build_replace_function_sql(info: Function) -> str:
     quoted = quote_securable(info.full_name)
     params = _build_function_params(info.parameters)
     comment = _build_function_comment_clause(info.comment)
-    return f"CREATE OR REPLACE FUNCTION {quoted}{params}{comment} RETURN {info.definition}"
+    return (
+        f"CREATE OR REPLACE FUNCTION {quoted}{params}{comment} RETURN {info.definition}"
+    )
 
 
-def _build_comment_update_sql(securable_type: SecurableType, full_name: str, comment: str) -> str:
+def _build_comment_update_sql(
+    securable_type: SecurableType, full_name: str, comment: str
+) -> str:
     """Build an ALTER/COMMENT ON SQL statement to set the comment of an existing securable.
 
     Catalog/schema use ``ALTER ... SET COMMENT '...'``; table/volume use
@@ -301,7 +308,9 @@ def _run_attribute_update(
             _apply_owner_update(uc_helper, update)
         case "rfa_destinations":
             uc_helper.update_rfa_destinations(
-                update.securable_type, update.full_name, update.new_value,
+                update.securable_type,
+                update.full_name,
+                update.new_value,
             )
         case _:
             raise OrchestratorError(
@@ -355,7 +364,10 @@ def _run_column_create_batch(
             change_logger.log_securable_create(col)
 
     results = parallel_for_each(
-        work_items, worker, max_workers=max_workers, on_complete=on_complete,
+        work_items,
+        worker,
+        max_workers=max_workers,
+        on_complete=on_complete,
     )
     if dry_run:
         return []
@@ -402,7 +414,10 @@ def _run_create_batch(
         change_logger.log_securable_create(info)
 
     results = parallel_for_each(
-        work_items, worker, max_workers=max_workers, on_complete=on_complete,
+        work_items,
+        worker,
+        max_workers=max_workers,
+        on_complete=on_complete,
     )
     if dry_run:
         return []
@@ -435,7 +450,10 @@ def _run_replace_batch(
         change_logger.log_securable_replace(info, old_securables.get(info.full_name))
 
     results = parallel_for_each(
-        work_items, worker, max_workers=max_workers, on_complete=on_complete,
+        work_items,
+        worker,
+        max_workers=max_workers,
+        on_complete=on_complete,
     )
     if dry_run:
         return []
@@ -448,7 +466,9 @@ def _attribute_update_stmt(update: AttributeUpdate) -> str | None:
         return None
     new_comment = next(iter(update.new_value))
     return _build_comment_update_sql(
-        update.securable_type, update.full_name, str(new_comment),
+        update.securable_type,
+        update.full_name,
+        str(new_comment),
     )
 
 
@@ -497,20 +517,26 @@ def _run_attribute_update_sub_batch(
     def on_complete(item: tuple[AttributeUpdate, str | None], _result, error) -> None:
         update, stmt = item
         if error is not None:
-            change_logger.log_error(ExecutionError(
-                context=_attribute_update_context(update, stmt),
-                exception=error,
-            ))
+            change_logger.log_error(
+                ExecutionError(
+                    context=_attribute_update_context(update, stmt),
+                    exception=error,
+                )
+            )
             return
         change_logger.log_attribute_update(update)
 
     results = parallel_for_each(
-        work_items, worker, max_workers=max_workers, on_complete=on_complete,
+        work_items,
+        worker,
+        max_workers=max_workers,
+        on_complete=on_complete,
     )
     if dry_run:
         return []
     return [
-        stmt for (_update, stmt), _result, error in results
+        stmt
+        for (_update, stmt), _result, error in results
         if error is None and stmt is not None
     ]
 
@@ -546,19 +572,37 @@ def execute_securable_diff(
 
     creates_by_depth = _bucket_creates_by_depth(diff)
     for depth in sorted(creates_by_depth):
-        statements.extend(_run_create_batch(
-            uc_helper, creates_by_depth[depth], change_logger, dry_run, workers,
-        ))
+        statements.extend(
+            _run_create_batch(
+                uc_helper,
+                creates_by_depth[depth],
+                change_logger,
+                dry_run,
+                workers,
+            )
+        )
 
-    statements.extend(_run_replace_batch(
-        uc_helper, list(diff.securables_to_replace), diff.old_securables,
-        change_logger, dry_run, workers,
-    ))
+    statements.extend(
+        _run_replace_batch(
+            uc_helper,
+            list(diff.securables_to_replace),
+            diff.old_securables,
+            change_logger,
+            dry_run,
+            workers,
+        )
+    )
 
     attribute_buckets = _bucket_attribute_updates(list(diff.attributes_to_update))
     for sort_key in sorted(attribute_buckets):
-        statements.extend(_run_attribute_update_sub_batch(
-            uc_helper, attribute_buckets[sort_key], change_logger, dry_run, workers,
-        ))
+        statements.extend(
+            _run_attribute_update_sub_batch(
+                uc_helper,
+                attribute_buckets[sort_key],
+                change_logger,
+                dry_run,
+                workers,
+            )
+        )
 
     return statements

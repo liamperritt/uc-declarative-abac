@@ -15,7 +15,6 @@ from uc_declarative_abac.securables import (
     Function,
     Securable,
     SecurableAttributes,
-    SecurableDiff,
     Table,
 )
 from uc_declarative_abac.types import (
@@ -23,15 +22,22 @@ from uc_declarative_abac.types import (
     SecurableType,
 )
 
-import pytest
-
 
 # Catalogs referenced across the test fixtures. Tests opting into creation pass
 # this set as ``creation_in_scope_namespaces`` — equivalent to "create everything"
 # under the whole-catalog model. Tests exercising the disabled path pass an
 # explicit ``frozenset()`` instead.
 _ALL_TEST_CATALOGS = frozenset(
-    {"cat", "new_cat", "ghost", "ghost_catalog", "ghost_cat_a", "ghost_cat_b", "my_catalog", "catalog"}
+    {
+        "cat",
+        "new_cat",
+        "ghost",
+        "ghost_catalog",
+        "ghost_cat_a",
+        "ghost_cat_b",
+        "my_catalog",
+        "catalog",
+    }
 )
 
 
@@ -85,7 +91,9 @@ def test_securable_differ_detects_owner_change():
         )
     }
 
-    diff = compute_securable_diff(desired_attrs, actual_attrs, set(), set(), _resolver(), _change_logger())
+    diff = compute_securable_diff(
+        desired_attrs, actual_attrs, set(), set(), _resolver(), _change_logger()
+    )
 
     assert diff.attributes_to_update == [
         AttributeUpdate(
@@ -150,7 +158,12 @@ def test_securable_differ_suppresses_warning_for_ignored_unresolvable_owner():
     }
 
     diff = compute_securable_diff(
-        set(), actual_attrs, set(), set(), resolver, change_logger,
+        set(),
+        actual_attrs,
+        set(),
+        set(),
+        resolver,
+        change_logger,
         ignore_unresolvable=frozenset({ignored_id}),
     )
 
@@ -169,7 +182,9 @@ def test_securable_differ_ignores_matching_owners():
         )
     }
 
-    diff = compute_securable_diff(attrs, attrs, set(), set(), _resolver(), _change_logger())
+    diff = compute_securable_diff(
+        attrs, attrs, set(), set(), _resolver(), _change_logger()
+    )
 
     assert diff.attributes_to_update == []
 
@@ -186,7 +201,9 @@ def test_securable_differ_ignores_desired_only_attributes():
     }
     actual_attrs: set[SecurableAttributes] = set()
 
-    diff = compute_securable_diff(desired_attrs, actual_attrs, set(), set(), _resolver(), _change_logger())
+    diff = compute_securable_diff(
+        desired_attrs, actual_attrs, set(), set(), _resolver(), _change_logger()
+    )
 
     assert diff.attributes_to_update == []
 
@@ -208,7 +225,9 @@ def test_securable_differ_records_old_and_new_values():
         )
     }
 
-    diff = compute_securable_diff(desired_attrs, actual_attrs, set(), set(), _resolver(), _change_logger())
+    diff = compute_securable_diff(
+        desired_attrs, actual_attrs, set(), set(), _resolver(), _change_logger()
+    )
 
     assert len(diff.attributes_to_update) == 1
     update = diff.attributes_to_update[0]
@@ -228,7 +247,9 @@ def test_securable_differ_detects_new_function():
     """A Function in desired but not in actual appears in securables_to_create."""
     func = _make_function(full_name="catalog.schema.new_func")
 
-    diff = compute_securable_diff(set(), set(), {func}, set(), _resolver(), _change_logger())
+    diff = compute_securable_diff(
+        set(), set(), {func}, set(), _resolver(), _change_logger()
+    )
 
     assert diff.securables_to_create == [func]
     assert diff.securables_to_replace == []
@@ -245,7 +266,9 @@ def test_securable_differ_detects_changed_definition():
         definition="RETURN x",
     )
 
-    diff = compute_securable_diff(set(), set(), {desired_func}, {actual_func}, _resolver(), _change_logger())
+    diff = compute_securable_diff(
+        set(), set(), {desired_func}, {actual_func}, _resolver(), _change_logger()
+    )
 
     assert diff.securables_to_replace == [desired_func]
     assert diff.securables_to_create == []
@@ -262,7 +285,9 @@ def test_securable_differ_detects_changed_parameters():
         parameters=(("x", "STRING"),),
     )
 
-    diff = compute_securable_diff(set(), set(), {desired_func}, {actual_func}, _resolver(), _change_logger())
+    diff = compute_securable_diff(
+        set(), set(), {desired_func}, {actual_func}, _resolver(), _change_logger()
+    )
 
     assert diff.securables_to_replace == [desired_func]
     assert diff.securables_to_create == []
@@ -272,7 +297,9 @@ def test_securable_differ_ignores_matching_functions():
     """Identical Function in both sets produces no create or replace entries."""
     func = _make_function(full_name="catalog.schema.stable_func")
 
-    diff = compute_securable_diff(set(), set(), {func}, {func}, _resolver(), _change_logger())
+    diff = compute_securable_diff(
+        set(), set(), {func}, {func}, _resolver(), _change_logger()
+    )
 
     assert diff.securables_to_create == []
     assert diff.securables_to_replace == []
@@ -291,7 +318,12 @@ def test_securable_differ_populates_old_securables_on_replace():
     )
 
     diff = compute_securable_diff(
-        set(), set(), {desired_func}, {actual_func}, _resolver(), _change_logger(),
+        set(),
+        set(),
+        {desired_func},
+        {actual_func},
+        _resolver(),
+        _change_logger(),
     )
 
     assert diff.old_securables["catalog.schema.my_func"] == actual_func
@@ -301,7 +333,9 @@ def test_securable_differ_old_securables_empty_when_no_replacements():
     """Pure-create diffs leave diff.old_securables empty."""
     desired_func = _make_function(full_name="catalog.schema.new_func")
 
-    diff = compute_securable_diff(set(), set(), {desired_func}, set(), _resolver(), _change_logger())
+    diff = compute_securable_diff(
+        set(), set(), {desired_func}, set(), _resolver(), _change_logger()
+    )
 
     assert diff.old_securables == {}
 
@@ -325,7 +359,9 @@ def test_securable_differ_emits_attribute_update_for_created_securable():
     }
     actual_attrs: set[SecurableAttributes] = set()
 
-    diff = compute_securable_diff(desired_attrs, actual_attrs, {func}, set(), _resolver(), _change_logger())
+    diff = compute_securable_diff(
+        desired_attrs, actual_attrs, {func}, set(), _resolver(), _change_logger()
+    )
 
     assert diff.securables_to_create == [func]
     assert len(diff.attributes_to_update) == 1
@@ -342,11 +378,19 @@ def test_securable_differ_emits_attribute_update_for_created_securable():
 
 def test_securable_differ_compares_owners_by_resolved_principal_equality():
     """Two resolved Principals with the same identifier compare equal, so no update is emitted."""
-    sp_principal = Principal(PrincipalType.SERVICE_PRINCIPAL, "72a5956b-app-id", "sp_display_name")
-    desired = {SecurableAttributes(SecurableType.CATALOG, "my_catalog", owner=sp_principal)}
-    actual = {SecurableAttributes(SecurableType.CATALOG, "my_catalog", owner=sp_principal)}
+    sp_principal = Principal(
+        PrincipalType.SERVICE_PRINCIPAL, "72a5956b-app-id", "sp_display_name"
+    )
+    desired = {
+        SecurableAttributes(SecurableType.CATALOG, "my_catalog", owner=sp_principal)
+    }
+    actual = {
+        SecurableAttributes(SecurableType.CATALOG, "my_catalog", owner=sp_principal)
+    }
 
-    diff = compute_securable_diff(desired, actual, set(), set(), _resolver(), _change_logger())
+    diff = compute_securable_diff(
+        desired, actual, set(), set(), _resolver(), _change_logger()
+    )
 
     assert diff.attributes_to_update == []
 
@@ -355,10 +399,16 @@ def test_securable_differ_emits_principal_values_in_attribute_update():
     """When resolved owner Principals differ, the attribute update carries them directly."""
     new_principal = Principal(PrincipalType.GROUP, "new_group", "new_group")
     old_principal = Principal(PrincipalType.USER, "old_user", "old_user")
-    desired = {SecurableAttributes(SecurableType.CATALOG, "my_catalog", owner=new_principal)}
-    actual = {SecurableAttributes(SecurableType.CATALOG, "my_catalog", owner=old_principal)}
+    desired = {
+        SecurableAttributes(SecurableType.CATALOG, "my_catalog", owner=new_principal)
+    }
+    actual = {
+        SecurableAttributes(SecurableType.CATALOG, "my_catalog", owner=old_principal)
+    }
 
-    diff = compute_securable_diff(desired, actual, set(), set(), _resolver(), _change_logger())
+    diff = compute_securable_diff(
+        desired, actual, set(), set(), _resolver(), _change_logger()
+    )
 
     assert len(diff.attributes_to_update) == 1
     update = diff.attributes_to_update[0]
@@ -389,7 +439,12 @@ def test_securable_differ_comment_change_triggers_replace_not_attribute_update()
     )
 
     diff = compute_securable_diff(
-        set(), set(), {desired_func}, {actual_func}, _resolver(), _change_logger(),
+        set(),
+        set(),
+        {desired_func},
+        {actual_func},
+        _resolver(),
+        _change_logger(),
     )
 
     assert diff.securables_to_replace == [desired_func]
@@ -407,7 +462,12 @@ def test_securable_differ_ignores_matching_function_comments():
     )
 
     diff = compute_securable_diff(
-        set(), set(), {func}, {func}, _resolver(), _change_logger(),
+        set(),
+        set(),
+        {func},
+        {func},
+        _resolver(),
+        _change_logger(),
     )
 
     assert diff.securables_to_create == []
@@ -439,7 +499,9 @@ def test_securable_differ_detects_catalog_comment_change():
     desired = {_attrs(SecurableType.CATALOG, "my_catalog", comment="New")}
     actual = {_attrs(SecurableType.CATALOG, "my_catalog", comment="Old")}
 
-    diff = compute_securable_diff(desired, actual, set(), set(), _resolver(), _change_logger())
+    diff = compute_securable_diff(
+        desired, actual, set(), set(), _resolver(), _change_logger()
+    )
 
     assert len(diff.attributes_to_update) == 1
     update = diff.attributes_to_update[0]
@@ -452,9 +514,13 @@ def test_securable_differ_detects_schema_comment_change():
     desired = {_attrs(SecurableType.SCHEMA, "cat.sales", comment="New")}
     actual = {_attrs(SecurableType.SCHEMA, "cat.sales", comment="Old")}
 
-    diff = compute_securable_diff(desired, actual, set(), set(), _resolver(), _change_logger())
+    diff = compute_securable_diff(
+        desired, actual, set(), set(), _resolver(), _change_logger()
+    )
 
-    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [("comment", frozenset({"New"}))]
+    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [
+        ("comment", frozenset({"New"}))
+    ]
 
 
 def test_securable_differ_detects_table_comment_change_on_non_view_table():
@@ -467,18 +533,26 @@ def test_securable_differ_detects_table_comment_change_on_non_view_table():
     desired = {_attrs(SecurableType.TABLE, "cat.sales.orders", comment="New")}
     actual = {_attrs(SecurableType.TABLE, "cat.sales.orders", comment="Old")}
 
-    diff = compute_securable_diff(desired, actual, set(), {table}, _resolver(), _change_logger())
+    diff = compute_securable_diff(
+        desired, actual, set(), {table}, _resolver(), _change_logger()
+    )
 
-    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [("comment", frozenset({"New"}))]
+    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [
+        ("comment", frozenset({"New"}))
+    ]
 
 
 def test_securable_differ_detects_volume_comment_change():
     desired = {_attrs(SecurableType.VOLUME, "cat.landing.raw", comment="New")}
     actual = {_attrs(SecurableType.VOLUME, "cat.landing.raw", comment="Old")}
 
-    diff = compute_securable_diff(desired, actual, set(), set(), _resolver(), _change_logger())
+    diff = compute_securable_diff(
+        desired, actual, set(), set(), _resolver(), _change_logger()
+    )
 
-    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [("comment", frozenset({"New"}))]
+    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [
+        ("comment", frozenset({"New"}))
+    ]
 
 
 def test_securable_differ_ignores_matching_comments():
@@ -486,7 +560,9 @@ def test_securable_differ_ignores_matching_comments():
     desired = {_attrs(SecurableType.CATALOG, "cat", comment="same")}
     actual = {_attrs(SecurableType.CATALOG, "cat", comment="same")}
 
-    diff = compute_securable_diff(desired, actual, set(), set(), _resolver(), _change_logger())
+    diff = compute_securable_diff(
+        desired, actual, set(), set(), _resolver(), _change_logger()
+    )
 
     assert diff.attributes_to_update == []
 
@@ -496,7 +572,9 @@ def test_securable_differ_ignores_comment_when_config_does_not_specify():
     desired = {_attrs(SecurableType.CATALOG, "cat", comment=None)}
     actual = {_attrs(SecurableType.CATALOG, "cat", comment="some")}
 
-    diff = compute_securable_diff(desired, actual, set(), set(), _resolver(), _change_logger())
+    diff = compute_securable_diff(
+        desired, actual, set(), set(), _resolver(), _change_logger()
+    )
 
     assert diff.attributes_to_update == []
 
@@ -542,7 +620,12 @@ def test_securable_differ_does_not_emit_comment_update_for_newly_created_catalog
     desired_attrs = {_attrs(SecurableType.CATALOG, "new_cat", comment="Brand new")}
 
     diff = compute_securable_diff(
-        desired_attrs, set(), {catalog}, set(), _resolver(), _change_logger(),
+        desired_attrs,
+        set(),
+        {catalog},
+        set(),
+        _resolver(),
+        _change_logger(),
         creation_in_scope_namespaces=frozenset({"new_cat"}),
     )
 
@@ -556,14 +639,27 @@ def test_securable_differ_does_not_emit_comment_update_for_newly_created_table()
     table = Table(
         securable_type=SecurableType.TABLE,
         full_name="new_cat.sales.orders",
-        columns=(Column(securable_type=SecurableType.COLUMN, full_name="new_cat.sales.orders.id", data_type="BIGINT"),),
+        columns=(
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="new_cat.sales.orders.id",
+                data_type="BIGINT",
+            ),
+        ),
         comment="New table",
         location="s3://ext/orders",
     )
-    desired_attrs = {_attrs(SecurableType.TABLE, "new_cat.sales.orders", comment="New table")}
+    desired_attrs = {
+        _attrs(SecurableType.TABLE, "new_cat.sales.orders", comment="New table")
+    }
 
     diff = compute_securable_diff(
-        desired_attrs, set(), {table}, set(), _resolver(), _change_logger(),
+        desired_attrs,
+        set(),
+        {table},
+        set(),
+        _resolver(),
+        _change_logger(),
         creation_in_scope_namespaces=frozenset({"new_cat"}),
     )
 
@@ -577,10 +673,17 @@ def test_securable_differ_still_emits_owner_update_for_newly_created_catalog():
         securable_type=SecurableType.CATALOG,
         full_name="new_cat",
     )
-    desired_attrs = {_attrs(SecurableType.CATALOG, "new_cat", owner=_owner("team_data"))}
+    desired_attrs = {
+        _attrs(SecurableType.CATALOG, "new_cat", owner=_owner("team_data"))
+    }
 
     diff = compute_securable_diff(
-        desired_attrs, set(), {catalog}, set(), _resolver(), _change_logger(),
+        desired_attrs,
+        set(),
+        {catalog},
+        set(),
+        _resolver(),
+        _change_logger(),
         creation_in_scope_namespaces=frozenset({"new_cat"}),
     )
 
@@ -600,8 +703,12 @@ def test_securable_differ_logs_error_when_owner_change_targets_a_materialized_vi
         full_name="cat.sales.orders_mv",
         table_type="MATERIALIZED_VIEW",
     )
-    desired = {_attrs(SecurableType.TABLE, "cat.sales.orders_mv", owner=_owner("new_owner"))}
-    actual = {_attrs(SecurableType.TABLE, "cat.sales.orders_mv", owner=_owner("old_owner"))}
+    desired = {
+        _attrs(SecurableType.TABLE, "cat.sales.orders_mv", owner=_owner("new_owner"))
+    }
+    actual = {
+        _attrs(SecurableType.TABLE, "cat.sales.orders_mv", owner=_owner("old_owner"))
+    }
     logger = _change_logger()
 
     diff = compute_securable_diff(desired, actual, set(), {mv}, _resolver(), logger)
@@ -620,8 +727,12 @@ def test_securable_differ_logs_error_when_owner_change_targets_a_streaming_table
         full_name="cat.sales.orders_st",
         table_type="STREAMING_TABLE",
     )
-    desired = {_attrs(SecurableType.TABLE, "cat.sales.orders_st", owner=_owner("new_owner"))}
-    actual = {_attrs(SecurableType.TABLE, "cat.sales.orders_st", owner=_owner("old_owner"))}
+    desired = {
+        _attrs(SecurableType.TABLE, "cat.sales.orders_st", owner=_owner("new_owner"))
+    }
+    actual = {
+        _attrs(SecurableType.TABLE, "cat.sales.orders_st", owner=_owner("old_owner"))
+    }
     logger = _change_logger()
 
     diff = compute_securable_diff(desired, actual, set(), {st}, _resolver(), logger)
@@ -638,8 +749,12 @@ def test_securable_differ_emits_owner_change_for_view_table_type():
         full_name="cat.sales.orders_v",
         table_type="VIEW",
     )
-    desired = {_attrs(SecurableType.TABLE, "cat.sales.orders_v", owner=_owner("new_owner"))}
-    actual = {_attrs(SecurableType.TABLE, "cat.sales.orders_v", owner=_owner("old_owner"))}
+    desired = {
+        _attrs(SecurableType.TABLE, "cat.sales.orders_v", owner=_owner("new_owner"))
+    }
+    actual = {
+        _attrs(SecurableType.TABLE, "cat.sales.orders_v", owner=_owner("old_owner"))
+    }
     logger = _change_logger()
 
     diff = compute_securable_diff(desired, actual, set(), {view}, _resolver(), logger)
@@ -657,8 +772,12 @@ def test_securable_differ_emits_owner_change_for_managed_table():
         full_name="cat.sales.orders",
         table_type="MANAGED",
     )
-    desired = {_attrs(SecurableType.TABLE, "cat.sales.orders", owner=_owner("new_owner"))}
-    actual = {_attrs(SecurableType.TABLE, "cat.sales.orders", owner=_owner("old_owner"))}
+    desired = {
+        _attrs(SecurableType.TABLE, "cat.sales.orders", owner=_owner("new_owner"))
+    }
+    actual = {
+        _attrs(SecurableType.TABLE, "cat.sales.orders", owner=_owner("old_owner"))
+    }
     logger = _change_logger()
 
     diff = compute_securable_diff(desired, actual, set(), {table}, _resolver(), logger)
@@ -704,7 +823,9 @@ def test_securable_differ_owner_guard_does_not_affect_non_owner_attributes_on_mv
 
     # The owner guard is not triggered. The comment update is emitted normally since
     # MATERIALIZED_VIEW is not in the comment-immutable (VIEW-only) set.
-    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [("comment", frozenset({"new"}))]
+    assert [(u.attribute, u.new_value) for u in diff.attributes_to_update] == [
+        ("comment", frozenset({"new"}))
+    ]
     assert logger.errors == []
 
 
@@ -720,7 +841,8 @@ def _sec(sec_type: SecurableType, full_name: str) -> Securable:
 def _nonexistent_errors(change_logger: ChangeLogger) -> list:
     """Helper — extract the NonexistentSecurableError payloads from a ChangeLogger."""
     return [
-        e.exception for e in change_logger.errors
+        e.exception
+        for e in change_logger.errors
         if isinstance(e.exception, NonexistentSecurableError)
     ]
 
@@ -749,7 +871,9 @@ def test_securable_differ_logs_nonexistent_securable_error_when_schema_does_not_
 
     compute_securable_diff(set(), set(), desired, actual, _resolver(), change_logger)
 
-    offenders = {(e.securable_type, e.full_name) for e in _nonexistent_errors(change_logger)}
+    offenders = {
+        (e.securable_type, e.full_name) for e in _nonexistent_errors(change_logger)
+    }
     assert (SecurableType.SCHEMA, "cat.ghost_schema") in offenders
 
 
@@ -768,7 +892,9 @@ def test_securable_differ_logs_nonexistent_securable_error_when_table_does_not_e
 
     compute_securable_diff(set(), set(), desired, actual, _resolver(), change_logger)
 
-    offenders = {(e.securable_type, e.full_name) for e in _nonexistent_errors(change_logger)}
+    offenders = {
+        (e.securable_type, e.full_name) for e in _nonexistent_errors(change_logger)
+    }
     assert (SecurableType.TABLE, "cat.sch.ghost_table") in offenders
 
 
@@ -787,7 +913,9 @@ def test_securable_differ_logs_nonexistent_securable_error_when_volume_does_not_
 
     compute_securable_diff(set(), set(), desired, actual, _resolver(), change_logger)
 
-    offenders = {(e.securable_type, e.full_name) for e in _nonexistent_errors(change_logger)}
+    offenders = {
+        (e.securable_type, e.full_name) for e in _nonexistent_errors(change_logger)
+    }
     assert (SecurableType.VOLUME, "cat.raw.ghost_volume") in offenders
 
 
@@ -802,7 +930,9 @@ def test_securable_differ_logs_one_error_per_offender_when_multiple_nonexistent(
 
     compute_securable_diff(set(), set(), desired, set(), _resolver(), change_logger)
 
-    offenders = {(e.securable_type, e.full_name) for e in _nonexistent_errors(change_logger)}
+    offenders = {
+        (e.securable_type, e.full_name) for e in _nonexistent_errors(change_logger)
+    }
     assert offenders == {
         (SecurableType.CATALOG, "ghost_cat_a"),
         (SecurableType.CATALOG, "ghost_cat_b"),
@@ -816,7 +946,9 @@ def test_securable_differ_drops_nonexistent_securables_from_to_create():
     desired = {_sec(SecurableType.CATALOG, "ghost_catalog")}
     change_logger = _change_logger()
 
-    diff = compute_securable_diff(set(), set(), desired, set(), _resolver(), change_logger)
+    diff = compute_securable_diff(
+        set(), set(), desired, set(), _resolver(), change_logger
+    )
 
     assert diff.securables_to_create == []
 
@@ -842,7 +974,9 @@ def test_securable_differ_does_not_log_error_when_function_is_nonexistent_in_act
     }
     change_logger = _change_logger()
 
-    diff = compute_securable_diff(set(), set(), desired, actual, _resolver(), change_logger)
+    diff = compute_securable_diff(
+        set(), set(), desired, actual, _resolver(), change_logger
+    )
 
     assert func in diff.securables_to_create
     assert _nonexistent_errors(change_logger) == []
@@ -859,7 +993,9 @@ def test_securable_differ_returns_diff_normally_when_every_declared_securable_is
     actual = set(desired)
     change_logger = _change_logger()
 
-    diff = compute_securable_diff(set(), set(), desired, actual, _resolver(), change_logger)
+    diff = compute_securable_diff(
+        set(), set(), desired, actual, _resolver(), change_logger
+    )
 
     assert diff.securables_to_create == []
     assert diff.securables_to_replace == []
@@ -897,7 +1033,12 @@ def test_securable_differ_emits_catalog_schema_volume_in_to_create_when_taggable
     change_logger = _change_logger()
 
     diff = compute_securable_diff(
-        set(), set(), desired, set(), _resolver(), change_logger,
+        set(),
+        set(),
+        desired,
+        set(),
+        _resolver(),
+        change_logger,
         creation_in_scope_namespaces=_ALL_TEST_CATALOGS,
     )
 
@@ -913,7 +1054,12 @@ def test_securable_differ_emits_table_in_to_create_when_columns_valid_and_taggab
     change_logger = _change_logger()
 
     diff = compute_securable_diff(
-        set(), set(), {table}, set(), _resolver(), change_logger,
+        set(),
+        set(),
+        {table},
+        set(),
+        _resolver(),
+        change_logger,
         creation_in_scope_namespaces=_ALL_TEST_CATALOGS,
     )
 
@@ -932,7 +1078,12 @@ def test_securable_differ_logs_error_when_table_has_no_columns_and_taggable_crea
     change_logger = _change_logger()
 
     diff = compute_securable_diff(
-        set(), set(), {empty_table}, set(), _resolver(), change_logger,
+        set(),
+        set(),
+        {empty_table},
+        set(),
+        _resolver(),
+        change_logger,
         creation_in_scope_namespaces=_ALL_TEST_CATALOGS,
     )
 
@@ -949,14 +1100,27 @@ def test_securable_differ_logs_error_when_any_column_missing_data_type_and_tagga
         securable_type=SecurableType.TABLE,
         full_name="cat.sch.partly_typed",
         columns=(
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.partly_typed.a", data_type="STRING"),
-            Column(securable_type=SecurableType.COLUMN, full_name="cat.sch.partly_typed.b", data_type=None),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.partly_typed.a",
+                data_type="STRING",
+            ),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.partly_typed.b",
+                data_type=None,
+            ),
         ),
     )
     change_logger = _change_logger()
 
     diff = compute_securable_diff(
-        set(), set(), {table}, set(), _resolver(), change_logger,
+        set(),
+        set(),
+        {table},
+        set(),
+        _resolver(),
+        change_logger,
         creation_in_scope_namespaces=_ALL_TEST_CATALOGS,
     )
 
@@ -973,11 +1137,18 @@ def test_securable_differ_still_logs_error_when_taggable_creation_disabled():
     change_logger = _change_logger()
 
     diff = compute_securable_diff(
-        set(), set(), desired, set(), _resolver(), change_logger,
+        set(),
+        set(),
+        desired,
+        set(),
+        _resolver(),
+        change_logger,
     )
 
     assert diff.securables_to_create == []
-    offenders = {(e.securable_type, e.full_name) for e in _nonexistent_errors(change_logger)}
+    offenders = {
+        (e.securable_type, e.full_name) for e in _nonexistent_errors(change_logger)
+    }
     assert (SecurableType.CATALOG, "ghost") in offenders
 
 
@@ -991,7 +1162,12 @@ def test_securable_differ_does_not_add_table_to_replace_when_desired_columns_dif
     change_logger = _change_logger()
 
     diff = compute_securable_diff(
-        set(), set(), {desired_table}, {actual_table}, _resolver(), change_logger,
+        set(),
+        set(),
+        {desired_table},
+        {actual_table},
+        _resolver(),
+        change_logger,
         creation_in_scope_namespaces=_ALL_TEST_CATALOGS,
     )
 
@@ -1033,10 +1209,17 @@ def test_securable_differ_logs_nonexistent_column_when_missing_and_taggable_crea
     change_logger = _change_logger()
 
     diff = compute_securable_diff(
-        set(), set(), desired, actual, _resolver(), change_logger,
+        set(),
+        set(),
+        desired,
+        actual,
+        _resolver(),
+        change_logger,
     )
 
-    offenders = {(e.securable_type, e.full_name) for e in _nonexistent_errors(change_logger)}
+    offenders = {
+        (e.securable_type, e.full_name) for e in _nonexistent_errors(change_logger)
+    }
     assert (SecurableType.COLUMN, "cat.sch.orders.email") in offenders
     # No Column emitted when flag is off.
     assert not any(isinstance(s, Column) for s in diff.securables_to_create)
@@ -1049,7 +1232,12 @@ def test_securable_differ_emits_column_to_create_when_missing_and_taggable_creat
     change_logger = _change_logger()
 
     diff = compute_securable_diff(
-        set(), set(), desired, actual, _resolver(), change_logger,
+        set(),
+        set(),
+        desired,
+        actual,
+        _resolver(),
+        change_logger,
         creation_in_scope_namespaces=_ALL_TEST_CATALOGS,
     )
 
@@ -1077,7 +1265,12 @@ def test_securable_differ_logs_nonexistent_column_with_hint_when_taggable_creati
     change_logger = _change_logger()
 
     compute_securable_diff(
-        set(), set(), {desired_table}, actual, _resolver(), change_logger,
+        set(),
+        set(),
+        {desired_table},
+        actual,
+        _resolver(),
+        change_logger,
         creation_in_scope_namespaces=_ALL_TEST_CATALOGS,
     )
 
@@ -1096,7 +1289,12 @@ def test_securable_differ_does_not_emit_column_when_already_present_in_actual():
     change_logger = _change_logger()
 
     diff = compute_securable_diff(
-        set(), set(), desired, actual, _resolver(), change_logger,
+        set(),
+        set(),
+        desired,
+        actual,
+        _resolver(),
+        change_logger,
         creation_in_scope_namespaces=_ALL_TEST_CATALOGS,
     )
 
@@ -1111,7 +1309,12 @@ def test_securable_differ_ignores_columns_present_only_in_actual():
     change_logger = _change_logger()
 
     diff = compute_securable_diff(
-        set(), set(), desired, actual, _resolver(), change_logger,
+        set(),
+        set(),
+        desired,
+        actual,
+        _resolver(),
+        change_logger,
         creation_in_scope_namespaces=_ALL_TEST_CATALOGS,
     )
 
@@ -1127,7 +1330,12 @@ def test_securable_differ_skips_column_check_for_table_being_created():
     change_logger = _change_logger()
 
     diff = compute_securable_diff(
-        set(), set(), desired, actual, _resolver(), change_logger,
+        set(),
+        set(),
+        desired,
+        actual,
+        _resolver(),
+        change_logger,
         creation_in_scope_namespaces=_ALL_TEST_CATALOGS,
     )
 
@@ -1153,7 +1361,8 @@ def test_nonexistent_securable_error_message_recommends_enable_taggable_creation
     compute_securable_diff(set(), set(), desired, set(), _resolver(), change_logger)
 
     err = next(
-        e.exception for e in change_logger.errors
+        e.exception
+        for e in change_logger.errors
         if isinstance(e.exception, NonexistentSecurableError)
     )
     msg = str(err)
@@ -1190,7 +1399,12 @@ def test_securable_differ_detects_rfa_destinations_change():
     )
 
     diff = compute_securable_diff(
-        desired_attrs, actual_attrs, set(), {table}, _resolver(), _change_logger(),
+        desired_attrs,
+        actual_attrs,
+        set(),
+        {table},
+        _resolver(),
+        _change_logger(),
     )
 
     assert diff.attributes_to_update == [
@@ -1227,7 +1441,12 @@ def test_securable_differ_ignores_matching_rfa_destinations():
     )
 
     diff = compute_securable_diff(
-        desired_attrs, actual_attrs, set(), {table}, _resolver(), _change_logger(),
+        desired_attrs,
+        actual_attrs,
+        set(),
+        {table},
+        _resolver(),
+        _change_logger(),
     )
 
     assert diff.attributes_to_update == []
@@ -1256,7 +1475,12 @@ def test_securable_differ_ignores_rfa_destinations_when_desired_is_none():
     )
 
     diff = compute_securable_diff(
-        desired_attrs, actual_attrs, set(), {table}, _resolver(), _change_logger(),
+        desired_attrs,
+        actual_attrs,
+        set(),
+        {table},
+        _resolver(),
+        _change_logger(),
     )
 
     assert diff.attributes_to_update == []
@@ -1277,11 +1501,18 @@ def test_securable_differ_emits_rfa_destinations_update_for_newly_created_functi
     actual_attrs: set[SecurableAttributes] = set()
 
     diff = compute_securable_diff(
-        desired_attrs, actual_attrs, {func}, set(), _resolver(), _change_logger(),
+        desired_attrs,
+        actual_attrs,
+        {func},
+        set(),
+        _resolver(),
+        _change_logger(),
     )
 
     assert func in diff.securables_to_create
-    rfa_updates = [u for u in diff.attributes_to_update if u.attribute == "rfa_destinations"]
+    rfa_updates = [
+        u for u in diff.attributes_to_update if u.attribute == "rfa_destinations"
+    ]
     assert len(rfa_updates) == 1
     assert rfa_updates[0].full_name == "cat.sch.new_func"
     assert rfa_updates[0].new_value == frozenset({"dest_a", "dest_b"})
@@ -1310,7 +1541,12 @@ def test_securable_differ_emits_rfa_destinations_update_to_clear_destinations():
     )
 
     diff = compute_securable_diff(
-        desired_attrs, actual_attrs, set(), {table}, _resolver(), _change_logger(),
+        desired_attrs,
+        actual_attrs,
+        set(),
+        {table},
+        _resolver(),
+        _change_logger(),
     )
 
     assert len(diff.attributes_to_update) == 1
@@ -1338,7 +1574,12 @@ def test_securable_differ_records_old_and_new_rfa_destinations():
     }
 
     diff = compute_securable_diff(
-        desired_attrs, actual_attrs, set(), set(), _resolver(), _change_logger(),
+        desired_attrs,
+        actual_attrs,
+        set(),
+        set(),
+        _resolver(),
+        _change_logger(),
     )
 
     assert len(diff.attributes_to_update) == 1
@@ -1376,7 +1617,12 @@ def test_securable_differ_preserves_actual_comment_when_owner_resolves():
     }
 
     diff = compute_securable_diff(
-        desired_attrs, actual_attrs, set(), set(), _resolver(), _change_logger(),
+        desired_attrs,
+        actual_attrs,
+        set(),
+        set(),
+        _resolver(),
+        _change_logger(),
     )
 
     assert diff.attributes_to_update == []
@@ -1403,7 +1649,12 @@ def test_securable_differ_preserves_actual_rfa_destinations_when_owner_resolves(
     }
 
     diff = compute_securable_diff(
-        desired_attrs, actual_attrs, set(), set(), _resolver(), _change_logger(),
+        desired_attrs,
+        actual_attrs,
+        set(),
+        set(),
+        _resolver(),
+        _change_logger(),
     )
 
     assert diff.attributes_to_update == []
@@ -1425,12 +1676,18 @@ def test_nonexistent_securable_error_uses_hint_when_provided_instead_of_flag_boi
     change_logger = _change_logger()
 
     compute_securable_diff(
-        set(), set(), {table}, set(), _resolver(), change_logger,
+        set(),
+        set(),
+        {table},
+        set(),
+        _resolver(),
+        change_logger,
         creation_in_scope_namespaces=_ALL_TEST_CATALOGS,
     )
 
     err = next(
-        e.exception for e in change_logger.errors
+        e.exception
+        for e in change_logger.errors
         if isinstance(e.exception, NonexistentSecurableError)
     )
     msg = str(err)

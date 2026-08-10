@@ -61,7 +61,9 @@ def _change_logger() -> ChangeLogger:
     return ChangeLogger()
 
 
-def _resolved(name: str, principal_type: PrincipalType = PrincipalType.GROUP) -> Principal:
+def _resolved(
+    name: str, principal_type: PrincipalType = PrincipalType.GROUP
+) -> Principal:
     """Construct a resolved Principal (identifier == name) for use in test tuples."""
     return Principal(principal_type=principal_type, identifier=name, name=name)
 
@@ -140,7 +142,9 @@ def test_policy_differ_distinguishes_policies_by_securable():
 
 
 def test_policy_differ_treats_to_principals_change_as_replace():
-    desired = {_make_policy(to_principals=(_resolved("analysts"), _resolved("scientists")))}
+    desired = {
+        _make_policy(to_principals=(_resolved("analysts"), _resolved("scientists")))
+    }
     actual = {_make_policy(to_principals=(_resolved("analysts"),))}
 
     diff = compute_policy_diff(desired, actual, _resolver(), _change_logger())
@@ -228,7 +232,9 @@ def test_policy_differ_retains_policy_when_all_actual_principals_unresolvable():
     warning (no error) is logged."""
     actual = {
         _make_policy(
-            to_principals=(Principal(PrincipalType.UNKNOWN, identifier="unresolvable-uuid"),),
+            to_principals=(
+                Principal(PrincipalType.UNKNOWN, identifier="unresolvable-uuid"),
+            ),
         )
     }
     desired = {_make_policy(to_principals=())}
@@ -302,7 +308,10 @@ def test_policy_differ_emits_to_delete_for_in_scope_actual_only():
     actual = {_make_policy(name="stale")}  # securable cat.s.t
 
     diff = compute_policy_diff(
-        desired, actual, _resolver(), _change_logger(),
+        desired,
+        actual,
+        _resolver(),
+        _change_logger(),
         delete_scope=frozenset({"cat"}),
     )
 
@@ -317,7 +326,10 @@ def test_policy_differ_deletes_all_in_scope_when_desired_empty():
     actual = {_make_policy(name="p1"), _make_policy(name="p2")}
 
     diff = compute_policy_diff(
-        desired, actual, _resolver(), _change_logger(),
+        desired,
+        actual,
+        _resolver(),
+        _change_logger(),
         delete_scope=frozenset({"cat"}),
     )
 
@@ -331,7 +343,10 @@ def test_policy_differ_no_delete_when_scope_empty():
     actual = {_make_policy(name="stale")}
 
     diff = compute_policy_diff(
-        desired, actual, _resolver(), _change_logger(),
+        desired,
+        actual,
+        _resolver(),
+        _change_logger(),
         delete_scope=frozenset(),
     )
 
@@ -345,7 +360,10 @@ def test_policy_differ_no_delete_when_securable_out_of_scope():
     actual = {_make_policy(name="stale")}  # securable cat.s.t
 
     diff = compute_policy_diff(
-        desired, actual, _resolver(), _change_logger(),
+        desired,
+        actual,
+        _resolver(),
+        _change_logger(),
         delete_scope=frozenset({"other_catalog"}),
     )
 
@@ -359,7 +377,10 @@ def test_policy_differ_never_deletes_a_desired_policy():
     stale = _make_policy(name="stale")
 
     diff = compute_policy_diff(
-        {kept}, {kept, stale}, _resolver(), _change_logger(),
+        {kept},
+        {kept, stale},
+        _resolver(),
+        _change_logger(),
         delete_scope=frozenset({"cat"}),
     )
 

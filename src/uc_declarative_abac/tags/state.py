@@ -18,4 +18,6 @@ class TagDiff:
     to_add: set[SecurableTag] = field(default_factory=set)
     to_update: set[SecurableTag] = field(default_factory=set)
     to_remove: set[SecurableTag] = field(default_factory=set)
-    old_values: dict[tuple[SecurableType, str, str], str | None] = field(default_factory=dict)
+    old_values: dict[tuple[SecurableType, str, str], str | None] = field(
+        default_factory=dict
+    )

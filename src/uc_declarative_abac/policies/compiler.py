@@ -46,8 +46,11 @@ def compile_desired_policies(
         for p in catalog.policies or []:
             if isinstance(p, BaseFgacPolicyConfig):
                 built = _build_policy_if_valid(
-                    SecurableType.CATALOG, catalog.full_name, p,
-                    governed_tag_names, change_logger,
+                    SecurableType.CATALOG,
+                    catalog.full_name,
+                    p,
+                    governed_tag_names,
+                    change_logger,
                 )
                 if built is not None:
                     policies.add(built)
@@ -55,8 +58,11 @@ def compile_desired_policies(
             for p in schema.policies or []:
                 if isinstance(p, BaseFgacPolicyConfig):
                     built = _build_policy_if_valid(
-                        SecurableType.SCHEMA, schema.full_name, p,
-                        governed_tag_names, change_logger,
+                        SecurableType.SCHEMA,
+                        schema.full_name,
+                        p,
+                        governed_tag_names,
+                        change_logger,
                     )
                     if built is not None:
                         policies.add(built)
@@ -64,8 +70,11 @@ def compile_desired_policies(
                 for p in table.policies or []:
                     if isinstance(p, BaseFgacPolicyConfig):
                         built = _build_policy_if_valid(
-                            SecurableType.TABLE, table.full_name, p,
-                            governed_tag_names, change_logger,
+                            SecurableType.TABLE,
+                            table.full_name,
+                            p,
+                            governed_tag_names,
+                            change_logger,
                         )
                         if built is not None:
                             policies.add(built)
@@ -83,7 +92,9 @@ def _build_policy_if_valid(
     ungoverned keys and returning None if any were found."""
     ungoverned = _ungoverned_tag_keys(policy, governed_tag_names)
     if ungoverned:
-        context = f"Policy '{policy.name}' on {securable_type.value} {securable_full_name}"
+        context = (
+            f"Policy '{policy.name}' on {securable_type.value} {securable_full_name}"
+        )
         for key in sorted(ungoverned):
             change_logger.log_error(
                 ExecutionError(
@@ -130,7 +141,8 @@ def _build_policy(
             Principal(principal_type=PrincipalType.UNKNOWN, name=n) for n in policy.to
         ),
         except_principals=tuple(
-            Principal(principal_type=PrincipalType.UNKNOWN, name=n) for n in (policy.exceptions or [])
+            Principal(principal_type=PrincipalType.UNKNOWN, name=n)
+            for n in (policy.exceptions or [])
         ),
         when_condition=_render_when(policy.has_tags, policy.has_any_of_tags),
         match_columns=match_columns,
@@ -157,7 +169,9 @@ def _render_match_expr(
     group is appended last, parenthesised when it has more than one atom. Returns
     None when both groups are empty."""
     parts = [_render_tag_atom(k, v) for k, v in sorted((has_tags or {}).items())]
-    or_atoms = [_render_tag_atom(k, v) for k, v in sorted((has_any_of_tags or {}).items())]
+    or_atoms = [
+        _render_tag_atom(k, v) for k, v in sorted((has_any_of_tags or {}).items())
+    ]
     if or_atoms:
         or_expr = " OR ".join(or_atoms)
         parts.append(f"({or_expr})" if len(or_atoms) > 1 else or_expr)

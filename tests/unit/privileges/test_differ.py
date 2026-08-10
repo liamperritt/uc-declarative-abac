@@ -87,7 +87,10 @@ def test_privilege_differ_suppresses_warning_for_ignored_unresolvable_principal(
     change_logger = _change_logger()
 
     diff = compute_privilege_diff(
-        set(), actual, _failing_resolver(), change_logger,
+        set(),
+        actual,
+        _failing_resolver(),
+        change_logger,
         ignore_unresolvable=frozenset({ignored_id}),
     )
 
@@ -101,7 +104,9 @@ def test_privilege_differ_resolvable_ignored_principal_still_processed():
     it resolves normally and its privilege still flows into the diff (to_revoke
     here, since it's in actual but not desired)."""
     listed_id = "app-id-123"
-    resolved = Principal(PrincipalType.SERVICE_PRINCIPAL, identifier=listed_id, name="sp_sales")
+    resolved = Principal(
+        PrincipalType.SERVICE_PRINCIPAL, identifier=listed_id, name="sp_sales"
+    )
     ws_helper = MagicMock()
     ws_helper.resolve_by_identifier.return_value = resolved
     resolver = PrincipalResolver(ws_helper)
@@ -117,7 +122,10 @@ def test_privilege_differ_resolvable_ignored_principal_still_processed():
     change_logger = _change_logger()
 
     diff = compute_privilege_diff(
-        set(), actual, resolver, change_logger,
+        set(),
+        actual,
+        resolver,
+        change_logger,
         ignore_unresolvable=frozenset({listed_id}),
     )
 
@@ -164,7 +172,9 @@ def test_privilege_differ_computes_privileges_to_grant():
         SecurablePrivilege(
             securable_type=SecurableType.SCHEMA,
             securable_full_name="catalog.sales",
-            principal=Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
+            principal=Principal(
+                PrincipalType.GROUP, "data_engineers", "data_engineers"
+            ),
             privilege_type=PrivilegeType.USE_SCHEMA,
         ),
     }
@@ -183,7 +193,9 @@ def test_privilege_differ_computes_privileges_to_grant():
         SecurablePrivilege(
             securable_type=SecurableType.SCHEMA,
             securable_full_name="catalog.sales",
-            principal=Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
+            principal=Principal(
+                PrincipalType.GROUP, "data_engineers", "data_engineers"
+            ),
             privilege_type=PrivilegeType.USE_SCHEMA,
         ),
     }
@@ -245,7 +257,9 @@ def test_privilege_differ_returns_empty_diff_when_in_sync():
         SecurablePrivilege(
             securable_type=SecurableType.TABLE,
             securable_full_name="catalog.sales.orders",
-            principal=Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
+            principal=Principal(
+                PrincipalType.GROUP, "data_engineers", "data_engineers"
+            ),
             privilege_type=PrivilegeType.SELECT,
         ),
     }
@@ -261,7 +275,9 @@ def test_privilege_differ_handles_empty_desired():
         SecurablePrivilege(
             securable_type=SecurableType.VOLUME,
             securable_full_name="catalog.landing.raw_events",
-            principal=Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
+            principal=Principal(
+                PrincipalType.GROUP, "data_engineers", "data_engineers"
+            ),
             privilege_type=PrivilegeType.READ_VOLUME,
         ),
         SecurablePrivilege(
@@ -290,7 +306,9 @@ def test_privilege_differ_handles_empty_actual():
         SecurablePrivilege(
             securable_type=SecurableType.SCHEMA,
             securable_full_name="my_catalog.sales",
-            principal=Principal(PrincipalType.GROUP, "data_engineers", "data_engineers"),
+            principal=Principal(
+                PrincipalType.GROUP, "data_engineers", "data_engineers"
+            ),
             privilege_type=PrivilegeType.USE_SCHEMA,
         ),
     }

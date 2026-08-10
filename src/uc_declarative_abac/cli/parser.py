@@ -382,7 +382,9 @@ def _build_legacy_parser() -> argparse.ArgumentParser:
 # in its split form ("--settings-file path"). The "=" form ("--settings-file=x")
 # is a single token. Any *other* leading option means this is not a modern
 # "[globals] <subcommand> ..." invocation, so it is treated as the legacy flat form.
-_STORE_TRUE_GLOBAL_FLAGS = frozenset({"--verbose", "--quiet", "--version", "-h", "--help"})
+_STORE_TRUE_GLOBAL_FLAGS = frozenset(
+    {"--verbose", "--quiet", "--version", "-h", "--help"}
+)
 _VALUE_TAKING_GLOBAL_FLAGS = frozenset({"--settings-file"})
 
 

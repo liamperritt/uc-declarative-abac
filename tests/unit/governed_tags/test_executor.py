@@ -37,10 +37,14 @@ def _resolved_group(name: str) -> Principal:
 
 
 def _resolved_sp(display_name: str, app_id: str) -> Principal:
-    return Principal(PrincipalType.SERVICE_PRINCIPAL, identifier=app_id, name=display_name)
+    return Principal(
+        PrincipalType.SERVICE_PRINCIPAL, identifier=app_id, name=display_name
+    )
 
 
-def _make_rule_set_response(etag: str = "etag-1", grant_rules: list | None = None) -> MagicMock:
+def _make_rule_set_response(
+    etag: str = "etag-1", grant_rules: list | None = None
+) -> MagicMock:
     resp = MagicMock()
     resp.etag = etag
     resp.grant_rules = grant_rules or []
@@ -54,14 +58,22 @@ def _make_grant_rule(role: str, principals: list[str]) -> MagicMock:
     return rule
 
 
-def _setup_ws_helper_for_assigners(ws_helper: MagicMock, tag_to_id: dict[str, str], existing_assigners_by_tag: dict[str, list[str]] | None = None) -> None:
+def _setup_ws_helper_for_assigners(
+    ws_helper: MagicMock,
+    tag_to_id: dict[str, str],
+    existing_assigners_by_tag: dict[str, list[str]] | None = None,
+) -> None:
     """Wire ws_helper to return tag IDs and rule sets for the given tags."""
     existing = existing_assigners_by_tag or {}
     ws_helper.get_tag_policy_id.side_effect = lambda name: tag_to_id.get(name)
 
     def _get_rule_set_by_name(name: str) -> MagicMock:
         principals = existing.get(name, [])
-        rules = [_make_grant_rule("roles/tagPolicy.assigner", principals)] if principals else []
+        rules = (
+            [_make_grant_rule("roles/tagPolicy.assigner", principals)]
+            if principals
+            else []
+        )
         return _make_rule_set_response(etag=f"etag-{name}", grant_rules=rules)
 
     ws_helper.get_tag_policy_rule_set_by_name.side_effect = _get_rule_set_by_name
@@ -101,7 +113,9 @@ def test_governed_tag_executor_creates_new_tag_policy(ws_helper, change_logger):
     assert {v.name for v in sent_policy.values} == {"name", "email"}
 
 
-def test_governed_tag_executor_updates_description_only_when_description_changes(ws_helper, change_logger):
+def test_governed_tag_executor_updates_description_only_when_description_changes(
+    ws_helper, change_logger
+):
     """When only description differs, update_mask is 'description'."""
     new = _gt("pii", "New description", {"name"})
     old = _gt("pii", "Old description", {"name"})
@@ -111,10 +125,15 @@ def test_governed_tag_executor_updates_description_only_when_description_changes
 
     ws_helper.update_tag_policy.assert_called_once()
     call = ws_helper.update_tag_policy.call_args
-    assert call.kwargs.get("update_mask", call.args[2] if len(call.args) > 2 else None) == "description"
+    assert (
+        call.kwargs.get("update_mask", call.args[2] if len(call.args) > 2 else None)
+        == "description"
+    )
 
 
-def test_governed_tag_executor_updates_values_only_when_values_change(ws_helper, change_logger):
+def test_governed_tag_executor_updates_values_only_when_values_change(
+    ws_helper, change_logger
+):
     """When only allowed_values differ, update_mask is 'values'."""
     new = _gt("pii", "Same", {"name", "email"})
     old = _gt("pii", "Same", {"name"})
@@ -124,10 +143,15 @@ def test_governed_tag_executor_updates_values_only_when_values_change(ws_helper,
 
     ws_helper.update_tag_policy.assert_called_once()
     call = ws_helper.update_tag_policy.call_args
-    assert call.kwargs.get("update_mask", call.args[2] if len(call.args) > 2 else None) == "values"
+    assert (
+        call.kwargs.get("update_mask", call.args[2] if len(call.args) > 2 else None)
+        == "values"
+    )
 
 
-def test_governed_tag_executor_combines_update_mask_when_both_change(ws_helper, change_logger):
+def test_governed_tag_executor_combines_update_mask_when_both_change(
+    ws_helper, change_logger
+):
     """When both description and allowed_values differ, update_mask includes both fields."""
     new = _gt("pii", "New", {"name", "email"})
     old = _gt("pii", "Old", {"name"})
@@ -140,7 +164,9 @@ def test_governed_tag_executor_combines_update_mask_when_both_change(ws_helper, 
     assert mask == "description,values"
 
 
-def test_governed_tag_executor_sorts_allowed_values_before_sending_to_sdk(ws_helper, change_logger):
+def test_governed_tag_executor_sorts_allowed_values_before_sending_to_sdk(
+    ws_helper, change_logger
+):
     """Allowed values are sent to the SDK in deterministic (sorted) order."""
     diff = GovernedTagDiff(to_create={_gt("pii", "PII", {"phone", "email", "name"})})
 
@@ -165,13 +191,17 @@ def test_governed_tag_executor_skips_execution_in_dry_run(ws_helper, change_logg
     ws_helper.update_tag_policy.assert_not_called()
 
 
-def test_governed_tag_executor_logs_error_and_continues_on_sdk_exception(ws_helper, change_logger):
+def test_governed_tag_executor_logs_error_and_continues_on_sdk_exception(
+    ws_helper, change_logger
+):
     """An SDK exception during one create does not abort the rest of the batch."""
     ws_helper.create_tag_policy.side_effect = [
-        Exception("boom"),   # first call fails
-        MagicMock(),         # second call succeeds
+        Exception("boom"),  # first call fails
+        MagicMock(),  # second call succeeds
     ]
-    diff = GovernedTagDiff(to_create={_gt("fail", "", {"x"}), _gt("succeed", "", {"y"})})
+    diff = GovernedTagDiff(
+        to_create={_gt("fail", "", {"x"}), _gt("succeed", "", {"y"})}
+    )
 
     execute_governed_tag_diff(ws_helper, diff, change_logger, dry_run=False)
 
@@ -188,7 +218,9 @@ def _diff_with_deletes(*names: str) -> GovernedTagDiff:
     return GovernedTagDiff(to_delete={_gt(n, "", set()) for n in names})
 
 
-def test_governed_tag_executor_deletes_tag_after_yes_confirmation(ws_helper, change_logger, monkeypatch):
+def test_governed_tag_executor_deletes_tag_after_yes_confirmation(
+    ws_helper, change_logger, monkeypatch
+):
     """When `input` returns 'yes', the SDK delete is invoked for each tag."""
     monkeypatch.setattr("builtins.input", lambda *_: "yes")
     diff = _diff_with_deletes("legacy")
@@ -198,7 +230,9 @@ def test_governed_tag_executor_deletes_tag_after_yes_confirmation(ws_helper, cha
     ws_helper.delete_tag_policy.assert_called_once_with("legacy")
 
 
-def test_governed_tag_executor_deletes_tag_after_y_confirmation(ws_helper, change_logger, monkeypatch):
+def test_governed_tag_executor_deletes_tag_after_y_confirmation(
+    ws_helper, change_logger, monkeypatch
+):
     """Short form 'y' is also accepted as confirmation."""
     monkeypatch.setattr("builtins.input", lambda *_: "y")
     diff = _diff_with_deletes("legacy")
@@ -208,7 +242,9 @@ def test_governed_tag_executor_deletes_tag_after_y_confirmation(ws_helper, chang
     ws_helper.delete_tag_policy.assert_called_once_with("legacy")
 
 
-def test_governed_tag_executor_is_case_insensitive_for_confirmation(ws_helper, change_logger, monkeypatch):
+def test_governed_tag_executor_is_case_insensitive_for_confirmation(
+    ws_helper, change_logger, monkeypatch
+):
     """'YES' confirms — confirmation is case-insensitive."""
     monkeypatch.setattr("builtins.input", lambda *_: "YES")
     diff = _diff_with_deletes("legacy")
@@ -218,7 +254,9 @@ def test_governed_tag_executor_is_case_insensitive_for_confirmation(ws_helper, c
     ws_helper.delete_tag_policy.assert_called_once_with("legacy")
 
 
-def test_governed_tag_executor_exits_when_confirmation_not_given(ws_helper, change_logger, monkeypatch):
+def test_governed_tag_executor_exits_when_confirmation_not_given(
+    ws_helper, change_logger, monkeypatch
+):
     """Any response other than 'y'/'yes' (here: 'no') aborts the whole program
     via SystemExit; SDK delete is not invoked."""
     monkeypatch.setattr("builtins.input", lambda *_: "no")
@@ -230,10 +268,14 @@ def test_governed_tag_executor_exits_when_confirmation_not_given(ws_helper, chan
     ws_helper.delete_tag_policy.assert_not_called()
 
 
-def test_governed_tag_executor_deletes_without_prompt_when_force_enabled(ws_helper, change_logger, monkeypatch):
+def test_governed_tag_executor_deletes_without_prompt_when_force_enabled(
+    ws_helper, change_logger, monkeypatch
+):
     """`force=True` bypasses the prompt — `input()` is never called."""
+
     def _should_not_be_called(*_):
         raise AssertionError("input() was called even though force=True")
+
     monkeypatch.setattr("builtins.input", _should_not_be_called)
     diff = _diff_with_deletes("legacy")
 
@@ -242,10 +284,14 @@ def test_governed_tag_executor_deletes_without_prompt_when_force_enabled(ws_help
     ws_helper.delete_tag_policy.assert_called_once_with("legacy")
 
 
-def test_governed_tag_executor_does_not_prompt_or_delete_in_dry_run(ws_helper, change_logger, monkeypatch):
+def test_governed_tag_executor_does_not_prompt_or_delete_in_dry_run(
+    ws_helper, change_logger, monkeypatch
+):
     """Dry-run logs the would-delete list but never prompts or calls the SDK."""
+
     def _should_not_be_called(*_):
         raise AssertionError("input() was called during dry-run")
+
     monkeypatch.setattr("builtins.input", _should_not_be_called)
     diff = _diff_with_deletes("legacy")
 
@@ -254,7 +300,9 @@ def test_governed_tag_executor_does_not_prompt_or_delete_in_dry_run(ws_helper, c
     ws_helper.delete_tag_policy.assert_not_called()
 
 
-def test_governed_tag_executor_logs_deletion_per_tag(ws_helper, change_logger, monkeypatch):
+def test_governed_tag_executor_logs_deletion_per_tag(
+    ws_helper, change_logger, monkeypatch
+):
     """Each successful delete produces a log entry via log_governed_tag_delete."""
     monkeypatch.setattr("builtins.input", lambda *_: "yes")
     diff = _diff_with_deletes("a", "b", "c")
@@ -266,12 +314,16 @@ def test_governed_tag_executor_logs_deletion_per_tag(ws_helper, change_logger, m
 
 
 def test_governed_tag_executor_raises_interactive_confirmation_error_on_eof_when_not_forced(
-    ws_helper, change_logger, monkeypatch,
+    ws_helper,
+    change_logger,
+    monkeypatch,
 ):
     """EOFError from `input()` in a non-forced context raises InteractiveConfirmationRequiredError."""
     from uc_declarative_abac.utils import InteractiveConfirmationRequiredError
+
     def _raise_eof(*_):
         raise EOFError()
+
     monkeypatch.setattr("builtins.input", _raise_eof)
     diff = _diff_with_deletes("legacy")
 
@@ -282,7 +334,9 @@ def test_governed_tag_executor_raises_interactive_confirmation_error_on_eof_when
 
 
 def test_governed_tag_executor_logs_error_and_continues_on_sdk_delete_failure(
-    ws_helper, change_logger, monkeypatch,
+    ws_helper,
+    change_logger,
+    monkeypatch,
 ):
     """An SDK exception during one delete does not abort the rest of the batch."""
     monkeypatch.setattr("builtins.input", lambda *_: "yes")
@@ -300,12 +354,16 @@ def test_governed_tag_executor_logs_error_and_continues_on_sdk_delete_failure(
 # ---------------------------------------------------------------------------
 
 
-def test_governed_tag_executor_sets_assigners_for_newly_created_tag(ws_helper, change_logger):
+def test_governed_tag_executor_sets_assigners_for_newly_created_tag(
+    ws_helper, change_logger
+):
     """A new tag with assigners triggers update_rule_set after create."""
     _setup_ws_helper_for_assigners(ws_helper, tag_to_id={"pii": "tp-pii"})
-    diff = GovernedTagDiff(to_create={
-        _gt("pii", "PII", {"name"}, assigners={_resolved_user("alice@co.com")}),
-    })
+    diff = GovernedTagDiff(
+        to_create={
+            _gt("pii", "PII", {"name"}, assigners={_resolved_user("alice@co.com")}),
+        }
+    )
 
     execute_governed_tag_diff(ws_helper, diff, change_logger, dry_run=False)
 
@@ -328,7 +386,9 @@ def test_governed_tag_executor_registers_created_tag_id(ws_helper, change_logger
     ws_helper.register_created_tag_policy.assert_called_once()
 
 
-def test_governed_tag_executor_skips_rule_set_call_when_new_tag_has_no_principals(ws_helper, change_logger):
+def test_governed_tag_executor_skips_rule_set_call_when_new_tag_has_no_principals(
+    ws_helper, change_logger
+):
     """A new tag with empty assigners doesn't trigger update_rule_set."""
     _setup_ws_helper_for_assigners(ws_helper, tag_to_id={"pii": "tp-pii"})
     diff = GovernedTagDiff(to_create={_gt("pii", "PII", {"name"})})
@@ -338,17 +398,24 @@ def test_governed_tag_executor_skips_rule_set_call_when_new_tag_has_no_principal
     ws_helper.update_tag_policy_rule_set.assert_not_called()
 
 
-def test_governed_tag_executor_updates_rule_set_when_principals_change(ws_helper, change_logger):
+def test_governed_tag_executor_updates_rule_set_when_principals_change(
+    ws_helper, change_logger
+):
     """An update where only assigners change triggers update_rule_set, not update_tag_policy."""
     _setup_ws_helper_for_assigners(
         ws_helper,
         tag_to_id={"pii": "tp-pii"},
         existing_assigners_by_tag={"pii": ["users/alice@co.com"]},
     )
-    new = _gt("pii", "PII", {"name"}, assigners={
-        _resolved_user("alice@co.com"),
-        _resolved_user("bob@co.com"),
-    })
+    new = _gt(
+        "pii",
+        "PII",
+        {"name"},
+        assigners={
+            _resolved_user("alice@co.com"),
+            _resolved_user("bob@co.com"),
+        },
+    )
     old = _gt("pii", "PII", {"name"}, assigners={_resolved_user("alice@co.com")})
     diff = GovernedTagDiff(to_update={new}, old_values={"pii": old})
 
@@ -358,7 +425,9 @@ def test_governed_tag_executor_updates_rule_set_when_principals_change(ws_helper
     ws_helper.update_tag_policy_rule_set.assert_called_once()
 
 
-def test_governed_tag_executor_does_not_update_rule_set_when_only_description_changes(ws_helper, change_logger):
+def test_governed_tag_executor_does_not_update_rule_set_when_only_description_changes(
+    ws_helper, change_logger
+):
     """An update where only description changes leaves the rule set alone."""
     _setup_ws_helper_for_assigners(ws_helper, tag_to_id={"pii": "tp-pii"})
     new = _gt("pii", "New", {"name"}, assigners={_resolved_user("alice@co.com")})
@@ -371,7 +440,9 @@ def test_governed_tag_executor_does_not_update_rule_set_when_only_description_ch
     ws_helper.update_tag_policy_rule_set.assert_not_called()
 
 
-def test_governed_tag_executor_updates_both_when_description_and_principals_change(ws_helper, change_logger):
+def test_governed_tag_executor_updates_both_when_description_and_principals_change(
+    ws_helper, change_logger
+):
     """An update touching description AND assigners issues both calls."""
     _setup_ws_helper_for_assigners(
         ws_helper,
@@ -388,7 +459,9 @@ def test_governed_tag_executor_updates_both_when_description_and_principals_chan
     ws_helper.update_tag_policy_rule_set.assert_called_once()
 
 
-def test_governed_tag_executor_uses_etag_from_get_for_update_rule_set(ws_helper, change_logger):
+def test_governed_tag_executor_uses_etag_from_get_for_update_rule_set(
+    ws_helper, change_logger
+):
     """The etag returned by the GET ruleset is passed to update_rule_set (read-modify-write)."""
     _setup_ws_helper_for_assigners(
         ws_helper,
@@ -406,12 +479,17 @@ def test_governed_tag_executor_uses_etag_from_get_for_update_rule_set(ws_helper,
     assert etag == "etag-pii"
 
 
-def test_governed_tag_executor_preserves_non_assign_grant_rules(ws_helper, change_logger):
+def test_governed_tag_executor_preserves_non_assign_grant_rules(
+    ws_helper, change_logger
+):
     """Grant rules with roles other than ASSIGN are preserved across update_rule_set."""
-    other_rule = _make_grant_rule("roles/tagPolicy.someOtherRole", ["users/admin@co.com"])
+    other_rule = _make_grant_rule(
+        "roles/tagPolicy.someOtherRole", ["users/admin@co.com"]
+    )
     ws_helper.get_tag_policy_id.return_value = "tp-pii"
     ws_helper.get_tag_policy_rule_set_by_name.return_value = _make_rule_set_response(
-        etag="etag-pii", grant_rules=[other_rule],
+        etag="etag-pii",
+        grant_rules=[other_rule],
     )
 
     def _create_tag_policy(policy):
@@ -419,6 +497,7 @@ def test_governed_tag_executor_preserves_non_assign_grant_rules(ws_helper, chang
         result.tag_key = policy.tag_key
         result.id = "tp-pii"
         return result
+
     ws_helper.create_tag_policy.side_effect = _create_tag_policy
 
     new = _gt("pii", "PII", {"name"}, assigners={_resolved_user("alice@co.com")})
@@ -434,12 +513,16 @@ def test_governed_tag_executor_preserves_non_assign_grant_rules(ws_helper, chang
     assert "roles/tagPolicy.assigner" in roles
 
 
-def test_governed_tag_executor_encodes_user_principal_with_users_prefix(ws_helper, change_logger):
+def test_governed_tag_executor_encodes_user_principal_with_users_prefix(
+    ws_helper, change_logger
+):
     """Resolved USER principals are encoded as `users/<username>` in grant_rules."""
     _setup_ws_helper_for_assigners(ws_helper, tag_to_id={"pii": "tp-pii"})
-    diff = GovernedTagDiff(to_create={
-        _gt("pii", "PII", {"name"}, assigners={_resolved_user("alice@co.com")}),
-    })
+    diff = GovernedTagDiff(
+        to_create={
+            _gt("pii", "PII", {"name"}, assigners={_resolved_user("alice@co.com")}),
+        }
+    )
 
     execute_governed_tag_diff(ws_helper, diff, change_logger, dry_run=False)
 
@@ -449,12 +532,16 @@ def test_governed_tag_executor_encodes_user_principal_with_users_prefix(ws_helpe
     assert "users/alice@co.com" in assign_rule.principals
 
 
-def test_governed_tag_executor_encodes_group_principal_with_groups_prefix(ws_helper, change_logger):
+def test_governed_tag_executor_encodes_group_principal_with_groups_prefix(
+    ws_helper, change_logger
+):
     """Resolved GROUP principals are encoded as `groups/<name>`."""
     _setup_ws_helper_for_assigners(ws_helper, tag_to_id={"pii": "tp-pii"})
-    diff = GovernedTagDiff(to_create={
-        _gt("pii", "PII", {"name"}, assigners={_resolved_group("data_engineers")}),
-    })
+    diff = GovernedTagDiff(
+        to_create={
+            _gt("pii", "PII", {"name"}, assigners={_resolved_group("data_engineers")}),
+        }
+    )
 
     execute_governed_tag_diff(ws_helper, diff, change_logger, dry_run=False)
 
@@ -464,12 +551,21 @@ def test_governed_tag_executor_encodes_group_principal_with_groups_prefix(ws_hel
     assert "groups/data_engineers" in assign_rule.principals
 
 
-def test_governed_tag_executor_encodes_sp_principal_with_service_principals_prefix(ws_helper, change_logger):
+def test_governed_tag_executor_encodes_sp_principal_with_service_principals_prefix(
+    ws_helper, change_logger
+):
     """Resolved SP principals are encoded as `servicePrincipals/<application_id>`."""
     _setup_ws_helper_for_assigners(ws_helper, tag_to_id={"pii": "tp-pii"})
-    diff = GovernedTagDiff(to_create={
-        _gt("pii", "PII", {"name"}, assigners={_resolved_sp("my-sp", "app-uuid-123")}),
-    })
+    diff = GovernedTagDiff(
+        to_create={
+            _gt(
+                "pii",
+                "PII",
+                {"name"},
+                assigners={_resolved_sp("my-sp", "app-uuid-123")},
+            ),
+        }
+    )
 
     execute_governed_tag_diff(ws_helper, diff, change_logger, dry_run=False)
 
@@ -479,12 +575,16 @@ def test_governed_tag_executor_encodes_sp_principal_with_service_principals_pref
     assert "servicePrincipals/app-uuid-123" in assign_rule.principals
 
 
-def test_governed_tag_executor_skips_rule_set_calls_in_dry_run(ws_helper, change_logger):
+def test_governed_tag_executor_skips_rule_set_calls_in_dry_run(
+    ws_helper, change_logger
+):
     """Dry-run never calls update_rule_set."""
     _setup_ws_helper_for_assigners(ws_helper, tag_to_id={"pii": "tp-pii"})
-    diff = GovernedTagDiff(to_create={
-        _gt("pii", "PII", {"name"}, assigners={_resolved_user("alice@co.com")}),
-    })
+    diff = GovernedTagDiff(
+        to_create={
+            _gt("pii", "PII", {"name"}, assigners={_resolved_user("alice@co.com")}),
+        }
+    )
 
     execute_governed_tag_diff(ws_helper, diff, change_logger, dry_run=True)
 
@@ -492,10 +592,14 @@ def test_governed_tag_executor_skips_rule_set_calls_in_dry_run(ws_helper, change
     ws_helper.create_tag_policy.assert_not_called()
 
 
-def test_governed_tag_executor_logs_error_and_continues_on_rule_set_failure(ws_helper, change_logger):
+def test_governed_tag_executor_logs_error_and_continues_on_rule_set_failure(
+    ws_helper, change_logger
+):
     """An SDK failure during one rule-set update is captured and the run continues."""
     ws_helper.get_tag_policy_id.return_value = "tp-pii"
-    ws_helper.get_tag_policy_rule_set_by_name.return_value = _make_rule_set_response(etag="etag-pii")
+    ws_helper.get_tag_policy_rule_set_by_name.return_value = _make_rule_set_response(
+        etag="etag-pii"
+    )
     ws_helper.update_tag_policy_rule_set.side_effect = Exception("boom")
 
     new = _gt("pii", "PII", {"name"}, assigners={_resolved_user("alice@co.com")})
@@ -515,9 +619,7 @@ def test_governed_tag_executor_logs_error_and_continues_on_rule_set_failure(ws_h
 def test_governed_tag_executor_parallel_creates_run_as_batch(ws_helper, change_logger):
     """Multiple creates run as one parallel batch via the SDK."""
     ws_helper.create_tag_policy.return_value = MagicMock()
-    diff = GovernedTagDiff(to_create={
-        _gt(f"tag_{i}", "desc", {"v"}) for i in range(5)
-    })
+    diff = GovernedTagDiff(to_create={_gt(f"tag_{i}", "desc", {"v"}) for i in range(5)})
 
     execute_governed_tag_diff(ws_helper, diff, change_logger, max_parallel_changes=4)
 
@@ -526,15 +628,14 @@ def test_governed_tag_executor_parallel_creates_run_as_batch(ws_helper, change_l
 
 def test_governed_tag_executor_parallel_create_error_isolated(ws_helper, change_logger):
     """A failing create is logged; siblings still proceed."""
+
     def _fail_tag_1(policy):
         if policy.tag_key == "tag_1":
             raise RuntimeError("boom")
         return MagicMock()
 
     ws_helper.create_tag_policy.side_effect = _fail_tag_1
-    diff = GovernedTagDiff(to_create={
-        _gt(f"tag_{i}", "desc", {"v"}) for i in range(3)
-    })
+    diff = GovernedTagDiff(to_create={_gt(f"tag_{i}", "desc", {"v"}) for i in range(3)})
 
     execute_governed_tag_diff(ws_helper, diff, change_logger, max_parallel_changes=4)
 

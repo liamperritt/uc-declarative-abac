@@ -44,6 +44,7 @@ def _to_frozenset(attr: str, value: object) -> frozenset:
         return frozenset()
     return frozenset({value})
 
+
 # ``information_schema.tables.table_type`` values that don't support ``COMMENT ON TABLE …``
 # / ``ALTER TABLE … SET COMMENT`` via the path this engine uses. Today only regular VIEWs are
 # affected.
@@ -85,42 +86,55 @@ def compute_securable_diff(
     as errors (with a hint explaining the requirement) and dropped, surfacing
     later via ``ExecutionBatchError``.
     """
-    desired_attrs = _resolve_attribute_owners(desired_attrs, resolver, change_logger, ignore_unresolvable)
-    actual_attrs = _resolve_attribute_owners(actual_attrs, resolver, change_logger, ignore_unresolvable)
+    desired_attrs = _resolve_attribute_owners(
+        desired_attrs, resolver, change_logger, ignore_unresolvable
+    )
+    actual_attrs = _resolve_attribute_owners(
+        actual_attrs, resolver, change_logger, ignore_unresolvable
+    )
 
     securables_to_create, securables_to_replace, old_securables = _diff_securables(
         desired_securables, actual_securables
     )
     creatable, blocked = _partition_by_creation_scope(
-        securables_to_create, creation_in_scope_namespaces,
+        securables_to_create,
+        creation_in_scope_namespaces,
     )
     creatable = _validate_tables_for_creation(creatable, change_logger)
     _log_nonexistent_non_function_securables(blocked, change_logger)
     securables_to_create = creatable
 
     table_full_names_being_created = {
-        s.full_name for s in securables_to_create
+        s.full_name
+        for s in securables_to_create
         if s.securable_type == SecurableType.TABLE
     }
     columns_to_create = _diff_table_columns(
-        desired_securables, actual_securables,
-        table_full_names_being_created, change_logger, creation_in_scope_namespaces,
+        desired_securables,
+        actual_securables,
+        table_full_names_being_created,
+        change_logger,
+        creation_in_scope_namespaces,
     )
     securables_to_create.extend(columns_to_create)
 
     created_full_names = {s.full_name for s in securables_to_create}
 
     view_full_names = {
-        s.full_name for s in actual_securables
+        s.full_name
+        for s in actual_securables
         if isinstance(s, Table) and s.table_type in _COMMENT_IMMUTABLE_TABLE_TYPES
     }
     owner_immutable_full_names = {
-        s.full_name for s in actual_securables
+        s.full_name
+        for s in actual_securables
         if isinstance(s, Table) and s.table_type in _OWNER_IMMUTABLE_TABLE_TYPES
     }
 
     attributes_to_update = _diff_attributes(
-        desired_attrs, actual_attrs, created_full_names,
+        desired_attrs,
+        actual_attrs,
+        created_full_names,
         view_full_names=view_full_names,
         owner_immutable_full_names=owner_immutable_full_names,
         change_logger=change_logger,
@@ -194,7 +208,9 @@ def _diff_securables(
     old_securables: dict[str, Securable] = {}
 
     for desired_sec in desired:
-        actual_sec = actual_by_key.get((desired_sec.securable_type, desired_sec.full_name))
+        actual_sec = actual_by_key.get(
+            (desired_sec.securable_type, desired_sec.full_name)
+        )
         if actual_sec is None:
             to_create.append(desired_sec)
         elif isinstance(desired_sec, Function) and desired_sec != actual_sec:
@@ -247,10 +263,7 @@ def _diff_table_columns(
     lacks ``data_type``). Columns present in actual but absent from desired
     are ignored — additive only.
     """
-    actual_tables_by_name = {
-        s.full_name: s for s in actual
-        if isinstance(s, Table)
-    }
+    actual_tables_by_name = {s.full_name: s for s in actual if isinstance(s, Table)}
 
     columns_to_create: list[Column] = []
     for desired_sec in desired:
@@ -272,19 +285,26 @@ def _diff_table_columns(
                 if blocker is None:
                     columns_to_create.append(col)
                     continue
-                change_logger.log_error(ExecutionError(
-                    context=f"Validate ADD COLUMN {col.full_name}",
-                    exception=NonexistentSecurableError(
-                        SecurableType.COLUMN, col.full_name, hint=blocker,
-                    ),
-                ))
+                change_logger.log_error(
+                    ExecutionError(
+                        context=f"Validate ADD COLUMN {col.full_name}",
+                        exception=NonexistentSecurableError(
+                            SecurableType.COLUMN,
+                            col.full_name,
+                            hint=blocker,
+                        ),
+                    )
+                )
             else:
-                change_logger.log_error(ExecutionError(
-                    context=f"Existence check: COLUMN {col.full_name}",
-                    exception=NonexistentSecurableError(
-                        SecurableType.COLUMN, col.full_name,
-                    ),
-                ))
+                change_logger.log_error(
+                    ExecutionError(
+                        context=f"Existence check: COLUMN {col.full_name}",
+                        exception=NonexistentSecurableError(
+                            SecurableType.COLUMN,
+                            col.full_name,
+                        ),
+                    )
+                )
 
     return columns_to_create
 
@@ -328,12 +348,16 @@ def _validate_tables_for_creation(
         if isinstance(sec, Table):
             reason = _table_creation_blocker(sec)
             if reason is not None:
-                change_logger.log_error(ExecutionError(
-                    context=f"Validate CREATE TABLE {sec.full_name}",
-                    exception=NonexistentSecurableError(
-                        sec.securable_type, sec.full_name, hint=reason,
-                    ),
-                ))
+                change_logger.log_error(
+                    ExecutionError(
+                        context=f"Validate CREATE TABLE {sec.full_name}",
+                        exception=NonexistentSecurableError(
+                            sec.securable_type,
+                            sec.full_name,
+                            hint=reason,
+                        ),
+                    )
+                )
                 continue
         kept.append(sec)
     return kept
@@ -359,10 +383,12 @@ def _log_nonexistent_non_function_securables(
         key=lambda s: (s.securable_type.value, s.full_name),
     )
     for sec in nonexistent:
-        change_logger.log_error(ExecutionError(
-            context=f"Existence check: {sec.securable_type.value} {sec.full_name}",
-            exception=NonexistentSecurableError(sec.securable_type, sec.full_name),
-        ))
+        change_logger.log_error(
+            ExecutionError(
+                context=f"Existence check: {sec.securable_type.value} {sec.full_name}",
+                exception=NonexistentSecurableError(sec.securable_type, sec.full_name),
+            )
+        )
     return [s for s in to_create if isinstance(s, Function)]
 
 
@@ -398,9 +424,7 @@ def _diff_attributes(
 
     Desired-only attributes are skipped unless the securable is being created.
     """
-    actual_by_key = {
-        (a.securable_type, a.full_name): a for a in actual_attrs
-    }
+    actual_by_key = {(a.securable_type, a.full_name): a for a in actual_attrs}
 
     updates: list[AttributeUpdate] = []
 
@@ -433,8 +457,11 @@ def _diff_attributes(
             )
 
             if _should_skip_or_log(
-                update, is_being_created,
-                view_full_names, owner_immutable_full_names, change_logger,
+                update,
+                is_being_created,
+                view_full_names,
+                owner_immutable_full_names,
+                change_logger,
             ):
                 continue
             updates.append(update)
@@ -459,22 +486,26 @@ def _should_skip_or_log(
         return True
 
     if update.attribute == "comment" and update.full_name in view_full_names:
-        change_logger.log_error(ExecutionError(
-            context=f"Update comment on {update.securable_type.value} {update.full_name}",
-            exception=OrchestratorError(
-                "Cannot alter comment on a VIEW — only the view owner can alter comment."
-            ),
-        ))
+        change_logger.log_error(
+            ExecutionError(
+                context=f"Update comment on {update.securable_type.value} {update.full_name}",
+                exception=OrchestratorError(
+                    "Cannot alter comment on a VIEW — only the view owner can alter comment."
+                ),
+            )
+        )
         return True
 
     if update.attribute == "owner" and update.full_name in owner_immutable_full_names:
-        change_logger.log_error(ExecutionError(
-            context=f"Update owner on {update.securable_type.value} {update.full_name}",
-            exception=OrchestratorError(
-                "Materialized views and streaming tables do not support owner "
-                "changes via this engine. Change ownership of the pipeline instead."
-            ),
-        ))
+        change_logger.log_error(
+            ExecutionError(
+                context=f"Update owner on {update.securable_type.value} {update.full_name}",
+                exception=OrchestratorError(
+                    "Materialized views and streaming tables do not support owner "
+                    "changes via this engine. Change ownership of the pipeline instead."
+                ),
+            )
+        )
         return True
 
     return False

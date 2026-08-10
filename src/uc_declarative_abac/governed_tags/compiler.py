@@ -21,8 +21,7 @@ def compile_desired_governed_tags(config: ResourcesConfig) -> set[GovernedTag]:
             description=gt.description or "",
             allowed_values=frozenset(gt.allowed_values or ()),
             assigners=frozenset(
-                Principal(PrincipalType.UNKNOWN, name=p)
-                for p in (gt.assigners or ())
+                Principal(PrincipalType.UNKNOWN, name=p) for p in (gt.assigners or ())
             ),
         )
         for gt in config.governed_tags.values()

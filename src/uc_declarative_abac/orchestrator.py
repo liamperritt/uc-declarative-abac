@@ -88,7 +88,8 @@ class OrchestratorDiffsResult:
 
 
 def _filter_taggable_attributes(
-    attrs: set[SecurableAttributes], in_scope_namespaces: frozenset[str],
+    attrs: set[SecurableAttributes],
+    in_scope_namespaces: frozenset[str],
 ) -> set[SecurableAttributes]:
     """Drop non-function attributes whose namespace isn't in scope.
 
@@ -98,7 +99,8 @@ def _filter_taggable_attributes(
     behaviour when ``--enable-taggable-management`` is off.
     """
     return {
-        a for a in attrs
+        a
+        for a in attrs
         if a.securable_type == SecurableType.FUNCTION
         or in_namespace_scope(a.full_name, in_scope_namespaces)
     }
@@ -126,7 +128,9 @@ def load_config(
     """Discover, resolve, and validate YAML configs without contacting Databricks."""
     paths = discover_yaml_files(config_dir)
     raw_defs, raw_resources = load_raw_configs(paths)
-    resolved = resolve_refs(raw_defs, raw_resources, override_strategy=ref_override_strategy)
+    resolved = resolve_refs(
+        raw_defs, raw_resources, override_strategy=ref_override_strategy
+    )
     consolidated = consolidate_resources(resolved)
     return ResourcesConfig.model_validate(consolidated)
 
@@ -237,23 +241,28 @@ def run(
     # pipeline (empty set ⇒ domain inert for every namespace).
     tag_scope = (
         parse_namespace_filter(manage_tags_for_namespaces, configured_namespaces)
-        if enable_tag_management else frozenset()
+        if enable_tag_management
+        else frozenset()
     )
     privilege_scope = (
         parse_namespace_filter(manage_privileges_for_namespaces, configured_namespaces)
-        if enable_privilege_management else frozenset()
+        if enable_privilege_management
+        else frozenset()
     )
     taggable_management_scope = (
         parse_namespace_filter(manage_taggables_for_namespaces, configured_namespaces)
-        if enable_taggable_management else frozenset()
+        if enable_taggable_management
+        else frozenset()
     )
     taggable_creation_scope = (
         parse_namespace_filter(create_taggables_for_namespaces, configured_namespaces)
-        if enable_taggable_creation else frozenset()
+        if enable_taggable_creation
+        else frozenset()
     )
     policy_delete_scope = (
         parse_namespace_filter(delete_policies_for_namespaces, configured_namespaces)
-        if enable_policy_deletion else frozenset()
+        if enable_policy_deletion
+        else frozenset()
     )
     # Tag-key prefixes whose tags are never removed (only added/updated). Empty
     # string ⇒ no retention. Defaults to "class." to protect auto-classification.
@@ -305,28 +314,43 @@ def run(
     )
     change_logger = ChangeLogger(dry_run=dry_run, logger=_logger)
     change_logger.log_banner()
-    _logger.info("  Fetching current state from workspace (this can take several minutes)...")
+    _logger.info(
+        "  Fetching current state from workspace (this can take several minutes)..."
+    )
     # actual_tags is needed by either the tags domain (for the diff) or the privileges
     # domain (for policy matching against on-disk tag state when tag management is off).
     need_actual_tags = enable_tag_management or enable_privilege_management
     with ThreadPoolExecutor() as pool:
         actual_securables_f = pool.submit(
-            uc_helper.fetch_actual_securables, catalog_names, rfa_targets,
+            uc_helper.fetch_actual_securables,
+            catalog_names,
+            rfa_targets,
         )
         actual_policies_f = pool.submit(uc_helper.fetch_actual_policies, catalog_names)
         actual_governed_tags_f = pool.submit(
-            ws_helper.fetch_actual_governed_tags, desired_governed_tag_names,
+            ws_helper.fetch_actual_governed_tags,
+            desired_governed_tag_names,
         )
         principals_f = pool.submit(ws_helper.fetch_principals)
-        actual_tags_f = pool.submit(uc_helper.fetch_actual_tags, catalog_names) if need_actual_tags else None
-        actual_privs_f = pool.submit(uc_helper.fetch_actual_privileges, catalog_names) if enable_privilege_management else None
+        actual_tags_f = (
+            pool.submit(uc_helper.fetch_actual_tags, catalog_names)
+            if need_actual_tags
+            else None
+        )
+        actual_privs_f = (
+            pool.submit(uc_helper.fetch_actual_privileges, catalog_names)
+            if enable_privilege_management
+            else None
+        )
 
         actual_securables, actual_attributes = actual_securables_f.result()
         actual_policies = actual_policies_f.result()
         actual_governed_tags = actual_governed_tags_f.result()
         principals_f.result()
         actual_tags = actual_tags_f.result() if actual_tags_f is not None else set()
-        actual_privileges = actual_privs_f.result() if actual_privs_f is not None else set()
+        actual_privileges = (
+            actual_privs_f.result() if actual_privs_f is not None else set()
+        )
     _logger.info("  Successfully fetched current state")
 
     # Fetch membership for the configured groups only — one GET /Groups/{id} per
@@ -334,7 +358,8 @@ def run(
     # dispatched concurrently. Empty when the group domain is inert.
     actual_groups = (
         ws_helper.fetch_actual_groups(desired_group_names, desired_group_ids)
-        if group_domain_active else set()
+        if group_domain_active
+        else set()
     )
 
     # 3. Construct the shared PrincipalResolver now that ws_helper cache is populated.
@@ -343,12 +368,19 @@ def run(
     # 3a. Group workflow (the first domain — runs before governed tags so that any
     # groups referenced as policy/grant principals exist first). Inert unless a
     # group flag is set.
-    group_diff = compute_group_diff(
-        desired_groups, actual_groups, resolver, change_logger,
-        enable_group_creation=enable_group_creation,
-        enable_group_management=enable_group_management,
-        ignore_unresolvable=ignore_unresolvable,
-    ) if group_domain_active else GroupDiff()
+    group_diff = (
+        compute_group_diff(
+            desired_groups,
+            actual_groups,
+            resolver,
+            change_logger,
+            enable_group_creation=enable_group_creation,
+            enable_group_management=enable_group_management,
+            ignore_unresolvable=ignore_unresolvable,
+        )
+        if group_domain_active
+        else GroupDiff()
+    )
     # Groups slated for creation this run aren't in the principal cache yet (it was
     # fetched before any group existed). Register them so downstream domains
     # (governed-tag assigners, policies, privileges, securable owners) can resolve
@@ -364,8 +396,10 @@ def run(
     # catalog-scoped tag assignments, so new tag keys exist before SET TAGS).
     # desired_governed_tags was compiled at the start to scope the rule-set fetch.
     governed_tag_diff = compute_governed_tag_diff(
-        desired_governed_tags, actual_governed_tags,
-        resolver, change_logger,
+        desired_governed_tags,
+        actual_governed_tags,
+        resolver,
+        change_logger,
         enable_deletion=enable_governed_tag_deletion,
         ignore_unresolvable=ignore_unresolvable,
     )
@@ -386,11 +420,19 @@ def run(
     # FUNCTION creation / replacement is always engine-managed. When the
     # taggable-management gate is off entirely, ``taggable_management_scope``
     # is empty and this collapses to "function attributes only".
-    desired_attributes = _filter_taggable_attributes(desired_attributes, taggable_management_scope)
-    actual_attributes = _filter_taggable_attributes(actual_attributes, taggable_management_scope)
+    desired_attributes = _filter_taggable_attributes(
+        desired_attributes, taggable_management_scope
+    )
+    actual_attributes = _filter_taggable_attributes(
+        actual_attributes, taggable_management_scope
+    )
     securable_diff = compute_securable_diff(
-        desired_attributes, actual_attributes, desired_securables, actual_securables,
-        resolver, change_logger,
+        desired_attributes,
+        actual_attributes,
+        desired_securables,
+        actual_securables,
+        resolver,
+        change_logger,
         creation_in_scope_namespaces=taggable_creation_scope,
         ignore_unresolvable=ignore_unresolvable,
     )
@@ -399,13 +441,19 @@ def run(
     if enable_tag_management:
         desired_tags = compile_desired_tags(config, governed_tags, change_logger)
         in_scope_desired_tags = {
-            t for t in desired_tags if in_namespace_scope(t.securable_full_name, tag_scope)
+            t
+            for t in desired_tags
+            if in_namespace_scope(t.securable_full_name, tag_scope)
         }
         in_scope_actual_tags = {
-            t for t in actual_tags if in_namespace_scope(t.securable_full_name, tag_scope)
+            t
+            for t in actual_tags
+            if in_namespace_scope(t.securable_full_name, tag_scope)
         }
         out_of_scope_actual_tags = {
-            t for t in actual_tags if not in_namespace_scope(t.securable_full_name, tag_scope)
+            t
+            for t in actual_tags
+            if not in_namespace_scope(t.securable_full_name, tag_scope)
         }
         tag_diff = compute_tag_diff(in_scope_desired_tags, in_scope_actual_tags)
         tag_diff, retained_tags = filter_retained_removals(tag_diff, retain_prefixes)
@@ -427,10 +475,15 @@ def run(
 
     # 7. Policies workflow (mask/filter)
     desired_policies = compile_desired_policies(
-        config, governed_tag_names, change_logger,
+        config,
+        governed_tag_names,
+        change_logger,
     )
     policy_diff = compute_policy_diff(
-        desired_policies, actual_policies, resolver, change_logger,
+        desired_policies,
+        actual_policies,
+        resolver,
+        change_logger,
         ignore_unresolvable=ignore_unresolvable,
         delete_scope=policy_delete_scope,
     )
@@ -438,66 +491,108 @@ def run(
     # 8. Privileges workflow
     if enable_privilege_management:
         compiled_privileges = compile_desired_privileges(
-            config, tags_for_privilege_matching, governed_tag_names, change_logger,
+            config,
+            tags_for_privilege_matching,
+            governed_tag_names,
+            change_logger,
             run_date=date.today(),
         )
         in_scope_compiled_privileges = {
-            p for p in compiled_privileges if in_namespace_scope(p.securable_full_name, privilege_scope)
+            p
+            for p in compiled_privileges
+            if in_namespace_scope(p.securable_full_name, privilege_scope)
         }
         in_scope_actual_privileges = {
-            p for p in actual_privileges if in_namespace_scope(p.securable_full_name, privilege_scope)
+            p
+            for p in actual_privileges
+            if in_namespace_scope(p.securable_full_name, privilege_scope)
         }
         privilege_diff = compute_privilege_diff(
-            in_scope_compiled_privileges, in_scope_actual_privileges, resolver, change_logger,
+            in_scope_compiled_privileges,
+            in_scope_actual_privileges,
+            resolver,
+            change_logger,
             ignore_unresolvable=ignore_unresolvable,
         )
     else:
         privilege_diff = PrivilegeDiff()
 
     # 9. Log and execute (or dry-run) — group management runs first.
-    if (group_diff.groups_to_create or group_diff.members_to_add
-            or group_diff.members_to_remove or group_diff.groups_to_rename):
+    if (
+        group_diff.groups_to_create
+        or group_diff.members_to_add
+        or group_diff.members_to_remove
+        or group_diff.groups_to_rename
+    ):
         change_logger.log_section_header("Groups")
     execute_group_diff(
-        ws_helper, group_diff, change_logger,
-        dry_run=dry_run, max_parallel_changes=max_parallel_changes,
+        ws_helper,
+        group_diff,
+        change_logger,
+        dry_run=dry_run,
+        max_parallel_changes=max_parallel_changes,
     )
 
-    if governed_tag_diff.to_create or governed_tag_diff.to_update or governed_tag_diff.to_delete:
+    if (
+        governed_tag_diff.to_create
+        or governed_tag_diff.to_update
+        or governed_tag_diff.to_delete
+    ):
         change_logger.log_section_header("Governed tags")
     execute_governed_tag_diff(
-        ws_helper, governed_tag_diff, change_logger,
-        dry_run=dry_run, force=force,
+        ws_helper,
+        governed_tag_diff,
+        change_logger,
+        dry_run=dry_run,
+        force=force,
         # max_parallel_changes not currently supported for governed tags
     )
 
-    if securable_diff.securables_to_create or securable_diff.securables_to_replace or securable_diff.attributes_to_update:
+    if (
+        securable_diff.securables_to_create
+        or securable_diff.securables_to_replace
+        or securable_diff.attributes_to_update
+    ):
         change_logger.log_section_header("Securables")
     execute_securable_diff(
-        uc_helper, securable_diff, change_logger,
-        dry_run=dry_run, max_parallel_changes=max_parallel_changes,
+        uc_helper,
+        securable_diff,
+        change_logger,
+        dry_run=dry_run,
+        max_parallel_changes=max_parallel_changes,
     )
 
     if tag_diff.to_add or tag_diff.to_update or tag_diff.to_remove:
         change_logger.log_section_header("Tags")
     execute_tag_diff(
-        uc_helper, tag_diff, change_logger,
-        governed_tag_names=governed_tag_names, dry_run=dry_run, force=force,
+        uc_helper,
+        tag_diff,
+        change_logger,
+        governed_tag_names=governed_tag_names,
+        dry_run=dry_run,
+        force=force,
         max_parallel_changes=max_parallel_changes,
     )
 
     if policy_diff.to_create or policy_diff.to_replace or policy_diff.to_delete:
         change_logger.log_section_header("Policies")
     execute_policy_diff(
-        uc_helper, policy_diff, change_logger,
-        dry_run=dry_run, force=force, max_parallel_changes=max_parallel_changes,
+        uc_helper,
+        policy_diff,
+        change_logger,
+        dry_run=dry_run,
+        force=force,
+        max_parallel_changes=max_parallel_changes,
     )
 
     if privilege_diff.to_grant or privilege_diff.to_revoke:
         change_logger.log_section_header("Privileges")
     execute_privilege_diff(
-        uc_helper, privilege_diff, change_logger,
-        dry_run=dry_run, max_parallel_changes=max_parallel_changes,
+        uc_helper,
+        privilege_diff,
+        change_logger,
+        dry_run=dry_run,
+        max_parallel_changes=max_parallel_changes,
     )
 
     change_logger.log_errors_section()

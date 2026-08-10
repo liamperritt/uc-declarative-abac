@@ -12,7 +12,6 @@ from uc_declarative_abac.utils import (
 )
 
 
-
 # ---------------------------------------------------------------------------
 # discover_yaml_files
 # ---------------------------------------------------------------------------
@@ -20,11 +19,13 @@ from uc_declarative_abac.utils import (
 
 def test_discovery_finds_yaml_and_yml(tmp_yaml_dir):
     """Given a directory with .yaml, .yml, and .txt files, returns only YAML files."""
-    root = tmp_yaml_dir({
-        "a.yaml": {"key": "value"},
-        "b.yml": {"key": "value"},
-        "c.txt": "not yaml",
-    })
+    root = tmp_yaml_dir(
+        {
+            "a.yaml": {"key": "value"},
+            "b.yml": {"key": "value"},
+            "c.txt": "not yaml",
+        }
+    )
     (root / "c.txt").write_text("plain text")
 
     result = discover_yaml_files(root)
@@ -35,11 +36,13 @@ def test_discovery_finds_yaml_and_yml(tmp_yaml_dir):
 
 def test_discovery_finds_files_in_nested_directories(tmp_yaml_dir):
     """Given nested subdirectories, recursively discovers all YAML files."""
-    root = tmp_yaml_dir({
-        "top.yaml": {"key": "value"},
-        "level1/mid.yml": {"key": "value"},
-        "level1/level2/deep.yaml": {"key": "value"},
-    })
+    root = tmp_yaml_dir(
+        {
+            "top.yaml": {"key": "value"},
+            "level1/mid.yml": {"key": "value"},
+            "level1/level2/deep.yaml": {"key": "value"},
+        }
+    )
 
     result = discover_yaml_files(root)
 
@@ -64,22 +67,24 @@ def test_discovery_returns_empty_given_no_yaml_files(tmp_path):
 
 def test_discovery_merges_definitions_across_files(tmp_yaml_dir):
     """Given two files each contributing different definition types, merges them."""
-    root = tmp_yaml_dir({
-        "definitions/schemas.yaml": {
-            "definitions": {
-                "schemas": {
-                    "ops|sales": {"name": "sales"},
+    root = tmp_yaml_dir(
+        {
+            "definitions/schemas.yaml": {
+                "definitions": {
+                    "schemas": {
+                        "ops|sales": {"name": "sales"},
+                    },
                 },
             },
-        },
-        "definitions/tables.yaml": {
-            "definitions": {
-                "tables": {
-                    "ops|sales|orders": {"name": "orders"},
+            "definitions/tables.yaml": {
+                "definitions": {
+                    "tables": {
+                        "ops|sales|orders": {"name": "orders"},
+                    },
                 },
             },
-        },
-    })
+        }
+    )
 
     paths = discover_yaml_files(root)
     definitions, resources = load_raw_configs(paths)
@@ -97,22 +102,24 @@ def test_discovery_merges_definitions_across_files(tmp_yaml_dir):
 
 def test_discovery_merges_resources_across_files(tmp_yaml_dir):
     """Given two files with different catalog resources, merges them."""
-    root = tmp_yaml_dir({
-        "resources/prod.yaml": {
-            "resources": {
-                "catalogs": {
-                    "operations_prod": {"tags": {"env": "prod"}},
+    root = tmp_yaml_dir(
+        {
+            "resources/prod.yaml": {
+                "resources": {
+                    "catalogs": {
+                        "operations_prod": {"tags": {"env": "prod"}},
+                    },
                 },
             },
-        },
-        "resources/dev.yaml": {
-            "resources": {
-                "catalogs": {
-                    "operations_dev": {"tags": {"env": "dev"}},
+            "resources/dev.yaml": {
+                "resources": {
+                    "catalogs": {
+                        "operations_dev": {"tags": {"env": "dev"}},
+                    },
                 },
             },
-        },
-    })
+        }
+    )
 
     paths = discover_yaml_files(root)
     definitions, resources = load_raw_configs(paths)
@@ -126,22 +133,24 @@ def test_discovery_merges_resources_across_files(tmp_yaml_dir):
 
 def test_discovery_raises_on_duplicate_definition_key(tmp_yaml_dir):
     """Given two files defining the same definition key, raises DuplicateKeyError."""
-    root = tmp_yaml_dir({
-        "definitions/schemas_a.yaml": {
-            "definitions": {
-                "schemas": {
-                    "ops|sales": {"name": "sales"},
+    root = tmp_yaml_dir(
+        {
+            "definitions/schemas_a.yaml": {
+                "definitions": {
+                    "schemas": {
+                        "ops|sales": {"name": "sales"},
+                    },
                 },
             },
-        },
-        "definitions/schemas_b.yaml": {
-            "definitions": {
-                "schemas": {
-                    "ops|sales": {"name": "sales_duplicate"},
+            "definitions/schemas_b.yaml": {
+                "definitions": {
+                    "schemas": {
+                        "ops|sales": {"name": "sales_duplicate"},
+                    },
                 },
             },
-        },
-    })
+        }
+    )
 
     paths = discover_yaml_files(root)
 
@@ -151,18 +160,20 @@ def test_discovery_raises_on_duplicate_definition_key(tmp_yaml_dir):
 
 def test_discovery_ignores_files_with_no_definitions_or_resources(tmp_yaml_dir):
     """Given a YAML file with unrelated content, it is silently skipped."""
-    root = tmp_yaml_dir({
-        "definitions/schemas.yaml": {
-            "definitions": {
-                "schemas": {
-                    "ops|sales": {"name": "sales"},
+    root = tmp_yaml_dir(
+        {
+            "definitions/schemas.yaml": {
+                "definitions": {
+                    "schemas": {
+                        "ops|sales": {"name": "sales"},
+                    },
                 },
             },
-        },
-        "other/config.yaml": {
-            "settings": {"debug": True},
-        },
-    })
+            "other/config.yaml": {
+                "settings": {"debug": True},
+            },
+        }
+    )
 
     paths = discover_yaml_files(root)
     definitions, resources = load_raw_configs(paths)
@@ -178,22 +189,16 @@ def test_discovery_ignores_files_with_no_definitions_or_resources(tmp_yaml_dir):
 
 def test_discovery_rejects_duplicate_catalog_resource_keys(tmp_yaml_dir):
     """Given two files defining the same catalog resource key, raises DuplicateResourceError."""
-    root = tmp_yaml_dir({
-        "file1.yaml": {
-            "resources": {
-                "catalogs": {
-                    "my_catalog": {"tags": {"env": "prod"}}
-                }
-            }
-        },
-        "file2.yaml": {
-            "resources": {
-                "catalogs": {
-                    "my_catalog": {"tags": {"env": "test"}}
-                }
-            }
-        },
-    })
+    root = tmp_yaml_dir(
+        {
+            "file1.yaml": {
+                "resources": {"catalogs": {"my_catalog": {"tags": {"env": "prod"}}}}
+            },
+            "file2.yaml": {
+                "resources": {"catalogs": {"my_catalog": {"tags": {"env": "test"}}}}
+            },
+        }
+    )
     paths = discover_yaml_files(root)
     with pytest.raises(DuplicateResourceError):
         load_raw_configs(paths)
