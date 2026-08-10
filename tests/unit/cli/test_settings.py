@@ -8,6 +8,40 @@ import yaml
 from uc_declarative_abac.cli.settings import resolve_settings
 
 
+@pytest.mark.parametrize(
+    ("file_value", "env_value", "cli_value", "expected"),
+    [
+        pytest.param(None, None, None, "system", id="default"),
+        pytest.param("from-file", None, None, "from-file", id="settings-file"),
+        pytest.param("from-file", "from-env", None, "from-env", id="environment-over-file"),
+        pytest.param("from-file", "from-env", "from-cli", "from-cli", id="cli-over-environment"),
+    ],
+)
+def test_given_system_catalog_sources_when_settings_are_resolved_then_normal_precedence_applies(
+    file_value: str | None,
+    env_value: str | None,
+    cli_value: str | None,
+    expected: str,
+    monkeypatch,
+    tmp_path: Path,
+):
+    # Given
+    monkeypatch.chdir(tmp_path)
+    if file_value is not None:
+        (tmp_path / "uc_abac.yml").write_text(
+            yaml.dump({"system_catalog": file_value}), encoding="utf-8"
+        )
+    if env_value is not None:
+        monkeypatch.setenv("UC_ABAC_SYSTEM_CATALOG", env_value)
+    cli_overrides = {"system_catalog": cli_value} if cli_value is not None else {}
+
+    # When
+    settings = resolve_settings(cli_overrides, settings_file=None)
+
+    # Then
+    assert settings.system_catalog == expected
+
+
 def test_settings_prefers_cli_flag_over_env_var(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("UC_ABAC_WAREHOUSE_ID", "from-env")
     settings = resolve_settings(

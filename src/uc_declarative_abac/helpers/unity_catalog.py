@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -86,7 +87,9 @@ def _build_double_underscore_filter(
     return "".join(f" AND substring({col}, 1, 2) != '__'" for col in name_columns)
 
 
-def _build_tags_query(catalog_names: list[str]) -> str:
+def _build_tags_query(
+    catalog_names: list[str], *, system_catalog: str = "system"
+) -> str:
     """Build a UNION ALL query across all tag system tables for the given catalogs.
 
     Each arm aggregates to the per-securable grain: one row per securable, with all
@@ -140,41 +143,43 @@ def _build_tags_query(catalog_names: list[str]) -> str:
             f"SELECT '{sec_type}' AS securable_type, "
             f"{full_name_expr} AS securable_full_name, "
             f"to_json(sort_array(collect_list(struct(tag_name, tag_value)))) AS tags "
-            f"FROM system.information_schema.{table} "
+            f"FROM {system_catalog}.information_schema.{table} "
             f"WHERE {where} "
             f"GROUP BY {group_by_cols}"
         )
     return " UNION ALL ".join(parts)
 
 
-def _build_privileges_query(catalog_names: list[str]) -> str:
+def _build_privileges_query(
+    catalog_names: list[str], *, system_catalog: str = "system"
+) -> str:
     """Build a UNION ALL query across privilege system tables for the given catalogs."""
     in_clause = _build_catalog_in_clause(catalog_names)
     parts = [
         f"SELECT 'CATALOG' AS securable_type, catalog_name AS securable_full_name, "
         f"grantee, privilege_type "
-        f"FROM system.information_schema.catalog_privileges "
+        f"FROM {system_catalog}.information_schema.catalog_privileges "
         f"WHERE catalog_name IN {in_clause} AND inherited_from = 'NONE'"
         f"{_build_double_underscore_filter(['catalog_name'])}",
 
         f"SELECT 'SCHEMA' AS securable_type, "
         f"concat(catalog_name, '.', schema_name) AS securable_full_name, "
         f"grantee, privilege_type "
-        f"FROM system.information_schema.schema_privileges "
+        f"FROM {system_catalog}.information_schema.schema_privileges "
         f"WHERE catalog_name IN {in_clause} AND inherited_from = 'NONE' AND schema_name != 'information_schema'"
         f"{_build_double_underscore_filter(['catalog_name', 'schema_name'])}",
 
         f"SELECT 'TABLE' AS securable_type, "
         f"concat(table_catalog, '.', table_schema, '.', table_name) AS securable_full_name, "
         f"grantee, privilege_type "
-        f"FROM system.information_schema.table_privileges "
+        f"FROM {system_catalog}.information_schema.table_privileges "
         f"WHERE table_catalog IN {in_clause} AND inherited_from = 'NONE' AND table_schema != 'information_schema'"
         f"{_build_double_underscore_filter(['table_catalog', 'table_schema', 'table_name'])}",
 
         f"SELECT 'VOLUME' AS securable_type, "
         f"concat(volume_catalog, '.', volume_schema, '.', volume_name) AS securable_full_name, "
         f"grantee, privilege_type "
-        f"FROM system.information_schema.volume_privileges "
+        f"FROM {system_catalog}.information_schema.volume_privileges "
         f"WHERE volume_catalog IN {in_clause} AND inherited_from = 'NONE' AND volume_schema != 'information_schema'"
         f"{_build_double_underscore_filter(['volume_catalog', 'volume_schema', 'volume_name'])}",
     ]
@@ -250,7 +255,9 @@ def _fetch_external_links_rows(response: StatementResponse) -> list[list[str]]:
     return rows
 
 
-def _build_securables_query(catalog_names: list[str]) -> str:
+def _build_securables_query(
+    catalog_names: list[str], *, system_catalog: str = "system"
+) -> str:
     """Build a UNION ALL query for securable attributes, function definitions, and table columns.
 
     The TABLE arm joins ``information_schema.columns`` and aggregates each table's
@@ -283,7 +290,7 @@ def _build_securables_query(catalog_names: list[str]) -> str:
         f"SELECT 'CATALOG' AS securable_type, catalog_name AS full_name, "
         f"catalog_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, NULL AS columns, "
         f"comment AS comment, NULL AS table_type "
-        f"FROM system.information_schema.catalogs "
+        f"FROM {system_catalog}.information_schema.catalogs "
         f"WHERE catalog_name IN {in_clause}"
         f"{_build_double_underscore_filter(['catalog_name'])}",
 
@@ -291,7 +298,7 @@ def _build_securables_query(catalog_names: list[str]) -> str:
         f"concat(catalog_name, '.', schema_name) AS full_name, "
         f"schema_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, NULL AS columns, "
         f"comment AS comment, NULL AS table_type "
-        f"FROM system.information_schema.schemata "
+        f"FROM {system_catalog}.information_schema.schemata "
         f"WHERE catalog_name IN {in_clause} AND schema_name != 'information_schema'"
         f"{_build_double_underscore_filter(['catalog_name', 'schema_name'])}",
 
@@ -300,8 +307,8 @@ def _build_securables_query(catalog_names: list[str]) -> str:
         f"t.table_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, "
         f"to_json(transform(sort_array(collect_list(struct(c.ordinal_position, c.column_name))), x -> x.column_name)) AS columns, "
         f"t.comment AS comment, t.table_type AS table_type "
-        f"FROM system.information_schema.tables t "
-        f"LEFT JOIN system.information_schema.columns c "
+        f"FROM {system_catalog}.information_schema.tables t "
+        f"LEFT JOIN {system_catalog}.information_schema.columns c "
         f"ON t.table_catalog = c.table_catalog "
         f"AND t.table_schema = c.table_schema "
         f"AND t.table_name = c.table_name "
@@ -313,7 +320,7 @@ def _build_securables_query(catalog_names: list[str]) -> str:
         f"concat(volume_catalog, '.', volume_schema, '.', volume_name) AS full_name, "
         f"volume_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, NULL AS columns, "
         f"comment AS comment, NULL AS table_type "
-        f"FROM system.information_schema.volumes "
+        f"FROM {system_catalog}.information_schema.volumes "
         f"WHERE volume_catalog IN {in_clause} AND volume_schema != 'information_schema'"
         f"{_build_double_underscore_filter(['volume_catalog', 'volume_schema', 'volume_name'])}",
 
@@ -324,8 +331,8 @@ def _build_securables_query(catalog_names: list[str]) -> str:
         f"r.routine_definition AS routine_definition, "
         f"r.comment AS routine_comment, "
         f"NULL AS columns, NULL AS comment, NULL AS table_type "
-        f"FROM system.information_schema.routines r "
-        f"LEFT JOIN system.information_schema.parameters p "
+        f"FROM {system_catalog}.information_schema.routines r "
+        f"LEFT JOIN {system_catalog}.information_schema.parameters p "
         f"ON r.specific_catalog = p.specific_catalog "
         f"AND r.specific_schema = p.specific_schema "
         f"AND r.specific_name = p.specific_name "
@@ -424,7 +431,9 @@ def _parse_securable_rows(
     return securables, attributes
 
 
-def _build_policy_securables_query(catalog_names: list[str]) -> str:
+def _build_policy_securables_query(
+    catalog_names: list[str], *, system_catalog: str = "system"
+) -> str:
     """Build a single-scan discovery query against the system table for securables carrying mask/filter policies.
 
     Returns all catalogs, schemas, and tables that have ROW_FILTER or COLUMN_MASK
@@ -464,7 +473,7 @@ def _build_policy_securables_query(catalog_names: list[str]) -> str:
         "    WHEN 'SCHEMA'  THEN concat(catalog_name, '.', schema_name) "
         "    WHEN 'TABLE'   THEN concat(catalog_name, '.', schema_name, '.', securable_name) "
         "  END AS securable_full_name "
-        "FROM system.information_schema.abac_policy_definitions "
+        f"FROM {system_catalog}.information_schema.abac_policy_definitions "
         "WHERE catalog_name IN " + in_clause + " "
         "  AND policy_type IN ('ROW_FILTER', 'COLUMN_MASK') "
         "  AND on_securable_type IN ('CATALOG', 'SCHEMA', 'TABLE') "
@@ -625,6 +634,15 @@ def _merge_rfa_into_attributes(
     return set(by_key.values())
 
 
+def _validate_system_catalog(system_catalog: str) -> str:
+    """Validate and return a plain, unquoted Unity Catalog identifier."""
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", system_catalog) is None:
+        raise ValueError(
+            "system_catalog must be a plain, unquoted Unity Catalog identifier"
+        )
+    return system_catalog
+
+
 class UnityCatalogHelper:
     """Wraps WorkspaceClient for querying UC state and executing SQL.
 
@@ -632,9 +650,16 @@ class UnityCatalogHelper:
     for efficient result streaming. Caches results after initial fetch.
     """
 
-    def __init__(self, workspace_client: WorkspaceClient, warehouse_id: str) -> None:
+    def __init__(
+        self,
+        workspace_client: WorkspaceClient,
+        warehouse_id: str,
+        *,
+        system_catalog: str = "system",
+    ) -> None:
         self._client = workspace_client
         self._warehouse_id = warehouse_id
+        self._system_catalog = _validate_system_catalog(system_catalog)
         self._tags_cache: set[SecurableTag] | None = None
         self._privileges_cache: set[SecurablePrivilege] | None = None
         self._securables_cache: set[Securable] | None = None
@@ -677,7 +702,9 @@ class UnityCatalogHelper:
             self._tags_cache = set()
             return self._tags_cache
 
-        response = self._execute_and_poll(_build_tags_query(catalog_names))
+        response = self._execute_and_poll(
+            _build_tags_query(catalog_names, system_catalog=self._system_catalog)
+        )
         rows = _fetch_external_links_rows(response)
         self._tags_cache = _parse_tag_rows(rows)
         return self._tags_cache
@@ -695,7 +722,11 @@ class UnityCatalogHelper:
             self._privileges_cache = set()
             return self._privileges_cache
 
-        response = self._execute_and_poll(_build_privileges_query(catalog_names))
+        response = self._execute_and_poll(
+            _build_privileges_query(
+                catalog_names, system_catalog=self._system_catalog
+            )
+        )
         rows = _fetch_external_links_rows(response)
         self._privileges_cache = _parse_privilege_rows(rows)
         return self._privileges_cache
@@ -727,7 +758,11 @@ class UnityCatalogHelper:
             self._attributes_cache = set()
             return self._securables_cache, self._attributes_cache
 
-        response = self._execute_and_poll(_build_securables_query(catalog_names))
+        response = self._execute_and_poll(
+            _build_securables_query(
+                catalog_names, system_catalog=self._system_catalog
+            )
+        )
         rows = _fetch_external_links_rows(response)
         securables, attributes = _parse_securable_rows(rows)
 
@@ -864,7 +899,11 @@ class UnityCatalogHelper:
             self._policies_cache = set()
             return self._policies_cache
 
-        response = self._execute_and_poll(_build_policy_securables_query(catalog_names))
+        response = self._execute_and_poll(
+            _build_policy_securables_query(
+                catalog_names, system_catalog=self._system_catalog
+            )
+        )
         rows = _fetch_external_links_rows(response)
         securables = _parse_policy_securable_rows(rows)
 

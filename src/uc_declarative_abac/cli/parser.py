@@ -18,6 +18,12 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         help="Databricks CLI profile name (from ~/.databrickscfg)",
     )
     parser.add_argument(
+        "--system-catalog",
+        type=str,
+        default=argparse.SUPPRESS,
+        help="Catalog containing Unity Catalog system tables (default: system).",
+    )
+    parser.add_argument(
         "--use-workspace-scim",
         action="store_true",
         default=argparse.SUPPRESS,

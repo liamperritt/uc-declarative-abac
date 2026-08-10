@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 import uc_declarative_abac.cli.commands as cli
+from uc_declarative_abac.cli.settings import RunSettings
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +182,24 @@ def test_commands_deploy_passes_dry_run_false(monkeypatch):
     )
     assert exit_code == 0
     assert captured["dry_run"] is False
+
+
+def test_commands_deploy_forwards_system_catalog_from_run_settings_to_orchestrator(monkeypatch):
+    captured: dict = {}
+    settings = RunSettings(
+        config_dir=Path("cfg"),
+        warehouse_id="wh",
+        system_catalog="system_catalog_proxy",
+    )
+
+    monkeypatch.setattr(cli, "resolve_settings", lambda *_args, **_kwargs: settings)
+    monkeypatch.setattr(cli, "run", lambda **kwargs: captured.update(kwargs))
+    monkeypatch.setattr(cli, "WorkspaceClient", lambda **_: object())
+
+    exit_code = cli.run_cli(["deploy"])
+
+    assert exit_code == 0
+    assert captured["system_catalog"] == "system_catalog_proxy"
 
 
 def test_commands_deploy_missing_warehouse_returns_config_error(monkeypatch):

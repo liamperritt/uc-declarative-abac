@@ -242,6 +242,63 @@ def test_uc_helper_tags_query_is_valid_sql():
     assert "'other_catalog'" in sql
 
 
+def test_uc_helper_rejects_unsafe_system_catalog_when_constructed():
+    """An unsafe system catalog cannot reach SQL interpolation."""
+    client = _make_mock_workspace_client()
+
+    with pytest.raises(ValueError):
+        UnityCatalogHelper(
+            client,
+            WAREHOUSE_ID,
+            system_catalog="proxy; DROP CATALOG main",
+        )
+
+
+def test_uc_helper_fetches_actual_tags_from_configured_system_catalog():
+    """Given a system catalog override, every tags state read uses that catalog."""
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(
+        client,
+        WAREHOUSE_ID,
+        system_catalog="system_catalog_proxy",
+    )
+
+    helper.fetch_actual_tags(["my_catalog"])
+
+    tables = list(_parse_sql(_get_executed_sql(client)).find_all(sqlglot.exp.Table))
+    assert tables
+    assert {table.catalog for table in tables} == {"system_catalog_proxy"}
+    assert {table.db for table in tables} == {"information_schema"}
+
+
+@pytest.mark.parametrize(
+    ("fetch_method", "expected_schema"),
+    [
+        ("fetch_actual_privileges", "information_schema"),
+        ("fetch_actual_securables", "information_schema"),
+        ("fetch_actual_policies", "information_schema"),
+    ],
+)
+def test_uc_helper_uses_configured_system_catalog_for_remaining_state_queries(
+    fetch_method,
+    expected_schema,
+):
+    """Every remaining system-table state read honors the configured catalog."""
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(
+        client,
+        WAREHOUSE_ID,
+        system_catalog="system_catalog_proxy",
+    )
+
+    getattr(helper, fetch_method)(["my_catalog"])
+
+    tables = list(_parse_sql(_get_executed_sql(client)).find_all(sqlglot.exp.Table))
+    assert tables
+    assert {table.catalog for table in tables} == {"system_catalog_proxy"}
+    assert {table.db for table in tables} == {expected_schema}
+
+
 def test_uc_helper_tags_query_groups_by_securable_columns_per_arm():
     """Each UNION ALL arm GROUPs BY the securable's identifying columns so the result is
     at the securable grain (one row per securable)."""

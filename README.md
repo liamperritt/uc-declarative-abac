@@ -77,11 +77,25 @@ Global flags: `--version`, `--verbose`, `--quiet`, `--settings-file <path>`.
 ```yaml
 config_dir: ./configs
 warehouse_id: <warehouse-id>
+system_catalog: system_catalog_proxy
 enable_tag_management: true
 enable_privilege_management: true
 ```
 
-**Environment variables.** Any setting can also be set via `UC_ABAC_*` env vars (e.g. `UC_ABAC_WAREHOUSE_ID`, `UC_ABAC_ENABLE_TAG_MANAGEMENT=true`). Precedence: defaults < settings file < env vars < CLI flags.
+**Environment variables.** Any setting can also be set via `UC_ABAC_*` env vars (e.g. `UC_ABAC_WAREHOUSE_ID`, `UC_ABAC_SYSTEM_CATALOG`, `UC_ABAC_ENABLE_TAG_MANAGEMENT=true`). Precedence: defaults < settings file < env vars < CLI flags.
+
+**System-table proxy catalogs.** Actual-state SQL reads `system.information_schema` by default. Set `--system-catalog <catalog>`, `system_catalog` in the settings file, or `UC_ABAC_SYSTEM_CATALOG` to use a curated proxy catalog instead. The catalog value must be a plain identifier containing only ASCII letters, digits, and underscores, and may not start with a digit. The proxy must expose these views under its `information_schema` schema:
+
+| Domain | Required views |
+|---|---|
+| tags | `catalog_tags`, `schema_tags`, `table_tags`, `volume_tags`, `column_tags` |
+| privileges | `catalog_privileges`, `schema_privileges`, `table_privileges`, `volume_privileges` |
+| securables | `catalogs`, `schemata`, `tables`, `columns`, `volumes`, `routines`, `parameters` |
+| policies | `abac_policy_definitions` |
+
+The views must retain every column projected or filtered by the corresponding Databricks information-schema view. In particular, this includes object-name and tag columns; `privilege_type`, `grantee`, and `inherited_from`; `table_type`, `comment`, the `*_owner` columns, `routine_definition`, and `ordinal_position`; and the policy type and securable-name columns in `abac_policy_definitions`.
+
+> **Visibility warning:** A workspace-scoped proxy must expose every configured object. If it hides rows, existing objects can appear absent and the engine can plan incorrect creates, tag removals, or privilege revokes.
 
 **Exit codes:** `0` success · `1` execution errors · `2` usage error · `3` config/validation error · `4` Databricks/auth error · `130` interrupted.
 
@@ -118,6 +132,7 @@ The repo ships a composite GitHub Action at `deploy/action.yml` so any other rep
 |---|---|---|---|
 | `config-dir` | yes | — | Path to the YAML config directory, relative to the caller's repo root |
 | `warehouse-id` | yes | — | SQL warehouse ID used to execute UC queries |
+| `system-catalog` | no | `'system'` | Catalog containing the `information_schema` views used for actual-state queries |
 | `profile` | no | `''` | Databricks CLI profile name from `~/.databrickscfg`; omit to use env-based auth (see the [Authentication](#authentication) table) |
 | `dry-run` | no | `'false'` | Print planned changes without executing when `'true'` |
 | `use-workspace-scim` | no | `'false'` | Fetch principals from the workspace SCIM API instead of the account SCIM proxy when `'true'`. The account-level system groups `account users` and `account admins` are automatically included, since the workspace SCIM API does not surface them. **Incompatible with configuring `resources.groups`** — group management requires the account SCIM proxy, so combining the two errors out |
