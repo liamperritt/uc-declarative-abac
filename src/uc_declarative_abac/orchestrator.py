@@ -135,6 +135,7 @@ def run(
     config_dir: Path,
     workspace_client: WorkspaceClient,
     warehouse_id: str,
+    system_catalog: str = "system",
     dry_run: bool = False,
     use_workspace_scim: bool = False,
     skip_users_fetch: bool = False,
@@ -291,7 +292,11 @@ def run(
     }
 
     # 3. Parallel initial fetch (securables, tags, privileges, and principals concurrently)
-    uc_helper = UnityCatalogHelper(workspace_client, warehouse_id)
+    uc_helper = UnityCatalogHelper(
+        workspace_client,
+        warehouse_id,
+        system_catalog=system_catalog,
+    )
     ws_helper = WorkspaceHelper(
         workspace_client,
         use_workspace_scim=use_workspace_scim,

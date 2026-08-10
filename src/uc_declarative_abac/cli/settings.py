@@ -23,6 +23,7 @@ _EMPTY_MEANINGFUL_FIELDS = frozenset(
 # Maps RunSettings field names to UC_ABAC_* environment variable suffixes.
 _ENV_FIELD_MAP: dict[str, str] = {
     "config_dir": "CONFIG_DIR",
+    "system_catalog": "SYSTEM_CATALOG",
     "warehouse_id": "WAREHOUSE_ID",
     "profile": "PROFILE",
     "use_workspace_scim": "USE_WORKSPACE_SCIM",
@@ -54,6 +55,7 @@ class RunSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     config_dir: Path | None = None
+    system_catalog: str = "system"
     warehouse_id: str | None = None
     profile: str | None = None
     use_workspace_scim: bool = False

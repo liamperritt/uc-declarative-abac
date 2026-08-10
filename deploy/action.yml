@@ -12,6 +12,12 @@ inputs:
   warehouse-id:
     description: SQL warehouse ID the engine will use to execute UC queries.
     required: true
+  system-catalog:
+    description: >-
+      Catalog containing the information_schema views used for actual-state
+      queries. Defaults to the Databricks system catalog.
+    required: false
+    default: system
   profile:
     description: >-
       Optional Databricks CLI profile name from ~/.databrickscfg. Omit (leave empty)
@@ -211,6 +217,7 @@ runs:
       env:
         CONFIG_DIR: ${{ inputs.config-dir }}
         WAREHOUSE_ID: ${{ inputs.warehouse-id }}
+        SYSTEM_CATALOG: ${{ inputs.system-catalog }}
         PROFILE: ${{ inputs.profile }}
         DRY_RUN: ${{ inputs.dry-run }}
         USE_WORKSPACE_SCIM: ${{ inputs.use-workspace-scim }}
@@ -241,6 +248,7 @@ runs:
           "deploy"
           --config-dir "$CONFIG_DIR"
           --warehouse-id "$WAREHOUSE_ID"
+          --system-catalog "$SYSTEM_CATALOG"
         )
         if [[ "$DRY_RUN" == "true" ]]; then
           args+=(--dry-run)

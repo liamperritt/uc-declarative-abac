@@ -501,6 +501,35 @@ def test_orchestrator_dry_run_does_not_execute_sql(
 # ---------------------------------------------------------------------------
 
 
+def test_orchestrator_constructs_unity_catalog_helper_with_system_catalog(
+    tmp_yaml_dir, mock_workspace_client,
+):
+    """run() forwards the configured system catalog to UnityCatalogHelper."""
+    from uc_declarative_abac.helpers import UnityCatalogHelper
+
+    root = tmp_yaml_dir({"resources/catalog.yaml": {"resources": {}}})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _setup_mock_empty_principals(mock_workspace_client)
+
+    with patch(
+        "uc_declarative_abac.orchestrator.UnityCatalogHelper",
+        wraps=UnityCatalogHelper,
+    ) as mock_uc_helper:
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            system_catalog="system_catalog_proxy",
+            dry_run=True,
+        )
+
+    mock_uc_helper.assert_called_once_with(
+        mock_workspace_client,
+        "test-warehouse-id",
+        system_catalog="system_catalog_proxy",
+    )
+
+
 def test_orchestrator_threads_max_parallel_changes_to_each_executor(
     tmp_yaml_dir, mock_workspace_client, monkeypatch):
     """run() forwards max_parallel_changes as a kwarg into every domain executor."""
