@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from uc_declarative_abac.configs import ResourcesConfig
 from uc_declarative_abac.governed_tags import (
-    compile_desired_governed_tags,
     GovernedTag,
+    compile_desired_governed_tags,
 )
 from uc_declarative_abac.principals import Principal
 from uc_declarative_abac.types import PrincipalType

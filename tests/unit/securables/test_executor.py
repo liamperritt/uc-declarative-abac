@@ -3,16 +3,16 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from uc_declarative_abac.logger import ChangeLogger
+from uc_declarative_abac.principals import Principal
 from uc_declarative_abac.securables import (
     AttributeUpdate,
     Column,
-    execute_securable_diff,
     Function,
     Securable,
     SecurableDiff,
     Table,
+    execute_securable_diff,
 )
-from uc_declarative_abac.principals import Principal
 from uc_declarative_abac.types import (
     PrincipalType,
     SecurableType,
@@ -696,7 +696,7 @@ def test_securable_executor_logs_error_and_continues_on_other_tables_after_batch
 
     def _fail_for_orders(sql):
         if "orders" in sql:
-            raise Exception("boom")
+            raise RuntimeError("boom")
 
     uc_helper.execute_sql.side_effect = _fail_for_orders
     cl = ChangeLogger()
@@ -820,8 +820,7 @@ def test_securable_executor_runs_column_batches_for_different_tables_in_parallel
         nonlocal active, max_active
         with lock:
             active += 1
-            if active > max_active:
-                max_active = active
+            max_active = max(max_active, active)
         # Sleep so workers genuinely overlap.
         time.sleep(0.02)
         with lock:

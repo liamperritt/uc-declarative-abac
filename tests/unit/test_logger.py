@@ -3,23 +3,22 @@ from __future__ import annotations
 import logging
 from unittest.mock import MagicMock
 
-from uc_declarative_abac.policies import Policy
-from uc_declarative_abac.utils import ExecutionError
-from uc_declarative_abac.privileges import SecurablePrivilege
 from uc_declarative_abac.logger import ChangeLogger
+from uc_declarative_abac.policies import Policy
+from uc_declarative_abac.principals import Principal
+from uc_declarative_abac.privileges import SecurablePrivilege
 from uc_declarative_abac.securables import (
     AttributeUpdate,
     Function,
 )
 from uc_declarative_abac.tags import SecurableTag
-from uc_declarative_abac.principals import Principal
 from uc_declarative_abac.types import (
     PolicyType,
     PrincipalType,
     PrivilegeType,
     SecurableType,
 )
-
+from uc_declarative_abac.utils import ExecutionError
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -75,12 +74,15 @@ def _make_tag(
     )
 
 
+_DEFAULT_PRIVILEGE_PRINCIPAL = Principal(
+    PrincipalType.GROUP, "data_engineers", "data_engineers"
+)
+
+
 def _make_privilege(
     securable_type: SecurableType = SecurableType.SCHEMA,
     securable_full_name: str = "my_catalog.sales",
-    principal: Principal = Principal(
-        PrincipalType.GROUP, "data_engineers", "data_engineers"
-    ),
+    principal: Principal = _DEFAULT_PRIVILEGE_PRINCIPAL,
     privilege_type: str | PrivilegeType = PrivilegeType.SELECT,
 ) -> SecurablePrivilege:
     return SecurablePrivilege(
@@ -289,7 +291,7 @@ def test_change_logger_logs_dry_run_summary() -> None:
 def _make_execution_error(
     statement: str = "GRANT SELECT ON TABLE `cat`.`s`.`t` TO `user`",
     exception: Exception | None = None,
-) -> "ExecutionError":
+) -> ExecutionError:
     return ExecutionError(
         context=statement,
         exception=exception or RuntimeError("SQL execution failed"),
@@ -782,19 +784,19 @@ def _make_logger_policy(**overrides) -> Policy:
     """Factory matching tests/unit/policies/test_differ.py: principals are
     `Principal` instances so `_format_principal_delta` can read `.name`."""
     analysts = Principal(PrincipalType.GROUP, identifier="analysts", name="analysts")
-    base = dict(
-        securable_type=SecurableType.TABLE,
-        securable_full_name="cat.s.t",
-        name="mask_pii",
-        policy_type=PolicyType.MASK,
-        function_name="cat.default.fn",
-        to_principals=(analysts,),
-        except_principals=(),
-        when_condition=None,
-        match_columns=(),
-        on_column="c",
-        using_columns=(),
-    )
+    base = {
+        "securable_type": SecurableType.TABLE,
+        "securable_full_name": "cat.s.t",
+        "name": "mask_pii",
+        "policy_type": PolicyType.MASK,
+        "function_name": "cat.default.fn",
+        "to_principals": (analysts,),
+        "except_principals": (),
+        "when_condition": None,
+        "match_columns": (),
+        "on_column": "c",
+        "using_columns": (),
+    }
     base.update(overrides)
     return Policy(**base)
 

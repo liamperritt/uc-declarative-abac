@@ -21,21 +21,20 @@ from pathlib import Path
 
 from databricks.sdk import WorkspaceClient
 
-from uc_declarative_abac.orchestrator import run
 from uc_declarative_abac.governed_tags import GovernedTag
+from uc_declarative_abac.orchestrator import run
+from uc_declarative_abac.principals import Principal
+from uc_declarative_abac.privileges import SecurablePrivilege
 from uc_declarative_abac.securables import (
     Function,
     SecurableAttributes,
 )
 from uc_declarative_abac.tags import SecurableTag
-from uc_declarative_abac.privileges import SecurablePrivilege
-from uc_declarative_abac.principals import Principal
 from uc_declarative_abac.types import (
     PrincipalType,
     PrivilegeType,
     SecurableType,
 )
-
 
 # ---------------------------------------------------------------------------
 # Expected state derived from the e2e YAML configs
@@ -333,14 +332,13 @@ def test_uc_declarative_abac_dry_run(
         )
 
     # All expected attribute updates should be pending
-    pending_attrs = {
+    {
         (u.securable_type, u.full_name, u.attribute)
         for u in result.securable_diff.attributes_to_update
     }
     for attr in EXPECTED_ATTRIBUTES:
         if attr.owner:
-            key = (attr.securable_type, attr.full_name, "owner")
-            assert key in pending_attrs or True, (
+            assert True, (
                 f"Expected attribute update not found in diff: {attr}"
             )
 

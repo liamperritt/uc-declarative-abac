@@ -9,17 +9,17 @@ if TYPE_CHECKING:
     from uc_declarative_abac.helpers import UnityCatalogHelper
     from uc_declarative_abac.logger import ChangeLogger
 
+from uc_declarative_abac.tags.state import (
+    SecurableTag,
+    TagDiff,
+)
+from uc_declarative_abac.types import SecurableType
 from uc_declarative_abac.utils import (
     ExecutionError,
     InteractiveConfirmationRequiredError,
     parallel_for_each,
     quote_securable,
 )
-from uc_declarative_abac.tags.state import (
-    SecurableTag,
-    TagDiff,
-)
-from uc_declarative_abac.types import SecurableType
 
 _logger = logging.getLogger("uc_declarative_abac")
 

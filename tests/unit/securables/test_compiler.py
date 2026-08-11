@@ -4,12 +4,12 @@ from uc_declarative_abac.configs import ResourcesConfig
 from uc_declarative_abac.principals import Principal
 from uc_declarative_abac.securables import (
     Column,
-    compile_desired_attributes,
-    compile_desired_securables,
     Function,
     Securable,
     SecurableAttributes,
     Table,
+    compile_desired_attributes,
+    compile_desired_securables,
 )
 from uc_declarative_abac.types import (
     PrincipalType,

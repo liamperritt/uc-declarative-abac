@@ -4,6 +4,7 @@ import logging
 import sys
 from typing import TYPE_CHECKING
 
+from databricks.sdk.errors.base import DatabricksError
 from databricks.sdk.service.iam import GrantRule
 from databricks.sdk.service.tags import TagPolicy, Value
 
@@ -15,17 +16,17 @@ from uc_declarative_abac.governed_tags.state import (
     GovernedTag,
     GovernedTagDiff,
 )
+from uc_declarative_abac.principals import (
+    Principal,
+    ensure_resolved,
+)
+from uc_declarative_abac.types import PrincipalType
 from uc_declarative_abac.utils import (
     ExecutionError,
     InteractiveConfirmationRequiredError,
     OrchestratorError,
     parallel_for_each,
 )
-from uc_declarative_abac.principals import (
-    ensure_resolved,
-    Principal,
-)
-from uc_declarative_abac.types import PrincipalType
 
 _logger = logging.getLogger("uc_declarative_abac")
 
@@ -126,7 +127,7 @@ def _apply_assigners(
             etag=current.etag,
             grant_rules=new_rules,
         )
-    except Exception as exc:
+    except (DatabricksError, OrchestratorError) as exc:
         change_logger.log_error(
             ExecutionError(
                 context=f"update_rule_set({gt.name})",

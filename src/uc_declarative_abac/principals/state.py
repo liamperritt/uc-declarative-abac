@@ -32,11 +32,12 @@ class Principal:
             raise ValueError(
                 "Principal must have at least one of name or identifier set"
             )
-        if self.principal_type != PrincipalType.UNKNOWN:
-            if not self.name or not self.identifier:
-                raise ValueError(
-                    "Resolved principals must have both name and identifier"
-                )
+        if self.principal_type != PrincipalType.UNKNOWN and (
+            not self.name or not self.identifier
+        ):
+            raise ValueError(
+                "Resolved principals must have both name and identifier"
+            )
 
 
 @dataclass(frozen=True)

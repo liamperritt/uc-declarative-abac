@@ -8,9 +8,9 @@ from uc_declarative_abac.principals import (
     PrincipalResolver,
 )
 from uc_declarative_abac.privileges import (
-    compute_privilege_diff,
     PrivilegeDiff,
     SecurablePrivilege,
+    compute_privilege_diff,
 )
 from uc_declarative_abac.types import (
     PrincipalType,

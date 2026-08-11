@@ -3,11 +3,12 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from databricks.sdk.errors.base import DatabricksError
 
 from uc_declarative_abac.governed_tags import (
-    execute_governed_tag_diff,
     GovernedTag,
     GovernedTagDiff,
+    execute_governed_tag_diff,
 )
 from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.principals import Principal
@@ -600,7 +601,7 @@ def test_governed_tag_executor_logs_error_and_continues_on_rule_set_failure(
     ws_helper.get_tag_policy_rule_set_by_name.return_value = _make_rule_set_response(
         etag="etag-pii"
     )
-    ws_helper.update_tag_policy_rule_set.side_effect = Exception("boom")
+    ws_helper.update_tag_policy_rule_set.side_effect = DatabricksError("boom")
 
     new = _gt("pii", "PII", {"name"}, assigners={_resolved_user("alice@co.com")})
     old = _gt("pii", "PII", {"name"}, assigners=set())

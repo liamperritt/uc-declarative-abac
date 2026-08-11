@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Callable, Literal, TypeVar
+from typing import Literal, TypeVar
 
 from uc_declarative_abac.types import SecurableType
-
 
 T = TypeVar("T")
 R = TypeVar("R")
@@ -48,14 +48,11 @@ def parallel_for_each(
         }
         for future in as_completed(future_to_idx):
             idx, item = future_to_idx[future]
-            try:
-                triple: tuple[T, R | None, Exception | None] = (
-                    item,
-                    future.result(),
-                    None,
-                )
-            except Exception as exc:
-                triple = (item, None, exc)
+            error = future.exception()
+            if error is not None:
+                triple = (item, None, error)
+            else:
+                triple = (item, future.result(), None)
             if on_complete is not None:
                 on_complete(*triple)
             by_index[idx] = triple
@@ -65,7 +62,7 @@ def parallel_for_each(
 def _invoke(item: T, work_fn: Callable[[T], R]) -> tuple[T, R | None, Exception | None]:
     try:
         return (item, work_fn(item), None)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — capture any worker failure for the caller
         return (item, None, exc)
 
 

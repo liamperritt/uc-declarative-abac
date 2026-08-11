@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
+
 import pytest
 
 from uc_declarative_abac.principals import Principal
 from uc_declarative_abac.types import PrincipalType
-
 
 # ---------------------------------------------------------------------------
 # Principal invariants
@@ -84,7 +85,7 @@ def test_principal_allows_user_with_same_name_and_identifier():
 def test_principal_is_frozen():
     """Fields cannot be mutated after construction."""
     p = Principal(principal_type=PrincipalType.USER, name="x", identifier="x")
-    with pytest.raises(Exception):
+    with pytest.raises(FrozenInstanceError):
         p.name = "y"  # type: ignore[misc]
 
 

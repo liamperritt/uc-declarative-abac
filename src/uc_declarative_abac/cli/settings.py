@@ -95,7 +95,7 @@ def _load_settings_file(path: Path) -> dict[str, Any]:
     with path.open(encoding="utf-8") as handle:
         data = yaml.safe_load(handle) or {}
     if not isinstance(data, dict):
-        raise ValueError(
+        raise TypeError(
             f"Settings file {path} must contain a YAML mapping at the top level."
         )
     return data

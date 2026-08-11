@@ -3,12 +3,12 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from uc_declarative_abac.logger import ChangeLogger
+from uc_declarative_abac.principals import Principal
 from uc_declarative_abac.privileges import (
-    execute_privilege_diff,
     PrivilegeDiff,
     SecurablePrivilege,
+    execute_privilege_diff,
 )
-from uc_declarative_abac.principals import Principal
 from uc_declarative_abac.types import (
     PrincipalType,
     PrivilegeType,

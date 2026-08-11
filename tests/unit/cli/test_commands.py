@@ -3,10 +3,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-
 import uc_declarative_abac.cli.commands as cli
 from uc_declarative_abac.cli.settings import RunSettings
-
 
 # ---------------------------------------------------------------------------
 # Legacy flat invocation (regression coverage for pre-subcommand CLI)

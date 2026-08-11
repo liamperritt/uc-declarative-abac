@@ -192,12 +192,12 @@ def _print_error(message: str, *, verbose: bool) -> None:
         traceback.print_exc()
 
 
-def _handle_cli_error(exc: BaseException, *, verbose: bool) -> int:
+def _handle_cli_error(exc: Exception, *, verbose: bool) -> int:
     if isinstance(exc, ExecutionBatchError):
         _print_error(str(exc), verbose=verbose)
         return EXIT_EXECUTION_ERROR
     if isinstance(
-        exc, (OrchestratorError, ValidationError, ValueError, yaml.YAMLError)
+        exc, (OrchestratorError, ValidationError, ValueError, TypeError, yaml.YAMLError)
     ):
         _print_error(str(exc), verbose=verbose)
         return EXIT_CONFIG_ERROR
@@ -240,17 +240,22 @@ def run_cli(argv: list[str] | None = None) -> int:
         return cmd_deploy(settings, namespace, namespaces)
     except KeyboardInterrupt:
         return EXIT_INTERRUPTED
-    except BaseException as exc:
+    except (
+        ExecutionBatchError,
+        OrchestratorError,
+        ValidationError,
+        ValueError,
+        TypeError,
+        yaml.YAMLError,
+        DatabricksError,
+        CliUsageError,
+    ) as exc:
         verbose = getattr(namespace, "verbose", False)
         return _handle_cli_error(exc, verbose=verbose)
 
 
 def main() -> None:
-    try:
-        exit_code = run_cli()
-    except SystemExit:
-        raise
-    sys.exit(exit_code)
+    sys.exit(run_cli())
 
 
 # Re-exported for tests that monkeypatch the CLI boundary.

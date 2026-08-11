@@ -6,10 +6,10 @@ import pytest
 
 from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.principals import (
-    execute_group_diff,
     GroupDiff,
     GroupRename,
     Principal,
+    execute_group_diff,
 )
 from uc_declarative_abac.types import PrincipalType
 
@@ -166,7 +166,6 @@ def test_group_executor_logs_error_and_continues_on_remove_members_failure(
     def _fail_for_one(name, members):
         if name == "fail_group":
             raise RuntimeError("boom")
-        return None
 
     ws_helper.remove_group_members.side_effect = _fail_for_one
     diff = GroupDiff(
@@ -196,7 +195,6 @@ def test_group_executor_logs_error_and_continues_on_add_members_failure(
     def _fail_for_one(name, members):
         if name == "fail_group":
             raise RuntimeError("boom")
-        return None
 
     ws_helper.add_group_members.side_effect = _fail_for_one
     diff = GroupDiff(

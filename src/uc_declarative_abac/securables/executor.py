@@ -7,11 +7,9 @@ if TYPE_CHECKING:
     from uc_declarative_abac.helpers import UnityCatalogHelper
     from uc_declarative_abac.logger import ChangeLogger
 
-from uc_declarative_abac.utils import (
-    ExecutionError,
-    OrchestratorError,
-    parallel_for_each,
-    quote_securable,
+from uc_declarative_abac.principals import (
+    Principal,
+    ensure_resolved,
 )
 from uc_declarative_abac.securables.state import (
     AttributeUpdate,
@@ -21,12 +19,13 @@ from uc_declarative_abac.securables.state import (
     SecurableDiff,
     Table,
 )
-from uc_declarative_abac.principals import (
-    ensure_resolved,
-    Principal,
-)
 from uc_declarative_abac.types import SecurableType
-
+from uc_declarative_abac.utils import (
+    ExecutionError,
+    OrchestratorError,
+    parallel_for_each,
+    quote_securable,
+)
 
 # UC hierarchy depth: catalogs at the top, then schemas, then leaf types
 # (tables/volumes/functions), then columns. This topology drives execution
@@ -324,8 +323,8 @@ def _bucket_creates_by_depth(diff: SecurableDiff) -> dict[int, list[Securable]]:
     for info in diff.securables_to_create:
         depth, _ = _creation_sort_key(info)
         by_depth[depth].append(info)
-    for depth in by_depth:
-        by_depth[depth].sort(key=_creation_sort_key)
+    for bucket in by_depth.values():
+        bucket.sort(key=_creation_sort_key)
     return by_depth
 
 

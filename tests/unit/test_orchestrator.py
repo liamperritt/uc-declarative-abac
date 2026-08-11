@@ -7,13 +7,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from uc_declarative_abac.orchestrator import run
-from uc_declarative_abac.utils import (
-    DisallowedTagValueError,
-    ExecutionBatchError,
-    OrchestratorError,
-    PrincipalValidationError,
-    UngovernedTagError,
-)
 from uc_declarative_abac.policies import (
     PolicyDiff,
 )
@@ -22,7 +15,13 @@ from uc_declarative_abac.tags import TagDiff
 from uc_declarative_abac.types import (
     SecurableType,
 )
-
+from uc_declarative_abac.utils import (
+    DisallowedTagValueError,
+    ExecutionBatchError,
+    OrchestratorError,
+    PrincipalValidationError,
+    UngovernedTagError,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1119,7 +1118,7 @@ def _new_mock_client() -> MagicMock:
     return client
 
 
-def _tmp_yaml_root(config: dict) -> "pathlib.Path":
+def _tmp_yaml_root(config: dict) -> pathlib.Path:
     """Write the single-file config to a fresh tmp dir and return the dir path."""
     import tempfile
 

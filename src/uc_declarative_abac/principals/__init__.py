@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from uc_declarative_abac.principals.compiler import compile_desired_groups
+from uc_declarative_abac.principals.differ import compute_group_diff
+from uc_declarative_abac.principals.executor import execute_group_diff
 from uc_declarative_abac.principals.resolver import (
+    PrincipalResolver,
     ensure_all_resolved,
     ensure_resolved,
     log_principal_resolution_failure,
-    PrincipalResolver,
 )
 from uc_declarative_abac.principals.state import (
     Group,
@@ -12,9 +15,6 @@ from uc_declarative_abac.principals.state import (
     GroupRename,
     Principal,
 )
-from uc_declarative_abac.principals.compiler import compile_desired_groups
-from uc_declarative_abac.principals.differ import compute_group_diff
-from uc_declarative_abac.principals.executor import execute_group_diff
 
 __all__ = [
     "Group",

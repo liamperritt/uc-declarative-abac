@@ -1,21 +1,20 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 
 from uc_declarative_abac.configs import ResourcesConfig
-from uc_declarative_abac.utils import UngovernedTagError
 from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.policies import (
-    compile_desired_policies,
     Policy,
+    compile_desired_policies,
 )
 from uc_declarative_abac.types import (
     PolicyType,
     SecurableType,
 )
-
+from uc_declarative_abac.utils import UngovernedTagError
 
 # Permissive superset of every tag key used across the fixtures in this file.
 # Tests that target the "ungoverned tag" validation pass a narrower set explicitly.
@@ -502,7 +501,7 @@ def test_policy_compiler_filter_constant_column_goes_to_using():
         # Dates/timestamps render as plain quoted strings — USING COLUMNS does not
         # accept typed-literal constructors (DATE '...'); the function param casts.
         (date(2026, 6, 5), "'2026-06-05'"),
-        (datetime(2026, 6, 5, 12, 30, 0), "'2026-06-05 12:30:00'"),
+        (datetime(2026, 6, 5, 12, 30, 0, tzinfo=UTC), "'2026-06-05 12:30:00'"),
     ],
 )
 def test_policy_compiler_renders_constant_column_by_type(
@@ -525,12 +524,11 @@ def test_policy_compiler_renders_constant_column_by_type(
 
 def test_policy_compiler_renders_tz_aware_datetime_dropping_timezone():
     """A timezone-aware datetime constant renders the wall-clock time, dropping tz."""
-    from datetime import timezone
 
     policy_dict = _fgac_policy(
         columns=[
             {"alias": "email", "has_tags": {"pii": "email"}},
-            {"constant": datetime(2026, 6, 5, 12, 30, 0, tzinfo=timezone.utc)},
+            {"constant": datetime(2026, 6, 5, 12, 30, 0, tzinfo=UTC)},
         ],
     )
     config = ResourcesConfig.model_validate(

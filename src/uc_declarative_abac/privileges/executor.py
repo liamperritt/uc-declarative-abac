@@ -7,17 +7,17 @@ if TYPE_CHECKING:
     from uc_declarative_abac.helpers import UnityCatalogHelper
     from uc_declarative_abac.logger import ChangeLogger
 
-from uc_declarative_abac.utils import (
-    ExecutionError,
-    parallel_for_each,
-    quote_securable,
-)
 from uc_declarative_abac.principals import ensure_resolved
 from uc_declarative_abac.privileges.state import (
     PrivilegeDiff,
     SecurablePrivilege,
 )
 from uc_declarative_abac.types import SecurableType
+from uc_declarative_abac.utils import (
+    ExecutionError,
+    parallel_for_each,
+    quote_securable,
+)
 
 
 def _build_grant_sql(priv: SecurablePrivilege) -> str:
@@ -53,8 +53,8 @@ def _bucket_by_sec_type(
     buckets: dict[SecurableType, list[SecurablePrivilege]] = defaultdict(list)
     for p in privileges:
         buckets[p.securable_type].append(p)
-    for sec_type in buckets:
-        buckets[sec_type].sort(key=_privilege_sort_key)
+    for bucket in buckets.values():
+        bucket.sort(key=_privilege_sort_key)
     return buckets
 
 

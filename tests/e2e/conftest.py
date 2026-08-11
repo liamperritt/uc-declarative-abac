@@ -3,9 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from databricks.sdk import WorkspaceClient
-
 
 PROFILE = "field-eng-east"
 WAREHOUSE_ID = "e9a9c8bab075bb70"

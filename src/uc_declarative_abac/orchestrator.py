@@ -3,63 +3,63 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
 from databricks.sdk import WorkspaceClient
 
 from uc_declarative_abac.configs import (
+    ResourcesConfig,
     consolidate_resources,
     discover_yaml_files,
     load_raw_configs,
     resolve_refs,
-    ResourcesConfig,
 )
 from uc_declarative_abac.governed_tags import (
+    GovernedTagDiff,
     compile_desired_governed_tags,
     compute_governed_tag_diff,
     execute_governed_tag_diff,
-    GovernedTagDiff,
 )
 from uc_declarative_abac.helpers import (
     UnityCatalogHelper,
     WorkspaceHelper,
 )
+from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.policies import (
+    PolicyDiff,
     compile_desired_policies,
     compute_policy_diff,
     execute_policy_diff,
-    PolicyDiff,
 )
 from uc_declarative_abac.principals import (
+    GroupDiff,
+    PrincipalResolver,
     compile_desired_groups,
     compute_group_diff,
     execute_group_diff,
-    GroupDiff,
-    PrincipalResolver,
 )
 from uc_declarative_abac.privileges import (
+    PrivilegeDiff,
     compile_desired_privileges,
     compute_privilege_diff,
     execute_privilege_diff,
-    PrivilegeDiff,
 )
 from uc_declarative_abac.securables import (
+    SecurableAttributes,
+    SecurableDiff,
     compile_desired_attributes,
     compile_desired_securables,
     compute_securable_diff,
     execute_securable_diff,
-    SecurableAttributes,
-    SecurableDiff,
 )
-from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.tags import (
+    TagDiff,
     compile_desired_tags,
     compute_tag_diff,
     execute_tag_diff,
     filter_retained_removals,
-    TagDiff,
 )
 from uc_declarative_abac.types import SecurableType
 from uc_declarative_abac.utils import (
@@ -495,7 +495,7 @@ def run(
             tags_for_privilege_matching,
             governed_tag_names,
             change_logger,
-            run_date=date.today(),
+            run_date=datetime.now(UTC).date(),
         )
         in_scope_compiled_privileges = {
             p
