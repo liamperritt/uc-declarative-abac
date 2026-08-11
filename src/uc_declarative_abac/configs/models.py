@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from abc import ABC, abstractmethod
 from datetime import date, datetime
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal
 
 from databricks.sdk.service.catalog import ColumnTypeName
 from pydantic import (
@@ -130,14 +130,14 @@ SecurableName = Annotated[str, AfterValidator(_reject_double_underscore_name)]
 
 
 # A constant column value, preserving its native YAML-parsed type.
-PolicyColumnConstantValue = Union[
-    StrictBool,
-    StrictInt,
-    StrictFloat,
-    Annotated[datetime, Strict()],
-    Annotated[date, Strict()],
-    StrictStr,
-]
+PolicyColumnConstantValue = (
+    StrictBool
+    | StrictInt
+    | StrictFloat
+    | Annotated[datetime, Strict()]
+    | Annotated[date, Strict()]
+    | StrictStr
+)
 
 
 class PolicyColumnAliasConfig(BaseModel):
@@ -163,7 +163,7 @@ class PolicyColumnConstantConfig(BaseModel):
     constant: PolicyColumnConstantValue
 
 
-PolicyColumnConfig = Union[PolicyColumnAliasConfig, PolicyColumnConstantConfig]
+PolicyColumnConfig = PolicyColumnAliasConfig | PolicyColumnConstantConfig
 
 
 class BasePolicyConfig(BaseModel, ABC):
@@ -257,7 +257,7 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
             raise ValueError("cannot specify both 'column' and 'columns' on a policy")
         column = data["column"]
         if not isinstance(column, dict):
-            raise ValueError(
+            raise ValueError(  # noqa: TRY004 — pydantic wraps ValueError, not TypeError
                 "'column' must be a mapping — either an 'alias' with "
                 "'has_tags'/'has_any_of_tags', or a 'constant'"
             )
@@ -344,7 +344,7 @@ class GrantPolicyConfig(BasePolicyConfig):
         return self
 
 
-PolicyConfig = Union[MaskPolicyConfig, FilterPolicyConfig, GrantPolicyConfig]
+PolicyConfig = MaskPolicyConfig | FilterPolicyConfig | GrantPolicyConfig
 
 
 class ParameterConfig(BaseModel):
@@ -611,11 +611,11 @@ class CatalogConfig(BaseTaggableConfig):
         return self.name
 
 
-TaggableConfig = Union[
-    CatalogConfig, SchemaConfig, TableConfig, VolumeConfig, ColumnConfig
-]
+TaggableConfig = (
+    CatalogConfig | SchemaConfig | TableConfig | VolumeConfig | ColumnConfig
+)
 
-SecurableConfig = Union[TaggableConfig, FunctionConfig]
+SecurableConfig = TaggableConfig | FunctionConfig
 
 
 class GovernedTagConfig(BaseModel):

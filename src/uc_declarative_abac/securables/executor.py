@@ -323,8 +323,8 @@ def _bucket_creates_by_depth(diff: SecurableDiff) -> dict[int, list[Securable]]:
     for info in diff.securables_to_create:
         depth, _ = _creation_sort_key(info)
         by_depth[depth].append(info)
-    for depth in by_depth:
-        by_depth[depth].sort(key=_creation_sort_key)
+    for bucket in by_depth.values():
+        bucket.sort(key=_creation_sort_key)
     return by_depth
 
 

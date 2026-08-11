@@ -159,8 +159,8 @@ def _bucket_by_sec_type(policies: set[Policy]) -> dict[SecurableType, list[Polic
     buckets: dict[SecurableType, list[Policy]] = defaultdict(list)
     for p in policies:
         buckets[p.securable_type].append(p)
-    for sec_type in buckets:
-        buckets[sec_type].sort(key=_policy_sort_key)
+    for bucket in buckets.values():
+        bucket.sort(key=_policy_sort_key)
     return buckets
 
 

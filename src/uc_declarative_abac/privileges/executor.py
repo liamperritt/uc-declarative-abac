@@ -53,8 +53,8 @@ def _bucket_by_sec_type(
     buckets: dict[SecurableType, list[SecurablePrivilege]] = defaultdict(list)
     for p in privileges:
         buckets[p.securable_type].append(p)
-    for sec_type in buckets:
-        buckets[sec_type].sort(key=_privilege_sort_key)
+    for bucket in buckets.values():
+        bucket.sort(key=_privilege_sort_key)
     return buckets
 
 

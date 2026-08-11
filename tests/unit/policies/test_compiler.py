@@ -501,7 +501,7 @@ def test_policy_compiler_filter_constant_column_goes_to_using():
         # Dates/timestamps render as plain quoted strings — USING COLUMNS does not
         # accept typed-literal constructors (DATE '...'); the function param casts.
         (date(2026, 6, 5), "'2026-06-05'"),
-        (datetime(2026, 6, 5, 12, 30, 0), "'2026-06-05 12:30:00'"),
+        (datetime(2026, 6, 5, 12, 30, 0, tzinfo=UTC), "'2026-06-05 12:30:00'"),
     ],
 )
 def test_policy_compiler_renders_constant_column_by_type(

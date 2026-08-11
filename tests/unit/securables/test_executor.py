@@ -696,7 +696,7 @@ def test_securable_executor_logs_error_and_continues_on_other_tables_after_batch
 
     def _fail_for_orders(sql):
         if "orders" in sql:
-            raise Exception("boom")
+            raise RuntimeError("boom")
 
     uc_helper.execute_sql.side_effect = _fail_for_orders
     cl = ChangeLogger()

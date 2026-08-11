@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date
+from datetime import UTC, date, datetime
 
 from uc_declarative_abac.configs import (
     GrantPolicyConfig,
@@ -63,7 +63,7 @@ def compile_desired_privileges(
     every offender.
     """
     if run_date is None:
-        run_date = date.today()
+        run_date = datetime.now(UTC).date()
     tag_index = _build_tag_index(desired_tags)
     policies = _collect_policies(config)
     active_policies = [

@@ -4,6 +4,7 @@ import logging
 import sys
 from typing import TYPE_CHECKING
 
+from databricks.sdk.errors.base import DatabricksError
 from databricks.sdk.service.iam import GrantRule
 from databricks.sdk.service.tags import TagPolicy, Value
 
@@ -126,7 +127,7 @@ def _apply_assigners(
             etag=current.etag,
             grant_rules=new_rules,
         )
-    except Exception as exc:
+    except (DatabricksError, OrchestratorError) as exc:
         change_logger.log_error(
             ExecutionError(
                 context=f"update_rule_set({gt.name})",

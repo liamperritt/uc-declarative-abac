@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -495,7 +495,7 @@ def run(
             tags_for_privilege_matching,
             governed_tag_names,
             change_logger,
-            run_date=date.today(),
+            run_date=datetime.now(UTC).date(),
         )
         in_scope_compiled_privileges = {
             p

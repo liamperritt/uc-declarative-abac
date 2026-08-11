@@ -74,12 +74,15 @@ def _make_tag(
     )
 
 
+_DEFAULT_PRIVILEGE_PRINCIPAL = Principal(
+    PrincipalType.GROUP, "data_engineers", "data_engineers"
+)
+
+
 def _make_privilege(
     securable_type: SecurableType = SecurableType.SCHEMA,
     securable_full_name: str = "my_catalog.sales",
-    principal: Principal = Principal(
-        PrincipalType.GROUP, "data_engineers", "data_engineers"
-    ),
+    principal: Principal = _DEFAULT_PRIVILEGE_PRINCIPAL,
     privilege_type: str | PrivilegeType = PrivilegeType.SELECT,
 ) -> SecurablePrivilege:
     return SecurablePrivilege(
