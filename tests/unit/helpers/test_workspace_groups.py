@@ -9,7 +9,6 @@ from uc_declarative_abac.principals import GroupRename, Principal
 from uc_declarative_abac.types import PrincipalType
 from uc_declarative_abac.utils import PrincipalValidationError
 
-
 # ---------------------------------------------------------------------------
 # Mock helpers
 # ---------------------------------------------------------------------------

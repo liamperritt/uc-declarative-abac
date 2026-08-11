@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Callable, Literal, TypeVar
+from typing import Literal, TypeVar
 
 from uc_declarative_abac.types import SecurableType
-
 
 T = TypeVar("T")
 R = TypeVar("R")

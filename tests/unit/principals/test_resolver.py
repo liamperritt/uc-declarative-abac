@@ -6,19 +6,18 @@ import pytest
 
 from uc_declarative_abac.helpers import WorkspaceHelper
 from uc_declarative_abac.logger import ChangeLogger
+from uc_declarative_abac.principals import (
+    Principal,
+    PrincipalResolver,
+    ensure_all_resolved,
+    ensure_resolved,
+    log_principal_resolution_failure,
+)
+from uc_declarative_abac.types import PrincipalType
 from uc_declarative_abac.utils import (
     OrchestratorError,
     PrincipalValidationError,
 )
-from uc_declarative_abac.principals import (
-    ensure_all_resolved,
-    ensure_resolved,
-    log_principal_resolution_failure,
-    Principal,
-    PrincipalResolver,
-)
-from uc_declarative_abac.types import PrincipalType
-
 
 # ---------------------------------------------------------------------------
 # Test helpers

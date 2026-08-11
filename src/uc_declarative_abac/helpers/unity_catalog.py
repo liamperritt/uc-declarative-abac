@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import logging
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -14,9 +15,11 @@ from databricks.sdk.service.catalog import (
     DestinationType,
     NotificationDestination,
     PolicyInfo,
-    Securable as SdkSecurable,
 )
 from databricks.sdk.service.catalog import PolicyType as SdkPolicyType
+from databricks.sdk.service.catalog import (
+    Securable as SdkSecurable,
+)
 from databricks.sdk.service.catalog import SecurableType as SdkSecurableType
 from databricks.sdk.service.sql import (
     Disposition,
@@ -25,11 +28,8 @@ from databricks.sdk.service.sql import (
     StatementState,
 )
 
-import logging
-
 from uc_declarative_abac.policies import Policy
 from uc_declarative_abac.principals import Principal
-from uc_declarative_abac.tags import SecurableTag
 from uc_declarative_abac.privileges import SecurablePrivilege
 from uc_declarative_abac.securables import (
     Column,
@@ -38,6 +38,7 @@ from uc_declarative_abac.securables import (
     SecurableAttributes,
     Table,
 )
+from uc_declarative_abac.tags import SecurableTag
 from uc_declarative_abac.types import (
     PolicyType,
     PrincipalType,
@@ -45,8 +46,8 @@ from uc_declarative_abac.types import (
     SecurableType,
 )
 from uc_declarative_abac.utils import (
-    classify_rfa_destination,
     OrchestratorError,
+    classify_rfa_destination,
 )
 
 _logger = logging.getLogger("uc_declarative_abac")
@@ -168,29 +169,29 @@ def _build_privileges_query(
     """Build a UNION ALL query across privilege system tables for the given catalogs."""
     in_clause = _build_catalog_in_clause(catalog_names)
     parts = [
-        f"SELECT 'CATALOG' AS securable_type, catalog_name AS securable_full_name, "
+        (f"SELECT 'CATALOG' AS securable_type, catalog_name AS securable_full_name, "
         f"grantee, privilege_type "
         f"FROM {system_catalog}.information_schema.catalog_privileges "
         f"WHERE catalog_name IN {in_clause} AND inherited_from = 'NONE'"
-        f"{_build_double_underscore_filter(['catalog_name'])}",
-        f"SELECT 'SCHEMA' AS securable_type, "
+        f"{_build_double_underscore_filter(['catalog_name'])}"),
+        (f"SELECT 'SCHEMA' AS securable_type, "
         f"concat(catalog_name, '.', schema_name) AS securable_full_name, "
         f"grantee, privilege_type "
         f"FROM {system_catalog}.information_schema.schema_privileges "
         f"WHERE catalog_name IN {in_clause} AND inherited_from = 'NONE' AND schema_name != 'information_schema'"
-        f"{_build_double_underscore_filter(['catalog_name', 'schema_name'])}",
-        f"SELECT 'TABLE' AS securable_type, "
+        f"{_build_double_underscore_filter(['catalog_name', 'schema_name'])}"),
+        (f"SELECT 'TABLE' AS securable_type, "
         f"concat(table_catalog, '.', table_schema, '.', table_name) AS securable_full_name, "
         f"grantee, privilege_type "
         f"FROM {system_catalog}.information_schema.table_privileges "
         f"WHERE table_catalog IN {in_clause} AND inherited_from = 'NONE' AND table_schema != 'information_schema'"
-        f"{_build_double_underscore_filter(['table_catalog', 'table_schema', 'table_name'])}",
-        f"SELECT 'VOLUME' AS securable_type, "
+        f"{_build_double_underscore_filter(['table_catalog', 'table_schema', 'table_name'])}"),
+        (f"SELECT 'VOLUME' AS securable_type, "
         f"concat(volume_catalog, '.', volume_schema, '.', volume_name) AS securable_full_name, "
         f"grantee, privilege_type "
         f"FROM {system_catalog}.information_schema.volume_privileges "
         f"WHERE volume_catalog IN {in_clause} AND inherited_from = 'NONE' AND volume_schema != 'information_schema'"
-        f"{_build_double_underscore_filter(['volume_catalog', 'volume_schema', 'volume_name'])}",
+        f"{_build_double_underscore_filter(['volume_catalog', 'volume_schema', 'volume_name'])}"),
     ]
     inner = " UNION ALL ".join(parts)
     return f"SELECT securable_type, securable_full_name, grantee, privilege_type FROM ({inner})"
@@ -302,20 +303,20 @@ def _build_securables_query(
     """
     in_clause = _build_catalog_in_clause(catalog_names)
     parts = [
-        f"SELECT 'CATALOG' AS securable_type, catalog_name AS full_name, "
+        (f"SELECT 'CATALOG' AS securable_type, catalog_name AS full_name, "
         f"catalog_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, NULL AS columns, "
         f"comment AS comment, NULL AS table_type "
         f"FROM {system_catalog}.information_schema.catalogs "
         f"WHERE catalog_name IN {in_clause}"
-        f"{_build_double_underscore_filter(['catalog_name'])}",
-        f"SELECT 'SCHEMA' AS securable_type, "
+        f"{_build_double_underscore_filter(['catalog_name'])}"),
+        (f"SELECT 'SCHEMA' AS securable_type, "
         f"concat(catalog_name, '.', schema_name) AS full_name, "
         f"schema_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, NULL AS columns, "
         f"comment AS comment, NULL AS table_type "
         f"FROM {system_catalog}.information_schema.schemata "
         f"WHERE catalog_name IN {in_clause} AND schema_name != 'information_schema'"
-        f"{_build_double_underscore_filter(['catalog_name', 'schema_name'])}",
-        f"SELECT 'TABLE' AS securable_type, "
+        f"{_build_double_underscore_filter(['catalog_name', 'schema_name'])}"),
+        (f"SELECT 'TABLE' AS securable_type, "
         f"concat(t.table_catalog, '.', t.table_schema, '.', t.table_name) AS full_name, "
         f"t.table_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, "
         f"to_json(transform(sort_array(collect_list(struct(c.ordinal_position, c.column_name))), x -> x.column_name)) AS columns, "
@@ -327,15 +328,15 @@ def _build_securables_query(
         f"AND t.table_name = c.table_name "
         f"WHERE t.table_catalog IN {in_clause} AND t.table_schema != 'information_schema'"
         f"{_build_double_underscore_filter(['t.table_catalog', 't.table_schema', 't.table_name'])} "
-        f"GROUP BY t.table_catalog, t.table_schema, t.table_name, t.table_owner, t.comment, t.table_type",
-        f"SELECT 'VOLUME' AS securable_type, "
+        f"GROUP BY t.table_catalog, t.table_schema, t.table_name, t.table_owner, t.comment, t.table_type"),
+        (f"SELECT 'VOLUME' AS securable_type, "
         f"concat(volume_catalog, '.', volume_schema, '.', volume_name) AS full_name, "
         f"volume_owner AS owner, NULL AS parameters, NULL AS routine_definition, NULL AS routine_comment, NULL AS columns, "
         f"comment AS comment, NULL AS table_type "
         f"FROM {system_catalog}.information_schema.volumes "
         f"WHERE volume_catalog IN {in_clause} AND volume_schema != 'information_schema'"
-        f"{_build_double_underscore_filter(['volume_catalog', 'volume_schema', 'volume_name'])}",
-        f"SELECT 'FUNCTION' AS securable_type, "
+        f"{_build_double_underscore_filter(['volume_catalog', 'volume_schema', 'volume_name'])}"),
+        (f"SELECT 'FUNCTION' AS securable_type, "
         f"concat(r.specific_catalog, '.', r.specific_schema, '.', r.specific_name) AS full_name, "
         f"r.routine_owner AS owner, "
         f"to_json(transform(sort_array(collect_list(struct(p.ordinal_position, p.parameter_name, p.data_type))), x -> struct(x.parameter_name, x.data_type))) AS parameters, "
@@ -349,7 +350,7 @@ def _build_securables_query(
         f"AND r.specific_name = p.specific_name "
         f"WHERE r.specific_catalog IN {in_clause} AND r.routine_type = 'FUNCTION' AND r.specific_schema != 'information_schema'"
         f"{_build_double_underscore_filter(['r.specific_catalog', 'r.specific_schema', 'r.specific_name'])} "
-        f"GROUP BY r.specific_catalog, r.specific_schema, r.specific_name, r.routine_owner, r.routine_definition, r.comment",
+        f"GROUP BY r.specific_catalog, r.specific_schema, r.specific_name, r.routine_owner, r.routine_definition, r.comment"),
     ]
     return " UNION ALL ".join(parts)
 

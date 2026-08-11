@@ -7,14 +7,10 @@ from uc_declarative_abac.configs import (
     GrantPolicyConfig,
     ResourcesConfig,
 )
-from uc_declarative_abac.utils import (
-    ExecutionError,
-    UngovernedTagError,
-)
 from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.principals import Principal
-from uc_declarative_abac.tags import SecurableTag
 from uc_declarative_abac.privileges.state import SecurablePrivilege
+from uc_declarative_abac.tags import SecurableTag
 from uc_declarative_abac.types import (
     ABSTRACT_PRIVILEGE_MAP,
     SECURABLE_TYPE_PRIVILEGE_MAP,
@@ -22,6 +18,10 @@ from uc_declarative_abac.types import (
     PrincipalType,
     PrivilegeType,
     SecurableType,
+)
+from uc_declarative_abac.utils import (
+    ExecutionError,
+    UngovernedTagError,
 )
 
 _TAG_VALUE_WILDCARD = "*"
@@ -282,11 +282,7 @@ def _policy_tags_match(
     Combining both fields is AND-of-groups."""
     if policy.has_tags and not _tags_match(policy.has_tags, actual_tags):
         return False
-    if policy.has_any_of_tags and not _tags_match_any(
-        policy.has_any_of_tags, actual_tags
-    ):
-        return False
-    return True
+    return not (policy.has_any_of_tags and not _tags_match_any(policy.has_any_of_tags, actual_tags))
 
 
 def _tags_match(

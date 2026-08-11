@@ -3,12 +3,11 @@ from __future__ import annotations
 from datetime import date
 
 from uc_declarative_abac.configs import ResourcesConfig
-from uc_declarative_abac.utils import UngovernedTagError
 from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.principals import Principal
 from uc_declarative_abac.privileges import (
-    compile_desired_privileges,
     SecurablePrivilege,
+    compile_desired_privileges,
 )
 from uc_declarative_abac.tags import SecurableTag
 from uc_declarative_abac.types import (
@@ -16,7 +15,7 @@ from uc_declarative_abac.types import (
     PrivilegeType,
     SecurableType,
 )
-
+from uc_declarative_abac.utils import UngovernedTagError
 
 # Permissive superset of every tag key used across the fixtures in this file.
 # Tests that target the "ungoverned tag" validation pass a narrower set explicitly.

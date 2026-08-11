@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import pytest
-
 import threading
 import time
+
+import pytest
 
 from uc_declarative_abac.utils import (
     catalog_of,
@@ -14,7 +14,6 @@ from uc_declarative_abac.utils import (
     parse_namespace_filter,
     validate_rfa_destinations,
 )
-
 
 # ---------------------------------------------------------------------------
 # is_system_governed_tag

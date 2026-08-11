@@ -11,7 +11,6 @@ from uc_declarative_abac.utils import (
     DuplicateResourceError,
 )
 
-
 # ---------------------------------------------------------------------------
 # discover_yaml_files
 # ---------------------------------------------------------------------------
@@ -122,7 +121,7 @@ def test_discovery_merges_resources_across_files(tmp_yaml_dir):
     )
 
     paths = discover_yaml_files(root)
-    definitions, resources = load_raw_configs(paths)
+    _definitions, resources = load_raw_configs(paths)
 
     assert "catalogs" in resources
     assert "operations_prod" in resources["catalogs"]
@@ -176,7 +175,7 @@ def test_discovery_ignores_files_with_no_definitions_or_resources(tmp_yaml_dir):
     )
 
     paths = discover_yaml_files(root)
-    definitions, resources = load_raw_configs(paths)
+    definitions, _resources = load_raw_configs(paths)
 
     assert "schemas" in definitions
     assert "ops|sales" in definitions["schemas"]

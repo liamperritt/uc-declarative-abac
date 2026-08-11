@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from uc_declarative_abac.utils import OrchestratorError
-from typing import Iterable
+from collections.abc import Iterable
 
+from uc_declarative_abac.utils import OrchestratorError
 
 _DEFAULT_SCHEMA_NAME = "default"
 _DERIVED_FUNCTION_NAME_PREFIX = "abac_"

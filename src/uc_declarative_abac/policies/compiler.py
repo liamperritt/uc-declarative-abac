@@ -9,10 +9,6 @@ from uc_declarative_abac.configs import (
     PolicyColumnConstantConfig,
     ResourcesConfig,
 )
-from uc_declarative_abac.utils import (
-    ExecutionError,
-    UngovernedTagError,
-)
 from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.policies.state import Policy
 from uc_declarative_abac.principals import Principal
@@ -21,7 +17,10 @@ from uc_declarative_abac.types import (
     PrincipalType,
     SecurableType,
 )
-
+from uc_declarative_abac.utils import (
+    ExecutionError,
+    UngovernedTagError,
+)
 
 _WILDCARD = "*"
 
@@ -200,7 +199,7 @@ def _build_match_columns(
     )
 
 
-def _render_sql_constant(value: bool | int | float | str | date | datetime) -> str:
+def _render_sql_constant(value: bool | float | str | date | datetime) -> str:
     """Render a constant column value as a SQL literal for the USING COLUMNS clause.
 
     That clause only accepts plain literals (strings, numbers, booleans) and column

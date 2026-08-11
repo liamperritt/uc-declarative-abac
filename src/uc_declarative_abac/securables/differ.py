@@ -20,10 +20,10 @@ from uc_declarative_abac.securables.state import (
 from uc_declarative_abac.types import SecurableType
 from uc_declarative_abac.utils import (
     ExecutionError,
-    in_namespace_scope,
     NonexistentSecurableError,
     OrchestratorError,
     PrincipalValidationError,
+    in_namespace_scope,
 )
 
 _GOVERNED_ATTRIBUTES = ["owner", "comment", "rfa_destinations"]
@@ -322,9 +322,9 @@ def _partition_by_creation_scope(
     creatable: list[Securable] = []
     blocked: list[Securable] = []
     for sec in to_create:
-        if isinstance(sec, Function):
-            creatable.append(sec)
-        elif in_namespace_scope(sec.full_name, in_scope_namespaces):
+        if isinstance(sec, Function) or in_namespace_scope(
+            sec.full_name, in_scope_namespaces
+        ):
             creatable.append(sec)
         else:
             blocked.append(sec)

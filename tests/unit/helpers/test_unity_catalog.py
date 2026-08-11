@@ -6,11 +6,9 @@ import pytest
 import sqlglot
 from databricks.sdk.service.sql import Disposition, StatementState
 
-from uc_declarative_abac.utils import OrchestratorError
 from uc_declarative_abac.helpers import UnityCatalogHelper
 from uc_declarative_abac.helpers.unity_catalog import _POLL_INTERVAL_SECONDS
 from uc_declarative_abac.policies import Policy
-from uc_declarative_abac.tags import SecurableTag
 from uc_declarative_abac.principals import Principal
 from uc_declarative_abac.privileges import SecurablePrivilege
 from uc_declarative_abac.securables import (
@@ -18,12 +16,14 @@ from uc_declarative_abac.securables import (
     Securable,
     SecurableAttributes,
 )
+from uc_declarative_abac.tags import SecurableTag
 from uc_declarative_abac.types import (
     PolicyType,
     PrincipalType,
     PrivilegeType,
     SecurableType,
 )
+from uc_declarative_abac.utils import OrchestratorError
 
 WAREHOUSE_ID = "test-warehouse-id"
 
@@ -113,9 +113,9 @@ def test_uc_helper_parses_multiple_tags_from_single_securable_row(mock_fetch):
         [
             "TABLE",
             "my_catalog.sales.orders",
-            '[{"tag_name":"pii","tag_value":"true"},'
+            ('[{"tag_name":"pii","tag_value":"true"},'
             '{"tag_name":"classification","tag_value":"confidential"},'
-            '{"tag_name":"team","tag_value":"sales"}]',
+            '{"tag_name":"team","tag_value":"sales"}]'),
         ],
     ]
     mock_fetch.return_value = rows

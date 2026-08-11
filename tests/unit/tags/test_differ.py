@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from uc_declarative_abac.tags import (
-    compute_tag_diff,
-    filter_retained_removals,
     SecurableTag,
     TagDiff,
+    compute_tag_diff,
+    filter_retained_removals,
 )
 from uc_declarative_abac.types import SecurableType
-
 
 # ---------------------------------------------------------------------------
 # Tags to add, update and remove

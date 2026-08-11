@@ -7,11 +7,9 @@ if TYPE_CHECKING:
     from uc_declarative_abac.helpers import UnityCatalogHelper
     from uc_declarative_abac.logger import ChangeLogger
 
-from uc_declarative_abac.utils import (
-    ExecutionError,
-    OrchestratorError,
-    parallel_for_each,
-    quote_securable,
+from uc_declarative_abac.principals import (
+    Principal,
+    ensure_resolved,
 )
 from uc_declarative_abac.securables.state import (
     AttributeUpdate,
@@ -21,12 +19,13 @@ from uc_declarative_abac.securables.state import (
     SecurableDiff,
     Table,
 )
-from uc_declarative_abac.principals import (
-    ensure_resolved,
-    Principal,
-)
 from uc_declarative_abac.types import SecurableType
-
+from uc_declarative_abac.utils import (
+    ExecutionError,
+    OrchestratorError,
+    parallel_for_each,
+    quote_securable,
+)
 
 # UC hierarchy depth: catalogs at the top, then schemas, then leaf types
 # (tables/volumes/functions), then columns. This topology drives execution

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+import yaml
+
 from uc_declarative_abac.utils import (
     DuplicateKeyError,
     DuplicateResourceError,
 )
-from pathlib import Path
-
-import yaml
 
 
 def discover_yaml_files(root: Path) -> list[Path]:

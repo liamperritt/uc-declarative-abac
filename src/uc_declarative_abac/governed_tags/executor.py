@@ -15,17 +15,17 @@ from uc_declarative_abac.governed_tags.state import (
     GovernedTag,
     GovernedTagDiff,
 )
+from uc_declarative_abac.principals import (
+    Principal,
+    ensure_resolved,
+)
+from uc_declarative_abac.types import PrincipalType
 from uc_declarative_abac.utils import (
     ExecutionError,
     InteractiveConfirmationRequiredError,
     OrchestratorError,
     parallel_for_each,
 )
-from uc_declarative_abac.principals import (
-    ensure_resolved,
-    Principal,
-)
-from uc_declarative_abac.types import PrincipalType
 
 _logger = logging.getLogger("uc_declarative_abac")
 

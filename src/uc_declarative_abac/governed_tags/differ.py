@@ -10,15 +10,15 @@ from uc_declarative_abac.governed_tags.state import (
     GovernedTag,
     GovernedTagDiff,
 )
+from uc_declarative_abac.principals import (
+    Principal,
+    log_principal_resolution_failure,
+)
 from uc_declarative_abac.utils import (
     ExecutionError,
-    is_system_governed_tag,
     OrchestratorError,
     PrincipalValidationError,
-)
-from uc_declarative_abac.principals import (
-    log_principal_resolution_failure,
-    Principal,
+    is_system_governed_tag,
 )
 
 

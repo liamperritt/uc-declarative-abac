@@ -3,7 +3,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from uc_declarative_abac.logger import ChangeLogger
-from uc_declarative_abac.utils import NonexistentSecurableError
 from uc_declarative_abac.principals import (
     Principal,
     PrincipalResolver,
@@ -11,17 +10,17 @@ from uc_declarative_abac.principals import (
 from uc_declarative_abac.securables import (
     AttributeUpdate,
     Column,
-    compute_securable_diff,
     Function,
     Securable,
     SecurableAttributes,
     Table,
+    compute_securable_diff,
 )
 from uc_declarative_abac.types import (
     PrincipalType,
     SecurableType,
 )
-
+from uc_declarative_abac.utils import NonexistentSecurableError
 
 # Catalogs referenced across the test fixtures. Tests opting into creation pass
 # this set as ``creation_in_scope_namespaces`` — equivalent to "create everything"

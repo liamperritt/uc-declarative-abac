@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import copy
+from typing import Any, Literal
+
 from uc_declarative_abac.utils import (
     ResolutionError,
     UnreferencedDefinitionError,
 )
-import copy
-from typing import Any, Literal
-
 
 OverrideStrategy = Literal["merge", "replace"]
 

@@ -4,9 +4,9 @@ from unittest.mock import MagicMock
 
 from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.policies import (
-    compute_policy_diff,
     Policy,
     PolicyDiff,
+    compute_policy_diff,
 )
 from uc_declarative_abac.principals import (
     Principal,
@@ -69,19 +69,19 @@ def _resolved(
 
 
 def _make_policy(**overrides) -> Policy:
-    base = dict(
-        securable_type=SecurableType.TABLE,
-        securable_full_name="cat.s.t",
-        name="p1",
-        policy_type=PolicyType.MASK,
-        function_name="cat.default.fn",
-        to_principals=(_resolved("analysts"),),
-        except_principals=(),
-        when_condition=None,
-        match_columns=(("c", "has_tag_value('pii', 'email')"),),
-        on_column="c",
-        using_columns=(),
-    )
+    base = {
+        "securable_type": SecurableType.TABLE,
+        "securable_full_name": "cat.s.t",
+        "name": "p1",
+        "policy_type": PolicyType.MASK,
+        "function_name": "cat.default.fn",
+        "to_principals": (_resolved("analysts"),),
+        "except_principals": (),
+        "when_condition": None,
+        "match_columns": (("c", "has_tag_value('pii', 'email')"),),
+        "on_column": "c",
+        "using_columns": (),
+    }
     base.update(overrides)
     return Policy(**base)
 

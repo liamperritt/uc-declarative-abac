@@ -8,7 +8,6 @@ from uc_declarative_abac.utils import (
     UnreferencedDefinitionError,
 )
 
-
 # ---------------------------------------------------------------------------
 # Basic ref resolution
 # ---------------------------------------------------------------------------

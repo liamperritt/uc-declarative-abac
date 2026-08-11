@@ -4,11 +4,11 @@ from unittest.mock import MagicMock
 
 from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.principals import (
-    compute_group_diff,
     Group,
     GroupRename,
     Principal,
     PrincipalResolver,
+    compute_group_diff,
 )
 from uc_declarative_abac.types import PrincipalType
 from uc_declarative_abac.utils import PrincipalValidationError

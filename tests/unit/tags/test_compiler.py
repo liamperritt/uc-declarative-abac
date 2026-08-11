@@ -4,8 +4,8 @@ from uc_declarative_abac.configs import ResourcesConfig
 from uc_declarative_abac.governed_tags import GovernedTag
 from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.tags import (
-    compile_desired_tags,
     SecurableTag,
+    compile_desired_tags,
 )
 from uc_declarative_abac.types import SecurableType
 from uc_declarative_abac.utils import DisallowedTagValueError

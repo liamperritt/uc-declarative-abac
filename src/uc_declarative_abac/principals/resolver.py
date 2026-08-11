@@ -1,18 +1,19 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Iterable
+from collections.abc import Iterable
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from uc_declarative_abac.helpers import WorkspaceHelper
     from uc_declarative_abac.logger import ChangeLogger
 
 from uc_declarative_abac.principals.state import Principal
+from uc_declarative_abac.types import PrincipalType
 from uc_declarative_abac.utils import (
     ExecutionError,
     OrchestratorError,
     PrincipalValidationError,
 )
-from uc_declarative_abac.types import PrincipalType
 
 
 class PrincipalResolver:
@@ -58,7 +59,7 @@ class PrincipalResolver:
 
 
 def log_principal_resolution_failure(
-    change_logger: "ChangeLogger",
+    change_logger: ChangeLogger,
     context: str,
     principal: Principal,
     exc: PrincipalValidationError,

@@ -3,11 +3,10 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from uc_declarative_abac.logger import ChangeLogger
-from uc_declarative_abac.utils import ExecutionError
 from uc_declarative_abac.policies import (
-    execute_policy_diff,
     Policy,
     PolicyDiff,
+    execute_policy_diff,
 )
 from uc_declarative_abac.principals import Principal
 from uc_declarative_abac.types import (
@@ -15,6 +14,7 @@ from uc_declarative_abac.types import (
     PrincipalType,
     SecurableType,
 )
+from uc_declarative_abac.utils import ExecutionError
 
 
 def _resolved(
@@ -41,19 +41,19 @@ def _assert_sql_excludes(sql: str, *fragments: str):
 
 
 def _make_policy(**overrides) -> Policy:
-    base = dict(
-        securable_type=SecurableType.TABLE,
-        securable_full_name="cat.s.t",
-        name="mask_pii",
-        policy_type=PolicyType.MASK,
-        function_name="cat.default.mask_fn",
-        to_principals=(_resolved("analysts"),),
-        except_principals=(),
-        when_condition=None,
-        match_columns=(("c", "has_column_tag_value('pii', 'email')"),),
-        on_column="c",
-        using_columns=(),
-    )
+    base = {
+        "securable_type": SecurableType.TABLE,
+        "securable_full_name": "cat.s.t",
+        "name": "mask_pii",
+        "policy_type": PolicyType.MASK,
+        "function_name": "cat.default.mask_fn",
+        "to_principals": (_resolved("analysts"),),
+        "except_principals": (),
+        "when_condition": None,
+        "match_columns": (("c", "has_column_tag_value('pii', 'email')"),),
+        "on_column": "c",
+        "using_columns": (),
+    }
     base.update(overrides)
     return Policy(**base)
 
@@ -525,6 +525,7 @@ def test_policy_executor_raises_interactive_error_on_eof_when_not_forced(monkeyp
     """A non-interactive stream (input raises EOFError) without force raises
     InteractiveConfirmationRequiredError directing the operator to set --force."""
     import pytest
+
     from uc_declarative_abac.utils import InteractiveConfirmationRequiredError
 
     def _raise_eof(*_):

@@ -9,21 +9,21 @@ if TYPE_CHECKING:
     from uc_declarative_abac.helpers import UnityCatalogHelper
     from uc_declarative_abac.logger import ChangeLogger
 
+from uc_declarative_abac.policies.state import (
+    Policy,
+    PolicyDiff,
+)
+from uc_declarative_abac.principals import (
+    Principal,
+    ensure_all_resolved,
+)
+from uc_declarative_abac.types import PolicyType, SecurableType
 from uc_declarative_abac.utils import (
     ExecutionError,
     InteractiveConfirmationRequiredError,
     parallel_for_each,
     quote_securable,
 )
-from uc_declarative_abac.policies.state import (
-    Policy,
-    PolicyDiff,
-)
-from uc_declarative_abac.principals import (
-    ensure_all_resolved,
-    Principal,
-)
-from uc_declarative_abac.types import PolicyType, SecurableType
 
 _logger = logging.getLogger("uc_declarative_abac")
 

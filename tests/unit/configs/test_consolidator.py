@@ -1,9 +1,9 @@
 import pytest
 
 from uc_declarative_abac.configs import (
+    ResourcesConfig,
     consolidate_resources,
     resolve_refs,
-    ResourcesConfig,
 )
 from uc_declarative_abac.utils import (
     DuplicateResourceError,

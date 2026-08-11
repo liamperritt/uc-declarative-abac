@@ -8,7 +8,6 @@ import pytest
 import yaml
 from databricks.sdk.service.sql import StatementState
 
-
 # ---------------------------------------------------------------------------
 # WorkspaceClient mock
 # ---------------------------------------------------------------------------

@@ -5,7 +5,6 @@ import pytest
 from uc_declarative_abac.principals import Principal
 from uc_declarative_abac.types import PrincipalType
 
-
 # ---------------------------------------------------------------------------
 # Principal invariants
 # ---------------------------------------------------------------------------

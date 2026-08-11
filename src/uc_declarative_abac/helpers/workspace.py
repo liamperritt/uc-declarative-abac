@@ -2,19 +2,14 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
-from typing import Iterable
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.iam import GrantRule, RuleSetResponse, RuleSetUpdateRequest
 from databricks.sdk.service.tags import TagPolicy
 
 from uc_declarative_abac.governed_tags import GovernedTag
-from uc_declarative_abac.utils import (
-    DuplicateServicePrincipalError,
-    OrchestratorError,
-    PrincipalValidationError,
-)
 from uc_declarative_abac.principals import (
     Group,
     GroupRename,
@@ -22,6 +17,11 @@ from uc_declarative_abac.principals import (
     ensure_resolved,
 )
 from uc_declarative_abac.types import PrincipalType
+from uc_declarative_abac.utils import (
+    DuplicateServicePrincipalError,
+    OrchestratorError,
+    PrincipalValidationError,
+)
 
 _logger = logging.getLogger("uc_declarative_abac")
 

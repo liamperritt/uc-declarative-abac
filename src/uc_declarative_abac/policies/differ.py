@@ -10,13 +10,13 @@ from uc_declarative_abac.policies.state import (
     Policy,
     PolicyDiff,
 )
-from uc_declarative_abac.utils import (
-    in_namespace_scope,
-    PrincipalValidationError,
-)
 from uc_declarative_abac.principals import (
-    log_principal_resolution_failure,
     Principal,
+    log_principal_resolution_failure,
+)
+from uc_declarative_abac.utils import (
+    PrincipalValidationError,
+    in_namespace_scope,
 )
 
 

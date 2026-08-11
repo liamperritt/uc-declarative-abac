@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
-from typing import Annotated, Union
 from datetime import date, datetime
-from typing import Literal
+from typing import Annotated, Literal, Union
 
 from databricks.sdk.service.catalog import ColumnTypeName
 from pydantic import (
@@ -35,7 +34,6 @@ from uc_declarative_abac.utils import (
     is_system_governed_tag,
     validate_rfa_destinations,
 )
-
 
 _VALID_DATA_TYPE_PREFIXES = frozenset(ct.value for ct in ColumnTypeName)
 _DATA_TYPE_PREFIX_PATTERN = re.compile(r"^([A-Z_][A-Z0-9_]*)")
@@ -153,7 +151,7 @@ class PolicyColumnAliasConfig(BaseModel):
         return _coerce_null_tag_values(v)
 
     @model_validator(mode="after")
-    def _require_a_tag_match(self) -> "PolicyColumnAliasConfig":
+    def _require_a_tag_match(self) -> PolicyColumnAliasConfig:
         if not self.has_tags and not self.has_any_of_tags:
             raise ValueError(
                 "policy column must specify 'has_tags' or 'has_any_of_tags'"
@@ -223,7 +221,7 @@ class BasePolicyConfig(BaseModel, ABC):
 class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
     """Base model for Fine-Grained Access Control (FGAC) policy configs. Not intended to be instantiated directly."""
 
-    type: Union[Literal[PolicyType.MASK], Literal[PolicyType.FILTER]]
+    type: Literal[PolicyType.MASK, PolicyType.FILTER]
     function: str
     to: list[str] = Field(default_factory=lambda: list(_DEFAULT_FGAC_TO))
     exceptions: list[str] | None = Field(default=None, alias="except")
@@ -240,7 +238,7 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
         return list(_DEFAULT_FGAC_TO) if v is None else v
 
     @model_validator(mode="after")
-    def _qualify_function(self) -> "BaseFgacPolicyConfig":
+    def _qualify_function(self) -> BaseFgacPolicyConfig:
         """Complete a partially-qualified ``function`` from the policy's own
         catalog/schema so a policy definition can be reused across environment
         catalogs without a ref override."""
@@ -282,13 +280,13 @@ class MaskPolicyConfig(BaseFgacPolicyConfig):
     type: Literal[PolicyType.MASK] = PolicyType.MASK
 
     @model_validator(mode="after")
-    def _require_at_least_one_column(self) -> "MaskPolicyConfig":
+    def _require_at_least_one_column(self) -> MaskPolicyConfig:
         if not self.columns:
             raise ValueError("Mask policies must define at least one column")
         return self
 
     @model_validator(mode="after")
-    def _require_first_column_is_alias(self) -> "MaskPolicyConfig":
+    def _require_first_column_is_alias(self) -> MaskPolicyConfig:
         if self.columns and not isinstance(self.columns[0], PolicyColumnAliasConfig):
             raise ValueError(
                 "The first column of a mask policy must be a column alias, "
@@ -322,7 +320,7 @@ class GrantPolicyConfig(BasePolicyConfig):
     expiry_date: date | None = None
 
     @model_validator(mode="after")
-    def _validate_privileges_match_securable_type(self) -> "GrantPolicyConfig":
+    def _validate_privileges_match_securable_type(self) -> GrantPolicyConfig:
         """When 'for' is set, every privilege must be applicable to that
         securable type. With 'for' omitted, all privileges are allowed."""
         if self.for_securable_type is None:
@@ -632,7 +630,7 @@ class GovernedTagConfig(BaseModel):
     assigners: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _reject_allowed_values_on_system_tag(self) -> "GovernedTagConfig":
+    def _reject_allowed_values_on_system_tag(self) -> GovernedTagConfig:
         """A system-defined governed tag (see ``is_system_governed_tag``) has its
         allowed values owned by Databricks; they must not be pinned in config."""
         if is_system_governed_tag(self.name) and self.allowed_values:

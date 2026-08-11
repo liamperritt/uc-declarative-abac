@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from uc_declarative_abac.configs import ResourcesConfig
 from uc_declarative_abac.principals import (
-    compile_desired_groups,
     Principal,
+    compile_desired_groups,
 )
 from uc_declarative_abac.types import PrincipalType
 
