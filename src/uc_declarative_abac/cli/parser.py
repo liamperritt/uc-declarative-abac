@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from uc_declarative_abac.cli import __version__
+from uc_declarative_abac.cli.presentation import CliArgumentParser, HelpExample
 
 _SUBCOMMANDS = frozenset({"validate", "deploy"})
 
@@ -21,7 +22,7 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         "--system-catalog",
         type=str,
         default=argparse.SUPPRESS,
-        help="Catalog containing Unity Catalog system tables (default: system).",
+        help="Catalog containing Unity Catalog system tables [default: system].",
     )
     parser.add_argument(
         "--use-workspace-scim",
@@ -80,6 +81,7 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--manage-tags-for-namespaces",
         type=str,
+        metavar="NAMESPACES",
         default=argparse.SUPPRESS,
         help=(
             "Comma-separated catalog names or qualified schema names (<catalog>.<schema>) to "
@@ -90,6 +92,7 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--manage-privileges-for-namespaces",
         type=str,
+        metavar="NAMESPACES",
         default=argparse.SUPPRESS,
         help=(
             "Comma-separated catalog names or qualified schema names (<catalog>.<schema>) to "
@@ -100,6 +103,7 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--manage-taggables-for-namespaces",
         type=str,
+        metavar="NAMESPACES",
         default=argparse.SUPPRESS,
         help=(
             "Comma-separated catalog names or qualified schema names (<catalog>.<schema>) to "
@@ -111,6 +115,7 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--create-taggables-for-namespaces",
         type=str,
+        metavar="NAMESPACES",
         default=argparse.SUPPRESS,
         help=(
             "Comma-separated catalog names or qualified schema names (<catalog>.<schema>) to "
@@ -122,6 +127,7 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--delete-policies-for-namespaces",
         type=str,
+        metavar="NAMESPACES",
         default=argparse.SUPPRESS,
         help=(
             "Comma-separated catalog names or qualified schema names (<catalog>.<schema>) to "
@@ -167,6 +173,7 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--ignore-unresolvable-principals",
         type=str,
+        metavar="IDENTIFIERS",
         default=argparse.SUPPRESS,
         help=(
             "Comma-separated list of actual-state principal identifiers — usernames for users, "
@@ -240,8 +247,8 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         default=argparse.SUPPRESS,
         help=(
             "How sibling fields on a $ref entry combine with the referenced definition. "
-            "'merge' (default) recursively deep-merges maps and lists; 'replace' shallowly "
-            "replaces top-level keys (legacy behaviour)."
+            "'merge' recursively deep-merges maps and lists; 'replace' shallowly "
+            "replaces top-level keys (legacy behaviour) [default: merge]."
         ),
     )
     parser.add_argument(
@@ -249,8 +256,8 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=argparse.SUPPRESS,
         help=(
-            "Max worker threads used per (securable_type, change_type) execution batch. "
-            "Default 8. Set to 1 to disable parallelism and force sequential execution."
+            "Worker threads per execution batch [default: 8]. Set to 1 to disable "
+            "parallelism and force sequential execution."
         ),
     )
 
@@ -284,9 +291,22 @@ def _add_global_arguments(parser: argparse.ArgumentParser) -> None:
 
 def _build_modern_parser() -> argparse.ArgumentParser:
     common = _build_common_parser()
-    parser = argparse.ArgumentParser(
+    parser = CliArgumentParser(
+        prog="uc-abac",
         description="UC Declarative ABAC — declarative ABAC governance for Unity Catalog",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        product_name="UC Declarative ABAC",
+        version=__version__,
+        examples=(
+            HelpExample(
+                "uc-abac validate --config-dir ./configs",
+                "Validate local YAML configuration.",
+            ),
+            HelpExample(
+                "uc-abac deploy --config-dir ./configs --warehouse-id <id> --dry-run",
+                "Preview changes before deploying to Unity Catalog.",
+            ),
+        ),
     )
     parser.add_argument(
         "--version",
@@ -302,6 +322,17 @@ def _build_modern_parser() -> argparse.ArgumentParser:
         parents=[common],
         help="Parse, resolve, and validate YAML configs without contacting Databricks.",
         description="Validate YAML configs locally (no warehouse or credentials required).",
+        options_title="FLAGS:",
+        examples=(
+            HelpExample(
+                "uc-abac validate --config-dir ./configs",
+                "Validate the default local configuration.",
+            ),
+            HelpExample(
+                "uc-abac validate --config-dir ./configs --profile staging",
+                "Validate using settings for the staging profile.",
+            ),
+        ),
     )
     validate_parser.add_argument(
         "--config-dir",
@@ -314,8 +345,19 @@ def _build_modern_parser() -> argparse.ArgumentParser:
     deploy_parser = subparsers.add_parser(
         "deploy",
         parents=[common],
-        help="Deploy governance changes to Unity Catalog (add --dry-run to preview).",
-        description="Execute planned changes against Unity Catalog.",
+        help="Deploy governance changes (use --dry-run to preview).",
+        description="Deploy declarative governance to Unity Catalog.",
+        options_title="FLAGS:",
+        examples=(
+            HelpExample(
+                "uc-abac deploy --config-dir ./configs --warehouse-id <id> --dry-run",
+                "Preview the changes without applying them.",
+            ),
+            HelpExample(
+                "uc-abac deploy --config-dir ./configs --warehouse-id <id>",
+                "Apply the configured governance changes.",
+            ),
+        ),
     )
     deploy_parser.add_argument(
         "--config-dir",
@@ -341,7 +383,8 @@ def _build_modern_parser() -> argparse.ArgumentParser:
 
 
 def _build_legacy_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = CliArgumentParser(
+        prog="uc-abac",
         description="UC Declarative ABAC — declarative ABAC governance for Unity Catalog",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -407,8 +450,10 @@ def _is_legacy_invocation(argv: list[str]) -> bool:
         if token.startswith(tuple(f"{flag}=" for flag in _VALUE_TAKING_GLOBAL_FLAGS)):
             index += 1
             continue
-        # First non-global token decides: subcommand => modern, anything else => legacy.
-        return token not in _SUBCOMMANDS
+        # Positional tokens use the modern command parser so unknown commands get
+        # the same actionable diagnostic as misspelled known commands. Legacy
+        # invocations are distinguished by their leading flat option flags.
+        return token.startswith("-") and token not in _SUBCOMMANDS
     return False
 
 
