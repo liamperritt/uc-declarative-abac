@@ -12,6 +12,7 @@ from databricks.sdk.errors.base import DatabricksError
 from pydantic import ValidationError
 
 from uc_declarative_abac.cli.parser import parse_cli_args
+from uc_declarative_abac.cli.presentation import format_error, format_status
 from uc_declarative_abac.cli.settings import RunSettings, resolve_settings
 from uc_declarative_abac.orchestrator import load_config, run
 from uc_declarative_abac.utils import ExecutionBatchError, OrchestratorError
@@ -170,7 +171,7 @@ def _run_kwargs(
 def cmd_validate(settings: RunSettings) -> int:
     config_dir = _require_config_dir(settings)
     load_config(config_dir, settings.ref_override_strategy)
-    _logger.info("Config validation successful.")
+    _logger.info(format_status("success", "Config validation successful."))
     return EXIT_SUCCESS
 
 
@@ -186,8 +187,19 @@ def cmd_deploy(
     return EXIT_SUCCESS
 
 
+def _error_hint(message: str) -> str | None:
+    if "--warehouse-id is required" in message:
+        return (
+            "Pass `--warehouse-id <id>`, set `UC_ABAC_WAREHOUSE_ID`, "
+            "or add `warehouse_id` to the settings file."
+        )
+    return None
+
+
 def _print_error(message: str, *, verbose: bool) -> None:
-    print(message, file=sys.stderr)
+    sys.stderr.write(
+        format_error(message, hint=_error_hint(message), stream=sys.stderr)
+    )
     if verbose:
         traceback.print_exc()
 
