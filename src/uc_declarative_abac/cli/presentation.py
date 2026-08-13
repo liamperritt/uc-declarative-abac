@@ -10,7 +10,29 @@ from dataclasses import dataclass
 
 _RESET = "\x1b[0m"
 _BOLD = "\x1b[1m"
+_RED = "\x1b[31m"
+_GREEN = "\x1b[32m"
+_YELLOW = "\x1b[33m"
 _CYAN = "\x1b[36m"
+
+_UNICODE_SYMBOLS = {
+    "success": "✔",
+    "warning": "⚠",
+    "error": "✖",
+    "info": "ℹ",
+}
+_ASCII_SYMBOLS = {
+    "success": "[OK]",
+    "warning": "[WARN]",
+    "error": "[ERROR]",
+    "info": "[INFO]",
+}
+_ANSI_COLORS = {
+    "success": _GREEN,
+    "warning": _YELLOW,
+    "error": _RED,
+    "info": _CYAN,
+}
 
 
 def _is_tty(stream) -> bool:
@@ -39,11 +61,37 @@ def _style_help(text: str) -> str:
             line = f"{_BOLD}{line}{_RESET}"
         elif line.startswith("UC Declarative ABAC"):
             line = f"{_BOLD}{_CYAN}{line}{_RESET}"
-        elif line.startswith(("  validate ", "  deploy ")):
-            command, rest = line[2:].split(maxsplit=1)
-            line = f"  {_CYAN}{command}{_RESET}  {rest}"
+        elif line.startswith("  ") and not line.startswith("    "):
+            body = line[2:]
+            command, separator, rest = body.partition("  ")
+            if separator and command and not command.startswith("-"):
+                line = f"  {_CYAN}{command}{_RESET}{separator}{rest}"
         styled.append(line)
     return "\n".join(styled) + "\n"
+
+
+def format_status(kind: str, message: str, *, stream=None) -> str:
+    """Return one consistently styled status line for a terminal stream."""
+    target = stream if stream is not None else sys.stderr
+    if kind not in _UNICODE_SYMBOLS:
+        raise ValueError(f"Unknown status kind: {kind!r}")
+
+    symbol = (
+        _UNICODE_SYMBOLS[kind]
+        if _supports_unicode(target, _UNICODE_SYMBOLS[kind])
+        else _ASCII_SYMBOLS[kind]
+    )
+    if _supports_color(target):
+        symbol = f"{_ANSI_COLORS[kind]}{symbol}{_RESET}"
+    return f"{symbol} {message}"
+
+
+def format_error(message: str, *, hint: str | None = None, stream=None) -> str:
+    """Return an actionable, consistently styled CLI error."""
+    lines = [format_status("error", message, stream=stream)]
+    if hint:
+        lines.append(f"  Hint: {hint}")
+    return "\n".join(lines) + "\n"
 
 
 @dataclass(frozen=True)
@@ -108,49 +156,3 @@ class CliArgumentParser(argparse.ArgumentParser):
         target = file if file is not None else sys.stdout
         help_text = self.format_help()
         target.write(_style_help(help_text) if _supports_color(target) else help_text)
-
-
-def format_status(kind: str, message: str, *, stream=None) -> str:
-    """Return one consistently styled status line for a terminal stream."""
-    target = stream if stream is not None else sys.stderr
-    unicode_symbols = {
-        "success": "✔",
-        "warning": "⚠",
-        "error": "✖",
-        "info": "ℹ",
-    }
-    ascii_symbols = {
-        "success": "[OK]",
-        "warning": "[WARN]",
-        "error": "[ERROR]",
-        "info": "[INFO]",
-    }
-    ansi_colors = {
-        "success": "\x1b[32m",
-        "warning": "\x1b[33m",
-        "error": "\x1b[31m",
-        "info": "\x1b[36m",
-    }
-    if kind not in unicode_symbols:
-        raise ValueError(f"Unknown status kind: {kind!r}")
-
-    symbol = (
-        unicode_symbols[kind]
-        if _supports_unicode(target, unicode_symbols[kind])
-        else ascii_symbols[kind]
-    )
-    if _supports_color(target):
-        symbol = f"{ansi_colors[kind]}{symbol}\x1b[0m"
-    return f"{symbol} {message}"
-
-
-def format_error(message: str, *, hint: str | None = None, stream=None) -> str:
-    """Return an actionable, consistently styled CLI error."""
-    target = stream if stream is not None else sys.stderr
-    symbol = "✖" if _supports_unicode(target, "✖") else "[ERROR]"
-    if _supports_color(target):
-        symbol = f"\x1b[31m{symbol}{_RESET}"
-    lines = [f"{symbol} {message}"]
-    if hint:
-        lines.append(f"  Hint: {hint}")
-    return "\n".join(lines) + "\n"

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from uc_declarative_abac.cli.presentation import format_status
+from uc_declarative_abac.cli.presentation import format_error, format_status
 
 
 @dataclass
@@ -40,3 +40,12 @@ def test_presentation_uses_ansi_only_for_color_capable_tty(monkeypatch):
     assert "Configuration is valid" in non_tty_output
     assert "\x1b[" not in no_color_output
     assert "Configuration is valid" in no_color_output
+
+
+def test_presentation_error_reuses_status_styling():
+    stream = FakeTextStream(tty=False)
+    status = format_status("error", "boom", stream=stream)
+    error = format_error("boom", hint="try again", stream=stream)
+
+    assert error.startswith(status)
+    assert "Hint: try again" in error

@@ -6,13 +6,34 @@ import pytest
 
 from uc_declarative_abac.cli.parser import parse_cli_args
 
+_SHARED_DEFAULT_ANNOTATIONS = (
+    r"--system-catalog\b[\s\S]*?\[default: system\]",
+    r"--ref-override-strategy\b[\s\S]*?\[default: merge\]",
+    r"--max-parallel-changes\b[\s\S]*?\[default: 8\]",
+)
+_COMMAND_HELP_SECTIONS = ("USAGE:", "FLAGS:", "EXAMPLES:")
+
+
+def _help_output(argv: list[str], capsys) -> str:
+    with pytest.raises(SystemExit) as exc_info:
+        parse_cli_args(argv)
+    assert exc_info.value.code == 0
+    return capsys.readouterr().out
+
+
+def _assert_contains_patterns(output: str, patterns: tuple[str, ...]) -> None:
+    for pattern in patterns:
+        assert re.search(pattern, output)
+
+
+def _example_commands(output: str, prefix: str) -> list[str]:
+    return [
+        line.strip() for line in output.splitlines() if line.strip().startswith(prefix)
+    ]
+
 
 def test_parser_displays_polished_root_help(capsys):
-    with pytest.raises(SystemExit) as exc_info:
-        parse_cli_args(["--help"])
-
-    assert exc_info.value.code == 0
-    output = capsys.readouterr().out
+    output = _help_output(["--help"], capsys)
     nonempty_lines = [line for line in output.splitlines() if line.strip()]
     compact_header = " ".join(nonempty_lines[:3])
     assert "UC Declarative ABAC" in compact_header
@@ -22,7 +43,9 @@ def test_parser_displays_polished_root_help(capsys):
         assert section in output
 
     command_lines = [
-        line for line in output.splitlines() if line.lstrip().startswith(("validate ", "deploy "))
+        line
+        for line in output.splitlines()
+        if line.lstrip().startswith(("validate ", "deploy "))
     ]
     assert len(command_lines) == 2
     assert all(line.startswith("  ") for line in command_lines)
@@ -38,14 +61,10 @@ def test_parser_displays_polished_root_help(capsys):
 
 
 def test_parser_displays_polished_validate_help(capsys):
-    with pytest.raises(SystemExit) as exc_info:
-        parse_cli_args(["validate", "--help"])
-
-    assert exc_info.value.code == 0
-    output = capsys.readouterr().out
+    output = _help_output(["validate", "--help"], capsys)
 
     assert "Validate YAML configs locally" in output
-    for section in ("USAGE:", "FLAGS:", "EXAMPLES:"):
+    for section in _COMMAND_HELP_SECTIONS:
         assert section in output
 
     for flag in (
@@ -57,29 +76,19 @@ def test_parser_displays_polished_validate_help(capsys):
     ):
         assert flag in output
 
-    assert re.search(r"--system-catalog\b[\s\S]*?\[default: system\]", output)
-    assert re.search(r"--ref-override-strategy\b[\s\S]*?\[default: merge\]", output)
-    assert re.search(r"--max-parallel-changes\b[\s\S]*?\[default: 8\]", output)
+    _assert_contains_patterns(output, _SHARED_DEFAULT_ANNOTATIONS)
 
-    examples = [
-        line.strip()
-        for line in output.splitlines()
-        if line.strip().startswith("uc-abac validate ")
-    ]
+    examples = _example_commands(output, "uc-abac validate ")
     assert 2 <= len(examples) <= 3
     assert all("--config-dir" in example for example in examples)
     assert all(len(line) <= 80 for line in output.splitlines())
 
 
 def test_parser_displays_polished_deploy_help(capsys):
-    with pytest.raises(SystemExit) as exc_info:
-        parse_cli_args(["deploy", "--help"])
-
-    assert exc_info.value.code == 0
-    output = capsys.readouterr().out
+    output = _help_output(["deploy", "--help"], capsys)
 
     assert "Deploy declarative governance to Unity Catalog" in output
-    for section in ("USAGE:", "FLAGS:", "EXAMPLES:"):
+    for section in _COMMAND_HELP_SECTIONS:
         assert section in output
 
     for flag in (
@@ -94,16 +103,10 @@ def test_parser_displays_polished_deploy_help(capsys):
     ):
         assert flag in output
 
-    assert re.search(r"--system-catalog\b[\s\S]*?\[default: system\]", output)
-    assert re.search(r"--ref-override-strategy\b[\s\S]*?\[default: merge\]", output)
-    assert re.search(r"--max-parallel-changes\b[\s\S]*?\[default: 8\]", output)
+    _assert_contains_patterns(output, _SHARED_DEFAULT_ANNOTATIONS)
     assert "Off by default" in output
 
-    examples = [
-        line.strip()
-        for line in output.splitlines()
-        if line.strip().startswith("uc-abac deploy ")
-    ]
+    examples = _example_commands(output, "uc-abac deploy ")
     assert 2 <= len(examples) <= 3
     assert all("--config-dir" in example for example in examples)
     assert any("--dry-run" in example for example in examples)

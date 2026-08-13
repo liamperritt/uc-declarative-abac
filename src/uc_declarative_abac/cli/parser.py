@@ -8,6 +8,13 @@ from uc_declarative_abac.cli import __version__
 from uc_declarative_abac.cli.presentation import CliArgumentParser, HelpExample
 
 _SUBCOMMANDS = frozenset({"validate", "deploy"})
+_DESCRIPTION = "UC Declarative ABAC — declarative ABAC governance for Unity Catalog"
+_VALIDATE_EXAMPLE = "uc-abac validate --config-dir ./configs"
+_VALIDATE_PROFILE_EXAMPLE = "uc-abac validate --config-dir ./configs --profile staging"
+_DEPLOY_DRY_RUN_EXAMPLE = (
+    "uc-abac deploy --config-dir ./configs --warehouse-id <id> --dry-run"
+)
+_DEPLOY_EXAMPLE = "uc-abac deploy --config-dir ./configs --warehouse-id <id>"
 
 
 def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
@@ -289,30 +296,46 @@ def _add_global_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _build_modern_parser() -> argparse.ArgumentParser:
-    common = _build_common_parser()
-    parser = CliArgumentParser(
-        prog="uc-abac",
-        description="UC Declarative ABAC — declarative ABAC governance for Unity Catalog",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        product_name="UC Declarative ABAC",
-        version=__version__,
-        examples=(
-            HelpExample(
-                "uc-abac validate --config-dir ./configs",
-                "Validate local YAML configuration.",
-            ),
-            HelpExample(
-                "uc-abac deploy --config-dir ./configs --warehouse-id <id> --dry-run",
-                "Preview changes before deploying to Unity Catalog.",
-            ),
-        ),
+def _add_config_dir(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--config-dir",
+        type=Path,
+        default=argparse.SUPPRESS,
+        help="Path to the YAML config directory",
     )
+
+
+def _add_version(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
     )
+
+
+def _cli_parser(**kwargs) -> CliArgumentParser:
+    return CliArgumentParser(
+        prog="uc-abac",
+        description=_DESCRIPTION,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        **kwargs,
+    )
+
+
+def _build_modern_parser() -> argparse.ArgumentParser:
+    common = _build_common_parser()
+    parser = _cli_parser(
+        product_name="UC Declarative ABAC",
+        version=__version__,
+        examples=(
+            HelpExample(_VALIDATE_EXAMPLE, "Validate local YAML configuration."),
+            HelpExample(
+                _DEPLOY_DRY_RUN_EXAMPLE,
+                "Preview changes before deploying to Unity Catalog.",
+            ),
+        ),
+    )
+    _add_version(parser)
     _add_global_arguments(parser)
 
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -324,22 +347,14 @@ def _build_modern_parser() -> argparse.ArgumentParser:
         description="Validate YAML configs locally (no warehouse or credentials required).",
         options_title="FLAGS:",
         examples=(
+            HelpExample(_VALIDATE_EXAMPLE, "Validate the default local configuration."),
             HelpExample(
-                "uc-abac validate --config-dir ./configs",
-                "Validate the default local configuration.",
-            ),
-            HelpExample(
-                "uc-abac validate --config-dir ./configs --profile staging",
+                _VALIDATE_PROFILE_EXAMPLE,
                 "Validate using settings for the staging profile.",
             ),
         ),
     )
-    validate_parser.add_argument(
-        "--config-dir",
-        type=Path,
-        default=argparse.SUPPRESS,
-        help="Path to the YAML config directory",
-    )
+    _add_config_dir(validate_parser)
     validate_parser.set_defaults(command="validate")
 
     deploy_parser = subparsers.add_parser(
@@ -350,21 +365,13 @@ def _build_modern_parser() -> argparse.ArgumentParser:
         options_title="FLAGS:",
         examples=(
             HelpExample(
-                "uc-abac deploy --config-dir ./configs --warehouse-id <id> --dry-run",
+                _DEPLOY_DRY_RUN_EXAMPLE,
                 "Preview the changes without applying them.",
             ),
-            HelpExample(
-                "uc-abac deploy --config-dir ./configs --warehouse-id <id>",
-                "Apply the configured governance changes.",
-            ),
+            HelpExample(_DEPLOY_EXAMPLE, "Apply the configured governance changes."),
         ),
     )
-    deploy_parser.add_argument(
-        "--config-dir",
-        type=Path,
-        default=argparse.SUPPRESS,
-        help="Path to the YAML config directory",
-    )
+    _add_config_dir(deploy_parser)
     deploy_parser.add_argument(
         "--warehouse-id",
         type=str,
@@ -383,16 +390,8 @@ def _build_modern_parser() -> argparse.ArgumentParser:
 
 
 def _build_legacy_parser() -> argparse.ArgumentParser:
-    parser = CliArgumentParser(
-        prog="uc-abac",
-        description="UC Declarative ABAC — declarative ABAC governance for Unity Catalog",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=f"%(prog)s {__version__}",
-    )
+    parser = _cli_parser()
+    _add_version(parser)
     _add_global_arguments(parser)
     _add_common_run_arguments(parser)
     parser.add_argument(
@@ -405,12 +404,7 @@ def _build_legacy_parser() -> argparse.ArgumentParser:
     # be supplied via env vars or the settings file. A genuinely missing value is
     # caught after settings resolution (_require_config_dir / _require_warehouse_id
     # -> OrchestratorError -> exit 3), matching the deploy subcommand's behaviour.
-    parser.add_argument(
-        "--config-dir",
-        type=Path,
-        default=argparse.SUPPRESS,
-        help="Path to the YAML config directory",
-    )
+    _add_config_dir(parser)
     parser.add_argument(
         "--warehouse-id",
         type=str,
