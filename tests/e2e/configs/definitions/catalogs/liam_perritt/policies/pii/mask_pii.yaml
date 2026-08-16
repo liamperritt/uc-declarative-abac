@@ -4,7 +4,6 @@ definitions:
       $params:
         pipeline: ~
         constant: '####'
-        test: ~
       name: mask_pii
       comment: Policy for masking columns with PII values via 'uc_gov_pii' column tag
       type: mask
