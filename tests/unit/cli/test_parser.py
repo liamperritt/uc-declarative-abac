@@ -98,6 +98,7 @@ def test_parser_displays_polished_deploy_help(capsys):
         "--enable-tag-management",
         "--enable-privilege-management",
         "--enable-policy-deletion",
+        "--enable-group-deletion",
         "--manage-tags-for-namespaces",
         "--delete-policies-for-namespaces",
     ):

@@ -84,7 +84,10 @@ class GroupDiff:
     Principals to add to / remove from it (populated only when group management is
     enabled). ``groups_to_rename`` holds the renames detected by matching a desired
     group's ``id`` to an existing group whose display name differs (populated only
-    under group management). All member values hold fully-resolved Principals — the
+    under group management). ``groups_to_delete`` holds the Databricks-managed account
+    groups absent from config that should be deleted (populated only when group deletion
+    is enabled; each Group carries ``display_name`` + ``id`` and no members — the
+    executor deletes by id). All member values hold fully-resolved Principals — the
     differ resolves them before they land here.
     """
 
@@ -92,3 +95,4 @@ class GroupDiff:
     members_to_remove: dict[str, frozenset[Principal]] = field(default_factory=dict)
     groups_to_create: dict[str, frozenset[Principal]] = field(default_factory=dict)
     groups_to_rename: list[GroupRename] = field(default_factory=list)
+    groups_to_delete: set[Group] = field(default_factory=set)

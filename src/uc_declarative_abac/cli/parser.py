@@ -215,6 +215,20 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--enable-group-deletion",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help=(
+            "Make config authoritative over account group existence: delete any "
+            "Databricks-managed account group absent from resources.groups. Off by "
+            "default. Only operates on Databricks-managed groups — external "
+            "(IdP-provisioned) groups and account system groups (account users, account "
+            "admins) are never deleted. Requires --enable-group-creation and at least one "
+            "group declared under resources.groups. Requires interactive confirmation at "
+            "the terminal unless --force is set."
+        ),
+    )
+    parser.add_argument(
         "--enable-governed-tag-deletion",
         action="store_true",
         default=argparse.SUPPRESS,

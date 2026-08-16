@@ -151,6 +151,7 @@ def run(
     enable_policy_deletion: bool = False,
     enable_group_creation: bool = False,
     enable_group_management: bool = False,
+    enable_group_deletion: bool = False,
     ignore_unresolvable_principals: str = "",
     manage_tags_for_namespaces: str = "*",
     manage_privileges_for_namespaces: str = "*",
@@ -234,6 +235,20 @@ def run(
             "Group creation/management requires the account users list to resolve "
             "user members, but --skip-users-fetch was set. Remove --skip-users-fetch "
             "to create or manage the groups declared in config."
+        )
+    # Group deletion makes config authoritative over group existence — it is only
+    # usable alongside --enable-group-creation, and never against an empty config (a
+    # destructive account-wide sweep with no declared groups is disallowed outright).
+    if enable_group_deletion and not config.groups:
+        raise OrchestratorError(
+            "--enable-group-deletion was set but no groups are declared under "
+            "resources.groups. Declare the groups config should own, or drop the flag."
+        )
+    if enable_group_deletion and not enable_group_creation:
+        raise OrchestratorError(
+            "--enable-group-deletion requires --enable-group-creation (config must be "
+            "authoritative over group existence). Pass --enable-group-creation, or drop "
+            "--enable-group-deletion."
         )
 
     # Parse per-domain namespace filters. Each scope is empty when its paired
@@ -361,6 +376,12 @@ def run(
         if group_domain_active
         else set()
     )
+    # Group deletion needs the full account-group inventory (identity + provenance only,
+    # no membership) to find Databricks-managed groups absent from config. Cheap — built
+    # from caches populated during fetch_principals, no extra API calls.
+    all_account_groups = (
+        ws_helper.list_account_groups() if enable_group_deletion else set()
+    )
 
     # 3. Construct the shared PrincipalResolver now that ws_helper cache is populated.
     resolver = PrincipalResolver(ws_helper)
@@ -376,7 +397,9 @@ def run(
             change_logger,
             enable_group_creation=enable_group_creation,
             enable_group_management=enable_group_management,
+            enable_group_deletion=enable_group_deletion,
             ignore_unresolvable=ignore_unresolvable,
+            all_account_groups=all_account_groups,
         )
         if group_domain_active
         else GroupDiff()
@@ -523,6 +546,7 @@ def run(
         or group_diff.members_to_add
         or group_diff.members_to_remove
         or group_diff.groups_to_rename
+        or group_diff.groups_to_delete
     ):
         change_logger.log_section_header("Groups")
     execute_group_diff(
@@ -530,6 +554,7 @@ def run(
         group_diff,
         change_logger,
         dry_run=dry_run,
+        force=force,
         max_parallel_changes=max_parallel_changes,
     )
 

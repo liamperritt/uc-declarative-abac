@@ -191,6 +191,47 @@ def is_system_governed_tag(name: str) -> bool:
     return "." in name
 
 
+# Account-level system groups that are Databricks-owned: they cannot be deleted by
+# this engine (and are near-universally useful as policy targets). Single source of
+# truth, shared by the workspace helper (which surfaces them in workspace-SCIM mode)
+# and the group differ (which excludes them from deletion candidates).
+SYSTEM_ACCOUNT_GROUPS = frozenset({"account users", "account admins"})
+
+
+def is_system_account_group(name: str) -> bool:
+    """Return True if a group is a Databricks account system group.
+
+    Account system groups (``account users``, ``account admins``) are Databricks-owned
+    and cannot be deleted by this engine — like external (IdP-provisioned) groups, they
+    are never group-deletion candidates. Matched case-insensitively.
+    """
+    return name.lower() in SYSTEM_ACCOUNT_GROUPS
+
+
+def prompt_delete_confirmation(names: list[str], noun: str, warning: str) -> bool:
+    """Show the items slated for deletion and require interactive confirmation.
+
+    ``noun`` names the item type (e.g. ``"governed tag"``, ``"group"``) for the header,
+    and ``warning`` is the one-line consequence shown before the prompt. Accepts ``y``
+    or ``yes`` (case-insensitive) as affirmative; anything else aborts. Re-raises
+    ``EOFError`` (e.g. a non-TTY input stream) as ``InteractiveConfirmationRequiredError``
+    so CI contexts get a clear "set --force" directive instead of a silent skip. Shared
+    by the governed-tag and group deletion executors.
+    """
+    print(f"\nAbout to delete {len(names)} {noun}(s):")
+    for name in names:
+        print(f"  - {name}")
+    print()
+    try:
+        response = input(f"{warning} Confirm [y/N]: ")
+    except EOFError as exc:
+        raise InteractiveConfirmationRequiredError(
+            "Cannot prompt for confirmation in a non-interactive context. "
+            "Set --force to auto-confirm destructive actions."
+        ) from exc
+    return response.strip().lower() in {"y", "yes"}
+
+
 class OrchestratorError(Exception):
     """Base exception for all orchestrator errors."""
 

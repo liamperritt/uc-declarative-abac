@@ -3417,3 +3417,183 @@ def test_orchestrator_rename_does_not_diff_actual_grants_referencing_old_name(
         f"Expected no revoke for the renamed group (the actual old-name grant should not "
         f"appear as a stale revoke), got: {offending_revokes}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Group deletion workflow (--enable-group-deletion)
+# ---------------------------------------------------------------------------
+
+
+def _setup_mock_group_inventory(
+    mock_workspace_client: MagicMock,
+    groups: list[tuple[str, str, str]],
+) -> None:
+    """Configure the account SCIM proxy mock for group-deletion tests.
+
+    ``groups`` is a list of (display_name, id, external_id). The Groups LIST returns
+    id + displayName + externalId for every group (matching the widened attrs the
+    deletion path relies on); per-group GET returns the group with empty membership;
+    DELETE / PATCH / POST return {}. Users and SPs are empty.
+    """
+    by_id = {gid: (name, ext) for name, gid, ext in groups}
+
+    def _scim_do(method, path, **kwargs):
+        if method == "DELETE" and "/account/scim/v2/Groups/" in path:
+            return {}
+        if method in ("PATCH", "POST") and "/account/scim/v2/Groups" in path:
+            return {}
+        if "/account/scim/v2/Groups/" in path:
+            gid = path.rsplit("/", 1)[-1]
+            name, ext = by_id.get(gid, ("", ""))
+            return {
+                "id": gid,
+                "displayName": name,
+                "externalId": ext,
+                "members": [],
+            }
+        if path.endswith("/account/scim/v2/Groups"):
+            resources = [
+                {"id": gid, "displayName": name, "externalId": ext}
+                for name, gid, ext in groups
+            ]
+            return {
+                "totalResults": len(resources),
+                "startIndex": 1,
+                "itemsPerPage": 100,
+                "Resources": resources,
+            }
+        return {
+            "totalResults": 0,
+            "startIndex": 1,
+            "itemsPerPage": 100,
+            "Resources": [],
+        }
+
+    mock_workspace_client.api_client.do.side_effect = _scim_do
+
+
+def _delete_group_ids(mock_workspace_client: MagicMock) -> set[str]:
+    """Return the set of group SCIM ids a DELETE was issued against."""
+    return {
+        c.args[1].rsplit("/", 1)[-1]
+        for c in mock_workspace_client.api_client.do.call_args_list
+        if c.args and c.args[0] == "DELETE" and "/account/scim/v2/Groups/" in c.args[1]
+    }
+
+
+def test_orchestrator_deletes_undeclared_group_when_flag_and_force_enabled(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    """With enable_group_deletion + enable_group_creation + force, a Databricks-managed
+    account group absent from config is deleted by SCIM id."""
+    config = _config_with_group([])  # declares "data_engineers"
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_group_inventory(
+        mock_workspace_client,
+        [("data_engineers", "g-1", ""), ("legacy", "g-2", "")],
+    )
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_group_creation=True,
+        enable_group_deletion=True,
+        force=True,
+    )
+
+    deleted_names = {g.display_name for g in result.group_diff.groups_to_delete}
+    assert deleted_names == {"legacy"}
+    assert _delete_group_ids(mock_workspace_client) == {"g-2"}
+
+
+def test_orchestrator_does_not_delete_external_or_system_group(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    """An external (IdP-provisioned) group and an account system group are never deleted,
+    even with the flag + force."""
+    config = _config_with_group([])
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_group_inventory(
+        mock_workspace_client,
+        [
+            ("data_engineers", "g-1", ""),
+            ("idp-group", "g-3", "ext-abc"),
+            ("account users", "g-4", ""),
+        ],
+    )
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_group_creation=True,
+        enable_group_deletion=True,
+        force=True,
+    )
+
+    assert result.group_diff.groups_to_delete == set()
+    assert _delete_group_ids(mock_workspace_client) == set()
+
+
+def test_orchestrator_does_not_delete_when_flag_disabled(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    """Without enable_group_deletion, an undeclared managed group is left alone."""
+    config = _config_with_group([])
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_group_inventory(
+        mock_workspace_client,
+        [("data_engineers", "g-1", ""), ("legacy", "g-2", "")],
+    )
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_group_creation=True,
+    )
+
+    assert result.group_diff.groups_to_delete == set()
+    assert _delete_group_ids(mock_workspace_client) == set()
+
+
+def test_orchestrator_raises_group_deletion_without_declared_groups(
+    tmp_yaml_dir, mock_workspace_client
+):
+    """--enable-group-deletion against a config that declares no groups fails fast."""
+    config = {"resources": {"catalogs": {"my_catalog": {}}}}
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+
+    with pytest.raises(OrchestratorError):
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            enable_group_creation=True,
+            enable_group_deletion=True,
+        )
+
+
+def test_orchestrator_raises_group_deletion_without_creation_flag(
+    tmp_yaml_dir, mock_workspace_client
+):
+    """--enable-group-deletion requires --enable-group-creation; management-only is not
+    sufficient and fails fast."""
+    config = _config_with_group([])
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+
+    with pytest.raises(OrchestratorError):
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            enable_group_management=True,
+            enable_group_deletion=True,
+        )
