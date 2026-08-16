@@ -5,6 +5,7 @@ import pytest
 from uc_declarative_abac.configs import resolve_refs
 from uc_declarative_abac.utils import (
     ResolutionError,
+    TemplateParameterError,
     UnreferencedDefinitionError,
 )
 
@@ -1358,3 +1359,495 @@ def test_resolver_leaves_non_defs_strings_unchanged():
     assert policy["function"] == "platform.shared.mask_pii_email"
     assert policy["comment"] == "A plain string"
     assert policy["filter"] == "some_function_name"
+
+
+# ---------------------------------------------------------------------------
+# Template parameters ($params + {{ placeholder }})
+# ---------------------------------------------------------------------------
+
+
+def _schema_defs():
+    """A schema definition template with a required `env` and defaulted `medallion`."""
+    return {
+        "schemas": {
+            "ingestion|salesforce": {
+                "$params": {"env": None, "medallion": "bronze"},
+                "name": "salesforce",
+                "tags": {
+                    "environment": "{{ env }}",
+                    "quality_tier": "{{ medallion }}",
+                },
+            },
+        },
+    }
+
+
+def test_resolver_substitutes_ref_params():
+    """A $ref's $params values are substituted into the template body."""
+    resources = {
+        "catalogs": {
+            "ingestion_prod": {
+                "name": "ingestion_prod",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ingestion|salesforce",
+                        "$params": {"env": "prod", "medallion": "silver"},
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(_schema_defs(), resources)
+
+    schema = result["catalogs"]["ingestion_prod"]["schemas"][0]
+    assert schema["tags"] == {"environment": "prod", "quality_tier": "silver"}
+    # $params is consumed, never left on the resolved body.
+    assert "$params" not in schema
+
+
+def test_resolver_uses_definition_default_when_param_omitted():
+    """A $ref that omits a defaulted param picks up the definition's default."""
+    resources = {
+        "catalogs": {
+            "ingestion_prod": {
+                "name": "ingestion_prod",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ingestion|salesforce",
+                        "$params": {"env": "prod"},  # medallion omitted → bronze
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(_schema_defs(), resources)
+
+    schema = result["catalogs"]["ingestion_prod"]["schemas"][0]
+    assert schema["tags"]["quality_tier"] == "bronze"
+
+
+def test_resolver_ref_param_overrides_definition_default():
+    """A $ref supplying a defaulted param overrides the default."""
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ingestion|salesforce",
+                        "$params": {"env": "uat", "medallion": "gold"},
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(_schema_defs(), resources)
+
+    assert result["catalogs"]["c"]["schemas"][0]["tags"]["quality_tier"] == "gold"
+
+
+def test_resolver_forwards_params_through_nested_ref():
+    """A definition forwards a param to a child $ref via a {{ placeholder }} $params value."""
+    definitions = {
+        "tables": {
+            "ingestion|salesforce|account": {
+                "$params": {"env": None},
+                "name": "account",
+                "tags": {"environment": "{{ env }}"},
+            },
+        },
+        "schemas": {
+            "ingestion|salesforce": {
+                "$params": {"env": None},
+                "name": "salesforce",
+                "tables": [
+                    {
+                        "$ref": "$defs/tables/ingestion|salesforce|account",
+                        "$params": {"env": "{{ env }}"},
+                    },
+                ],
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "ingestion_prod": {
+                "name": "ingestion_prod",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ingestion|salesforce",
+                        "$params": {"env": "prod"},
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    table = result["catalogs"]["ingestion_prod"]["schemas"][0]["tables"][0]
+    assert table["tags"]["environment"] == "prod"
+
+
+def test_resolver_substitutes_placeholder_in_override_value():
+    """A placeholder in a $ref's sibling override value is bound by that $ref's $params."""
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ingestion|salesforce",
+                        "name": "{{ env }}_salesforce_raw",
+                        "$params": {"env": "prod"},
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(_schema_defs(), resources)
+
+    assert result["catalogs"]["c"]["schemas"][0]["name"] == "prod_salesforce_raw"
+
+
+def test_resolver_raises_on_missing_param():
+    """A $ref that fails to supply a required (non-defaulted) param is an error."""
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ingestion|salesforce",
+                        "$params": {"medallion": "bronze"},  # env missing
+                    },
+                ],
+            },
+        },
+    }
+
+    with pytest.raises(TemplateParameterError, match="[Mm]issing"):
+        resolve_refs(_schema_defs(), resources)
+
+
+def test_resolver_raises_on_unused_ref_param():
+    """A $ref supplying a param the template does not use is an error."""
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ingestion|salesforce",
+                        "$params": {"env": "prod", "typo": "x"},
+                    },
+                ],
+            },
+        },
+    }
+
+    with pytest.raises(TemplateParameterError, match="[Uu]nused"):
+        resolve_refs(_schema_defs(), resources)
+
+
+def test_resolver_allows_forwarding_only_param():
+    """A param used only to forward to a child $ref is not flagged unused."""
+    definitions = {
+        "tables": {
+            "t": {
+                "$params": {"env": None},
+                "name": "account",
+                "tags": {"environment": "{{ env }}"},
+            },
+        },
+        "schemas": {
+            "s": {
+                "$params": {"env": None},
+                "name": "salesforce",
+                "tables": [
+                    {"$ref": "$defs/tables/t", "$params": {"env": "{{ env }}"}},
+                ],
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {"$ref": "$defs/schemas/s", "$params": {"env": "prod"}},
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    assert (
+        result["catalogs"]["c"]["schemas"][0]["tables"][0]["tags"]["environment"]
+        == "prod"
+    )
+
+
+def test_resolver_raises_on_placeholder_in_plain_resource_value():
+    """A placeholder in a plain resource value (no $ref to bind it) is an error."""
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "ingestion_{{ env }}",  # no $ref anywhere — nothing binds it
+            },
+        },
+    }
+
+    with pytest.raises(TemplateParameterError, match="[Uu]nbound"):
+        resolve_refs({}, resources)
+
+
+def test_resolver_raises_on_placeholder_in_ref_target():
+    """A placeholder in a $ref target is never substituted; it fails to resolve."""
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ingestion|salesforce_{{ env }}",
+                        "$params": {"env": "prod"},
+                    },
+                ],
+            },
+        },
+    }
+
+    # The target is not a real definition key and the placeholder is not substituted,
+    # so resolution fails (unresolved ref), not a silent success.
+    with pytest.raises((ResolutionError, TemplateParameterError)):
+        resolve_refs(_schema_defs(), resources)
+
+
+def test_resolver_null_default_is_still_required():
+    """A null-declared param has no default, so a $ref must still supply it."""
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ingestion|salesforce",
+                        "$params": {"medallion": "bronze"},  # env (null) not supplied
+                    },
+                ],
+            },
+        },
+    }
+
+    with pytest.raises(TemplateParameterError, match="[Mm]issing"):
+        resolve_refs(_schema_defs(), resources)
+
+
+def test_resolver_empty_string_param_binds_empty():
+    """An explicit empty-string param value binds the placeholder to empty."""
+    definitions = {
+        "schemas": {
+            "s": {
+                "$params": {"suffix": None},
+                "name": "base{{ suffix }}",
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {"$ref": "$defs/schemas/s", "$params": {"suffix": ""}},
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    assert result["catalogs"]["c"]["schemas"][0]["name"] == "base"
+
+
+def test_resolver_rejects_non_string_param():
+    """A non-string $ref param value is an error (strings only)."""
+    definitions = {
+        "schemas": {
+            "s": {"$params": {"n": None}, "name": "s_{{ n }}"},
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {"$ref": "$defs/schemas/s", "$params": {"n": 3}},
+                ],
+            },
+        },
+    }
+
+    with pytest.raises(TemplateParameterError, match="must be a string"):
+        resolve_refs(definitions, resources)
+
+
+def test_resolver_escaped_double_braces_survive_substitution_and_guard():
+    """Escaped {{{{ }}}} in a function body resolves to literal {{ }} and is not flagged."""
+    definitions = {
+        "functions": {
+            "shared|mask_for_env": {
+                "$params": {"env": None},
+                "name": "mask_for_{{ env }}",
+                "return": "CASE WHEN '{{ env }}' = 'prod' "
+                "THEN CONCAT('{{{{', val, '}}}}') ELSE val END",
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "functions": [
+                    {
+                        "$ref": "$defs/functions/shared|mask_for_env",
+                        "$params": {"env": "prod"},
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    fn = result["catalogs"]["c"]["functions"][0]
+    assert fn["name"] == "mask_for_prod"
+    # {{ env }} substituted; the escaped literal braces collapse to single double-braces.
+    assert fn["return"] == (
+        "CASE WHEN 'prod' = 'prod' THEN CONCAT('{{', val, '}}') ELSE val END"
+    )
+
+
+def test_resolver_replace_strategy_drops_definition_defaults():
+    """Under replace, a $ref's $params wholesale-replaces the definition's defaults."""
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        # Under replace, this $params replaces the definition's
+                        # {env: null, medallion: bronze} entirely, so medallion is
+                        # no longer defaulted and its placeholder is unbound.
+                        "$ref": "$defs/schemas/ingestion|salesforce",
+                        "$params": {"env": "prod"},
+                    },
+                ],
+            },
+        },
+    }
+
+    with pytest.raises(TemplateParameterError, match="[Mm]issing"):
+        resolve_refs(_schema_defs(), resources, override_strategy="replace")
+
+
+def test_resolver_config_without_params_is_unchanged():
+    """A config with no $params / placeholders resolves exactly as before."""
+    definitions = {
+        "schemas": {
+            "ops|sales": {"name": "sales", "comment": "Sales"},
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "schemas": [{"$ref": "$defs/schemas/ops|sales"}],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    schema = result["catalogs"]["main"]["schemas"][0]
+    assert schema == {"name": "sales", "comment": "Sales"}
+
+
+def test_resolver_undeclared_params_allowed_when_no_signature_block():
+    """A definition with no $params block uses implicit params (all required)."""
+    definitions = {
+        "schemas": {
+            "s": {"name": "salesforce_{{ env }}"},  # implicit env, no $params block
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {"$ref": "$defs/schemas/s", "$params": {"env": "prod"}},
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    assert result["catalogs"]["c"]["schemas"][0]["name"] == "salesforce_prod"
+
+
+def test_resolver_raises_on_incomplete_signature_undeclared_placeholder():
+    """A declared $params missing a body placeholder is a hard error, upfront."""
+    definitions = {
+        "schemas": {
+            "s": {
+                "$params": {"env": None},  # region used in body but not declared
+                "name": "{{ env }}_{{ region }}",
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/s",
+                        "$params": {"env": "p", "region": "us"},
+                    },
+                ],
+            },
+        },
+    }
+
+    with pytest.raises(TemplateParameterError, match="undeclared"):
+        resolve_refs(definitions, resources)
+
+
+def test_resolver_raises_on_incomplete_signature_unused_declaration():
+    """A declared param the body never uses is a hard error, upfront."""
+    definitions = {
+        "schemas": {
+            "s": {
+                "$params": {"env": None, "extra": "x"},  # extra unused
+                "name": "{{ env }}",
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {"$ref": "$defs/schemas/s", "$params": {"env": "prod"}},
+                ],
+            },
+        },
+    }
+
+    with pytest.raises(TemplateParameterError, match="never uses"):
+        resolve_refs(definitions, resources)

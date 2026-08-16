@@ -681,7 +681,7 @@ Resource configs are concrete, deployable instances (e.g., catalogs and their co
 
 #### Groups
 
-Account groups and their membership are defined under `resources: groups:` (not definitions) because they are account-level singletons. The dictionary key is used as the group's display name if `name` is not provided.
+Account groups and their membership are deployed under `resources: groups:` — they are account-level singletons, so a group resource is what actually gets reconciled. The dictionary key is used as the group's display name if `name` is not provided. (Groups can also be captured as reusable `definitions: groups:` templates and pulled in with `$ref: $defs/groups/<key>` — useful with template parameters for environment-based group families; see [Template parameters](#template-parameters).)
 
 - **`name`** — the group's display name.
 - **`id`** — *(optional)* the group's account-level SCIM / internal id. When set, the engine matches the group by `id` instead of by `name`, which enables **renaming**: keep the `id` fixed and change `name`, and the engine updates the group's display name rather than treating it as a new group. Omit it for groups you never intend to rename.
@@ -872,6 +872,59 @@ resources:
             - name: leads
             `comment: Leads table         # appended; 'orders' from def is preserved
 ```
+
+### Template parameters
+
+Definitions can be **parameterised templates**. Any string value in a definition may contain `{{ placeholder }}` tokens; each `$ref` that instantiates the definition supplies concrete values via a sibling `$params` block. Think of a definition as a function, a `$ref` as a call, and `$params` as the arguments. This removes the last major source of copy-paste — environment-based names and principals — that plain `$ref` overrides couldn't factor out.
+
+```yaml
+definitions:
+  policies:
+    domain|grant_read_on_finance:
+      name: grant_read_on_{{ env }}_finance
+      type: grant
+      has_tags:
+        finance: '*'
+      privileges:
+        - read
+      to:
+        - finance_{{ env }}_analysts
+        - finance_{{ env }}_engineers
+
+resources:
+  catalogs:
+    gold_prod:
+      name: gold_prod
+      policies:
+        - $ref: $defs/policies/domain|grant_read_on_finance
+          $params:
+            env: prod
+    gold_uat:
+      name: gold_uat
+      policies:
+        - $ref: $defs/policies/domain|grant_read_on_finance
+          $params:
+            env: uat
+```
+
+**Syntax.** `{{ name }}` wraps a bare parameter name (inner whitespace is insignificant — `{{ env }}` and `{{env}}` are equal; the spaced form is recommended). It is a substitution reference, not a templating engine: no filters or expressions. A literal double-brace in a value (e.g. in a function `return` body) is escaped by doubling — `{{{{` renders `{{` and `}}}}` renders `}}`.
+
+**Defaults and signatures (optional).** A definition may declare its own `$params` block to give parameters default values (`medallion: bronze`) and/or to declare required parameters with a null value (`env:`). The effective value of a parameter is the definition's default overridden by the `$ref`'s argument (the same deep-merge as any other `$ref` override, honouring `--ref-override-strategy`). Declaring a `$params` block is optional — with none, parameters are implicit and all required — **but a declared block must be complete**: it must list exactly the placeholders the body uses. This makes the block a trustworthy, discoverable signature and catches body typos.
+
+```yaml
+definitions:
+  schemas:
+    ingestion|salesforce:
+      $params:
+        env:                # required — no default
+        medallion: bronze   # optional — defaults to bronze
+      name: salesforce
+      tags:
+        environment: '{{ env }}'
+        quality_tier: '{{ medallion }}'
+```
+
+**Rules.** Parameter values are strings (a number/bool is rejected with a hint to quote it; `''` is a real empty string, null means "not supplied"). Placeholders may appear only in values bound by a `$ref` (a definition body or a `$ref`'s override values) — never in dict keys or `$defs/...` reference targets. A multi-level template forwards a parameter to a child `$ref` by using `{{ placeholder }}` as the child's `$params` value. Every placeholder must be bound (by an argument or a default) and every supplied argument must be used; a missing, unused, incomplete-signature, non-string, or unbound-placeholder case fails config validation. See `scratch/template_params_feature_proposal.md` for the full specification.
 
 ---
 

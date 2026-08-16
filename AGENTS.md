@@ -104,11 +104,15 @@ Keys use `|`-delimited segments by convention (e.g. `operations|sales|orders`), 
 
 ### $ref syntax
 
-`$ref: $defs/<type>/<key>` — inspired by JSON Schema's `$defs` and `$ref` keywords. The `<type>` is one of: `schemas`, `tables`, `volumes`, `functions`, `policies`.
+`$ref: $defs/<type>/<key>` — inspired by JSON Schema's `$defs` and `$ref` keywords. The `<type>` is one of: `catalogs`, `schemas`, `tables`, `volumes`, `functions`, `policies`, `groups`. (The resolver is type-agnostic: it resolves `$defs/<type>/<key>` for any `<type>` present under `definitions:`.)
 
 ### Overrides
 
 Any `$ref` entry can include additional fields that override the definition. Unspecified fields fall back to the definition. Overrides support recursive `$ref` nesting.
+
+### Template parameters (`$params` + `{{ placeholder }}`)
+
+A definition may be a *template* containing `{{ placeholder }}` tokens; a `$ref` supplies values via a sibling `$params` block (a definition is a function, a `$ref` is a call, `$params` are the arguments). A definition may also declare its own `$params` block for per-parameter defaults (`name: value`) and/or a required-parameter signature (`name:` / null); **a declared `$params` block must be complete** (list exactly the placeholders the body uses). `$params` values are strings; substitution is resolved during `$ref` expansion and stripped before model validation. Missing, unused, incomplete-signature, non-string, and unbound-placeholder cases all raise `TemplateParameterError`. Implemented in `configs/params.py` + `configs/resolver.py`; see `scratch/template_params_feature_proposal.md` for the full spec.
 
 ### `name` field
 

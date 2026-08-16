@@ -252,6 +252,18 @@ class UnreferencedDefinitionError(OrchestratorError):
     """Raised when definitions exist that are not referenced by any $ref."""
 
 
+class TemplateParameterError(OrchestratorError):
+    """Raised for template-parameter (``$params`` / ``{{ placeholder }}``) errors.
+
+    Covers every failure mode of the template-parameters feature: an incomplete
+    definition ``$params`` signature (a body placeholder left undeclared, or a
+    declared parameter the body never uses), a ``$ref`` that fails to supply a
+    required parameter (missing) or supplies one the template does not use
+    (unused), a non-string ``$params`` value, and a ``{{ placeholder }}`` in a
+    value not bound by any ``$ref``.
+    """
+
+
 class PrincipalValidationError(OrchestratorError):
     """Raised when one or more principal names cannot be found in the account."""
 
