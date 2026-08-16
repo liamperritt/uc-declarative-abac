@@ -916,7 +916,7 @@ definitions:
   schemas:
     ingestion|salesforce:
       $params:
-        env:                # required — no default
+        env: ~              # required — no default
         medallion: bronze   # optional — defaults to bronze
       name: salesforce
       tags:
