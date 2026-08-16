@@ -218,6 +218,12 @@ def test_check_no_unbound_raises_on_missing():
         check_no_unbound({"env"}, set(), ref="$defs/x")
 
 
+def test_check_no_unbound_single_quotes_names():
+    """Missing placeholder names are wrapped in single quotes in the message."""
+    with pytest.raises(TemplateParameterError, match="'env', 'team'"):
+        check_no_unbound({"team", "env"}, set(), ref="$defs/x")
+
+
 def test_check_no_unused_passes_when_all_used():
     """No error when every supplied param is used."""
     check_no_unused({"env"}, {"env"}, ref="$defs/x")
@@ -245,9 +251,9 @@ def test_check_signature_complete_accepts_exact_match():
 
 
 def test_check_signature_complete_raises_on_undeclared_placeholder():
-    """A body placeholder missing from the declared signature raises."""
+    """A body placeholder missing from the declared signature raises (name single-quoted)."""
     body = {"$params": {"env": None}, "name": "{{ env }}_{{ region }}"}
-    with pytest.raises(TemplateParameterError, match="undeclared"):
+    with pytest.raises(TemplateParameterError, match="undeclared placeholder\\(s\\) 'region'"):
         check_signature_complete("s", body, body["$params"])
 
 

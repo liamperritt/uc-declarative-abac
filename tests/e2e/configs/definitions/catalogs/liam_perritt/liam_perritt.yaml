@@ -13,6 +13,8 @@ definitions:
       policies:
         - $ref: $defs/policies/managed_by|grant_use_catalog
         - $ref: $defs/policies/managed_by|grant_catalog_read
+          $params:
+            env: test
         - $ref: $defs/policies/team|grant_schema_access
         - $ref: $defs/policies/zone|grant_bronze_access
         - $ref: $defs/policies/zone|grant_landing_read
@@ -21,5 +23,7 @@ definitions:
         - $ref: $defs/policies/cdc|filter_cdc_operation
       schemas:
         - $ref: $defs/schemas/liam_perritt|default
+          $params:
+            env: test
         - $ref: $defs/schemas/liam_perritt|lff_sqlserver_bronze
         - $ref: $defs/schemas/liam_perritt|sqlserver_lff

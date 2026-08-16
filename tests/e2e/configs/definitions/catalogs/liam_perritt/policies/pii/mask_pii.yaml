@@ -1,6 +1,10 @@
 definitions:
   policies:
     pii|mask_pii:
+      $params:
+        pipeline: ~
+        constant: '####'
+        test: ~
       name: mask_pii
       comment: Policy for masking columns with PII values via 'uc_gov_pii' column tag
       type: mask
@@ -8,8 +12,8 @@ definitions:
         - alias: pii
           has_any_of_tags:
             uc_gov_pii: '*'
-            uc_gov_pipeline: lff
-        - constant: '####'
+            uc_gov_pipeline: '{{ pipeline }}'
+        - constant: '{{ constant }}'
       function:
         parameters:
           - name: pii

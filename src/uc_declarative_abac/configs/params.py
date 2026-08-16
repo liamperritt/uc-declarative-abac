@@ -38,6 +38,11 @@ _REF_KEY = "$ref"
 _PARAMS_KEY = "$params"
 
 
+def _quote_names(names) -> str:
+    """Render an iterable of parameter names as a sorted, single-quoted, comma list."""
+    return ", ".join(f"'{name}'" for name in sorted(names))
+
+
 def find_placeholders(text: str) -> set[str]:
     """Return the set of parameter names referenced by ``{{ name }}`` tokens in ``text``.
 
@@ -148,11 +153,10 @@ def _finalise(node: Any) -> Any:
     if isinstance(node, str):
         unresolved = find_placeholders(node)
         if unresolved:
-            names = ", ".join(sorted(unresolved))
             raise TemplateParameterError(
-                f"Unbound template parameter(s) {names} in value {node!r}: a "
-                f"'{{{{ ... }}}}' placeholder can only appear in a value bound by a "
-                f"$ref's $params (a definition body or a $ref override value)."
+                f"Unbound template parameter(s) {_quote_names(unresolved)} in value "
+                f"{node!r}: a '{{{{ ... }}}}' placeholder can only appear in a value "
+                f"bound by a $ref's $params (a definition body or a $ref override value)."
             )
         return unescape(node)
     return node
@@ -178,11 +182,10 @@ def check_no_unbound(used: set[str], available: set[str], *, ref: str) -> None:
     """Assert every placeholder used by a referenced template has a value at the ``$ref``."""
     missing = used - available
     if missing:
-        names = ", ".join(sorted(missing))
         raise TemplateParameterError(
-            f"Missing template parameter(s) {names} for $ref '{ref}': the template "
-            f"uses these placeholders but neither $params nor a definition default "
-            f"supplies a value."
+            f"Missing template parameter(s) {_quote_names(missing)} for $ref '{ref}': "
+            f"the template uses these placeholders but neither $params nor a definition "
+            f"default supplies a value."
         )
 
 
@@ -190,11 +193,10 @@ def check_no_unused(supplied: set[str], used: set[str], *, ref: str) -> None:
     """Assert every parameter supplied at a ``$ref`` is actually used by the template."""
     unused = supplied - used
     if unused:
-        names = ", ".join(sorted(unused))
         raise TemplateParameterError(
-            f"Unused template parameter(s) {names} supplied to $ref '{ref}': the "
-            f"template has no matching '{{{{ ... }}}}' placeholder (check for a name "
-            f"mismatch)."
+            f"Unused template parameter(s) {_quote_names(unused)} supplied to $ref "
+            f"'{ref}': the template has no matching '{{{{ ... }}}}' placeholder (check "
+            f"for a name mismatch)."
         )
 
 
@@ -222,19 +224,18 @@ def check_signature_complete(
 
     undeclared = used - declared
     if undeclared:
-        names = ", ".join(sorted(undeclared))
         raise TemplateParameterError(
             f"Definition '{def_key}' declares a $params signature but its body uses "
-            f"undeclared placeholder(s) {names}; add them to $params (with a default "
-            f"or as null for required)."
+            f"undeclared placeholder(s) {_quote_names(undeclared)}; add them to $params "
+            f"(with a default or as null for required)."
         )
 
     unused = declared - used
     if unused:
-        names = ", ".join(sorted(unused))
         raise TemplateParameterError(
-            f"Definition '{def_key}' declares parameter(s) {names} in $params that its "
-            f"body never uses; remove them or reference them via '{{{{ ... }}}}'."
+            f"Definition '{def_key}' declares parameter(s) {_quote_names(unused)} in "
+            f"$params that its body never uses; remove them or reference them via "
+            f"'{{{{ ... }}}}'."
         )
 
 

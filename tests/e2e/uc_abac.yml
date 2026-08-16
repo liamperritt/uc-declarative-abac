@@ -3,4 +3,5 @@ enable_tag_management: true
 enable_privilege_management: true
 enable_policy_deletion: true
 use_workspace_scim: true
+warehouse_id: db89cedbd3e93a0a
 profile: field-eng-east
