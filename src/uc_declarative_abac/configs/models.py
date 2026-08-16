@@ -649,11 +649,18 @@ class GroupConfig(BaseModel):
     renamed: change ``name`` while keeping ``id`` and the engine updates the
     group's display name instead of treating it as a new group. It is accepted as
     either a string or an integer (a numeric id in YAML) and stored as a string.
+
+    ``expiry_date`` makes the group time-bound: when a deployment runs on or past
+    this date, all of the group's members are removed (the group itself is not
+    deleted). It takes effect only under ``--enable-group-management`` — the flag
+    that reconciles membership — and is a no-op without it. Omitted (``None``) means
+    the group never expires. Mirrors ``GrantPolicyConfig.expiry_date``.
     """
 
     name: str
     id: str | None = None
     members: list[str] = Field(default_factory=list)
+    expiry_date: date | None = None
 
     @field_validator("id", mode="before")
     @classmethod

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 from uc_declarative_abac.configs import ResourcesConfig
 from uc_declarative_abac.principals import (
     Principal,
@@ -184,3 +186,105 @@ def test_groups_compiler_emits_all_groups_in_config():
 
     names = {g.display_name for g in result}
     assert names == {"data_engineers", "analysts", "admins"}
+
+
+# ---------------------------------------------------------------------------
+# expiry_date: on/after the date, a group's members are emitted as empty
+# ---------------------------------------------------------------------------
+
+
+def _config_with_expiring_group(expiry_date: str) -> ResourcesConfig:
+    return ResourcesConfig.model_validate(
+        {
+            "catalogs": {"cat": {"name": "cat"}},
+            "groups": {
+                "temp_access": {
+                    "name": "temp_access",
+                    "members": ["alice@example.com", "bob@example.com"],
+                    "expiry_date": expiry_date,
+                },
+            },
+        }
+    )
+
+
+def test_groups_compiler_emits_empty_members_when_expiry_date_is_past():
+    """A group whose expiry_date is before run_date is emitted with empty members
+    (the group itself is still present)."""
+    config = _config_with_expiring_group("2025-01-01")
+
+    result = compile_desired_groups(config, run_date=date(2025, 6, 1))
+
+    grp = next(g for g in result if g.display_name == "temp_access")
+    assert grp.members == frozenset()
+
+
+def test_groups_compiler_emits_empty_members_when_expiry_date_is_today():
+    """expiry is 'on or past' the date: expiry_date == run_date is expired."""
+    config = _config_with_expiring_group("2025-06-01")
+
+    result = compile_desired_groups(config, run_date=date(2025, 6, 1))
+
+    grp = next(g for g in result if g.display_name == "temp_access")
+    assert grp.members == frozenset()
+
+
+def test_groups_compiler_keeps_members_when_expiry_date_is_future():
+    """A group whose expiry_date is after run_date retains its configured members."""
+    config = _config_with_expiring_group("2026-12-31")
+
+    result = compile_desired_groups(config, run_date=date(2025, 6, 1))
+
+    grp = next(g for g in result if g.display_name == "temp_access")
+    assert grp.members == frozenset(
+        {
+            Principal(PrincipalType.UNKNOWN, name="alice@example.com"),
+            Principal(PrincipalType.UNKNOWN, name="bob@example.com"),
+        }
+    )
+
+
+def test_groups_compiler_keeps_members_when_no_expiry_date():
+    """A group without expiry_date retains its members regardless of run_date."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {"cat": {"name": "cat"}},
+            "groups": {
+                "data_engineers": {
+                    "name": "data_engineers",
+                    "members": ["alice@example.com"],
+                },
+            },
+        }
+    )
+
+    result = compile_desired_groups(config, run_date=date(2099, 12, 31))
+
+    grp = next(g for g in result if g.display_name == "data_engineers")
+    assert grp.members == frozenset(
+        {Principal(PrincipalType.UNKNOWN, name="alice@example.com")}
+    )
+
+
+def test_groups_compiler_keeps_id_and_name_on_expired_group():
+    """An expired group is still emitted (name + id preserved) so it is matchable and
+    not dropped from desired — only its members are emptied."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {"cat": {"name": "cat"}},
+            "groups": {
+                "temp_access": {
+                    "name": "temp_access",
+                    "id": "g-99",
+                    "members": ["alice@example.com"],
+                    "expiry_date": "2025-01-01",
+                },
+            },
+        }
+    )
+
+    result = compile_desired_groups(config, run_date=date(2025, 6, 1))
+
+    grp = next(g for g in result if g.display_name == "temp_access")
+    assert grp.id == "g-99"
+    assert grp.members == frozenset()

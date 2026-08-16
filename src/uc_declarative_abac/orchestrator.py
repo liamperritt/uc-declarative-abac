@@ -301,7 +301,7 @@ def run(
     #      independently of the flag (mirroring ``_filter_taggable_attributes``). Without
     #      this the function's actual RFA state stays ``None`` when the flag is off, and an
     #      explicit empty list ("remove all") silently no-ops against a ``None`` actual.
-    desired_groups = compile_desired_groups(config)
+    desired_groups = compile_desired_groups(config, run_date=datetime.now(UTC).date())
     desired_group_names = {g.display_name for g in desired_groups}
     desired_group_ids = {g.id for g in desired_groups if g.id}
     desired_governed_tags = compile_desired_governed_tags(config)

@@ -3597,3 +3597,86 @@ def test_orchestrator_raises_group_deletion_without_creation_flag(
             enable_group_management=True,
             enable_group_deletion=True,
         )
+
+
+# ---------------------------------------------------------------------------
+# Group expiry_date (members removed on/after the date; group not deleted)
+# ---------------------------------------------------------------------------
+
+
+def test_orchestrator_removes_all_members_of_expired_group(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    """A group with a past expiry_date has all its members removed under
+    --enable-group-management, and the group itself is not deleted."""
+    config = {
+        "resources": {
+            "catalogs": {"my_catalog": {}},
+            "groups": {
+                "data_engineers": {
+                    "members": ["alice@example.com"],
+                    "expiry_date": "2020-01-01",  # deterministically in the past
+                }
+            },
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_group_state(
+        mock_workspace_client,
+        group_name="data_engineers",
+        group_id="g-1",
+        member_ids=["u-1"],  # alice is currently a member
+        users=[("u-1", "alice@example.com")],
+    )
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_group_management=True,
+    )
+
+    assert "data_engineers" in result.group_diff.members_to_remove
+    removed = {p.name for p in result.group_diff.members_to_remove["data_engineers"]}
+    assert removed == {"alice@example.com"}
+    assert result.group_diff.members_to_add == {}
+    assert result.group_diff.groups_to_delete == set()
+
+
+def test_orchestrator_keeps_members_of_group_with_future_expiry(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    """A group whose expiry_date is far in the future keeps its members (no removal)."""
+    config = {
+        "resources": {
+            "catalogs": {"my_catalog": {}},
+            "groups": {
+                "data_engineers": {
+                    "members": ["alice@example.com"],
+                    "expiry_date": "2999-01-01",
+                }
+            },
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_group_state(
+        mock_workspace_client,
+        group_name="data_engineers",
+        group_id="g-1",
+        member_ids=["u-1"],  # alice already a member → in sync, no change
+        users=[("u-1", "alice@example.com")],
+    )
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_group_management=True,
+    )
+
+    assert result.group_diff.members_to_remove == {}
+    assert result.group_diff.members_to_add == {}

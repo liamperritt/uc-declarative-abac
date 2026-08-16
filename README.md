@@ -178,7 +178,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: liamperritt/uc-declarative-abac/deploy@v0.8.2
+      - uses: liamperritt/uc-declarative-abac/deploy@v0.8.3
         with:
           config-dir: configs/
           warehouse-id: ${{ vars.DATABRICKS_WAREHOUSE_ID }}
@@ -219,7 +219,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: liamperritt/uc-declarative-abac/validate@v0.8.2
+      - uses: liamperritt/uc-declarative-abac/validate@v0.8.3
         with:
           config-dir: configs/
 ```
@@ -686,11 +686,13 @@ Account groups and their membership are defined under `resources: groups:` (not 
 - **`name`** — the group's display name.
 - **`id`** — *(optional)* the group's account-level SCIM / internal id. When set, the engine matches the group by `id` instead of by `name`, which enables **renaming**: keep the `id` fixed and change `name`, and the engine updates the group's display name rather than treating it as a new group. Omit it for groups you never intend to rename.
 - **`members`** — the list of principals (users, groups, or service principals by display name) that must belong to the group.
+- **`expiry_date`** — *(optional)* an ISO date (`YYYY-MM-DD`). When a deployment runs **on or after** this date, all of the group's members are removed (the group itself is **not** deleted). Takes effect only under `enable-group-management` — the flag that reconciles membership — and is a no-op without it. Omit it for groups that never expire. Mirrors the `expiry_date` on grant policies.
 
 Behaviour (governed by two orthogonal, off-by-default flags):
 
 - **Creation (`enable-group-creation`).** Creates a configured group that doesn't yet exist, **with its configured members** (atomically). The engine automatically receives the `MANAGER` role on groups it creates. This flag only brings missing groups into existence; it does not reconcile the membership of existing groups.
 - **Membership management (`enable-group-management`).** Reconciles the membership of **existing** groups: configured members not in the group are added, and members in the group but absent from config are **removed** (an empty/omitted `members` list removes all members — config is the source of truth). Requires the engine principal to hold the `MANAGER` role on each managed group.
+- **Expiry (`enable-group-management`).** When a group sets an `expiry_date` and the deployment runs on or after it, the group is treated as having no configured members, so all current members are removed (the group is left in place). Realised through the same membership-reconciliation path, so it requires `enable-group-management` and is inert without it.
 - **Renaming (`enable-group-management`).** When a configured group sets an `id` and its `name` differs from the group's current display name in the account, the engine renames the group (updates its display name via the account SCIM proxy) instead of creating a new one. Renaming is part of management, so it requires `enable-group-management`. Update your **config** references (securable owners, governed-tag assigners, grant/policy principals) to the **new** name: a config reference to the new name resolves cleanly, while a stale config reference to the **old** name is a fatal error. References in the **already-deployed state** (existing grants, policies, assigners, and memberships still recorded under the old name, since they aren't renamed until the rename applies — and never in dry-run) are transparently mapped from the old name to the new one, so a rename run is idempotent — it does **not** produce spurious grant/policy/assigner churn. A configured `id` that matches no account group is a fatal error, as is renaming a group to a display name already used by a different group.
 - **Gating.** With neither flag the group domain is inert (configured groups are ignored). Under management, a configured group that doesn't exist is a fatal error unless creation is also enabled. To fully provision a brand-new group with its members in one run, pass both flags.
 - **Externally-managed groups are rejected.** An existing group provisioned from an external IdP (it carries an `external_id`) cannot have its membership managed or be renamed here — the run fails with a clear error.
@@ -704,6 +706,7 @@ resources:
     data_engineers:
       name: data_engineers
       # id: "1234567890123456"   # set to rename: keep id, change name above
+      # expiry_date: 2026-12-31  # on/after this date, all members are removed (group kept)
       members:
         - alice@example.com
         - bob@example.com

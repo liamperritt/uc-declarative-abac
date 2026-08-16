@@ -933,6 +933,36 @@ def test_group_config_accepts_optional_id():
     assert config.groups["without_id"].id is None
 
 
+def test_group_config_accepts_expiry_date():
+    """A group declaring an ``expiry_date`` parses it onto GroupConfig.expiry_date."""
+    from datetime import date
+
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {"cat": {}},
+            "groups": {
+                "temp_access": {"members": ["alice@example.com"], "expiry_date": "2026-12-31"},
+            },
+        }
+    )
+
+    assert config.groups is not None
+    assert config.groups["temp_access"].expiry_date == date(2026, 12, 31)
+
+
+def test_group_config_defaults_expiry_date_to_none():
+    """A group without ``expiry_date`` defaults to None (never expires)."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {"cat": {}},
+            "groups": {"data_engineers": {"members": ["alice@example.com"]}},
+        }
+    )
+
+    assert config.groups is not None
+    assert config.groups["data_engineers"].expiry_date is None
+
+
 def test_group_config_rejects_duplicate_ids_when_two_groups_share_id():
     """Two group entries (different keys/names) sharing the same ``id`` raise
     DuplicateResourceError."""
