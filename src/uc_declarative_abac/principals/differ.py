@@ -17,6 +17,7 @@ from uc_declarative_abac.utils import (
     ExecutionError,
     OrchestratorError,
     PrincipalValidationError,
+    is_system_account_group,
 )
 
 
@@ -184,6 +185,34 @@ def _reconcile_membership(
         diff.members_to_remove[name] = frozenset(to_remove)
 
 
+def _diff_group_deletes(
+    desired: set[Group],
+    all_account_groups: set[Group],
+    enable_deletion: bool,
+) -> set[Group]:
+    """Account groups absent from config that should be deleted, when deletion is enabled.
+
+    A group is a deletion candidate only when it is Databricks-managed and undeclared:
+    its display name is not among the desired names AND its SCIM id (when present) is not
+    among the desired ids — the id check protects a group pending a rename (config holds
+    the new name, the account still the old one, matched by id) from being deleted.
+    External / IdP-provisioned groups (``external_id`` set) and Databricks account system
+    groups (``account users`` / ``account admins``) are never candidates.
+    """
+    if not enable_deletion:
+        return set()
+    desired_names = {g.display_name for g in desired}
+    desired_ids = {g.id for g in desired if g.id}
+    return {
+        g
+        for g in all_account_groups
+        if g.display_name not in desired_names
+        and not (g.id and g.id in desired_ids)
+        and not g.external_id
+        and not is_system_account_group(g.display_name)
+    }
+
+
 def compute_group_diff(
     desired: set[Group],
     actual: set[Group],
@@ -191,7 +220,9 @@ def compute_group_diff(
     change_logger: ChangeLogger,
     enable_group_creation: bool = False,
     enable_group_management: bool = False,
+    enable_group_deletion: bool = False,
     ignore_unresolvable: frozenset[str] = frozenset(),
+    all_account_groups: set[Group] = frozenset(),
 ) -> GroupDiff:
     """Compute the group-management diff between desired and actual.
 
@@ -215,6 +246,12 @@ def compute_group_diff(
       existing groups are left untouched. A newly-created group is handled by
       creation only — management does not re-process it.
 
+    - **Deletion** (``enable_group_deletion``): every Databricks-managed account group in
+      ``all_account_groups`` that is absent from config (by name and id) is queued for
+      deletion in ``groups_to_delete``. External / IdP-provisioned and account system
+      groups are excluded. Without the flag (or with an empty ``all_account_groups``), no
+      group is deleted.
+
     A desired ``id`` that matches no account group, and a rename whose target name
     is already taken by a different group, are both fatal errors.
 
@@ -226,6 +263,9 @@ def compute_group_diff(
     actual_by_id = {g.id: g for g in actual if g.id}
 
     diff = GroupDiff()
+    diff.groups_to_delete = _diff_group_deletes(
+        desired, all_account_groups, enable_group_deletion
+    )
     for desired_group in desired:
         actual_group, ok = _find_actual_group(
             desired_group, actual_by_name, actual_by_id, change_logger

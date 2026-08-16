@@ -78,6 +78,12 @@ def test_settings_loads_boolean_from_env(monkeypatch):
     assert settings.enable_tag_management is True
 
 
+def test_settings_loads_enable_group_deletion_from_env(monkeypatch):
+    monkeypatch.setenv("UC_ABAC_ENABLE_GROUP_DELETION", "true")
+    settings = resolve_settings({}, settings_file=None)
+    assert settings.enable_group_deletion is True
+
+
 def test_settings_loads_namespace_scope_from_env(monkeypatch):
     monkeypatch.setenv("UC_ABAC_MANAGE_TAGS_FOR_NAMESPACES", "cat_env.sch1")
     settings = resolve_settings({}, settings_file=None)

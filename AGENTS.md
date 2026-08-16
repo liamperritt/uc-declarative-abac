@@ -67,6 +67,25 @@ The privileges, securables, governed-tags, **and policies** differs all follow t
 
 The `--ignore-unresolvable-principals` CLI flag (orchestrator param `ignore_unresolvable_principals`, parsed to a standalone `frozenset[str]` named `ignore_unresolvable`) **only suppresses the non-fatal resolution-failure warning** for the listed actual-state identifiers — it changes nothing about resolution itself. A listed principal that resolves is processed exactly as usual; only when it fails to resolve is the warning silenced (the row is dropped from the diff either way, as it always was for unresolvable principals). The check lives **inside `log_principal_resolution_failure`** (`principals/resolver.py`): in the actual-state (identifier-only) warning branch, if `principal.identifier in ignore_unresolvable` it returns without logging; config-side (name) failures stay fatal `ExecutionError`s regardless. The set is a plain parameter threaded `run()` → `compute_*_diff(..., ignore_unresolvable)` → `_resolve_*(..., ignore_unresolvable)` → `log_principal_resolution_failure(..., ignore_unresolvable)` for the privileges, securables (owner), governed-tags (assigners), and policies (`to`/`except`) domains. It is **not** state on `PrincipalResolver` (the resolver has no knowledge of ignoring). Tags reference no principals.
 
+## Adding a CLI flag
+
+A CLI flag is only fully wired when it reaches the engine through **both** entry points —
+the `uc-abac` CLI **and** the composite GitHub Action. It is easy to update the Python
+plumbing and forget the Action, so treat this as a checklist and update every item:
+
+1. **`src/uc_declarative_abac/cli/parser.py`** — add the `argparse` argument.
+2. **`src/uc_declarative_abac/cli/settings.py`** — add the `RunSettings` field **and** the
+   `_ENV_FIELD_MAP` entry (`UC_ABAC_<NAME>` env var).
+3. **`src/uc_declarative_abac/cli/commands.py`** — thread it through `_run_kwargs`.
+4. **`src/uc_declarative_abac/orchestrator.py`** — add the `run()` parameter and wiring.
+5. **`deploy/action.yml`** — **easy to miss.** Three edits in this one file: the
+   `inputs:` entry, the `env:` mapping (`ENABLE_FOO: ${{ inputs.enable-foo }}`), and the
+   `args+=(--enable-foo)` line in the args-building shell step. Grep the file for an
+   existing sibling flag (e.g. `enable-group-management`) — it appears in all three
+   places, so a flag that isn't in all three is under-wired.
+6. **`README.md`** — add the row to the GitHub Action input table (and any prose).
+7. **Tests** — parser help, settings env var, and commands passthrough at minimum.
+
 ## YAML config conventions
 
 ### Definition IDs

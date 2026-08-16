@@ -1,17 +1,22 @@
 from __future__ import annotations
 
+import logging
+import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from uc_declarative_abac.helpers import WorkspaceHelper
     from uc_declarative_abac.logger import ChangeLogger
 
-from uc_declarative_abac.principals.state import GroupDiff, GroupRename
+from uc_declarative_abac.principals.state import Group, GroupDiff, GroupRename
 from uc_declarative_abac.utils import (
     ExecutionError,
     OrchestratorError,
     parallel_for_each,
+    prompt_delete_confirmation,
 )
+
+_logger = logging.getLogger("uc_declarative_abac")
 
 
 def _group_membership_error(group_name: str, error: Exception) -> Exception:
@@ -192,11 +197,64 @@ def _execute_member_removes(
     )
 
 
+def _execute_deletes(
+    ws_helper: WorkspaceHelper,
+    diff: GroupDiff,
+    change_logger: ChangeLogger,
+    dry_run: bool,
+    force: bool,
+    max_workers: int,
+) -> None:
+    """Delete each group in groups_to_delete, gated by interactive confirmation.
+
+    Dry-run logs the would-delete list without prompting or executing. Otherwise the
+    operator must confirm (unless ``force``); a decline aborts the whole run, matching
+    governed-tag deletion. After confirmation, per-group SDK deletes run in parallel.
+    """
+    if not diff.groups_to_delete:
+        return
+    groups_sorted = sorted(diff.groups_to_delete, key=lambda g: g.display_name)
+    if dry_run:
+        for group in groups_sorted:
+            change_logger.log_group_delete(group)
+        return
+    if not force and not prompt_delete_confirmation(
+        [g.display_name for g in groups_sorted],
+        "group",
+        "This is irreversible and will delete these account groups and all their "
+        "memberships.",
+    ):
+        _logger.info("Group deletion cancelled — aborting run.")
+        sys.exit(1)
+
+    def worker(group: Group) -> None:
+        ws_helper.delete_group(group.id)
+
+    def on_complete(group: Group, _result, error) -> None:
+        if error is not None:
+            change_logger.log_error(
+                ExecutionError(
+                    context=f"delete_group({group.display_name})",
+                    exception=error,
+                )
+            )
+            return
+        change_logger.log_group_delete(group)
+
+    parallel_for_each(
+        groups_sorted,
+        worker,
+        max_workers=max_workers,
+        on_complete=on_complete,
+    )
+
+
 def execute_group_diff(
     ws_helper: WorkspaceHelper,
     diff: GroupDiff,
     change_logger: ChangeLogger,
     dry_run: bool = False,
+    force: bool = False,
     max_parallel_changes: int = 1,
 ) -> None:
     """Apply a GroupDiff against the account via the account SCIM proxy.
@@ -204,8 +262,10 @@ def execute_group_diff(
     Creates groups first (``ws_helper.create_group``, with their members), then
     renames existing groups (``ws_helper.rename_group``), then adds members to and
     removes members from existing groups (``ws_helper.add_group_members`` /
-    ``remove_group_members``). Renames precede member ops so a group carries its new
-    display name before membership is reconciled. Each phase forms one parallel
+    ``remove_group_members``), then deletes undeclared groups (``ws_helper.delete_group``,
+    gated by interactive confirmation unless ``force``). Renames precede member ops so a
+    group carries its new display name before membership is reconciled; deletes run last
+    so no membership op targets a group being removed. Each phase forms one parallel
     batch (up to ``max_parallel_changes`` workers); dry-run forces sequential
     execution and skips the API calls. Each SDK exception is logged via
     ``change_logger.log_error`` and the batch continues.
@@ -215,3 +275,4 @@ def execute_group_diff(
     _execute_renames(ws_helper, diff, change_logger, dry_run, workers)
     _execute_member_adds(ws_helper, diff, change_logger, dry_run, workers)
     _execute_member_removes(ws_helper, diff, change_logger, dry_run, workers)
+    _execute_deletes(ws_helper, diff, change_logger, dry_run, force, workers)

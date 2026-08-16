@@ -103,6 +103,16 @@ def test_main_defaults_enable_policy_deletion_off(monkeypatch):
     assert captured["enable_policy_deletion"] is False
 
 
+def test_main_passes_enable_group_deletion_through_to_run(monkeypatch):
+    captured = _run_legacy(monkeypatch, ["--enable-group-deletion"])
+    assert captured["enable_group_deletion"] is True
+
+
+def test_main_defaults_enable_group_deletion_off(monkeypatch):
+    captured = _run_legacy(monkeypatch, [])
+    assert captured["enable_group_deletion"] is False
+
+
 def test_main_passes_delete_policies_namespaces_through_to_run(monkeypatch):
     captured = _run_legacy(
         monkeypatch,

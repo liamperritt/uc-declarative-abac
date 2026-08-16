@@ -41,6 +41,7 @@ _ENV_FIELD_MAP: dict[str, str] = {
     "ignore_unresolvable_principals": "IGNORE_UNRESOLVABLE_PRINCIPALS",
     "enable_group_creation": "ENABLE_GROUP_CREATION",
     "enable_group_management": "ENABLE_GROUP_MANAGEMENT",
+    "enable_group_deletion": "ENABLE_GROUP_DELETION",
     "enable_governed_tag_deletion": "ENABLE_GOVERNED_TAG_DELETION",
     "enable_policy_deletion": "ENABLE_POLICY_DELETION",
     "force": "FORCE",
@@ -73,6 +74,7 @@ class RunSettings(BaseModel):
     ignore_unresolvable_principals: str = ""
     enable_group_creation: bool = False
     enable_group_management: bool = False
+    enable_group_deletion: bool = False
     enable_governed_tag_deletion: bool = False
     enable_policy_deletion: bool = False
     force: bool = False

@@ -23,9 +23,9 @@ from uc_declarative_abac.principals import (
 from uc_declarative_abac.types import PrincipalType
 from uc_declarative_abac.utils import (
     ExecutionError,
-    InteractiveConfirmationRequiredError,
     OrchestratorError,
     parallel_for_each,
+    prompt_delete_confirmation,
 )
 
 _logger = logging.getLogger("uc_declarative_abac")
@@ -251,31 +251,6 @@ def _execute_updates(
     )
 
 
-def _prompt_delete_confirmation(tags: list[GovernedTag]) -> bool:
-    """Show the list of tags slated for deletion and require interactive confirmation.
-
-    Accepts ``y`` or ``yes`` (case-insensitive) as affirmative; anything else aborts.
-    Re-raises ``EOFError`` (e.g. non-TTY input stream) as
-    ``InteractiveConfirmationRequiredError`` so CI contexts get a clear "set --force"
-    directive instead of a silent skip.
-    """
-    print(f"\nAbout to delete {len(tags)} governed tag(s):")
-    for gt in tags:
-        print(f"  - {gt.name}")
-    print()
-    try:
-        response = input(
-            "This is irreversible and will orphan any objects tagged with these keys. "
-            "Confirm [y/N]: "
-        )
-    except EOFError as exc:
-        raise InteractiveConfirmationRequiredError(
-            "Cannot prompt for confirmation in a non-interactive context. "
-            "Set --force to auto-confirm destructive actions."
-        ) from exc
-    return response.strip().lower() in {"y", "yes"}
-
-
 def _execute_deletes(
     ws_helper: WorkspaceHelper,
     diff: GovernedTagDiff,
@@ -295,7 +270,11 @@ def _execute_deletes(
         for gt in tags_sorted:
             change_logger.log_governed_tag_delete(gt)
         return
-    if not force and not _prompt_delete_confirmation(tags_sorted):
+    if not force and not prompt_delete_confirmation(
+        [gt.name for gt in tags_sorted],
+        "governed tag",
+        "This is irreversible and will orphan any objects tagged with these keys.",
+    ):
         _logger.info("Governed tag deletion cancelled — aborting run.")
         sys.exit(1)
 

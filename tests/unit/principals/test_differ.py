@@ -671,3 +671,106 @@ def test_group_differ_falls_back_to_name_match_when_id_absent():
     assert _alice_resolved in diff.members_to_add["analysts"]
     assert diff.groups_to_rename == []
     assert change_logger.has_errors is False
+
+
+# ---------------------------------------------------------------------------
+# group deletion (under --enable-group-deletion)
+# ---------------------------------------------------------------------------
+
+
+def test_group_differ_does_not_delete_when_flag_disabled():
+    """Default behaviour (flag off): undeclared account groups are left alone."""
+    desired = {_group_with_id("analysts", "1")}
+    all_account_groups = {
+        _group_with_id("analysts", "1"),
+        _group_with_id("legacy", "2"),
+    }
+
+    diff = compute_group_diff(
+        desired,
+        set(),
+        _resolver_passthrough(),
+        ChangeLogger(),
+        all_account_groups=all_account_groups,
+    )
+
+    assert diff.groups_to_delete == set()
+
+
+def test_group_differ_deletes_undeclared_managed_group_when_flag_enabled():
+    """With enable_group_deletion, a Databricks-managed account group absent from config
+    flows into groups_to_delete."""
+    legacy = _group_with_id("legacy", "2")
+    desired = {_group_with_id("analysts", "1")}
+    all_account_groups = {_group_with_id("analysts", "1"), legacy}
+
+    diff = compute_group_diff(
+        desired,
+        set(),
+        _resolver_passthrough(),
+        ChangeLogger(),
+        enable_group_deletion=True,
+        all_account_groups=all_account_groups,
+    )
+
+    assert legacy in diff.groups_to_delete
+    assert _group_with_id("analysts", "1") not in diff.groups_to_delete
+
+
+def test_group_differ_does_not_delete_external_group_when_flag_enabled():
+    """An external (IdP-provisioned) group absent from config is never deleted."""
+    external = _group_with_id("idp-group", "2", external_id="ext-abc")
+    desired = {_group_with_id("analysts", "1")}
+    all_account_groups = {_group_with_id("analysts", "1"), external}
+
+    diff = compute_group_diff(
+        desired,
+        set(),
+        _resolver_passthrough(),
+        ChangeLogger(),
+        enable_group_deletion=True,
+        all_account_groups=all_account_groups,
+    )
+
+    assert external not in diff.groups_to_delete
+    assert diff.groups_to_delete == set()
+
+
+def test_group_differ_does_not_delete_account_system_group_when_flag_enabled():
+    """The Databricks account system groups (account users / account admins) are never
+    deletion candidates, even when absent from config."""
+    system_group = _group_with_id("account users", "2")
+    desired = {_group_with_id("analysts", "1")}
+    all_account_groups = {_group_with_id("analysts", "1"), system_group}
+
+    diff = compute_group_diff(
+        desired,
+        set(),
+        _resolver_passthrough(),
+        ChangeLogger(),
+        enable_group_deletion=True,
+        all_account_groups=all_account_groups,
+    )
+
+    assert system_group not in diff.groups_to_delete
+    assert diff.groups_to_delete == set()
+
+
+def test_group_differ_does_not_delete_group_matched_by_desired_id_on_rename():
+    """A group pending a rename (config holds the new name, the account still the old one,
+    matched by id) is not treated as undeclared and is never deleted."""
+    # Config declares the group under its new name but keeps its id.
+    desired = {_group_with_id("analysts_renamed", "1")}
+    # The account still carries the old display name under the same id.
+    all_account_groups = {_group_with_id("analysts_old", "1")}
+
+    diff = compute_group_diff(
+        desired,
+        set(),
+        _resolver_passthrough(),
+        ChangeLogger(),
+        enable_group_deletion=True,
+        all_account_groups=all_account_groups,
+    )
+
+    assert diff.groups_to_delete == set()
