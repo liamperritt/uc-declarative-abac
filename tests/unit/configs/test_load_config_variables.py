@@ -3,10 +3,10 @@ from __future__ import annotations
 import pytest
 
 from uc_declarative_abac.orchestrator import load_config
-from uc_declarative_abac.utils import TemplateParameterError
+from uc_declarative_abac.utils import TemplateVariableError
 
 # ---------------------------------------------------------------------------
-# Template parameters through the full offline load_config pipeline
+# Template variables through the full offline load_config pipeline
 # (discovery -> resolve_refs -> consolidate_resources -> ResourcesConfig)
 # ---------------------------------------------------------------------------
 
@@ -42,7 +42,7 @@ def _env_catalog_config(env: str) -> dict:
     }
 
 
-def test_load_config_resolves_params_end_to_end(tmp_yaml_dir):
+def test_load_config_resolves_vars_end_to_end(tmp_yaml_dir):
     """A $vars config resolves to concrete objects through the whole pipeline."""
     root = tmp_yaml_dir({"ingestion_uat.yaml": _env_catalog_config("uat")})
 
@@ -53,12 +53,12 @@ def test_load_config_resolves_params_end_to_end(tmp_yaml_dir):
     assert schema.tags == {"environment": "uat", "quality_tier": "bronze"}
 
 
-def test_load_config_raises_config_error_on_missing_param(tmp_yaml_dir):
-    """A $ref that omits a required param fails the offline load with a config error."""
+def test_load_config_raises_config_error_on_missing_var(tmp_yaml_dir):
+    """A $ref that omits a required variable fails the offline load with a config error."""
     config = _env_catalog_config("dev")
     # Drop the required `env` argument from the $ref.
     config["resources"]["catalogs"]["ingestion_dev"]["schemas"][0]["$vars"] = {}
     root = tmp_yaml_dir({"ingestion_dev.yaml": config})
 
-    with pytest.raises(TemplateParameterError, match="[Mm]issing"):
+    with pytest.raises(TemplateVariableError, match="[Mm]issing"):
         load_config(root)

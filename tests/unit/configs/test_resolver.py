@@ -5,7 +5,7 @@ import pytest
 from uc_declarative_abac.configs import resolve_refs
 from uc_declarative_abac.utils import (
     ResolutionError,
-    TemplateParameterError,
+    TemplateVariableError,
     UnreferencedDefinitionError,
 )
 
@@ -1362,7 +1362,7 @@ def test_resolver_leaves_non_defs_strings_unchanged():
 
 
 # ---------------------------------------------------------------------------
-# Template parameters ($vars + {{ placeholder }})
+# Template variables ($vars + {{ placeholder }})
 # ---------------------------------------------------------------------------
 
 
@@ -1382,7 +1382,7 @@ def _schema_defs():
     }
 
 
-def test_resolver_substitutes_ref_params():
+def test_resolver_substitutes_ref_vars():
     """A $ref's $vars values are substituted into the template body."""
     resources = {
         "catalogs": {
@@ -1406,8 +1406,8 @@ def test_resolver_substitutes_ref_params():
     assert "$vars" not in schema
 
 
-def test_resolver_uses_definition_default_when_param_omitted():
-    """A $ref that omits a defaulted param picks up the definition's default."""
+def test_resolver_uses_definition_default_when_var_omitted():
+    """A $ref that omits a defaulted variable picks up the definition's default."""
     resources = {
         "catalogs": {
             "ingestion_prod": {
@@ -1428,8 +1428,8 @@ def test_resolver_uses_definition_default_when_param_omitted():
     assert schema["tags"]["quality_tier"] == "bronze"
 
 
-def test_resolver_ref_param_overrides_definition_default():
-    """A $ref supplying a defaulted param overrides the default."""
+def test_resolver_ref_var_overrides_definition_default():
+    """A $ref supplying a defaulted variable overrides the default."""
     resources = {
         "catalogs": {
             "c": {
@@ -1449,8 +1449,8 @@ def test_resolver_ref_param_overrides_definition_default():
     assert result["catalogs"]["c"]["schemas"][0]["tags"]["quality_tier"] == "gold"
 
 
-def test_resolver_forwards_params_through_nested_ref():
-    """A definition forwards a param to a child $ref via a {{ placeholder }} $vars value."""
+def test_resolver_forwards_vars_through_nested_ref():
+    """A definition forwards a variable to a child $ref via a {{ placeholder }} $vars value."""
     definitions = {
         "tables": {
             "ingestion|salesforce|account": {
@@ -1514,8 +1514,8 @@ def test_resolver_substitutes_placeholder_in_override_value():
     assert result["catalogs"]["c"]["schemas"][0]["name"] == "prod_salesforce_raw"
 
 
-def test_resolver_raises_on_missing_param():
-    """A $ref that fails to supply a required (non-defaulted) param is an error."""
+def test_resolver_raises_on_missing_var():
+    """A $ref that fails to supply a required (non-defaulted) variable is an error."""
     resources = {
         "catalogs": {
             "c": {
@@ -1530,12 +1530,12 @@ def test_resolver_raises_on_missing_param():
         },
     }
 
-    with pytest.raises(TemplateParameterError, match="[Mm]issing"):
+    with pytest.raises(TemplateVariableError, match="[Mm]issing"):
         resolve_refs(_schema_defs(), resources)
 
 
-def test_resolver_raises_on_unused_ref_param():
-    """A $ref supplying a param the template does not use is an error."""
+def test_resolver_raises_on_unused_ref_var():
+    """A $ref supplying a variable the template does not use is an error."""
     resources = {
         "catalogs": {
             "c": {
@@ -1550,12 +1550,12 @@ def test_resolver_raises_on_unused_ref_param():
         },
     }
 
-    with pytest.raises(TemplateParameterError, match="[Uu]nused"):
+    with pytest.raises(TemplateVariableError, match="[Uu]nused"):
         resolve_refs(_schema_defs(), resources)
 
 
-def test_resolver_allows_forwarding_only_param():
-    """A param used only to forward to a child $ref is not flagged unused."""
+def test_resolver_allows_forwarding_only_var():
+    """A variable used only to forward to a child $ref is not flagged unused."""
     definitions = {
         "tables": {
             "t": {
@@ -1603,7 +1603,7 @@ def test_resolver_raises_on_placeholder_in_plain_resource_value():
         },
     }
 
-    with pytest.raises(TemplateParameterError, match="[Uu]nbound"):
+    with pytest.raises(TemplateVariableError, match="[Uu]nbound"):
         resolve_refs({}, resources)
 
 
@@ -1625,12 +1625,12 @@ def test_resolver_raises_on_placeholder_in_ref_target():
 
     # The target is not a real definition key and the placeholder is not substituted,
     # so resolution fails (unresolved ref), not a silent success.
-    with pytest.raises((ResolutionError, TemplateParameterError)):
+    with pytest.raises((ResolutionError, TemplateVariableError)):
         resolve_refs(_schema_defs(), resources)
 
 
 def test_resolver_null_default_is_still_required():
-    """A null-declared param has no default, so a $ref must still supply it."""
+    """A null-declared variable has no default, so a $ref must still supply it."""
     resources = {
         "catalogs": {
             "c": {
@@ -1645,12 +1645,12 @@ def test_resolver_null_default_is_still_required():
         },
     }
 
-    with pytest.raises(TemplateParameterError, match="[Mm]issing"):
+    with pytest.raises(TemplateVariableError, match="[Mm]issing"):
         resolve_refs(_schema_defs(), resources)
 
 
-def test_resolver_empty_string_param_binds_empty():
-    """An explicit empty-string param value binds the placeholder to empty."""
+def test_resolver_empty_string_var_binds_empty():
+    """An explicit empty-string variable value binds the placeholder to empty."""
     definitions = {
         "schemas": {
             "s": {
@@ -1675,8 +1675,8 @@ def test_resolver_empty_string_param_binds_empty():
     assert result["catalogs"]["c"]["schemas"][0]["name"] == "base"
 
 
-def test_resolver_rejects_non_string_param():
-    """A non-string $ref param value is an error (strings only)."""
+def test_resolver_rejects_non_string_var():
+    """A non-string $ref variable value is an error (strings only)."""
     definitions = {
         "schemas": {
             "s": {"$vars": {"n": None}, "name": "s_{{ n }}"},
@@ -1693,7 +1693,7 @@ def test_resolver_rejects_non_string_param():
         },
     }
 
-    with pytest.raises(TemplateParameterError, match="must be a string"):
+    with pytest.raises(TemplateVariableError, match="must be a string"):
         resolve_refs(definitions, resources)
 
 
@@ -1752,11 +1752,11 @@ def test_resolver_replace_strategy_drops_definition_defaults():
         },
     }
 
-    with pytest.raises(TemplateParameterError, match="[Mm]issing"):
+    with pytest.raises(TemplateVariableError, match="[Mm]issing"):
         resolve_refs(_schema_defs(), resources, override_strategy="replace")
 
 
-def test_resolver_config_without_params_is_unchanged():
+def test_resolver_config_without_vars_is_unchanged():
     """A config with no $vars / placeholders resolves exactly as before."""
     definitions = {
         "schemas": {
@@ -1780,7 +1780,7 @@ def test_resolver_config_without_params_is_unchanged():
 def test_resolver_legacy_params_key_is_inert():
     """After the rename, a `$params` key is no longer the feature trigger.
 
-    It is treated as an ordinary field (not template parameters), so it neither binds
+    It is treated as an ordinary field (not template variables), so it neither binds
     placeholders nor gets stripped — it just passes through like any other key.
     """
     definitions = {
@@ -1803,8 +1803,8 @@ def test_resolver_legacy_params_key_is_inert():
     assert schema == {"name": "sales", "$params": {"env": "prod"}}
 
 
-def test_resolver_undeclared_params_allowed_when_no_signature_block():
-    """A definition with no $vars block uses implicit params (all required)."""
+def test_resolver_undeclared_vars_allowed_when_no_signature_block():
+    """A definition with no $vars block uses implicit variables (all required)."""
     definitions = {
         "schemas": {
             "s": {"name": "salesforce_{{ env }}"},  # implicit env, no $vars block
@@ -1850,12 +1850,12 @@ def test_resolver_raises_on_incomplete_signature_undeclared_placeholder():
         },
     }
 
-    with pytest.raises(TemplateParameterError, match="undeclared"):
+    with pytest.raises(TemplateVariableError, match="undeclared"):
         resolve_refs(definitions, resources)
 
 
 def test_resolver_raises_on_incomplete_signature_unused_declaration():
-    """A declared param the body never uses is a hard error, upfront."""
+    """A declared variable the body never uses is a hard error, upfront."""
     definitions = {
         "schemas": {
             "s": {
@@ -1875,5 +1875,5 @@ def test_resolver_raises_on_incomplete_signature_unused_declaration():
         },
     }
 
-    with pytest.raises(TemplateParameterError, match="never uses"):
+    with pytest.raises(TemplateVariableError, match="never uses"):
         resolve_refs(definitions, resources)

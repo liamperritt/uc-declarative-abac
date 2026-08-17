@@ -3,11 +3,11 @@ from __future__ import annotations
 import copy
 from typing import Any, Literal
 
-from uc_declarative_abac.configs.parameters import (
+from uc_declarative_abac.configs.variables import (
     check_no_unbound,
     check_no_unused,
     check_signature_complete,
-    check_string_params,
+    check_string_vars,
     collect_placeholders,
     finalise,
     substitute_in_body,
@@ -22,7 +22,7 @@ OverrideStrategy = Literal["merge", "replace"]
 
 _PRIMITIVE_TYPES = (str, int, float, bool)
 _IDENTIFIER_KEYS = ("name", "alias", "$ref")
-_PARAMETERS_KEY = "$vars"
+_VARS_KEY = "$vars"
 
 
 def _is_primitive(value: Any) -> bool:
@@ -182,7 +182,7 @@ def resolve_refs(
             f"Unreferenced definitions: {', '.join(keys)}"
         )
 
-    # Final template-parameter pass over the fully-resolved tree: any surviving
+    # Final template-variable pass over the fully-resolved tree: any surviving
     # ``{{ placeholder }}`` had nothing to bind it (e.g. a placeholder in a plain
     # resource value with no $ref) and is a hard error; escaped ``{{{{ }}}}`` braces
     # are collapsed to their literals. Runs once, after all $ref expansion.
@@ -196,14 +196,14 @@ def _check_definition_signatures(definitions: dict) -> None:
     its body uses (each defaulted or null). Checked once per definition against the raw
     body — before any inline ``$defs/`` expansion — so a definition is judged only on
     its own placeholders. Definitions without a ``$vars`` block use implicit
-    parameters and are skipped.
+    variables and are skipped.
     """
     for entries in definitions.values():
         if not isinstance(entries, dict):
             continue
         for def_key, body in entries.items():
-            if isinstance(body, dict) and _PARAMETERS_KEY in body:
-                declared = body.get(_PARAMETERS_KEY) or {}
+            if isinstance(body, dict) and _VARS_KEY in body:
+                declared = body.get(_VARS_KEY) or {}
                 check_signature_complete(def_key, body, declared)
 
 
@@ -325,7 +325,7 @@ def _resolve_ref(
     else:
         resolved = _merge_dicts(resolved, overrides)
 
-    resolved = _apply_params(resolved, ref_path)
+    resolved = _apply_vars(resolved, ref_path)
 
     result = _resolve_node(
         definitions, resolved, referenced, visited, override_strategy
@@ -334,24 +334,24 @@ def _resolve_ref(
     return result
 
 
-def _apply_params(resolved: dict, ref_path: str) -> dict:
-    """Bind and substitute template parameters for a just-merged $ref body.
+def _apply_vars(resolved: dict, ref_path: str) -> dict:
+    """Bind and substitute template variables for a just-merged $ref body.
 
     ``$vars`` rides the ordinary override merge like any other key, so ``resolved``
-    already holds the effective parameters — the definition's declared defaults merged
+    already holds the effective variables — the definition's declared defaults merged
     under the $ref's supplied arguments (honouring the active override strategy). Pop
     that merged block off (so it never leaks to model validation), drop null entries
     ("not supplied"; ``''`` is a real value), validate against the placeholders the body
     actually uses, and substitute — structure-aware, so a nested $ref's forwarded
     ``$vars`` values become literals before that child is expanded.
     """
-    merged_params = resolved.pop(_PARAMETERS_KEY, None) or {}
-    params = {k: v for k, v in merged_params.items() if v is not None}
-    check_string_params(params, context=f"$ref '{ref_path}'")
+    merged_variables = resolved.pop(_VARS_KEY, None) or {}
+    variables = {k: v for k, v in merged_variables.items() if v is not None}
+    check_string_vars(variables, context=f"$ref '{ref_path}'")
     used = collect_placeholders(resolved)
-    check_no_unbound(used, set(params), ref=ref_path)
-    check_no_unused(set(params), used, ref=ref_path)
-    return substitute_in_body(resolved, params)
+    check_no_unbound(used, set(variables), ref=ref_path)
+    check_no_unused(set(variables), used, ref=ref_path)
+    return substitute_in_body(resolved, variables)
 
 
 def _resolve_inline_defs_string(
