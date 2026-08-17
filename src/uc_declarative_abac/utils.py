@@ -253,13 +253,13 @@ class UnreferencedDefinitionError(OrchestratorError):
 
 
 class TemplateParameterError(OrchestratorError):
-    """Raised for template-parameter (``$params`` / ``{{ placeholder }}``) errors.
+    """Raised for template-parameter (``$vars`` / ``{{ placeholder }}``) errors.
 
     Covers every failure mode of the template-parameters feature: an incomplete
-    definition ``$params`` signature (a body placeholder left undeclared, or a
+    definition ``$vars`` signature (a body placeholder left undeclared, or a
     declared parameter the body never uses), a ``$ref`` that fails to supply a
     required parameter (missing) or supplies one the template does not use
-    (unused), a non-string ``$params`` value, and a ``{{ placeholder }}`` in a
+    (unused), a non-string ``$vars`` value, and a ``{{ placeholder }}`` in a
     value not bound by any ``$ref``.
     """
 

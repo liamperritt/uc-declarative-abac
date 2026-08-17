@@ -1,8 +1,8 @@
 """Template-parameter helpers for the config resolver.
 
 A ``definitions`` entry may be a *template* containing ``{{ placeholder }}`` tokens;
-a ``$ref`` that instantiates it supplies concrete values via a sibling ``$params``
-block, and a definition may declare per-parameter defaults via its own ``$params``
+a ``$ref`` that instantiates it supplies concrete values via a sibling ``$vars``
+block, and a definition may declare per-parameter defaults via its own ``$vars``
 block. This module is the single source of truth for detecting, validating, and
 substituting those tokens. It is dependency-light and imported by ``resolver.py``
 (never the reverse).
@@ -12,7 +12,7 @@ Literal double braces are escaped by doubling — ``{{{{`` renders a literal ``{
 and ``}}}}`` a literal ``}}`` — so genuine ``{{ }}`` in SQL function bodies survives.
 
 Structure-awareness (see ``collect_placeholders`` / ``substitute_in_body``): within a
-template body, plain values and a nested ``$ref``'s ``$params`` *values* (forwarding)
+template body, plain values and a nested ``$ref``'s ``$vars`` *values* (forwarding)
 belong to the enclosing template's parameter scope; a nested ``$ref``'s target string
 and its other override values belong to that child ``$ref`` and are left untouched.
 """
@@ -35,7 +35,7 @@ _TOKEN_RE = re.compile(
 )
 
 _REF_KEY = "$ref"
-_PARAMS_KEY = "$params"
+_PARAMETERS_KEY = "$vars"
 
 
 def _quote_names(names) -> str:
@@ -81,9 +81,9 @@ def collect_placeholders(node: Any) -> set[str]:
     """Collect every parameter name referenced within a template body, structure-aware.
 
     Scans string *values* only (never dict keys). At a nested ``$ref`` dict, only the
-    ``$params`` values are in the enclosing template's scope (forwarding); the ``$ref``
+    ``$vars`` values are in the enclosing template's scope (forwarding); the ``$ref``
     target and the ``$ref``'s other override values belong to that child and are skipped.
-    A forwarding-only parameter — used solely as a nested ``$ref``'s ``$params`` value —
+    A forwarding-only parameter — used solely as a nested ``$ref``'s ``$vars`` value —
     therefore counts as used.
     """
     found: set[str] = set()
@@ -94,7 +94,7 @@ def collect_placeholders(node: Any) -> set[str]:
 def _collect(node: Any, found: set[str]) -> None:
     if isinstance(node, dict):
         if _REF_KEY in node:
-            for value in (node.get(_PARAMS_KEY) or {}).values():
+            for value in (node.get(_PARAMETERS_KEY) or {}).values():
                 _collect(value, found)
             return
         for value in node.values():
@@ -109,10 +109,10 @@ def _collect(node: Any, found: set[str]) -> None:
 def substitute_in_body(body: Any, params: dict[str, str]) -> Any:
     """Return a copy of ``body`` with placeholders substituted, structure-aware.
 
-    Substitutes plain string values and a nested ``$ref``'s ``$params`` values (so a
+    Substitutes plain string values and a nested ``$ref``'s ``$vars`` values (so a
     forwarded value becomes a literal before that child ``$ref`` is expanded). A nested
     ``$ref``'s target and its other override values are left untouched — they are bound
-    by that child ``$ref``'s own ``$params`` when it expands.
+    by that child ``$ref``'s own ``$vars`` when it expands.
     """
     return _substitute(copy.deepcopy(body), params)
 
@@ -120,9 +120,9 @@ def substitute_in_body(body: Any, params: dict[str, str]) -> Any:
 def _substitute(node: Any, params: dict[str, str]) -> Any:
     if isinstance(node, dict):
         if _REF_KEY in node:
-            ref_params = node.get(_PARAMS_KEY)
+            ref_params = node.get(_PARAMETERS_KEY)
             if isinstance(ref_params, dict):
-                node[_PARAMS_KEY] = {
+                node[_PARAMETERS_KEY] = {
                     key: _substitute(value, params) for key, value in ref_params.items()
                 }
             return node
@@ -156,14 +156,14 @@ def _finalise(node: Any) -> Any:
             raise TemplateParameterError(
                 f"Unbound template parameter(s) {_quote_names(unresolved)} in value "
                 f"{node!r}: a '{{{{ ... }}}}' placeholder can only appear in a value "
-                f"bound by a $ref's $params (a definition body or a $ref override value)."
+                f"bound by a $ref's $vars (a definition body or a $ref override value)."
             )
         return unescape(node)
     return node
 
 
 def check_string_params(params: dict[str, Any], *, context: str) -> None:
-    """Assert every ``$params`` value is a string (or ``None`` = not supplied).
+    """Assert every ``$vars`` value is a string (or ``None`` = not supplied).
 
     ``None`` is permitted: on a definition it declares a required parameter; on a ``$ref``
     it is dropped before this check. Numbers, booleans, lists, and maps are rejected —
@@ -184,7 +184,7 @@ def check_no_unbound(used: set[str], available: set[str], *, ref: str) -> None:
     if missing:
         raise TemplateParameterError(
             f"Missing template parameter(s) {_quote_names(missing)} for $ref '{ref}': "
-            f"the template uses these placeholders but neither $params nor a definition "
+            f"the template uses these placeholders but neither $vars nor a definition "
             f"default supplies a value."
         )
 
@@ -203,9 +203,9 @@ def check_no_unused(supplied: set[str], used: set[str], *, ref: str) -> None:
 def check_signature_complete(
     def_key: str, body: dict, declared_params: dict[str, Any]
 ) -> None:
-    """Enforce the "declared => complete" rule for a definition's ``$params`` signature.
+    """Enforce the "declared => complete" rule for a definition's ``$vars`` signature.
 
-    If a definition declares a ``$params`` block, it must be a complete signature: the
+    If a definition declares a ``$vars`` block, it must be a complete signature: the
     declared names and the placeholders the body actually uses must match exactly, in
     both directions. Declared values must be strings (defaults) or ``None`` (required),
     and a default value may not itself contain a placeholder (literal-only defaults).
@@ -225,8 +225,8 @@ def check_signature_complete(
     undeclared = used - declared
     if undeclared:
         raise TemplateParameterError(
-            f"Definition '{def_key}' declares a $params signature but its body uses "
-            f"undeclared placeholder(s) {_quote_names(undeclared)}; add them to $params "
+            f"Definition '{def_key}' declares a $vars signature but its body uses "
+            f"undeclared placeholder(s) {_quote_names(undeclared)}; add them to $vars "
             f"(with a default or as null for required)."
         )
 
@@ -234,11 +234,11 @@ def check_signature_complete(
     if unused:
         raise TemplateParameterError(
             f"Definition '{def_key}' declares parameter(s) {_quote_names(unused)} in "
-            f"$params that its body never uses; remove them or reference them via "
+            f"$vars that its body never uses; remove them or reference them via "
             f"'{{{{ ... }}}}'."
         )
 
 
 def _body_without_params(body: dict) -> dict:
-    """A shallow view of a definition body with its own top-level ``$params`` removed."""
-    return {key: value for key, value in body.items() if key != _PARAMS_KEY}
+    """A shallow view of a definition body with its own top-level ``$vars`` removed."""
+    return {key: value for key, value in body.items() if key != _PARAMETERS_KEY}

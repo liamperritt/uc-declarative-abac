@@ -17,7 +17,7 @@ def _env_catalog_config(env: str) -> dict:
         "definitions": {
             "schemas": {
                 "ingestion|salesforce": {
-                    "$params": {"env": None, "medallion": "bronze"},
+                    "$vars": {"env": None, "medallion": "bronze"},
                     "name": "salesforce",
                     "tags": {
                         "environment": "{{ env }}",
@@ -33,7 +33,7 @@ def _env_catalog_config(env: str) -> dict:
                     "schemas": [
                         {
                             "$ref": "$defs/schemas/ingestion|salesforce",
-                            "$params": {"env": env},
+                            "$vars": {"env": env},
                         },
                     ],
                 },
@@ -43,7 +43,7 @@ def _env_catalog_config(env: str) -> dict:
 
 
 def test_load_config_resolves_params_end_to_end(tmp_yaml_dir):
-    """A $params config resolves to concrete objects through the whole pipeline."""
+    """A $vars config resolves to concrete objects through the whole pipeline."""
     root = tmp_yaml_dir({"ingestion_uat.yaml": _env_catalog_config("uat")})
 
     config = load_config(root)
@@ -57,7 +57,7 @@ def test_load_config_raises_config_error_on_missing_param(tmp_yaml_dir):
     """A $ref that omits a required param fails the offline load with a config error."""
     config = _env_catalog_config("dev")
     # Drop the required `env` argument from the $ref.
-    config["resources"]["catalogs"]["ingestion_dev"]["schemas"][0]["$params"] = {}
+    config["resources"]["catalogs"]["ingestion_dev"]["schemas"][0]["$vars"] = {}
     root = tmp_yaml_dir({"ingestion_dev.yaml": config})
 
     with pytest.raises(TemplateParameterError, match="[Mm]issing"):

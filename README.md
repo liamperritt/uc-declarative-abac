@@ -875,7 +875,7 @@ resources:
 
 ### Template parameters
 
-Definitions can be **parameterised templates**. Any string value in a definition may contain `{{ placeholder }}` tokens; each `$ref` that instantiates the definition supplies concrete values via a sibling `$params` block. Think of a definition as a function, a `$ref` as a call, and `$params` as the arguments. This removes the last major source of copy-paste — environment-based names and principals — that plain `$ref` overrides couldn't factor out.
+Definitions can be **parameterised templates**. Any string value in a definition may contain `{{ placeholder }}` tokens; each `$ref` that instantiates the definition supplies concrete values via a sibling `$vars` block. Think of a definition as a function, a `$ref` as a call, and `$vars` as the arguments. This removes the last major source of copy-paste — environment-based names and principals — that plain `$ref` overrides couldn't factor out.
 
 ```yaml
 definitions:
@@ -897,25 +897,25 @@ resources:
       name: gold_prod
       policies:
         - $ref: $defs/policies/domain|grant_read_on_finance
-          $params:
+          $vars:
             env: prod
     gold_uat:
       name: gold_uat
       policies:
         - $ref: $defs/policies/domain|grant_read_on_finance
-          $params:
+          $vars:
             env: uat
 ```
 
 **Syntax.** `{{ name }}` wraps a bare parameter name (inner whitespace is insignificant — `{{ env }}` and `{{env}}` are equal; the spaced form is recommended). It is a substitution reference, not a templating engine: no filters or expressions. A literal double-brace in a value (e.g. in a function `return` body) is escaped by doubling — `{{{{` renders `{{` and `}}}}` renders `}}`.
 
-**Defaults and signatures (optional).** A definition may declare its own `$params` block to give parameters default values (`medallion: bronze`) and/or to declare required parameters with a null value (`env:`). The effective value of a parameter is the definition's default overridden by the `$ref`'s argument (the same deep-merge as any other `$ref` override, honouring `--ref-override-strategy`). Declaring a `$params` block is optional — with none, parameters are implicit and all required — **but a declared block must be complete**: it must list exactly the placeholders the body uses. This makes the block a trustworthy, discoverable signature and catches body typos.
+**Defaults and signatures (optional).** A definition may declare its own `$vars` block to give parameters default values (`medallion: bronze`) and/or to declare required parameters with a null value (`env:`). The effective value of a parameter is the definition's default overridden by the `$ref`'s argument (the same deep-merge as any other `$ref` override, honouring `--ref-override-strategy`). Declaring a `$vars` block is optional — with none, parameters are implicit and all required — **but a declared block must be complete**: it must list exactly the placeholders the body uses. This makes the block a trustworthy, discoverable signature and catches body typos.
 
 ```yaml
 definitions:
   schemas:
     ingestion|salesforce:
-      $params:
+      $vars:
         env: ~              # required — no default
         medallion: bronze   # optional — defaults to bronze
       name: salesforce
@@ -924,7 +924,7 @@ definitions:
         quality_tier: '{{ medallion }}'
 ```
 
-**Rules.** Parameter values are strings (a number/bool is rejected with a hint to quote it; `''` is a real empty string, null means "not supplied"). Placeholders may appear only in values bound by a `$ref` (a definition body or a `$ref`'s override values) — never in dict keys or `$defs/...` reference targets. A multi-level template forwards a parameter to a child `$ref` by using `{{ placeholder }}` as the child's `$params` value. Every placeholder must be bound (by an argument or a default) and every supplied argument must be used; a missing, unused, incomplete-signature, non-string, or unbound-placeholder case fails config validation. See `scratch/template_params_feature_proposal.md` for the full specification.
+**Rules.** Parameter values are strings (a number/bool is rejected with a hint to quote it; `''` is a real empty string, null means "not supplied"). Placeholders may appear only in values bound by a `$ref` (a definition body or a `$ref`'s override values) — never in dict keys or `$defs/...` reference targets. A multi-level template forwards a parameter to a child `$ref` by using `{{ placeholder }}` as the child's `$vars` value. Every placeholder must be bound (by an argument or a default) and every supplied argument must be used; a missing, unused, incomplete-signature, non-string, or unbound-placeholder case fails config validation. See the [feature proposal](https://github.com/liamperritt/uc-declarative-abac/issues/18) for the full specification.
 
 ---
 

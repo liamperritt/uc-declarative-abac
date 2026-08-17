@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 from typing import Any, Literal
 
-from uc_declarative_abac.configs.params import (
+from uc_declarative_abac.configs.parameters import (
     check_no_unbound,
     check_no_unused,
     check_signature_complete,
@@ -22,7 +22,7 @@ OverrideStrategy = Literal["merge", "replace"]
 
 _PRIMITIVE_TYPES = (str, int, float, bool)
 _IDENTIFIER_KEYS = ("name", "alias", "$ref")
-_PARAMS_KEY = "$params"
+_PARAMETERS_KEY = "$vars"
 
 
 def _is_primitive(value: Any) -> bool:
@@ -192,18 +192,18 @@ def resolve_refs(
 def _check_definition_signatures(definitions: dict) -> None:
     """Enforce the "declared => complete" rule on every definition upfront.
 
-    A definition that declares a ``$params`` block must list exactly the placeholders
+    A definition that declares a ``$vars`` block must list exactly the placeholders
     its body uses (each defaulted or null). Checked once per definition against the raw
     body — before any inline ``$defs/`` expansion — so a definition is judged only on
-    its own placeholders. Definitions without a ``$params`` block use implicit
+    its own placeholders. Definitions without a ``$vars`` block use implicit
     parameters and are skipped.
     """
     for entries in definitions.values():
         if not isinstance(entries, dict):
             continue
         for def_key, body in entries.items():
-            if isinstance(body, dict) and _PARAMS_KEY in body:
-                declared = body.get(_PARAMS_KEY) or {}
+            if isinstance(body, dict) and _PARAMETERS_KEY in body:
+                declared = body.get(_PARAMETERS_KEY) or {}
                 check_signature_complete(def_key, body, declared)
 
 
@@ -337,15 +337,15 @@ def _resolve_ref(
 def _apply_params(resolved: dict, ref_path: str) -> dict:
     """Bind and substitute template parameters for a just-merged $ref body.
 
-    ``$params`` rides the ordinary override merge like any other key, so ``resolved``
+    ``$vars`` rides the ordinary override merge like any other key, so ``resolved``
     already holds the effective parameters — the definition's declared defaults merged
     under the $ref's supplied arguments (honouring the active override strategy). Pop
     that merged block off (so it never leaks to model validation), drop null entries
     ("not supplied"; ``''`` is a real value), validate against the placeholders the body
     actually uses, and substitute — structure-aware, so a nested $ref's forwarded
-    ``$params`` values become literals before that child is expanded.
+    ``$vars`` values become literals before that child is expanded.
     """
-    merged_params = resolved.pop(_PARAMS_KEY, None) or {}
+    merged_params = resolved.pop(_PARAMETERS_KEY, None) or {}
     params = {k: v for k, v in merged_params.items() if v is not None}
     check_string_params(params, context=f"$ref '{ref_path}'")
     used = collect_placeholders(resolved)

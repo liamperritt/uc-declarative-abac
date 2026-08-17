@@ -1362,7 +1362,7 @@ def test_resolver_leaves_non_defs_strings_unchanged():
 
 
 # ---------------------------------------------------------------------------
-# Template parameters ($params + {{ placeholder }})
+# Template parameters ($vars + {{ placeholder }})
 # ---------------------------------------------------------------------------
 
 
@@ -1371,7 +1371,7 @@ def _schema_defs():
     return {
         "schemas": {
             "ingestion|salesforce": {
-                "$params": {"env": None, "medallion": "bronze"},
+                "$vars": {"env": None, "medallion": "bronze"},
                 "name": "salesforce",
                 "tags": {
                     "environment": "{{ env }}",
@@ -1383,7 +1383,7 @@ def _schema_defs():
 
 
 def test_resolver_substitutes_ref_params():
-    """A $ref's $params values are substituted into the template body."""
+    """A $ref's $vars values are substituted into the template body."""
     resources = {
         "catalogs": {
             "ingestion_prod": {
@@ -1391,7 +1391,7 @@ def test_resolver_substitutes_ref_params():
                 "schemas": [
                     {
                         "$ref": "$defs/schemas/ingestion|salesforce",
-                        "$params": {"env": "prod", "medallion": "silver"},
+                        "$vars": {"env": "prod", "medallion": "silver"},
                     },
                 ],
             },
@@ -1402,8 +1402,8 @@ def test_resolver_substitutes_ref_params():
 
     schema = result["catalogs"]["ingestion_prod"]["schemas"][0]
     assert schema["tags"] == {"environment": "prod", "quality_tier": "silver"}
-    # $params is consumed, never left on the resolved body.
-    assert "$params" not in schema
+    # $vars is consumed, never left on the resolved body.
+    assert "$vars" not in schema
 
 
 def test_resolver_uses_definition_default_when_param_omitted():
@@ -1415,7 +1415,7 @@ def test_resolver_uses_definition_default_when_param_omitted():
                 "schemas": [
                     {
                         "$ref": "$defs/schemas/ingestion|salesforce",
-                        "$params": {"env": "prod"},  # medallion omitted → bronze
+                        "$vars": {"env": "prod"},  # medallion omitted → bronze
                     },
                 ],
             },
@@ -1437,7 +1437,7 @@ def test_resolver_ref_param_overrides_definition_default():
                 "schemas": [
                     {
                         "$ref": "$defs/schemas/ingestion|salesforce",
-                        "$params": {"env": "uat", "medallion": "gold"},
+                        "$vars": {"env": "uat", "medallion": "gold"},
                     },
                 ],
             },
@@ -1450,23 +1450,23 @@ def test_resolver_ref_param_overrides_definition_default():
 
 
 def test_resolver_forwards_params_through_nested_ref():
-    """A definition forwards a param to a child $ref via a {{ placeholder }} $params value."""
+    """A definition forwards a param to a child $ref via a {{ placeholder }} $vars value."""
     definitions = {
         "tables": {
             "ingestion|salesforce|account": {
-                "$params": {"env": None},
+                "$vars": {"env": None},
                 "name": "account",
                 "tags": {"environment": "{{ env }}"},
             },
         },
         "schemas": {
             "ingestion|salesforce": {
-                "$params": {"env": None},
+                "$vars": {"env": None},
                 "name": "salesforce",
                 "tables": [
                     {
                         "$ref": "$defs/tables/ingestion|salesforce|account",
-                        "$params": {"env": "{{ env }}"},
+                        "$vars": {"env": "{{ env }}"},
                     },
                 ],
             },
@@ -1479,7 +1479,7 @@ def test_resolver_forwards_params_through_nested_ref():
                 "schemas": [
                     {
                         "$ref": "$defs/schemas/ingestion|salesforce",
-                        "$params": {"env": "prod"},
+                        "$vars": {"env": "prod"},
                     },
                 ],
             },
@@ -1493,7 +1493,7 @@ def test_resolver_forwards_params_through_nested_ref():
 
 
 def test_resolver_substitutes_placeholder_in_override_value():
-    """A placeholder in a $ref's sibling override value is bound by that $ref's $params."""
+    """A placeholder in a $ref's sibling override value is bound by that $ref's $vars."""
     resources = {
         "catalogs": {
             "c": {
@@ -1502,7 +1502,7 @@ def test_resolver_substitutes_placeholder_in_override_value():
                     {
                         "$ref": "$defs/schemas/ingestion|salesforce",
                         "name": "{{ env }}_salesforce_raw",
-                        "$params": {"env": "prod"},
+                        "$vars": {"env": "prod"},
                     },
                 ],
             },
@@ -1523,7 +1523,7 @@ def test_resolver_raises_on_missing_param():
                 "schemas": [
                     {
                         "$ref": "$defs/schemas/ingestion|salesforce",
-                        "$params": {"medallion": "bronze"},  # env missing
+                        "$vars": {"medallion": "bronze"},  # env missing
                     },
                 ],
             },
@@ -1543,7 +1543,7 @@ def test_resolver_raises_on_unused_ref_param():
                 "schemas": [
                     {
                         "$ref": "$defs/schemas/ingestion|salesforce",
-                        "$params": {"env": "prod", "typo": "x"},
+                        "$vars": {"env": "prod", "typo": "x"},
                     },
                 ],
             },
@@ -1559,17 +1559,17 @@ def test_resolver_allows_forwarding_only_param():
     definitions = {
         "tables": {
             "t": {
-                "$params": {"env": None},
+                "$vars": {"env": None},
                 "name": "account",
                 "tags": {"environment": "{{ env }}"},
             },
         },
         "schemas": {
             "s": {
-                "$params": {"env": None},
+                "$vars": {"env": None},
                 "name": "salesforce",
                 "tables": [
-                    {"$ref": "$defs/tables/t", "$params": {"env": "{{ env }}"}},
+                    {"$ref": "$defs/tables/t", "$vars": {"env": "{{ env }}"}},
                 ],
             },
         },
@@ -1579,7 +1579,7 @@ def test_resolver_allows_forwarding_only_param():
             "c": {
                 "name": "c",
                 "schemas": [
-                    {"$ref": "$defs/schemas/s", "$params": {"env": "prod"}},
+                    {"$ref": "$defs/schemas/s", "$vars": {"env": "prod"}},
                 ],
             },
         },
@@ -1616,7 +1616,7 @@ def test_resolver_raises_on_placeholder_in_ref_target():
                 "schemas": [
                     {
                         "$ref": "$defs/schemas/ingestion|salesforce_{{ env }}",
-                        "$params": {"env": "prod"},
+                        "$vars": {"env": "prod"},
                     },
                 ],
             },
@@ -1638,7 +1638,7 @@ def test_resolver_null_default_is_still_required():
                 "schemas": [
                     {
                         "$ref": "$defs/schemas/ingestion|salesforce",
-                        "$params": {"medallion": "bronze"},  # env (null) not supplied
+                        "$vars": {"medallion": "bronze"},  # env (null) not supplied
                     },
                 ],
             },
@@ -1654,7 +1654,7 @@ def test_resolver_empty_string_param_binds_empty():
     definitions = {
         "schemas": {
             "s": {
-                "$params": {"suffix": None},
+                "$vars": {"suffix": None},
                 "name": "base{{ suffix }}",
             },
         },
@@ -1664,7 +1664,7 @@ def test_resolver_empty_string_param_binds_empty():
             "c": {
                 "name": "c",
                 "schemas": [
-                    {"$ref": "$defs/schemas/s", "$params": {"suffix": ""}},
+                    {"$ref": "$defs/schemas/s", "$vars": {"suffix": ""}},
                 ],
             },
         },
@@ -1679,7 +1679,7 @@ def test_resolver_rejects_non_string_param():
     """A non-string $ref param value is an error (strings only)."""
     definitions = {
         "schemas": {
-            "s": {"$params": {"n": None}, "name": "s_{{ n }}"},
+            "s": {"$vars": {"n": None}, "name": "s_{{ n }}"},
         },
     }
     resources = {
@@ -1687,7 +1687,7 @@ def test_resolver_rejects_non_string_param():
             "c": {
                 "name": "c",
                 "schemas": [
-                    {"$ref": "$defs/schemas/s", "$params": {"n": 3}},
+                    {"$ref": "$defs/schemas/s", "$vars": {"n": 3}},
                 ],
             },
         },
@@ -1702,7 +1702,7 @@ def test_resolver_escaped_double_braces_survive_substitution_and_guard():
     definitions = {
         "functions": {
             "shared|mask_for_env": {
-                "$params": {"env": None},
+                "$vars": {"env": None},
                 "name": "mask_for_{{ env }}",
                 "return": "CASE WHEN '{{ env }}' = 'prod' "
                 "THEN CONCAT('{{{{', val, '}}}}') ELSE val END",
@@ -1716,7 +1716,7 @@ def test_resolver_escaped_double_braces_survive_substitution_and_guard():
                 "functions": [
                     {
                         "$ref": "$defs/functions/shared|mask_for_env",
-                        "$params": {"env": "prod"},
+                        "$vars": {"env": "prod"},
                     },
                 ],
             },
@@ -1734,18 +1734,18 @@ def test_resolver_escaped_double_braces_survive_substitution_and_guard():
 
 
 def test_resolver_replace_strategy_drops_definition_defaults():
-    """Under replace, a $ref's $params wholesale-replaces the definition's defaults."""
+    """Under replace, a $ref's $vars wholesale-replaces the definition's defaults."""
     resources = {
         "catalogs": {
             "c": {
                 "name": "c",
                 "schemas": [
                     {
-                        # Under replace, this $params replaces the definition's
+                        # Under replace, this $vars replaces the definition's
                         # {env: null, medallion: bronze} entirely, so medallion is
                         # no longer defaulted and its placeholder is unbound.
                         "$ref": "$defs/schemas/ingestion|salesforce",
-                        "$params": {"env": "prod"},
+                        "$vars": {"env": "prod"},
                     },
                 ],
             },
@@ -1757,7 +1757,7 @@ def test_resolver_replace_strategy_drops_definition_defaults():
 
 
 def test_resolver_config_without_params_is_unchanged():
-    """A config with no $params / placeholders resolves exactly as before."""
+    """A config with no $vars / placeholders resolves exactly as before."""
     definitions = {
         "schemas": {
             "ops|sales": {"name": "sales", "comment": "Sales"},
@@ -1777,11 +1777,37 @@ def test_resolver_config_without_params_is_unchanged():
     assert schema == {"name": "sales", "comment": "Sales"}
 
 
-def test_resolver_undeclared_params_allowed_when_no_signature_block():
-    """A definition with no $params block uses implicit params (all required)."""
+def test_resolver_legacy_params_key_is_inert():
+    """After the rename, a `$params` key is no longer the feature trigger.
+
+    It is treated as an ordinary field (not template parameters), so it neither binds
+    placeholders nor gets stripped — it just passes through like any other key.
+    """
     definitions = {
         "schemas": {
-            "s": {"name": "salesforce_{{ env }}"},  # implicit env, no $params block
+            "ops|sales": {"name": "sales", "$params": {"env": "prod"}},
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "schemas": [{"$ref": "$defs/schemas/ops|sales"}],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    schema = result["catalogs"]["main"]["schemas"][0]
+    # `$params` is not consumed as a $vars block; it survives as a plain field.
+    assert schema == {"name": "sales", "$params": {"env": "prod"}}
+
+
+def test_resolver_undeclared_params_allowed_when_no_signature_block():
+    """A definition with no $vars block uses implicit params (all required)."""
+    definitions = {
+        "schemas": {
+            "s": {"name": "salesforce_{{ env }}"},  # implicit env, no $vars block
         },
     }
     resources = {
@@ -1789,7 +1815,7 @@ def test_resolver_undeclared_params_allowed_when_no_signature_block():
             "c": {
                 "name": "c",
                 "schemas": [
-                    {"$ref": "$defs/schemas/s", "$params": {"env": "prod"}},
+                    {"$ref": "$defs/schemas/s", "$vars": {"env": "prod"}},
                 ],
             },
         },
@@ -1801,11 +1827,11 @@ def test_resolver_undeclared_params_allowed_when_no_signature_block():
 
 
 def test_resolver_raises_on_incomplete_signature_undeclared_placeholder():
-    """A declared $params missing a body placeholder is a hard error, upfront."""
+    """A declared $vars missing a body placeholder is a hard error, upfront."""
     definitions = {
         "schemas": {
             "s": {
-                "$params": {"env": None},  # region used in body but not declared
+                "$vars": {"env": None},  # region used in body but not declared
                 "name": "{{ env }}_{{ region }}",
             },
         },
@@ -1817,7 +1843,7 @@ def test_resolver_raises_on_incomplete_signature_undeclared_placeholder():
                 "schemas": [
                     {
                         "$ref": "$defs/schemas/s",
-                        "$params": {"env": "p", "region": "us"},
+                        "$vars": {"env": "p", "region": "us"},
                     },
                 ],
             },
@@ -1833,7 +1859,7 @@ def test_resolver_raises_on_incomplete_signature_unused_declaration():
     definitions = {
         "schemas": {
             "s": {
-                "$params": {"env": None, "extra": "x"},  # extra unused
+                "$vars": {"env": None, "extra": "x"},  # extra unused
                 "name": "{{ env }}",
             },
         },
@@ -1843,7 +1869,7 @@ def test_resolver_raises_on_incomplete_signature_unused_declaration():
             "c": {
                 "name": "c",
                 "schemas": [
-                    {"$ref": "$defs/schemas/s", "$params": {"env": "prod"}},
+                    {"$ref": "$defs/schemas/s", "$vars": {"env": "prod"}},
                 ],
             },
         },

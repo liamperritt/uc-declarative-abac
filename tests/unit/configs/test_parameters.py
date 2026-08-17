@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from uc_declarative_abac.configs.params import (
+from uc_declarative_abac.configs.parameters import (
     check_no_unbound,
     check_no_unused,
     check_signature_complete,
@@ -119,10 +119,10 @@ def test_collect_placeholders_skips_dict_keys():
 
 
 def test_collect_placeholders_counts_forwarded_nested_ref_params():
-    """A placeholder used only as a nested $ref's $params value counts as used."""
+    """A placeholder used only as a nested $ref's $vars value counts as used."""
     body = {
         "tables": [
-            {"$ref": "$defs/tables/x", "$params": {"env": "{{ env }}"}},
+            {"$ref": "$defs/tables/x", "$vars": {"env": "{{ env }}"}},
         ],
     }
     assert collect_placeholders(body) == {"env"}
@@ -135,7 +135,7 @@ def test_collect_placeholders_ignores_nested_ref_target_and_overrides():
             {
                 "$ref": "$defs/tables/{{ x }}",  # target — child scope, ignored
                 "name": "{{ y }}",  # override value — child scope, ignored
-                "$params": {"env": "{{ env }}"},  # forwarding — counted
+                "$vars": {"env": "{{ env }}"},  # forwarding — counted
             },
         ],
     }
@@ -154,10 +154,10 @@ def test_substitute_in_body_substitutes_plain_values():
 
 
 def test_substitute_in_body_substitutes_forwarded_nested_params():
-    """A nested $ref's $params values are substituted (forwarding to the child)."""
-    body = {"tables": [{"$ref": "$defs/tables/x", "$params": {"env": "{{ env }}"}}]}
+    """A nested $ref's $vars values are substituted (forwarding to the child)."""
+    body = {"tables": [{"$ref": "$defs/tables/x", "$vars": {"env": "{{ env }}"}}]}
     result = substitute_in_body(body, {"env": "prod"})
-    assert result["tables"][0]["$params"]["env"] == "prod"
+    assert result["tables"][0]["$vars"]["env"] == "prod"
 
 
 def test_substitute_in_body_leaves_nested_ref_target_and_overrides():
@@ -167,7 +167,7 @@ def test_substitute_in_body_leaves_nested_ref_target_and_overrides():
             {
                 "$ref": "$defs/tables/x",
                 "name": "{{ env }}",
-                "$params": {"env": "{{ env }}"},
+                "$vars": {"env": "{{ env }}"},
             },
         ],
     }
@@ -175,7 +175,7 @@ def test_substitute_in_body_leaves_nested_ref_target_and_overrides():
     entry = result["tables"][0]
     assert entry["$ref"] == "$defs/tables/x"  # untouched
     assert entry["name"] == "{{ env }}"  # untouched (child's scope)
-    assert entry["$params"]["env"] == "prod"  # forwarded → substituted
+    assert entry["$vars"]["env"] == "prod"  # forwarded → substituted
 
 
 def test_substitute_in_body_does_not_mutate_input():
@@ -243,45 +243,47 @@ def test_check_no_unused_raises_on_extra():
 def test_check_signature_complete_accepts_exact_match():
     """A signature listing exactly the body's placeholders (default + null) passes."""
     body = {
-        "$params": {"env": None, "medallion": "bronze"},
+        "$vars": {"env": None, "medallion": "bronze"},
         "name": "s",
         "tags": {"e": "{{ env }}", "m": "{{ medallion }}"},
     }
-    check_signature_complete("s", body, body["$params"])
+    check_signature_complete("s", body, body["$vars"])
 
 
 def test_check_signature_complete_raises_on_undeclared_placeholder():
     """A body placeholder missing from the declared signature raises (name single-quoted)."""
-    body = {"$params": {"env": None}, "name": "{{ env }}_{{ region }}"}
-    with pytest.raises(TemplateParameterError, match="undeclared placeholder\\(s\\) 'region'"):
-        check_signature_complete("s", body, body["$params"])
+    body = {"$vars": {"env": None}, "name": "{{ env }}_{{ region }}"}
+    with pytest.raises(
+        TemplateParameterError, match="undeclared placeholder\\(s\\) 'region'"
+    ):
+        check_signature_complete("s", body, body["$vars"])
 
 
 def test_check_signature_complete_raises_on_unused_declaration():
     """A declared param the body never uses raises."""
-    body = {"$params": {"env": None, "extra": "x"}, "name": "{{ env }}"}
+    body = {"$vars": {"env": None, "extra": "x"}, "name": "{{ env }}"}
     with pytest.raises(TemplateParameterError, match="never uses"):
-        check_signature_complete("s", body, body["$params"])
+        check_signature_complete("s", body, body["$vars"])
 
 
 def test_check_signature_complete_counts_forwarded_param_as_used():
-    """A param used only as a forwarded nested-$ref $params value is 'used'."""
+    """A param used only as a forwarded nested-$ref $vars value is 'used'."""
     body = {
-        "$params": {"env": None},
-        "tables": [{"$ref": "$defs/tables/x", "$params": {"env": "{{ env }}"}}],
+        "$vars": {"env": None},
+        "tables": [{"$ref": "$defs/tables/x", "$vars": {"env": "{{ env }}"}}],
     }
-    check_signature_complete("s", body, body["$params"])
+    check_signature_complete("s", body, body["$vars"])
 
 
 def test_check_signature_complete_rejects_placeholder_default():
     """A default value may not itself be a placeholder (literal-only defaults)."""
-    body = {"$params": {"env": "{{ other }}"}, "name": "{{ env }}"}
+    body = {"$vars": {"env": "{{ other }}"}, "name": "{{ env }}"}
     with pytest.raises(TemplateParameterError, match="literal-only"):
-        check_signature_complete("s", body, body["$params"])
+        check_signature_complete("s", body, body["$vars"])
 
 
 def test_check_signature_complete_rejects_non_string_default():
     """A non-string default value is rejected."""
-    body = {"$params": {"env": None, "n": 3}, "name": "{{ env }}_{{ n }}"}
+    body = {"$vars": {"env": None, "n": 3}, "name": "{{ env }}_{{ n }}"}
     with pytest.raises(TemplateParameterError, match="must be a string"):
-        check_signature_complete("s", body, body["$params"])
+        check_signature_complete("s", body, body["$vars"])

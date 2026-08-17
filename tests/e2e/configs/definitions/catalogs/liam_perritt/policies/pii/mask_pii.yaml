@@ -1,7 +1,7 @@
 definitions:
   policies:
     pii|mask_pii:
-      $params:
+      $vars:
         pipeline: ~
         constant: '####'
       name: mask_pii
