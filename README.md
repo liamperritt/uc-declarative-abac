@@ -178,7 +178,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: liamperritt/uc-declarative-abac/deploy@v0.8.4
+      - uses: liamperritt/uc-declarative-abac/deploy@v0.9.0
         with:
           config-dir: configs/
           warehouse-id: ${{ vars.DATABRICKS_WAREHOUSE_ID }}
@@ -219,7 +219,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: liamperritt/uc-declarative-abac/validate@v0.8.4
+      - uses: liamperritt/uc-declarative-abac/validate@v0.9.0
         with:
           config-dir: configs/
 ```
@@ -289,6 +289,8 @@ Key conventions by type:
 | policies (cross-catalog, reusable) | `<tag_key/domain>>\|<policy_name>` | `pii\|mask_pii_email` |
 
 These keys are the stable identity for each entity and let you reference entities across files via `$defs/<type>/<key>` or `$ref: $defs/<type>/<key>` syntax (inspired by JSON Schema's `$defs` and `$ref` keywords) which also supports selective config overrides (see the **Overrides** section below).
+
+> **Strict keys.** Config models reject **unknown keys**: a field that isn't part of the schema (a typo like `has_tag` for `has_tags`, `too` for `to`, or a key placed on the wrong object type) is a hard validation error, not silently ignored. This surfaces mistakes at load time instead of letting a misspelled field quietly change what gets deployed.
 
 Any definition type (catalogs, schemas, tables, volumes, functions, mask/filter policy) can be promoted to a concrete resource by placing it under `resources:` with a `$ref`/`$defs` reference to the definition. For catalogs this is the usual pattern — the catalog definition captures the shape, and a resource catalog references it. For leaf types (table, volume, function) you can also promote them directly when you need a single deployed instance outside of a catalog composition; these require `catalog_name`/`schema_name` to be set.
 

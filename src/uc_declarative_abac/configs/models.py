@@ -10,6 +10,7 @@ from pydantic import (
     AfterValidator,
     AliasChoices,
     BaseModel,
+    ConfigDict,
     Field,
     Strict,
     StrictBool,
@@ -140,7 +141,21 @@ PolicyColumnConstantValue = (
 )
 
 
-class PolicyColumnAliasConfig(BaseModel):
+class BaseConfig(BaseModel, ABC):
+    """Shared base for every config model.
+
+    Carries the one cross-cutting policy: ``extra="forbid"`` — an unknown key in a
+    config is a hard ``ValidationError``, never silently dropped. For a governance tool a
+    silently-ignored typo (``has_tag`` for ``has_tags``, ``too`` for ``to``, a misplaced
+    ``$vars``) would mean a wrong-but-silent deployment; forbidding extras makes it fail
+    loudly at load time. Pydantic merges ``model_config`` down the MRO, so defining it here
+    once applies it to every subclass.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PolicyColumnAliasConfig(BaseConfig):
     alias: str
     has_tags: dict[str, str] | None = None
     has_any_of_tags: dict[str, str] | None = None
@@ -159,14 +174,14 @@ class PolicyColumnAliasConfig(BaseModel):
         return self
 
 
-class PolicyColumnConstantConfig(BaseModel):
+class PolicyColumnConstantConfig(BaseConfig):
     constant: PolicyColumnConstantValue
 
 
 PolicyColumnConfig = PolicyColumnAliasConfig | PolicyColumnConstantConfig
 
 
-class BasePolicyConfig(BaseModel, ABC):
+class BasePolicyConfig(BaseConfig, ABC):
     """Base model for all policy configs. Not intended to be instantiated directly."""
 
     catalog_name: str
@@ -347,7 +362,7 @@ class GrantPolicyConfig(BasePolicyConfig):
 PolicyConfig = MaskPolicyConfig | FilterPolicyConfig | GrantPolicyConfig
 
 
-class ParameterConfig(BaseModel):
+class ParameterConfig(BaseConfig):
     name: str
     data_type: str = Field(
         validation_alias=AliasChoices("data_type", "type"),
@@ -366,7 +381,7 @@ class ParameterConfig(BaseModel):
         return _validate_data_type_prefix(v)
 
 
-class BaseSecurableConfig(BaseModel, ABC):
+class BaseSecurableConfig(BaseConfig, ABC):
     """Base model for all UC securable configs. Not intended to be instantiated directly."""
 
     name: SecurableName
@@ -618,7 +633,7 @@ TaggableConfig = (
 SecurableConfig = TaggableConfig | FunctionConfig
 
 
-class GovernedTagConfig(BaseModel):
+class GovernedTagConfig(BaseConfig):
     """Account-level governed tag declaration. Serialised under `resources.governed_tags`."""
 
     name: str
@@ -641,7 +656,7 @@ class GovernedTagConfig(BaseModel):
         return self
 
 
-class GroupConfig(BaseModel):
+class GroupConfig(BaseConfig):
     """Represents a Databricks-managed group with optional members.
 
     ``id`` is the account-level SCIM / internal group id. When set, the engine
@@ -671,7 +686,7 @@ class GroupConfig(BaseModel):
         return str(v) if isinstance(v, int) else v
 
 
-class ResourcesConfig(BaseModel):
+class ResourcesConfig(BaseConfig):
     catalogs: dict[str, CatalogConfig]
     governed_tags: dict[str, GovernedTagConfig] | None = None
     groups: dict[str, GroupConfig] | None = None
