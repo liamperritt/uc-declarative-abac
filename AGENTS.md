@@ -120,6 +120,10 @@ Optional on resources. If omitted, the dictionary key is used as the UC object n
 
 This key-derivation applies only to securables (catalogs/schemas/tables/volumes/functions), which are keyed dicts. **Policies are lists, not keyed dicts**, so a policy `name` is never derived from a key — it is **required on every policy type** (mask, filter, grant) and must be set explicitly. Policy names must also be unique among the policies attached to the same securable (enforced by `_check_duplicate_names` in `configs/models.py`).
 
+### Strict keys (`extra="forbid"`)
+
+Every config model in `configs/models.py` inherits from `BaseConfig`, an abstract base that sets `model_config = ConfigDict(extra="forbid")` (Pydantic merges `model_config` down the MRO, so it applies to all subclasses). Unknown keys are a hard `ValidationError`, never silently dropped — a misspelled field (`has_tag`, `too`, `owener`) or a key on the wrong object type fails at load time rather than quietly changing the deployment. Aliases (`for`→`for_securable_type`, `return`→`definition`, `except`→`exceptions`, `type`/`data_type`, `comment`/`description`) are known keys and still accepted. When adding a model field, this base is inherited automatically; no per-model config is needed.
+
 ## Table definitions — security model
 
 Two approaches to RLS/CLS, which can coexist:
