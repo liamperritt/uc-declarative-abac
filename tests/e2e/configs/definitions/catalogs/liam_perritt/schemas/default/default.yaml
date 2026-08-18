@@ -11,7 +11,9 @@ definitions:
           tags:
             uc_gov_classification: internal
       functions:
-        - $defs/functions/abac|format_phone
+        - $ref: $defs/functions/abac|format_phone
+          $vars:
+            env: '{{ env }}'
       tables:
         - name: batch_table
           tags:

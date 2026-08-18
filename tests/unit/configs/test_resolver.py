@@ -1652,6 +1652,112 @@ def test_resolver_rejects_parent_widening_child_contract_via_override():
         resolve_refs(definitions, resources)
 
 
+def _format_phone_defs():
+    """A function declaring a required `env` used *only* in `owner`, plus a defaulted var."""
+    return {
+        "functions": {
+            "abac|format_phone": {
+                "$vars": {"env": None, "redaction_character": "+"},
+                "name": "format_phone",
+                "owner": "sp_uc_governor_{{ env }}",
+                "return": "concat('{{ redaction_character }}', code, phone)",
+            },
+        },
+    }
+
+
+def test_resolver_required_var_not_bypassed_by_overriding_its_usage():
+    """A null-declared (required) var stays required even when the $ref overrides away its
+    only usage and supplies no value — previously this silently succeeded."""
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "name": "s",
+                        "functions": [
+                            {
+                                "$ref": "$defs/functions/abac|format_phone",
+                                "owner": "sp_uc_governor_prod",  # removes the only {{ env }} usage
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+    }
+
+    with pytest.raises(TemplateVariableError, match="[Mm]issing"):
+        resolve_refs(_format_phone_defs(), resources)
+
+
+def test_resolver_supplying_declared_var_valid_even_if_usage_overridden():
+    """Supplying a declared var is always valid — even when an override removed its usage.
+
+    The corollary of "null = always required": the caller supplies `env` and also overrides
+    `owner`, so `env` is unused in the resolved body, but it is a declared variable and must
+    not be flagged as an unused argument.
+    """
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "name": "s",
+                        "functions": [
+                            {
+                                "$ref": "$defs/functions/abac|format_phone",
+                                "owner": "sp_uc_governor_prod",
+                                "$vars": {"env": "prod"},
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(_format_phone_defs(), resources)
+
+    fn = result["catalogs"]["c"]["schemas"][0]["functions"][0]
+    assert fn["owner"] == "sp_uc_governor_prod"  # the override literal
+    assert fn["return"] == "concat('+', code, phone)"  # redaction_character default applied
+    assert "$vars" not in fn
+
+
+def test_resolver_defaulted_var_overridden_away_needs_no_value():
+    """A defaulted (non-null) declared var whose usage is overridden away needs no value and
+    is not flagged missing or unused (its default is simply never rendered)."""
+    definitions = {
+        "schemas": {
+            "s": {
+                "$vars": {"medallion": "bronze"},
+                "name": "salesforce",
+                "tags": {"quality_tier": "{{ medallion }}"},
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/s",
+                        "tags": {"quality_tier": "gold"},  # overrides the only {{ medallion }} usage
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    assert result["catalogs"]["c"]["schemas"][0]["tags"]["quality_tier"] == "gold"
+
+
 def test_resolver_inline_defs_string_equivalent_to_ref_dict_for_templated_def():
     """A bare `$defs/...` string binds the definition's own $vars defaults, like a $ref dict.
 

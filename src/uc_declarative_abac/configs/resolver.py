@@ -336,7 +336,8 @@ def _resolve_ref(
     else:
         resolved = _merge_dicts(resolved, overrides)
 
-    resolved = _apply_vars(resolved, ref_path)
+    declared = _declared_vars(definition)
+    resolved = _apply_vars(resolved, ref_path, declared)
 
     result = _resolve_node(
         definitions, resolved, referenced, visited, override_strategy
@@ -345,19 +346,41 @@ def _resolve_ref(
     return result
 
 
-def _apply_vars(resolved: Any, ref_path: str) -> Any:
+def _declared_vars(definition: Any) -> set[str]:
+    """The variable names a definition declares in its own ``$vars`` signature.
+
+    These form the template's required parameter set (a null default still requires a
+    value at the ``$ref``). Empty for an implicit definition (no ``$vars`` block) or a
+    non-dict body. Taken from the raw definition, before the caller's ``$vars`` arguments
+    are merged in, so it reflects the definition's contract only.
+    """
+    if not isinstance(definition, dict):
+        return set()
+    return set(definition.get(_VARS_KEY) or {})
+
+
+def _apply_vars(resolved: Any, ref_path: str, declared: set[str]) -> Any:
     """Bind and substitute template variables for a just-merged $ref body.
 
     ``$vars`` rides the ordinary override merge like any other key, so ``resolved``
     already holds the effective variables — the definition's declared defaults merged
-    under the $ref's supplied arguments (honouring the active override strategy). Pop
-    that merged block off (so it never leaks to model validation), drop null entries
-    ("not supplied"; ``''`` is a real value), validate against the placeholders the body
-    actually uses, and substitute — structure-aware, so a nested $ref's forwarded
-    ``$vars`` values *and* any override values this definition writes onto that nested
-    $ref become literals before the child is expanded. A nested $ref's target string is
-    the sole thing left untouched. Every placeholder this definition writes is bound here,
-    so a child $ref only ever sees its own declared variables.
+    under the $ref's supplied arguments (honouring the active override strategy). Pop that
+    merged block off (so it never leaks to model validation) and split it into the values
+    to substitute (non-null) from the requirement it encodes.
+
+    The template's parameter set is ``accepted = used | declared``: every placeholder the
+    (post-override) body actually uses, plus every variable the definition **declares** in
+    its own ``$vars`` signature (``declared``). Validating against ``accepted`` — rather
+    than usage alone — is what keeps a required (null-declared) variable required even when
+    the caller overrides away the only field that referenced it: such a variable is still
+    in ``declared``, so it must be supplied. Conversely, supplying a declared variable is
+    always allowed (it is in ``accepted``), even if an override removed its usage.
+
+    Substitution is structure-aware, so a nested $ref's forwarded ``$vars`` values *and*
+    any override values this definition writes onto that nested $ref become literals before
+    the child is expanded; a nested $ref's target string is the sole thing left untouched.
+    Every placeholder this definition writes is bound here, so a child $ref only ever sees
+    its own declared variables.
 
     A non-dict definition body (e.g. a bare list of columns referenced via an inline
     ``$defs/...`` string) has no place for a ``$vars`` block, so it is returned unchanged —
@@ -367,12 +390,16 @@ def _apply_vars(resolved: Any, ref_path: str) -> Any:
     if not isinstance(resolved, dict):
         return resolved
     merged_variables = resolved.pop(_VARS_KEY, None) or {}
-    variables = {k: v for k, v in merged_variables.items() if v is not None}
-    check_string_vars(variables, context=f"$ref '{ref_path}'")
+    # Non-null entries are the values to substitute; a null entry is "not supplied"
+    # (``''`` is a real value). Requiredness comes from ``accepted`` below, not from which
+    # entries happen to be non-null — so a null-declared variable can't be dropped.
+    supplied = {k: v for k, v in merged_variables.items() if v is not None}
+    check_string_vars(supplied, context=f"$ref '{ref_path}'")
     used = collect_placeholders(resolved)
-    check_no_unbound(used, set(variables), ref=ref_path)
-    check_no_unused(set(variables), used, ref=ref_path)
-    return substitute_in_body(resolved, variables)
+    accepted = used | declared
+    check_no_unbound(accepted, set(supplied), ref=ref_path)
+    check_no_unused(set(supplied), accepted, ref=ref_path)
+    return substitute_in_body(resolved, supplied)
 
 
 def _resolve_inline_defs_string(
@@ -399,7 +426,7 @@ def _resolve_inline_defs_string(
     referenced.add(ref_path)
     definition = _lookup_definition(definitions, ref_path)
     resolved = copy.deepcopy(definition)
-    resolved = _apply_vars(resolved, ref_path)
+    resolved = _apply_vars(resolved, ref_path, _declared_vars(definition))
     result = _resolve_node(
         definitions, resolved, referenced, visited, override_strategy
     )

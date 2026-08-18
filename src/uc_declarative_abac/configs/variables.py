@@ -273,14 +273,20 @@ def check_string_vars(variables: dict[str, Any], *, context: str) -> None:
             )
 
 
-def check_no_unbound(used: set[str], available: set[str], *, ref: str) -> None:
-    """Assert every placeholder used by a referenced template has a value at the ``$ref``."""
-    missing = used - available
+def check_no_unbound(required: set[str], available: set[str], *, ref: str) -> None:
+    """Assert every variable a referenced template requires has a value at the ``$ref``.
+
+    ``required`` is the template's parameter set — the placeholders its body uses plus the
+    variables it declares in its own ``$vars`` signature (a null-declared variable is
+    required even if the caller overrides away the field that referenced it).
+    """
+    missing = required - available
     if missing:
         raise TemplateVariableError(
             f"Missing template variable(s) {_quote_names(missing)} for $ref '{ref}': "
-            f"the template uses these placeholders but neither $vars nor a definition "
-            f"default supplies a value."
+            f"the template requires these variables (used in its body, or declared as a "
+            f"required — null — $vars entry) but neither $vars nor a definition default "
+            f"supplies a value."
         )
 
 
