@@ -3,12 +3,14 @@ from __future__ import annotations
 import pytest
 
 from uc_declarative_abac.configs.variables import (
+    check_no_placeholders_in_resources,
     check_no_unbound,
     check_no_unused,
     check_signature_complete,
     check_string_vars,
     collect_placeholders,
     finalise,
+    find_malformed_placeholders,
     find_placeholders,
     substitute,
     substitute_in_body,
@@ -40,6 +42,43 @@ def test_find_placeholders_ignores_escaped_double_braces():
 def test_find_placeholders_returns_empty_for_plain_text():
     """A string with no tokens yields no names."""
     assert find_placeholders("just_a_plain_name") == set()
+
+
+# ---------------------------------------------------------------------------
+# find_malformed_placeholders
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("{{ my-var }}", {"my-var"}),  # hyphen
+        ("{{ a.b }}", {"a.b"}),  # dot
+        ("{{ 1x }}", {"1x"}),  # leading digit
+        ("prefix_{{ env-1 }}_suffix", {"env-1"}),
+    ],
+)
+def test_find_malformed_placeholders_flags_identifier_shaped_invalid(text, expected):
+    """A `{{ token }}` that is identifier-shaped but not a valid identifier is flagged."""
+    assert find_malformed_placeholders(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "{{ env }}",  # valid — handled by substitution, not malformed
+        "{{env}}",  # valid, unspaced
+        '{{"a":1}}',  # literal JSON braces
+        "{{ SELECT 1 }}",  # literal SQL (multi-token)
+        "{{ f(x) }}",  # literal SQL (parens)
+        "{{{{ my-var }}}}",  # escaped literal braces — inner not captured
+        "finance-team",  # hyphen but no braces
+        "plain text",
+    ],
+)
+def test_find_malformed_placeholders_ignores_valid_literal_and_escaped(text):
+    """Valid placeholders, literal SQL/JSON braces, and escaped braces are not flagged."""
+    assert find_malformed_placeholders(text) == set()
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +140,17 @@ def test_finalise_allows_escaped_braces_without_error():
     assert finalise("{{{{ env }}}}") == "{{ env }}"
 
 
+def test_finalise_raises_on_malformed_placeholder():
+    """An identifier-shaped-but-invalid placeholder surviving resolution is a hard error."""
+    with pytest.raises(TemplateVariableError, match="[Mm]alformed"):
+        finalise({"name": "ingestion_{{ my-var }}"})
+
+
+def test_finalise_allows_escaped_invalid_identifier_braces():
+    """Escaped braces around a non-identifier are literal, not a malformed placeholder."""
+    assert finalise("{{{{ my-var }}}}") == "{{ my-var }}"
+
+
 # ---------------------------------------------------------------------------
 # collect_placeholders (structure-aware)
 # ---------------------------------------------------------------------------
@@ -128,18 +178,18 @@ def test_collect_placeholders_counts_forwarded_nested_ref_vars():
     assert collect_placeholders(body) == {"env"}
 
 
-def test_collect_placeholders_ignores_nested_ref_target_and_overrides():
-    """A nested $ref's target and its override values belong to the child, not here."""
+def test_collect_placeholders_counts_nested_ref_overrides_ignores_target():
+    """A nested $ref's $vars and override values are the enclosing scope's; only the target is not."""
     body = {
         "tables": [
             {
-                "$ref": "$defs/tables/{{ x }}",  # target — child scope, ignored
-                "name": "{{ y }}",  # override value — child scope, ignored
+                "$ref": "$defs/tables/{{ x }}",  # target — structural, not counted
+                "name": "{{ y }}",  # override value — enclosing scope, counted
                 "$vars": {"env": "{{ env }}"},  # forwarding — counted
             },
         ],
     }
-    assert collect_placeholders(body) == {"env"}
+    assert collect_placeholders(body) == {"env", "y"}
 
 
 # ---------------------------------------------------------------------------
@@ -160,8 +210,8 @@ def test_substitute_in_body_substitutes_forwarded_nested_vars():
     assert result["tables"][0]["$vars"]["env"] == "prod"
 
 
-def test_substitute_in_body_leaves_nested_ref_target_and_overrides():
-    """A nested $ref's target and override values are not substituted by the parent."""
+def test_substitute_in_body_substitutes_nested_ref_overrides_leaves_target():
+    """The parent substitutes a nested $ref's $vars and override values; the target is untouched."""
     body = {
         "tables": [
             {
@@ -173,8 +223,8 @@ def test_substitute_in_body_leaves_nested_ref_target_and_overrides():
     }
     result = substitute_in_body(body, {"env": "prod"})
     entry = result["tables"][0]
-    assert entry["$ref"] == "$defs/tables/x"  # untouched
-    assert entry["name"] == "{{ env }}"  # untouched (child's scope)
+    assert entry["$ref"] == "$defs/tables/x"  # target untouched (structural)
+    assert entry["name"] == "prod"  # override value → bound by enclosing scope
     assert entry["$vars"]["env"] == "prod"  # forwarded → substituted
 
 
@@ -200,6 +250,17 @@ def test_check_string_vars_rejects_non_strings(value):
     """Numbers, booleans, lists, and maps are rejected with a hint."""
     with pytest.raises(TemplateVariableError, match="must be a string"):
         check_string_vars({"p": value}, context="test")
+
+
+def test_check_string_vars_rejects_defs_reference_value():
+    """A $vars value that looks like a $defs/ reference is rejected with a clear message."""
+    with pytest.raises(TemplateVariableError, match="reference"):
+        check_string_vars({"x": "$defs/columns/region"}, context="test")
+
+
+def test_check_string_vars_accepts_forwarding_placeholder_value():
+    """A forwarding `{{ ... }}` value is a valid (string) $vars value."""
+    check_string_vars({"env": "{{ env }}"}, context="test")
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +336,15 @@ def test_check_signature_complete_counts_forwarded_var_as_used():
     check_signature_complete("s", body, body["$vars"])
 
 
+def test_check_signature_complete_counts_child_ref_override_var_as_used():
+    """A variable used only in an override the definition writes onto a child $ref is 'used'."""
+    body = {
+        "$vars": {"env": None},
+        "tables": [{"$ref": "$defs/tables/x", "comment": "created in {{ env }}"}],
+    }
+    check_signature_complete("s", body, body["$vars"])
+
+
 def test_check_signature_complete_rejects_placeholder_default():
     """A default value may not itself be a placeholder (literal-only defaults)."""
     body = {"$vars": {"env": "{{ other }}"}, "name": "{{ env }}"}
@@ -287,3 +357,74 @@ def test_check_signature_complete_rejects_non_string_default():
     body = {"$vars": {"env": None, "n": 3}, "name": "{{ env }}_{{ n }}"}
     with pytest.raises(TemplateVariableError, match="must be a string"):
         check_signature_complete("s", body, body["$vars"])
+
+
+# ---------------------------------------------------------------------------
+# check_no_placeholders_in_resources
+# ---------------------------------------------------------------------------
+
+
+def test_check_no_placeholders_in_resources_allows_clean_tree():
+    """A resource tree with no placeholders (and $ref/$vars literals) passes."""
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {"$ref": "$defs/schemas/s", "$vars": {"env": "prod"}},
+                ],
+            },
+        },
+    }
+    check_no_placeholders_in_resources(resources)  # no raise
+
+
+def test_check_no_placeholders_in_resources_raises_on_plain_value():
+    """A placeholder in a plain resource value is rejected, with the path in the message."""
+    resources = {"catalogs": {"c": {"name": "ingestion_{{ env }}"}}}
+    with pytest.raises(TemplateVariableError, match="catalogs.c.name"):
+        check_no_placeholders_in_resources(resources)
+
+
+def test_check_no_placeholders_in_resources_raises_on_ref_override_value():
+    """A placeholder in a $ref override value at the resource level is rejected."""
+    resources = {
+        "catalogs": {
+            "c": {
+                "schemas": [
+                    {"$ref": "$defs/schemas/s", "name": "{{ env }}_raw"},
+                ],
+            },
+        },
+    }
+    with pytest.raises(TemplateVariableError, match="'env'"):
+        check_no_placeholders_in_resources(resources)
+
+
+def test_check_no_placeholders_in_resources_raises_on_vars_value():
+    """A placeholder in a resource $vars value is rejected (resource $vars are literals)."""
+    resources = {
+        "catalogs": {
+            "c": {
+                "schemas": [
+                    {"$ref": "$defs/schemas/s", "$vars": {"env": "{{ env }}"}},
+                ],
+            },
+        },
+    }
+    with pytest.raises(TemplateVariableError, match="'env'"):
+        check_no_placeholders_in_resources(resources)
+
+
+def test_check_no_placeholders_in_resources_allows_escaped_braces():
+    """Escaped {{{{ }}}} in a resource value is not a placeholder and is allowed."""
+    resources = {
+        "catalogs": {
+            "c": {
+                "functions": [
+                    {"name": "f", "return": "CONCAT('{{{{', val, '}}}}')"},
+                ],
+            },
+        },
+    }
+    check_no_placeholders_in_resources(resources)  # no raise

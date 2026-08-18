@@ -4,6 +4,7 @@ import copy
 from typing import Any, Literal
 
 from uc_declarative_abac.configs.variables import (
+    check_no_placeholders_in_resources,
     check_no_unbound,
     check_no_unused,
     check_signature_complete,
@@ -162,6 +163,7 @@ def resolve_refs(
     Raises UnreferencedDefinitionError if any definitions are not referenced.
     """
     _check_definition_signatures(definitions)
+    check_no_placeholders_in_resources(resources)
 
     referenced: set[str] = set()
     visited: set[str] = set()
@@ -193,10 +195,12 @@ def _check_definition_signatures(definitions: dict) -> None:
     """Enforce the "declared => complete" rule on every definition upfront.
 
     A definition that declares a ``$vars`` block must list exactly the placeholders
-    its body uses (each defaulted or null). Checked once per definition against the raw
-    body — before any inline ``$defs/`` expansion — so a definition is judged only on
-    its own placeholders. Definitions without a ``$vars`` block use implicit
-    variables and are skipped.
+    its body uses (each defaulted or null). "Uses" counts every placeholder the
+    definition writes — plain values, forwarded ``$vars`` values on a nested ``$ref``,
+    and override values on a nested ``$ref`` — since the enclosing definition binds them
+    all. Checked once per definition against the raw body — before any inline ``$defs/``
+    expansion — so a definition is judged only on its own placeholders. Definitions
+    without a ``$vars`` block use implicit variables and are skipped.
     """
     for entries in definitions.values():
         if not isinstance(entries, dict):
@@ -264,12 +268,19 @@ def _resolve_inline_defs_strings(
     ``$ref`` dicts are intentionally NOT pre-resolved here: their sibling keys
     (``alias``, ``name``) are the *intended* merge identifier as written in YAML,
     so the merge must see them before the ``$ref`` is expanded.
+
+    A ``$vars`` block's values are also left untouched (copied through): they are literal
+    strings or forwarding ``{{ ... }}`` placeholders, never references, so a value that
+    happens to start with ``$defs/`` must reach ``check_string_vars`` as a raw string (to
+    raise a clear "not a reference" error) instead of being silently expanded here.
     """
     if isinstance(node, dict):
         if "$ref" in node:
             return node
         return {
-            key: _resolve_inline_defs_strings(
+            key: value
+            if key == _VARS_KEY
+            else _resolve_inline_defs_strings(
                 definitions, value, referenced, visited, override_strategy
             )
             for key, value in node.items()
@@ -334,7 +345,7 @@ def _resolve_ref(
     return result
 
 
-def _apply_vars(resolved: dict, ref_path: str) -> dict:
+def _apply_vars(resolved: Any, ref_path: str) -> Any:
     """Bind and substitute template variables for a just-merged $ref body.
 
     ``$vars`` rides the ordinary override merge like any other key, so ``resolved``
@@ -343,8 +354,18 @@ def _apply_vars(resolved: dict, ref_path: str) -> dict:
     that merged block off (so it never leaks to model validation), drop null entries
     ("not supplied"; ``''`` is a real value), validate against the placeholders the body
     actually uses, and substitute — structure-aware, so a nested $ref's forwarded
-    ``$vars`` values become literals before that child is expanded.
+    ``$vars`` values *and* any override values this definition writes onto that nested
+    $ref become literals before the child is expanded. A nested $ref's target string is
+    the sole thing left untouched. Every placeholder this definition writes is bound here,
+    so a child $ref only ever sees its own declared variables.
+
+    A non-dict definition body (e.g. a bare list of columns referenced via an inline
+    ``$defs/...`` string) has no place for a ``$vars`` block, so it is returned unchanged —
+    the recursive resolution pass still walks it, and any stray placeholder in it surfaces
+    at ``finalise``.
     """
+    if not isinstance(resolved, dict):
+        return resolved
     merged_variables = resolved.pop(_VARS_KEY, None) or {}
     variables = {k: v for k, v in merged_variables.items() if v is not None}
     check_string_vars(variables, context=f"$ref '{ref_path}'")
@@ -361,13 +382,24 @@ def _resolve_inline_defs_string(
     visited: set[str],
     override_strategy: OverrideStrategy,
 ) -> Any:
-    """Resolve a bare $defs/... string value the same way a $ref dict is resolved."""
+    """Resolve a bare $defs/... string value the same way a $ref dict is resolved.
+
+    A bare string carries no sibling overrides and no supplied ``$vars``, so it is exactly
+    a ``$ref`` dict with neither: the referenced definition is bound against its **own**
+    ``$vars`` defaults (``_apply_vars``), which strips the ``$vars`` block and substitutes
+    the definition's placeholders before it is spliced in. This keeps the bare-string form
+    equivalent to the ``$ref``-dict form. A definition with a required (un-defaulted)
+    variable therefore cannot be referenced by the bare string — there is nowhere to supply
+    it — and must use the ``$ref`` + ``$vars`` form; that surfaces as a missing-variable
+    error here rather than leaking an unresolved ``{{ ... }}``.
+    """
     if ref_path in visited:
         raise ResolutionError(f"Circular $ref detected: {ref_path}")
     visited.add(ref_path)
     referenced.add(ref_path)
     definition = _lookup_definition(definitions, ref_path)
     resolved = copy.deepcopy(definition)
+    resolved = _apply_vars(resolved, ref_path)
     result = _resolve_node(
         definitions, resolved, referenced, visited, override_strategy
     )

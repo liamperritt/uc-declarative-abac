@@ -12,9 +12,11 @@ Literal double braces are escaped by doubling — ``{{{{`` renders a literal ``{
 and ``}}}}`` a literal ``}}`` — so genuine ``{{ }}`` in SQL function bodies survives.
 
 Structure-awareness (see ``collect_placeholders`` / ``substitute_in_body``): within a
-template body, plain values and a nested ``$ref``'s ``$vars`` *values* (forwarding)
-belong to the enclosing template's variable scope; a nested ``$ref``'s target string
-and its other override values belong to that child ``$ref`` and are left untouched.
+template body, every string value — plain values, a nested ``$ref``'s ``$vars`` values
+(forwarding), and a nested ``$ref``'s override values — belongs to the enclosing
+template's variable scope and is bound here. Only a nested ``$ref``'s target string is
+left untouched (it is resolved structurally and may never hold a placeholder). In short:
+the definition that *writes* a placeholder is the one that binds it.
 """
 
 from __future__ import annotations
@@ -34,6 +36,21 @@ _TOKEN_RE = re.compile(
     r"|\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}"  # a {{ placeholder }}
 )
 
+# A validation-only scanner for *malformed* placeholders — a `{{ token }}` whose token is
+# identifier-shaped but not a valid bare identifier (e.g. `{{ my-var }}`, `{{ a.b }}`,
+# `{{ 1x }}`), which `_TOKEN_RE` never matches and so would otherwise pass through as literal
+# text. Order matters: escapes are consumed first (so `{{{{ my-var }}}}` is a literal, not a
+# hit), then a valid placeholder (non-capturing — handled by substitution), and only then the
+# malformed alternative (group 1). The single-token, word-chars-plus-`.`/`-` shape deliberately
+# does NOT match legitimate literal SQL/JSON braces (`{{"a":1}}`, `{{ SELECT 1 }}`, `{{ f(x) }}`),
+# preserving the delimiter's collision-safety.
+_MALFORMED_RE = re.compile(
+    r"\{\{\{\{"  # escaped literal "{{"
+    r"|\}\}\}\}"  # escaped literal "}}"
+    r"|\{\{\s*[A-Za-z_][A-Za-z0-9_]*\s*\}\}"  # a VALID {{ placeholder }} — ignored
+    r"|\{\{\s*([A-Za-z0-9_][\w.\-]*)\s*\}\}"  # identifier-shaped but INVALID -> group 1
+)
+
 _REF_KEY = "$ref"
 _VARS_KEY = "$vars"
 
@@ -49,6 +66,20 @@ def find_placeholders(text: str) -> set[str]:
     Escaped ``{{{{ ... }}}}`` sequences are not placeholders and contribute nothing.
     """
     return {m.group(1) for m in _TOKEN_RE.finditer(text) if m.group(1) is not None}
+
+
+def find_malformed_placeholders(text: str) -> set[str]:
+    """Return identifier-shaped-but-invalid ``{{ token }}`` names in ``text``.
+
+    These are tokens a user likely intended as a placeholder but whose name is not a valid
+    bare identifier (``{{ my-var }}``, ``{{ a.b }}``, ``{{ 1x }}``). ``_TOKEN_RE`` never
+    matches them, so without this they would pass through as literal text. Escaped
+    ``{{{{ ... }}}}`` sequences and legitimate literal braces (``{{"a":1}}``, ``{{ SELECT 1 }}``)
+    are not reported. See ``_MALFORMED_RE``.
+    """
+    return {
+        m.group(1) for m in _MALFORMED_RE.finditer(text) if m.group(1) is not None
+    }
 
 
 def substitute(text: str, variables: dict[str, str]) -> str:
@@ -80,11 +111,12 @@ def unescape(text: str) -> str:
 def collect_placeholders(node: Any) -> set[str]:
     """Collect every variable name referenced within a template body, structure-aware.
 
-    Scans string *values* only (never dict keys). At a nested ``$ref`` dict, only the
-    ``$vars`` values are in the enclosing template's scope (forwarding); the ``$ref``
-    target and the ``$ref``'s other override values belong to that child and are skipped.
-    A forwarding-only variable — used solely as a nested ``$ref``'s ``$vars`` value —
-    therefore counts as used.
+    Scans string *values* only (never dict keys). At a nested ``$ref`` dict, every value
+    except the ``$ref`` target — its ``$vars`` values (forwarding) and its override
+    values alike — is in the enclosing template's scope and is counted here; only the
+    ``$ref`` target string is skipped. So both a forwarding-only variable (used solely as
+    a nested ``$ref``'s ``$vars`` value) and a variable used only in an override the
+    enclosing template writes onto a child ``$ref`` count as used.
     """
     found: set[str] = set()
     _collect(node, found)
@@ -94,8 +126,13 @@ def collect_placeholders(node: Any) -> set[str]:
 def _collect(node: Any, found: set[str]) -> None:
     if isinstance(node, dict):
         if _REF_KEY in node:
-            for value in (node.get(_VARS_KEY) or {}).values():
-                _collect(value, found)
+            # Everything authored at this nested $ref site — its $vars (forwarding) and
+            # its override values — is the enclosing template's text, so its placeholders
+            # count as used here. Only the $ref target is excluded (resolved structurally,
+            # never templated).
+            for key, value in node.items():
+                if key != _REF_KEY:
+                    _collect(value, found)
             return
         for value in node.values():
             _collect(value, found)
@@ -109,10 +146,11 @@ def _collect(node: Any, found: set[str]) -> None:
 def substitute_in_body(body: Any, variables: dict[str, str]) -> Any:
     """Return a copy of ``body`` with placeholders substituted, structure-aware.
 
-    Substitutes plain string values and a nested ``$ref``'s ``$vars`` values (so a
-    forwarded value becomes a literal before that child ``$ref`` is expanded). A nested
-    ``$ref``'s target and its other override values are left untouched — they are bound
-    by that child ``$ref``'s own ``$vars`` when it expands.
+    Substitutes every string value except a nested ``$ref``'s target: plain values, a
+    nested ``$ref``'s ``$vars`` values (forwarding), and a nested ``$ref``'s override
+    values are all bound in the enclosing template's scope, so they become literals before
+    that child ``$ref`` is expanded. Only the ``$ref`` target string is left untouched (it
+    is resolved structurally). The enclosing definition binds every placeholder it writes.
     """
     return _substitute(copy.deepcopy(body), variables)
 
@@ -120,13 +158,13 @@ def substitute_in_body(body: Any, variables: dict[str, str]) -> Any:
 def _substitute(node: Any, variables: dict[str, str]) -> Any:
     if isinstance(node, dict):
         if _REF_KEY in node:
-            ref_variables = node.get(_VARS_KEY)
-            if isinstance(ref_variables, dict):
-                node[_VARS_KEY] = {
-                    key: _substitute(value, variables)
-                    for key, value in ref_variables.items()
-                }
-            return node
+            # Substitute everything the enclosing template authored at this nested $ref
+            # site — its $vars (forwarding) and its override values — leaving only the
+            # $ref target string untouched (resolved structurally, never templated).
+            return {
+                key: value if key == _REF_KEY else _substitute(value, variables)
+                for key, value in node.items()
+            }
         return {key: _substitute(value, variables) for key, value in node.items()}
     if isinstance(node, list):
         return [_substitute(item, variables) for item in node]
@@ -138,10 +176,14 @@ def _substitute(node: Any, variables: dict[str, str]) -> Any:
 def finalise(node: Any) -> Any:
     """Final placeholder pass over a fully-resolved tree.
 
-    Any remaining live ``{{ name }}`` token is a placeholder that no ``$ref`` bound —
-    a hard error, wherever it sits (a plain resource value, or a forwarded value with
-    nothing to bind it). Escaped ``{{{{ ... }}}}`` sequences are not placeholders and
-    are collapsed to their literal braces. Runs once, after all ``$ref`` expansion.
+    Any remaining live ``{{ name }}`` token is a placeholder that nothing bound — a hard
+    error, wherever it sits. In practice these are caught earlier (an unbound definition
+    placeholder by ``check_no_unbound`` at its ``$ref``; a resource placeholder by
+    ``check_no_placeholders_in_resources``), so this is a defensive backstop. It also
+    rejects any *malformed* placeholder (an identifier-shaped ``{{ token }}`` whose name is
+    not a valid bare identifier), which no earlier check sees because ``_TOKEN_RE`` never
+    matched it. Escaped ``{{{{ ... }}}}`` sequences are not placeholders and are collapsed
+    to their literal braces. Runs once, after all ``$ref`` expansion.
     """
     return _finalise(node)
 
@@ -156,27 +198,79 @@ def _finalise(node: Any) -> Any:
         if unresolved:
             raise TemplateVariableError(
                 f"Unbound template variable(s) {_quote_names(unresolved)} in value "
-                f"{node!r}: a '{{{{ ... }}}}' placeholder can only appear in a value "
-                f"bound by a $ref's $vars (a definition body or a $ref override value)."
+                f"{node!r}: a '{{{{ ... }}}}' placeholder is bound by the enclosing "
+                f"definition's $vars and may appear only inside a definition (never in a "
+                f"resource, which must be concrete)."
+            )
+        malformed = find_malformed_placeholders(node)
+        if malformed:
+            raise TemplateVariableError(
+                f"Malformed template placeholder(s) {_quote_names(malformed)} in value "
+                f"{node!r}: a '{{{{ ... }}}}' variable reference must be a bare identifier "
+                f"(letters, digits, and underscore, not starting with a digit). Rename the "
+                f"variable, or if the braces are literal escape them by doubling."
             )
         return unescape(node)
     return node
 
 
+def check_no_placeholders_in_resources(resources: Any) -> None:
+    """Assert no ``{{ placeholder }}`` appears anywhere in the authored resources tree.
+
+    Placeholders are a *definition* facility, bound by the enclosing definition's
+    ``$vars``. Resources are the concrete instance layer and carry no ``$vars`` scope, so
+    a placeholder anywhere under ``resources`` (a plain value, a ``$ref`` override value,
+    or a ``$vars`` value) has nothing to bind it and is a hard error. This scans the raw
+    resources — before any ``$ref`` expansion inlines definition bodies — so it never sees
+    (and never faults) the placeholders that legitimately live inside definitions. Escaped
+    ``{{{{ ... }}}}`` sequences are not placeholders and are ignored (they survive to
+    ``finalise``, which collapses them to literal braces).
+    """
+    _check_no_placeholders(resources, path="resources")
+
+
+def _check_no_placeholders(node: Any, *, path: str) -> None:
+    if isinstance(node, dict):
+        for key, value in node.items():
+            _check_no_placeholders(value, path=f"{path}.{key}")
+    elif isinstance(node, list):
+        for index, item in enumerate(node):
+            _check_no_placeholders(item, path=f"{path}[{index}]")
+    elif isinstance(node, str):
+        names = find_placeholders(node)
+        if names:
+            raise TemplateVariableError(
+                f"Template placeholder(s) {_quote_names(names)} found in a resource "
+                f"value at {path}: {node!r}. Placeholders are bound by the enclosing "
+                f"definition's $vars; a resource is the concrete instance layer and must "
+                f"not contain '{{{{ ... }}}}' — supply the literal value, or move the "
+                f"templating into a definition and instantiate it via $ref + $vars."
+            )
+
+
 def check_string_vars(variables: dict[str, Any], *, context: str) -> None:
-    """Assert every ``$vars`` value is a string (or ``None`` = not supplied).
+    """Assert every ``$vars`` value is a plain string (or ``None`` = not supplied).
 
     ``None`` is permitted: on a definition it declares a required variable; on a ``$ref``
     it is dropped before this check. Numbers, booleans, lists, and maps are rejected —
-    a placeholder interpolates into a string, and quoting keeps the rendering explicit.
+    a placeholder interpolates into a string, and quoting keeps the rendering explicit. A
+    string that looks like a reference (``$defs/...``) is rejected too: ``$vars`` values are
+    literal strings (or a forwarding ``{{ ... }}`` placeholder), never definition references.
     """
     for name, value in variables.items():
-        if value is None or isinstance(value, str):
+        if value is None:
             continue
-        raise TemplateVariableError(
-            f"Template variable '{name}' in {context} must be a string, got "
-            f'{type(value).__name__} ({value!r}); quote it (e.g. "{value}").'
-        )
+        if not isinstance(value, str):
+            raise TemplateVariableError(
+                f"Template variable '{name}' in {context} must be a string, got "
+                f'{type(value).__name__} ({value!r}); quote it (e.g. "{value}").'
+            )
+        if value.startswith("$defs/"):
+            raise TemplateVariableError(
+                f"Template variable '{name}' in {context} has a reference-like value "
+                f"{value!r}: $vars values are literal strings (or a forwarding "
+                f"'{{{{ ... }}}}' placeholder), not '$defs/...' references."
+            )
 
 
 def check_no_unbound(used: set[str], available: set[str], *, ref: str) -> None:

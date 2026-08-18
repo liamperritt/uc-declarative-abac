@@ -260,7 +260,8 @@ class TemplateVariableError(OrchestratorError):
     declared variable the body never uses), a ``$ref`` that fails to supply a
     required variable (missing) or supplies one the template does not use
     (unused), a non-string ``$vars`` value, and a ``{{ placeholder }}`` in a
-    value not bound by any ``$ref``.
+    resource value (resources are the concrete instance layer — placeholders are
+    bound by the enclosing definition's ``$vars`` and belong inside definitions).
     """
 
 
