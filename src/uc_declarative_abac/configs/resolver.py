@@ -3,6 +3,16 @@ from __future__ import annotations
 import copy
 from typing import Any, Literal
 
+from uc_declarative_abac.configs.variables import (
+    check_no_placeholders_in_resources,
+    check_no_unbound,
+    check_no_unused,
+    check_signature_complete,
+    check_string_vars,
+    collect_placeholders,
+    finalise,
+    substitute_in_body,
+)
 from uc_declarative_abac.utils import (
     ResolutionError,
     UnreferencedDefinitionError,
@@ -13,6 +23,7 @@ OverrideStrategy = Literal["merge", "replace"]
 
 _PRIMITIVE_TYPES = (str, int, float, bool)
 _IDENTIFIER_KEYS = ("name", "alias", "$ref")
+_VARS_KEY = "$vars"
 
 
 def _is_primitive(value: Any) -> bool:
@@ -151,6 +162,9 @@ def resolve_refs(
 
     Raises UnreferencedDefinitionError if any definitions are not referenced.
     """
+    _check_definition_signatures(definitions)
+    check_no_placeholders_in_resources(resources)
+
     referenced: set[str] = set()
     visited: set[str] = set()
     result = _resolve_node(
@@ -170,7 +184,31 @@ def resolve_refs(
             f"Unreferenced definitions: {', '.join(keys)}"
         )
 
-    return result
+    # Final template-variable pass over the fully-resolved tree: any surviving
+    # ``{{ placeholder }}`` had nothing to bind it (e.g. a placeholder in a plain
+    # resource value with no $ref) and is a hard error; escaped ``{{{{ }}}}`` braces
+    # are collapsed to their literals. Runs once, after all $ref expansion.
+    return finalise(result)
+
+
+def _check_definition_signatures(definitions: dict) -> None:
+    """Enforce the "declared => complete" rule on every definition upfront.
+
+    A definition that declares a ``$vars`` block must list exactly the placeholders
+    its body uses (each defaulted or null). "Uses" counts every placeholder the
+    definition writes — plain values, forwarded ``$vars`` values on a nested ``$ref``,
+    and override values on a nested ``$ref`` — since the enclosing definition binds them
+    all. Checked once per definition against the raw body — before any inline ``$defs/``
+    expansion — so a definition is judged only on its own placeholders. Definitions
+    without a ``$vars`` block use implicit variables and are skipped.
+    """
+    for entries in definitions.values():
+        if not isinstance(entries, dict):
+            continue
+        for def_key, body in entries.items():
+            if isinstance(body, dict) and _VARS_KEY in body:
+                declared = body.get(_VARS_KEY) or {}
+                check_signature_complete(def_key, body, declared)
 
 
 def _resolve_node(
@@ -230,12 +268,19 @@ def _resolve_inline_defs_strings(
     ``$ref`` dicts are intentionally NOT pre-resolved here: their sibling keys
     (``alias``, ``name``) are the *intended* merge identifier as written in YAML,
     so the merge must see them before the ``$ref`` is expanded.
+
+    A ``$vars`` block's values are also left untouched (copied through): they are literal
+    strings or forwarding ``{{ ... }}`` placeholders, never references, so a value that
+    happens to start with ``$defs/`` must reach ``check_string_vars`` as a raw string (to
+    raise a clear "not a reference" error) instead of being silently expanded here.
     """
     if isinstance(node, dict):
         if "$ref" in node:
             return node
         return {
-            key: _resolve_inline_defs_strings(
+            key: value
+            if key == _VARS_KEY
+            else _resolve_inline_defs_strings(
                 definitions, value, referenced, visited, override_strategy
             )
             for key, value in node.items()
@@ -291,11 +336,70 @@ def _resolve_ref(
     else:
         resolved = _merge_dicts(resolved, overrides)
 
+    declared = _declared_vars(definition)
+    resolved = _apply_vars(resolved, ref_path, declared)
+
     result = _resolve_node(
         definitions, resolved, referenced, visited, override_strategy
     )
     visited.discard(ref_path)
     return result
+
+
+def _declared_vars(definition: Any) -> set[str]:
+    """The variable names a definition declares in its own ``$vars`` signature.
+
+    These form the template's required parameter set (a null default still requires a
+    value at the ``$ref``). Empty for an implicit definition (no ``$vars`` block) or a
+    non-dict body. Taken from the raw definition, before the caller's ``$vars`` arguments
+    are merged in, so it reflects the definition's contract only.
+    """
+    if not isinstance(definition, dict):
+        return set()
+    return set(definition.get(_VARS_KEY) or {})
+
+
+def _apply_vars(resolved: Any, ref_path: str, declared: set[str]) -> Any:
+    """Bind and substitute template variables for a just-merged $ref body.
+
+    ``$vars`` rides the ordinary override merge like any other key, so ``resolved``
+    already holds the effective variables — the definition's declared defaults merged
+    under the $ref's supplied arguments (honouring the active override strategy). Pop that
+    merged block off (so it never leaks to model validation) and split it into the values
+    to substitute (non-null) from the requirement it encodes.
+
+    The template's parameter set is ``accepted = used | declared``: every placeholder the
+    (post-override) body actually uses, plus every variable the definition **declares** in
+    its own ``$vars`` signature (``declared``). Validating against ``accepted`` — rather
+    than usage alone — is what keeps a required (null-declared) variable required even when
+    the caller overrides away the only field that referenced it: such a variable is still
+    in ``declared``, so it must be supplied. Conversely, supplying a declared variable is
+    always allowed (it is in ``accepted``), even if an override removed its usage.
+
+    Substitution is structure-aware, so a nested $ref's forwarded ``$vars`` values *and*
+    any override values this definition writes onto that nested $ref become literals before
+    the child is expanded; a nested $ref's target string is the sole thing left untouched.
+    Every placeholder this definition writes is bound here, so a child $ref only ever sees
+    its own declared variables.
+
+    A non-dict definition body (e.g. a bare list of columns referenced via an inline
+    ``$defs/...`` string) has no place for a ``$vars`` block, so it is returned unchanged —
+    the recursive resolution pass still walks it, and any stray placeholder in it surfaces
+    at ``finalise``.
+    """
+    if not isinstance(resolved, dict):
+        return resolved
+    merged_variables = resolved.pop(_VARS_KEY, None) or {}
+    # Non-null entries are the values to substitute; a null entry is "not supplied"
+    # (``''`` is a real value). Requiredness comes from ``accepted`` below, not from which
+    # entries happen to be non-null — so a null-declared variable can't be dropped.
+    supplied = {k: v for k, v in merged_variables.items() if v is not None}
+    check_string_vars(supplied, context=f"$ref '{ref_path}'")
+    used = collect_placeholders(resolved)
+    accepted = used | declared
+    check_no_unbound(accepted, set(supplied), ref=ref_path)
+    check_no_unused(set(supplied), accepted, ref=ref_path)
+    return substitute_in_body(resolved, supplied)
 
 
 def _resolve_inline_defs_string(
@@ -305,13 +409,24 @@ def _resolve_inline_defs_string(
     visited: set[str],
     override_strategy: OverrideStrategy,
 ) -> Any:
-    """Resolve a bare $defs/... string value the same way a $ref dict is resolved."""
+    """Resolve a bare $defs/... string value the same way a $ref dict is resolved.
+
+    A bare string carries no sibling overrides and no supplied ``$vars``, so it is exactly
+    a ``$ref`` dict with neither: the referenced definition is bound against its **own**
+    ``$vars`` defaults (``_apply_vars``), which strips the ``$vars`` block and substitutes
+    the definition's placeholders before it is spliced in. This keeps the bare-string form
+    equivalent to the ``$ref``-dict form. A definition with a required (un-defaulted)
+    variable therefore cannot be referenced by the bare string — there is nowhere to supply
+    it — and must use the ``$ref`` + ``$vars`` form; that surfaces as a missing-variable
+    error here rather than leaking an unresolved ``{{ ... }}``.
+    """
     if ref_path in visited:
         raise ResolutionError(f"Circular $ref detected: {ref_path}")
     visited.add(ref_path)
     referenced.add(ref_path)
     definition = _lookup_definition(definitions, ref_path)
     resolved = copy.deepcopy(definition)
+    resolved = _apply_vars(resolved, ref_path, _declared_vars(definition))
     result = _resolve_node(
         definitions, resolved, referenced, visited, override_strategy
     )

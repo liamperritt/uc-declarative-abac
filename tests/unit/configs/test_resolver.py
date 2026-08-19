@@ -5,6 +5,7 @@ import pytest
 from uc_declarative_abac.configs import resolve_refs
 from uc_declarative_abac.utils import (
     ResolutionError,
+    TemplateVariableError,
     UnreferencedDefinitionError,
 )
 
@@ -1358,3 +1359,904 @@ def test_resolver_leaves_non_defs_strings_unchanged():
     assert policy["function"] == "platform.shared.mask_pii_email"
     assert policy["comment"] == "A plain string"
     assert policy["filter"] == "some_function_name"
+
+
+# ---------------------------------------------------------------------------
+# Template variables ($vars + {{ placeholder }})
+# ---------------------------------------------------------------------------
+
+
+def _schema_defs():
+    """A schema definition template with a required `env` and defaulted `medallion`."""
+    return {
+        "schemas": {
+            "ingestion|salesforce": {
+                "$vars": {"env": None, "medallion": "bronze"},
+                "name": "salesforce",
+                "tags": {
+                    "environment": "{{ env }}",
+                    "quality_tier": "{{ medallion }}",
+                },
+            },
+        },
+    }
+
+
+def test_resolver_substitutes_ref_vars():
+    """A $ref's $vars values are substituted into the template body."""
+    resources = {
+        "catalogs": {
+            "ingestion_prod": {
+                "name": "ingestion_prod",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ingestion|salesforce",
+                        "$vars": {"env": "prod", "medallion": "silver"},
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(_schema_defs(), resources)
+
+    schema = result["catalogs"]["ingestion_prod"]["schemas"][0]
+    assert schema["tags"] == {"environment": "prod", "quality_tier": "silver"}
+    # $vars is consumed, never left on the resolved body.
+    assert "$vars" not in schema
+
+
+def test_resolver_uses_definition_default_when_var_omitted():
+    """A $ref that omits a defaulted variable picks up the definition's default."""
+    resources = {
+        "catalogs": {
+            "ingestion_prod": {
+                "name": "ingestion_prod",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ingestion|salesforce",
+                        "$vars": {"env": "prod"},  # medallion omitted → bronze
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(_schema_defs(), resources)
+
+    schema = result["catalogs"]["ingestion_prod"]["schemas"][0]
+    assert schema["tags"]["quality_tier"] == "bronze"
+
+
+def test_resolver_ref_var_overrides_definition_default():
+    """A $ref supplying a defaulted variable overrides the default."""
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ingestion|salesforce",
+                        "$vars": {"env": "uat", "medallion": "gold"},
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(_schema_defs(), resources)
+
+    assert result["catalogs"]["c"]["schemas"][0]["tags"]["quality_tier"] == "gold"
+
+
+def test_resolver_forwards_vars_through_nested_ref():
+    """A definition forwards a variable to a child $ref via a {{ placeholder }} $vars value."""
+    definitions = {
+        "tables": {
+            "ingestion|salesforce|account": {
+                "$vars": {"env": None},
+                "name": "account",
+                "tags": {"environment": "{{ env }}"},
+            },
+        },
+        "schemas": {
+            "ingestion|salesforce": {
+                "$vars": {"env": None},
+                "name": "salesforce",
+                "tables": [
+                    {
+                        "$ref": "$defs/tables/ingestion|salesforce|account",
+                        "$vars": {"env": "{{ env }}"},
+                    },
+                ],
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "ingestion_prod": {
+                "name": "ingestion_prod",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ingestion|salesforce",
+                        "$vars": {"env": "prod"},
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    table = result["catalogs"]["ingestion_prod"]["schemas"][0]["tables"][0]
+    assert table["tags"]["environment"] == "prod"
+
+
+def test_resolver_rejects_placeholder_in_resource_override():
+    """A placeholder in a $ref override value at the resource level is an error.
+
+    Resources are the concrete instance layer: a placeholder there is bound by nothing
+    (the enclosing definition binds placeholders, and a resource is not a definition). The
+    author must supply the literal or move the templating into a definition.
+    """
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ingestion|salesforce",
+                        "name": "{{ env }}_salesforce_raw",
+                        "$vars": {"env": "prod"},
+                    },
+                ],
+            },
+        },
+    }
+
+    with pytest.raises(TemplateVariableError):
+        resolve_refs(_schema_defs(), resources)
+
+
+def test_resolver_binds_child_ref_override_to_enclosing_definition():
+    """An override a definition writes onto a child $ref is bound by that definition's $vars.
+
+    The schema overrides the table's `comment` with `{{ env }}` — the schema's own
+    variable. It is substituted in the schema's scope before the table $ref expands, so the
+    table itself never needs to declare `env`.
+    """
+    definitions = {
+        "tables": {
+            "t": {"name": "account"},
+        },
+        "schemas": {
+            "s": {
+                "$vars": {"env": None},
+                "name": "s_{{ env }}",
+                "tables": [
+                    {"$ref": "$defs/tables/t", "comment": "created in {{ env }}"},
+                ],
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {"$ref": "$defs/schemas/s", "$vars": {"env": "prod"}},
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    table = result["catalogs"]["c"]["schemas"][0]["tables"][0]
+    assert table["name"] == "account"
+    assert table["comment"] == "created in prod"
+
+
+def test_resolver_supports_inline_ref_with_placeholder_override_in_definition():
+    """A definition's inline $ref override may carry a placeholder bound by that definition.
+
+    The catalog definition's `tags` inlines a shared `base_tags` fragment and adds
+    `environment: '{{ env }}'`. The placeholder is the catalog's own (bound by its $vars),
+    substituted before base_tags is merged — so base_tags never needs to know `env`. This
+    previously raised a spurious "missing variable" because the placeholder was mis-bound to
+    the base_tags $ref's (empty) scope.
+    """
+    definitions = {
+        "tags": {
+            "base_tags": {
+                "governed_by": "uc_declarative_abac",
+                "classification": "in_confidence",
+            },
+        },
+        "catalogs": {
+            "ingestion": {
+                "$vars": {"env": None},
+                "name": "ingestion_{{ env }}",
+                "tags": {
+                    "$ref": "$defs/tags/base_tags",
+                    "environment": "{{ env }}",
+                },
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "ingestion_prod": {
+                "$ref": "$defs/catalogs/ingestion",
+                "$vars": {"env": "prod"},
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    catalog = result["catalogs"]["ingestion_prod"]
+    assert catalog["name"] == "ingestion_prod"
+    assert catalog["tags"] == {
+        "governed_by": "uc_declarative_abac",
+        "classification": "in_confidence",
+        "environment": "prod",
+    }
+
+
+def test_resolver_rejects_parent_widening_child_contract_via_override():
+    """A parent cannot smuggle a variable into a child's contract via an override + $vars.
+
+    The function template's contract is {redaction_character}. A schema references it and
+    adds `owner: sp_..._{{ env }}` plus `$vars: {env: ...}`. Now `owner` is bound in the
+    schema's scope, so `env` reaches the function $ref as a surplus argument the function
+    never uses → unused-variable error. The function's declared contract is protected.
+    """
+    definitions = {
+        "functions": {
+            "abac|format_phone": {
+                "$vars": {"redaction_character": "+"},
+                "name": "format_phone",
+                "return": "concat('{{ redaction_character }}', code, phone)",
+            },
+        },
+        "schemas": {
+            "liam_perritt|default": {
+                "$vars": {"env": None},
+                "name": "default",
+                "functions": [
+                    {
+                        "$ref": "$defs/functions/abac|format_phone",
+                        "$vars": {"env": "{{ env }}"},
+                        "owner": "sp_uc_governor_{{ env }}",
+                    },
+                ],
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/liam_perritt|default",
+                        "$vars": {"env": "prod"},
+                    },
+                ],
+            },
+        },
+    }
+
+    with pytest.raises(TemplateVariableError, match="[Uu]nused"):
+        resolve_refs(definitions, resources)
+
+
+def _format_phone_defs():
+    """A function declaring a required `env` used *only* in `owner`, plus a defaulted var."""
+    return {
+        "functions": {
+            "abac|format_phone": {
+                "$vars": {"env": None, "redaction_character": "+"},
+                "name": "format_phone",
+                "owner": "sp_uc_governor_{{ env }}",
+                "return": "concat('{{ redaction_character }}', code, phone)",
+            },
+        },
+    }
+
+
+def test_resolver_required_var_not_bypassed_by_overriding_its_usage():
+    """A null-declared (required) var stays required even when the $ref overrides away its
+    only usage and supplies no value — previously this silently succeeded."""
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "name": "s",
+                        "functions": [
+                            {
+                                "$ref": "$defs/functions/abac|format_phone",
+                                "owner": "sp_uc_governor_prod",  # removes the only {{ env }} usage
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+    }
+
+    with pytest.raises(TemplateVariableError, match="[Mm]issing"):
+        resolve_refs(_format_phone_defs(), resources)
+
+
+def test_resolver_supplying_declared_var_valid_even_if_usage_overridden():
+    """Supplying a declared var is always valid — even when an override removed its usage.
+
+    The corollary of "null = always required": the caller supplies `env` and also overrides
+    `owner`, so `env` is unused in the resolved body, but it is a declared variable and must
+    not be flagged as an unused argument.
+    """
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "name": "s",
+                        "functions": [
+                            {
+                                "$ref": "$defs/functions/abac|format_phone",
+                                "owner": "sp_uc_governor_prod",
+                                "$vars": {"env": "prod"},
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(_format_phone_defs(), resources)
+
+    fn = result["catalogs"]["c"]["schemas"][0]["functions"][0]
+    assert fn["owner"] == "sp_uc_governor_prod"  # the override literal
+    assert fn["return"] == "concat('+', code, phone)"  # redaction_character default applied
+    assert "$vars" not in fn
+
+
+def test_resolver_defaulted_var_overridden_away_needs_no_value():
+    """A defaulted (non-null) declared var whose usage is overridden away needs no value and
+    is not flagged missing or unused (its default is simply never rendered)."""
+    definitions = {
+        "schemas": {
+            "s": {
+                "$vars": {"medallion": "bronze"},
+                "name": "salesforce",
+                "tags": {"quality_tier": "{{ medallion }}"},
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/s",
+                        "tags": {"quality_tier": "gold"},  # overrides the only {{ medallion }} usage
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    assert result["catalogs"]["c"]["schemas"][0]["tags"]["quality_tier"] == "gold"
+
+
+def test_resolver_inline_defs_string_equivalent_to_ref_dict_for_templated_def():
+    """A bare `$defs/...` string binds the definition's own $vars defaults, like a $ref dict.
+
+    A definition with a defaulted variable (here `redaction_character: '+'`) referenced by
+    the bare-string form resolves against its own default and strips $vars — producing the
+    same result as the `{$ref: ...}` form with no arguments.
+    """
+    definitions = {
+        "functions": {
+            "abac|format_phone": {
+                "$vars": {"redaction_character": "+"},
+                "name": "format_phone",
+                "owner": "sp_uc_governor_test",
+                "return": "concat('{{ redaction_character }}', code, phone)",
+            },
+        },
+    }
+
+    def _resources(functions):
+        return {"catalogs": {"c": {"name": "c", "schemas": [
+            {"name": "s", "functions": functions},
+        ]}}}
+
+    inline = resolve_refs(
+        definitions, _resources(["$defs/functions/abac|format_phone"])
+    )
+    ref_dict = resolve_refs(
+        definitions, _resources([{"$ref": "$defs/functions/abac|format_phone"}])
+    )
+
+    fn = inline["catalogs"]["c"]["schemas"][0]["functions"][0]
+    assert fn == {
+        "name": "format_phone",
+        "owner": "sp_uc_governor_test",
+        "return": "concat('+', code, phone)",
+    }
+    assert inline == ref_dict
+
+
+def test_resolver_inline_defs_string_non_dict_body_is_unchanged():
+    """A non-dict (list-bodied) definition referenced inline resolves without a $vars crash."""
+    definitions = {
+        "columns": {"pair": [{"name": "a", "type": "string"}, {"name": "b", "type": "string"}]},
+    }
+    resources = {"catalogs": {"c": {"name": "c", "tables": [
+        {"name": "t", "columns": ["$defs/columns/pair"]},
+    ]}}}
+
+    result = resolve_refs(definitions, resources)
+
+    # The list-bodied fragment resolves (no $vars handling applied to a non-dict body).
+    assert result["catalogs"]["c"]["tables"][0]["columns"] == [
+        [{"name": "a", "type": "string"}, {"name": "b", "type": "string"}],
+    ]
+
+
+def test_resolver_inline_defs_string_missing_required_var_errors():
+    """A bare `$defs/...` string to a definition with a required (null) var can't bind it."""
+    definitions = {
+        "schemas": {
+            "s": {"$vars": {"env": None}, "name": "s_{{ env }}"},
+        },
+    }
+    # No way to supply `env` via a bare string → missing-variable error (not a leaked {{ }}).
+    resources = {"catalogs": {"c": {"name": "c", "schemas": ["$defs/schemas/s"]}}}
+
+    with pytest.raises(TemplateVariableError, match="[Mm]issing"):
+        resolve_refs(definitions, resources)
+
+
+def test_resolver_rejects_placeholder_in_resource_vars_value():
+    """A placeholder in a resource-level $vars value is an error (resource $vars are literals)."""
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ingestion|salesforce",
+                        "$vars": {"env": "{{ env }}"},
+                    },
+                ],
+            },
+        },
+    }
+
+    with pytest.raises(TemplateVariableError):
+        resolve_refs(_schema_defs(), resources)
+
+
+def test_resolver_raises_on_malformed_placeholder_in_definition():
+    """An identifier-shaped-but-invalid placeholder in a referenced definition is an error."""
+    definitions = {
+        "schemas": {"s": {"name": "s", "tags": {"e": "{{ my-var }}"}}},
+    }
+    resources = {"catalogs": {"c": {"name": "c", "schemas": [
+        {"$ref": "$defs/schemas/s"},
+    ]}}}
+
+    with pytest.raises(TemplateVariableError, match="[Mm]alformed"):
+        resolve_refs(definitions, resources)
+
+
+def test_resolver_raises_on_malformed_placeholder_in_resource_value():
+    """A malformed placeholder in a plain resource value is an error (not silently literal)."""
+    resources = {"catalogs": {"c": {"name": "ingestion_{{ my-var }}"}}}
+
+    with pytest.raises(TemplateVariableError, match="[Mm]alformed"):
+        resolve_refs({}, resources)
+
+
+def test_resolver_rejects_defs_reference_in_ref_vars_value():
+    """A $ref's $vars value that looks like a $defs/ reference errors clearly (not 'must be a string')."""
+    definitions = {
+        "schemas": {"s": {"$vars": {"x": None}, "name": "{{ x }}"}},
+        "columns": {"region": {"name": "region", "type": "string"}},
+    }
+    resources = {"catalogs": {"c": {"name": "c", "schemas": [
+        {"$ref": "$defs/schemas/s", "$vars": {"x": "$defs/columns/region"}},
+    ]}}}
+
+    with pytest.raises(TemplateVariableError, match="reference"):
+        resolve_refs(definitions, resources)
+
+
+def test_resolver_rejects_defs_reference_in_definition_default():
+    """A definition $vars default that looks like a $defs/ reference errors clearly."""
+    definitions = {
+        "schemas": {"s": {"$vars": {"x": "$defs/columns/region"}, "name": "{{ x }}"}},
+        "columns": {"region": {"name": "region", "type": "string"}},
+    }
+    resources = {"catalogs": {"c": {"name": "c", "schemas": [
+        {"$ref": "$defs/schemas/s"},
+    ]}}}
+
+    with pytest.raises(TemplateVariableError, match="reference"):
+        resolve_refs(definitions, resources)
+
+
+def test_resolver_raises_on_missing_var():
+    """A $ref that fails to supply a required (non-defaulted) variable is an error."""
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ingestion|salesforce",
+                        "$vars": {"medallion": "bronze"},  # env missing
+                    },
+                ],
+            },
+        },
+    }
+
+    with pytest.raises(TemplateVariableError, match="[Mm]issing"):
+        resolve_refs(_schema_defs(), resources)
+
+
+def test_resolver_raises_on_unused_ref_var():
+    """A $ref supplying a variable the template does not use is an error."""
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ingestion|salesforce",
+                        "$vars": {"env": "prod", "typo": "x"},
+                    },
+                ],
+            },
+        },
+    }
+
+    with pytest.raises(TemplateVariableError, match="[Uu]nused"):
+        resolve_refs(_schema_defs(), resources)
+
+
+def test_resolver_allows_forwarding_only_var():
+    """A variable used only to forward to a child $ref is not flagged unused."""
+    definitions = {
+        "tables": {
+            "t": {
+                "$vars": {"env": None},
+                "name": "account",
+                "tags": {"environment": "{{ env }}"},
+            },
+        },
+        "schemas": {
+            "s": {
+                "$vars": {"env": None},
+                "name": "salesforce",
+                "tables": [
+                    {"$ref": "$defs/tables/t", "$vars": {"env": "{{ env }}"}},
+                ],
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {"$ref": "$defs/schemas/s", "$vars": {"env": "prod"}},
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    assert (
+        result["catalogs"]["c"]["schemas"][0]["tables"][0]["tags"]["environment"]
+        == "prod"
+    )
+
+
+def test_resolver_raises_on_placeholder_in_plain_resource_value():
+    """A placeholder in a plain resource value is an error (resources must be concrete)."""
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "ingestion_{{ env }}",  # placeholder in a resource — nothing binds it
+            },
+        },
+    }
+
+    with pytest.raises(TemplateVariableError, match="resource value"):
+        resolve_refs({}, resources)
+
+
+def test_resolver_raises_on_placeholder_in_ref_target():
+    """A placeholder in a $ref target is never substituted; it fails to resolve."""
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ingestion|salesforce_{{ env }}",
+                        "$vars": {"env": "prod"},
+                    },
+                ],
+            },
+        },
+    }
+
+    # The target is not a real definition key and the placeholder is not substituted,
+    # so resolution fails (unresolved ref), not a silent success.
+    with pytest.raises((ResolutionError, TemplateVariableError)):
+        resolve_refs(_schema_defs(), resources)
+
+
+def test_resolver_null_default_is_still_required():
+    """A null-declared variable has no default, so a $ref must still supply it."""
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ingestion|salesforce",
+                        "$vars": {"medallion": "bronze"},  # env (null) not supplied
+                    },
+                ],
+            },
+        },
+    }
+
+    with pytest.raises(TemplateVariableError, match="[Mm]issing"):
+        resolve_refs(_schema_defs(), resources)
+
+
+def test_resolver_empty_string_var_binds_empty():
+    """An explicit empty-string variable value binds the placeholder to empty."""
+    definitions = {
+        "schemas": {
+            "s": {
+                "$vars": {"suffix": None},
+                "name": "base{{ suffix }}",
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {"$ref": "$defs/schemas/s", "$vars": {"suffix": ""}},
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    assert result["catalogs"]["c"]["schemas"][0]["name"] == "base"
+
+
+def test_resolver_rejects_non_string_var():
+    """A non-string $ref variable value is an error (strings only)."""
+    definitions = {
+        "schemas": {
+            "s": {"$vars": {"n": None}, "name": "s_{{ n }}"},
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {"$ref": "$defs/schemas/s", "$vars": {"n": 3}},
+                ],
+            },
+        },
+    }
+
+    with pytest.raises(TemplateVariableError, match="must be a string"):
+        resolve_refs(definitions, resources)
+
+
+def test_resolver_escaped_double_braces_survive_substitution_and_guard():
+    """Escaped {{{{ }}}} in a function body resolves to literal {{ }} and is not flagged."""
+    definitions = {
+        "functions": {
+            "shared|mask_for_env": {
+                "$vars": {"env": None},
+                "name": "mask_for_{{ env }}",
+                "return": "CASE WHEN '{{ env }}' = 'prod' "
+                "THEN CONCAT('{{{{', val, '}}}}') ELSE val END",
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "functions": [
+                    {
+                        "$ref": "$defs/functions/shared|mask_for_env",
+                        "$vars": {"env": "prod"},
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    fn = result["catalogs"]["c"]["functions"][0]
+    assert fn["name"] == "mask_for_prod"
+    # {{ env }} substituted; the escaped literal braces collapse to single double-braces.
+    assert fn["return"] == (
+        "CASE WHEN 'prod' = 'prod' THEN CONCAT('{{', val, '}}') ELSE val END"
+    )
+
+
+def test_resolver_replace_strategy_drops_definition_defaults():
+    """Under replace, a $ref's $vars wholesale-replaces the definition's defaults."""
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        # Under replace, this $vars replaces the definition's
+                        # {env: null, medallion: bronze} entirely, so medallion is
+                        # no longer defaulted and its placeholder is unbound.
+                        "$ref": "$defs/schemas/ingestion|salesforce",
+                        "$vars": {"env": "prod"},
+                    },
+                ],
+            },
+        },
+    }
+
+    with pytest.raises(TemplateVariableError, match="[Mm]issing"):
+        resolve_refs(_schema_defs(), resources, override_strategy="replace")
+
+
+def test_resolver_config_without_vars_is_unchanged():
+    """A config with no $vars / placeholders resolves exactly as before."""
+    definitions = {
+        "schemas": {
+            "ops|sales": {"name": "sales", "comment": "Sales"},
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "schemas": [{"$ref": "$defs/schemas/ops|sales"}],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    schema = result["catalogs"]["main"]["schemas"][0]
+    assert schema == {"name": "sales", "comment": "Sales"}
+
+
+def test_resolver_legacy_params_key_is_inert():
+    """After the rename, a `$params` key is no longer the feature trigger.
+
+    It is treated as an ordinary field (not template variables), so it neither binds
+    placeholders nor gets stripped — it just passes through like any other key.
+    """
+    definitions = {
+        "schemas": {
+            "ops|sales": {"name": "sales", "$params": {"env": "prod"}},
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "schemas": [{"$ref": "$defs/schemas/ops|sales"}],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    schema = result["catalogs"]["main"]["schemas"][0]
+    # `$params` is not consumed as a $vars block; it survives as a plain field.
+    assert schema == {"name": "sales", "$params": {"env": "prod"}}
+
+
+def test_resolver_undeclared_vars_allowed_when_no_signature_block():
+    """A definition with no $vars block uses implicit variables (all required)."""
+    definitions = {
+        "schemas": {
+            "s": {"name": "salesforce_{{ env }}"},  # implicit env, no $vars block
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {"$ref": "$defs/schemas/s", "$vars": {"env": "prod"}},
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    assert result["catalogs"]["c"]["schemas"][0]["name"] == "salesforce_prod"
+
+
+def test_resolver_raises_on_incomplete_signature_undeclared_placeholder():
+    """A declared $vars missing a body placeholder is a hard error, upfront."""
+    definitions = {
+        "schemas": {
+            "s": {
+                "$vars": {"env": None},  # region used in body but not declared
+                "name": "{{ env }}_{{ region }}",
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/s",
+                        "$vars": {"env": "p", "region": "us"},
+                    },
+                ],
+            },
+        },
+    }
+
+    with pytest.raises(TemplateVariableError, match="undeclared"):
+        resolve_refs(definitions, resources)
+
+
+def test_resolver_raises_on_incomplete_signature_unused_declaration():
+    """A declared variable the body never uses is a hard error, upfront."""
+    definitions = {
+        "schemas": {
+            "s": {
+                "$vars": {"env": None, "extra": "x"},  # extra unused
+                "name": "{{ env }}",
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {"$ref": "$defs/schemas/s", "$vars": {"env": "prod"}},
+                ],
+            },
+        },
+    }
+
+    with pytest.raises(TemplateVariableError, match="never uses"):
+        resolve_refs(definitions, resources)

@@ -252,6 +252,19 @@ class UnreferencedDefinitionError(OrchestratorError):
     """Raised when definitions exist that are not referenced by any $ref."""
 
 
+class TemplateVariableError(OrchestratorError):
+    """Raised for template-variable (``$vars`` / ``{{ placeholder }}``) errors.
+
+    Covers every failure mode of the template-variables feature: an incomplete
+    definition ``$vars`` signature (a body placeholder left undeclared, or a
+    declared variable the body never uses), a ``$ref`` that fails to supply a
+    required variable (missing) or supplies one the template does not use
+    (unused), a non-string ``$vars`` value, and a ``{{ placeholder }}`` in a
+    resource value (resources are the concrete instance layer — placeholders are
+    bound by the enclosing definition's ``$vars`` and belong inside definitions).
+    """
+
+
 class PrincipalValidationError(OrchestratorError):
     """Raised when one or more principal names cannot be found in the account."""
 
