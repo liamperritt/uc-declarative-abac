@@ -952,7 +952,32 @@ definitions:
           owner: uc_gov_{{ env }}_team    # also used locally
 ```
 
-**Rules.** Variable names must be **bare identifiers** (letters, digits, underscore; not starting with a digit) — an identifier-shaped-but-invalid token like `{{ my-var }}` is rejected rather than passed through as literal text. Variable values are literal strings (a number/bool is rejected with a hint to quote it; `''` is a real empty string, null means "not supplied"; a value that looks like a `$defs/...` reference is rejected — `$vars` carry values, not references). A placeholder is bound by the `$vars` of the **enclosing definition** — the definition in whose text it appears, whether that's the definition's own body or an override the definition writes onto a child `$ref` (*the writer binds it*). A placeholder may therefore appear only inside a definition, never in a dict key, a `$defs/...` reference target, or **anywhere under a `resources:` entry** — a resource is the concrete instance layer and must supply literals, so a placeholder there is a hard error. Because binding is local to the writer, a parent cannot widen a child's variable contract via an override. A multi-level template forwards a variable to a child `$ref` by using `{{ placeholder }}` as the child's `$vars` value — except a definition's own body-root `$ref` (an *extends*), where a variable forwards into the base by name (see **Extending a definition** above). Every placeholder must be bound (by an argument or a default) and every supplied argument must be used; a missing, unused, incomplete-signature, non-string, or resource-placeholder case fails config validation. See the [feature proposal](https://github.com/liamperritt/uc-declarative-abac/issues/18) for the full specification.
+**Tag-name keys.** Most dict keys are structural (field names, `$ref`/`$defs` targets, resource identities) and stay literal, but a **tag name is user data** — so `{{ placeholder }}` is allowed in the *keys* of the tag-name maps `tags`, `has_tags`, and `has_any_of_tags` (on securables, columns, and policies), bound by the enclosing definition's `$vars` just like a value. A placeholder in any other key is still an error.
+
+```yaml
+definitions:
+  schemas:
+    ingestion|salesforce:
+      $vars:
+        env: ~
+      name: salesforce
+      tags:
+        uc_gov_{{ env }}_owner: platform    # tag NAME is templated
+  policies:
+    domain|grant_read:
+      $vars:
+        env: ~
+      name: grant_read
+      type: grant
+      has_any_of_tags:
+        finance_{{ env }}: '*'               # tag NAME in a policy condition
+      privileges: [read]
+      to: [analysts]
+```
+
+Two limitations: substitution happens after `$ref` override merge, so a tag key that still holds a placeholder cannot be targeted by an outer-level override (the outer writes a concrete key, which won't align); and two templated keys that resolve to the same tag name collapse (last wins).
+
+**Rules.** Variable names must be **bare identifiers** (letters, digits, underscore; not starting with a digit) — an identifier-shaped-but-invalid token like `{{ my-var }}` is rejected rather than passed through as literal text. Variable values are literal strings (a number/bool is rejected with a hint to quote it; `''` is a real empty string, null means "not supplied"; a value that looks like a `$defs/...` reference is rejected — `$vars` carry values, not references). A placeholder is bound by the `$vars` of the **enclosing definition** — the definition in whose text it appears, whether that's the definition's own body or an override the definition writes onto a child `$ref` (*the writer binds it*). A placeholder may therefore appear only inside a definition — in a value, or in a **tag-name map key** (`tags`, `has_tags`, `has_any_of_tags`; see **Tag-name keys** below) — never in any other dict key, a `$defs/...` reference target, or **anywhere under a `resources:` entry** — a resource is the concrete instance layer and must supply literals, so a placeholder there is a hard error. Because binding is local to the writer, a parent cannot widen a child's variable contract via an override. A multi-level template forwards a variable to a child `$ref` by using `{{ placeholder }}` as the child's `$vars` value — except a definition's own body-root `$ref` (an *extends*), where a variable forwards into the base by name (see **Extending a definition** above). Every placeholder must be bound (by an argument or a default) and every supplied argument must be used; a missing, unused, incomplete-signature, non-string, or resource-placeholder case fails config validation. See the [feature proposal](https://github.com/liamperritt/uc-declarative-abac/issues/18) for the full specification.
 
 ---
 

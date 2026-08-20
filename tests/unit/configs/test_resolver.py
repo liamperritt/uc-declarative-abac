@@ -2437,3 +2437,70 @@ def test_resolver_root_ref_base_without_vars_unchanged():
     schema = result["catalogs"]["c"]["schemas"][0]
     assert schema["tags"] == {"team": "platform"}
     assert schema["volumes"][0]["owner"] == "uc_gov_test_team"
+
+
+# ---------------------------------------------------------------------------
+# Placeholders in tag-name map keys
+# ---------------------------------------------------------------------------
+
+
+def test_resolver_substitutes_placeholder_in_tag_key():
+    """A {{ placeholder }} in a tag-map key resolves to a concrete tag name.
+
+    `env` is used only in a tag key on the schema and a has_any_of_tags key on the policy —
+    the signature check accepts it (a tag-key use counts as used), and both keys resolve.
+    """
+    definitions = {
+        "schemas": {
+            "s": {
+                "$vars": {"env": None},
+                "tags": {"uc_gov_{{ env }}_owner": "platform"},
+            },
+        },
+        "policies": {
+            "p": {
+                "$vars": {"env": None},
+                "name": "grant",
+                "type": "grant",
+                "has_any_of_tags": {"finance_{{ env }}": "*"},
+                "privileges": ["read"],
+                "to": ["x"],
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [{"$ref": "$defs/schemas/s", "$vars": {"env": "test"}}],
+                "policies": [{"$ref": "$defs/policies/p", "$vars": {"env": "test"}}],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    catalog = result["catalogs"]["c"]
+    assert catalog["schemas"][0]["tags"] == {"uc_gov_test_owner": "platform"}
+    assert catalog["policies"][0]["has_any_of_tags"] == {"finance_test": "*"}
+
+
+def test_resolver_rejects_placeholder_in_non_tag_key():
+    """A placeholder in a non-tag key is not a variable position and fails at finalise.
+
+    The schema declares no $vars and writes `{{ env }}` into an ordinary (non-tag) key. It is
+    never collected or substituted, so it survives to finalise as an unbound placeholder.
+    """
+    definitions = {
+        "schemas": {
+            "s": {"weird_{{ env }}_field": "x"},
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {"name": "c", "schemas": [{"$ref": "$defs/schemas/s"}]},
+        },
+    }
+
+    with pytest.raises(TemplateVariableError):
+        resolve_refs(definitions, resources)

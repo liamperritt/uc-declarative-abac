@@ -1,10 +1,12 @@
 definitions:
   schemas:
     liam_perritt|lff_sqlserver_bronze:
+      $vars:
+        tag_prefix: uc_gov
       name: lff_sqlserver_bronze
       tags:
-        uc_gov_team: data_engineering
-        uc_gov_zone: bronze
+        '{{ tag_prefix }}_team': data_engineering
+        '{{ tag_prefix }}_zone': bronze
       policies:
         - $ref: $defs/policies/pii|mask_pii
           $vars:
@@ -15,7 +17,7 @@ definitions:
             - name: override
               type: string
               tags:
-                uc_gov_pii: name
+                '{{ tag_prefix }}_pii': name
         - $ref: $defs/tables/liam_perritt|lff_sqlserver_bronze|dummy_table_cdc_st
       volumes:
         - $defs/volumes/liam_perritt|lff_sqlserver_bronze|test
