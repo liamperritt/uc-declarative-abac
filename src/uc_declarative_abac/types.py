@@ -119,6 +119,7 @@ _UNIVERSAL_PRIVILEGES = {
     PrivilegeType.ALL_PRIVILEGES,
     PrivilegeType.MANAGE,
     PrivilegeType.APPLY_TAG,
+    PrivilegeType.READ_METADATA,
 }
 
 SECURABLE_TYPE_PRIVILEGE_MAP: dict[SecurableType, set[PrivilegeType]] = {
