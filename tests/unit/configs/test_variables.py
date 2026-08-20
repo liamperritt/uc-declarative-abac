@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from uc_declarative_abac.configs.variables import (
+    accepted_vars,
     check_no_placeholders_in_resources,
     check_no_unbound,
     check_no_unused,
@@ -428,3 +429,62 @@ def test_check_no_placeholders_in_resources_allows_escaped_braces():
         },
     }
     check_no_placeholders_in_resources(resources)  # no raise
+
+
+# ---------------------------------------------------------------------------
+# accepted_vars
+# ---------------------------------------------------------------------------
+
+
+def test_accepted_vars_unions_declared_and_body_placeholders():
+    """A definition accepts its declared $vars names plus placeholders its body writes."""
+    body = {
+        "$vars": {"env": None, "medallion": "bronze"},
+        "name": "{{ env }}",
+        "tags": {"tier": "{{ medallion }}"},
+    }
+    assert accepted_vars(body) == {"env", "medallion"}
+
+
+def test_accepted_vars_counts_forwarded_placeholder():
+    """A placeholder used only as a nested $ref's forwarding $vars value is accepted."""
+    body = {
+        "$vars": {"env": None},
+        "tables": [{"$ref": "$defs/tables/t", "$vars": {"env": "{{ env }}"}}],
+    }
+    assert accepted_vars(body) == {"env"}
+
+
+def test_accepted_vars_empty_for_non_dict():
+    """A non-dict body (e.g. a bare column list) has no $vars scope."""
+    assert accepted_vars(["a", "b"]) == set()
+
+
+# ---------------------------------------------------------------------------
+# check_signature_complete with inherited (forwarded-to-base) uses
+# ---------------------------------------------------------------------------
+
+
+def test_check_signature_complete_inherited_use_allows_pass_through_var():
+    """A variable declared only to forward to a base counts as used when the base accepts it."""
+    body = {"$ref": "$defs/schemas/base", "name": "default"}
+    # `env` appears nowhere in the body, but the base accepts it (inherited use).
+    check_signature_complete(
+        "default", body, {"env": None}, inherited_uses={"env"}
+    )  # no raise
+
+
+def test_check_signature_complete_without_inherited_use_rejects_unused_var():
+    """Without an inherited use, a declared-but-unused variable is still rejected."""
+    body = {"$ref": "$defs/schemas/base", "name": "default"}
+    with pytest.raises(TemplateVariableError, match="never uses"):
+        check_signature_complete("default", body, {"env": None})
+
+
+def test_check_signature_complete_inherited_use_does_not_excuse_body_typo():
+    """Inherited uses relax only the unused direction — a body placeholder must still be declared."""
+    body = {"$ref": "$defs/schemas/base", "name": "{{ environmnet }}"}
+    with pytest.raises(TemplateVariableError, match="undeclared"):
+        check_signature_complete(
+            "default", body, {"env": None}, inherited_uses={"env"}
+        )

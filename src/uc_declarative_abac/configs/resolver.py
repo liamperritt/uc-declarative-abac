@@ -4,6 +4,7 @@ import copy
 from typing import Any, Literal
 
 from uc_declarative_abac.configs.variables import (
+    accepted_vars,
     check_no_placeholders_in_resources,
     check_no_unbound,
     check_no_unused,
@@ -208,7 +209,14 @@ def _check_definition_signatures(definitions: dict) -> None:
         for def_key, body in entries.items():
             if isinstance(body, dict) and _VARS_KEY in body:
                 declared = body.get(_VARS_KEY) or {}
-                check_signature_complete(def_key, body, declared)
+                # A definition whose body root is a $ref extends a base and implicitly
+                # forwards its own variables into it by name (see _forward_scope_to_base_ref).
+                # Treat the base's accepted variables as inherited uses so a variable declared
+                # solely to pass through to the base is not flagged as unused.
+                inherited_uses = _base_accepted_vars(definitions, body)
+                check_signature_complete(
+                    def_key, body, declared, inherited_uses=inherited_uses
+                )
 
 
 def _resolve_node(
@@ -337,7 +345,7 @@ def _resolve_ref(
         resolved = _merge_dicts(resolved, overrides)
 
     declared = _declared_vars(definition)
-    resolved = _apply_vars(resolved, ref_path, declared)
+    resolved = _apply_vars(resolved, ref_path, declared, definitions)
 
     result = _resolve_node(
         definitions, resolved, referenced, visited, override_strategy
@@ -359,7 +367,9 @@ def _declared_vars(definition: Any) -> set[str]:
     return set(definition.get(_VARS_KEY) or {})
 
 
-def _apply_vars(resolved: Any, ref_path: str, declared: set[str]) -> Any:
+def _apply_vars(
+    resolved: Any, ref_path: str, declared: set[str], definitions: dict
+) -> Any:
     """Bind and substitute template variables for a just-merged $ref body.
 
     ``$vars`` rides the ordinary override merge like any other key, so ``resolved``
@@ -382,6 +392,11 @@ def _apply_vars(resolved: Any, ref_path: str, declared: set[str]) -> Any:
     Every placeholder this definition writes is bound here, so a child $ref only ever sees
     its own declared variables.
 
+    Finally, if the substituted body is itself a root ``$ref`` — this definition *extends* a
+    base definition — its concrete variables are forwarded into that base by name (see
+    ``_forward_scope_to_base_ref``), the one place explicit ``$vars`` forwarding is
+    structurally impossible (the root ``$vars`` slot is the definition's own signature).
+
     A non-dict definition body (e.g. a bare list of columns referenced via an inline
     ``$defs/...`` string) has no place for a ``$vars`` block, so it is returned unchanged —
     the recursive resolution pass still walks it, and any stray placeholder in it surfaces
@@ -399,7 +414,52 @@ def _apply_vars(resolved: Any, ref_path: str, declared: set[str]) -> Any:
     accepted = used | declared
     check_no_unbound(accepted, set(supplied), ref=ref_path)
     check_no_unused(set(supplied), accepted, ref=ref_path)
-    return substitute_in_body(resolved, supplied)
+    substituted = substitute_in_body(resolved, supplied)
+    if isinstance(substituted, dict) and "$ref" in substituted:
+        substituted = _forward_scope_to_base_ref(substituted, supplied, definitions)
+    return substituted
+
+
+def _forward_scope_to_base_ref(
+    body: dict, supplied: dict, definitions: dict
+) -> dict:
+    """Forward an extending definition's own variables into the base it extends.
+
+    A definition whose body root is a ``$ref`` extends that base definition. Because the
+    root ``$vars`` slot is consumed as this definition's own signature, there is nowhere to
+    write an explicit forwarding ``$vars`` onto the base $ref — so the enclosing scope's
+    concrete variables are forwarded here **by name**, restricted to the variables the base
+    *accepts* (its declared signature plus the placeholders its body uses). Filtering to the
+    base's accepted set is what keeps this from tripping the base's "unused argument" check.
+
+    The forwarded values ride the ordinary override merge when the base $ref is expanded, so
+    the base binds and substitutes them exactly as it would an explicit nested forward. Any
+    ``$vars`` the ref already carries wins per-variable (there is normally none on a root
+    ``$ref``). This is a single, locally-authored inheritance hop — not ambient scope walking:
+    the value still comes from this definition and the $ref that instantiated it, nothing else.
+    """
+    base_accepted = _base_accepted_vars(definitions, body)
+    forwarded = {k: v for k, v in supplied.items() if k in base_accepted}
+    if forwarded:
+        existing = body.get(_VARS_KEY) or {}
+        body[_VARS_KEY] = {**forwarded, **existing}
+    return body
+
+
+def _base_accepted_vars(definitions: dict, body: Any) -> set[str]:
+    """The variables the base of a root-``$ref`` definition accepts, else an empty set.
+
+    Returns ``accepted_vars`` of the definition ``body`` extends via a root ``$ref``. Empty
+    when ``body`` is not a root-``$ref`` extension or the base cannot be resolved to a dict
+    (a missing/invalid ``$ref`` surfaces later, during resolution, with a clearer error).
+    """
+    if not isinstance(body, dict) or "$ref" not in body:
+        return set()
+    try:
+        base = _lookup_definition(definitions, body["$ref"])
+    except ResolutionError:
+        return set()
+    return accepted_vars(base)
 
 
 def _resolve_inline_defs_string(
@@ -426,7 +486,9 @@ def _resolve_inline_defs_string(
     referenced.add(ref_path)
     definition = _lookup_definition(definitions, ref_path)
     resolved = copy.deepcopy(definition)
-    resolved = _apply_vars(resolved, ref_path, _declared_vars(definition))
+    resolved = _apply_vars(
+        resolved, ref_path, _declared_vars(definition), definitions
+    )
     result = _resolve_node(
         definitions, resolved, referenced, visited, override_strategy
     )
