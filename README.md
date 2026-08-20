@@ -139,6 +139,7 @@ The repo ships a composite GitHub Action at `deploy/action.yml` so any other rep
 | `skip-users-fetch` | no | `'false'` | Skip listing users and treat the user set as empty when `'true'`. For organisations that govern access only via groups and service principals, this avoids the slowest SCIM list call and speeds up the initial fetch significantly in accounts with many users. It is useful when running interactively for a faster fetch time, but **it is not intended for production use.** |
 | `enable-group-creation` | no | `'false'` | Permit the engine to create account groups declared under `resources.groups` that don't yet exist, **with their configured members** (the engine automatically gets the `MANAGER` role on groups it creates). Independent of `enable-group-management`: this flag only creates missing groups |
 | `enable-group-management` | no | `'false'` | Permit the engine to reconcile the membership of **existing** account groups under `resources.groups` — adding configured members and **removing** members absent from config (an empty `members` list removes all). Requires the `MANAGER` role on each managed group. Off by default; does not create missing groups (use `enable-group-creation`) |
+| `enable-group-deletion` | no | `'false'` | Make config authoritative over account group existence: **delete** any Databricks-managed account group absent from `resources.groups`. Only Databricks-managed groups are affected — external (IdP-provisioned) groups and account system groups (`account users`, `account admins`) are never deleted. Requires `enable-group-creation` and at least one group declared under `resources.groups`. Requires interactive confirmation unless `force: 'true'` — in CI you must set `force` or the run errors out |
 | `enable-tag-management` | no | `'false'` | Permit the engine to create/update/remove tag assignments on securables |
 | `enable-privilege-management` | no | `'false'` | Permit the engine to `GRANT`/`REVOKE` privileges |
 | `enable-taggable-management` | no | `'false'` | Permit the engine to update attributes (owner, etc.) on existing catalogs/schemas/tables/volumes |
@@ -177,7 +178,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: liamperritt/uc-declarative-abac/deploy@v0.8.0
+      - uses: liamperritt/uc-declarative-abac/deploy@v0.9.0
         with:
           config-dir: configs/
           warehouse-id: ${{ vars.DATABRICKS_WAREHOUSE_ID }}
@@ -218,7 +219,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: liamperritt/uc-declarative-abac/validate@v0.8.0
+      - uses: liamperritt/uc-declarative-abac/validate@v0.9.0
         with:
           config-dir: configs/
 ```
@@ -236,7 +237,7 @@ jobs:
 
 ### Resources (deployed UC objects)
 
-- **Groups** — account groups and their membership. The engine adds configured members to existing account groups (additions only) and, with `enable-group-creation`, creates missing groups.
+- **Groups** — account groups and their membership. The engine adds configured members to existing account groups (additions only) and, with `enable-group-creation`, creates missing groups. With `enable-group-deletion` (which requires `enable-group-creation`), config becomes authoritative over group existence and undeclared Databricks-managed groups are deleted — external and account system groups are always left alone.
 - **Governed tags** — enforced usage rules for UC governed tags with allowed values, allowed principals, and comments.
 - **Catalogs** — usually a thin `$ref` to a catalog definition with optional overrides (e.g. a different `name` or `tags` for a test vs prod environment). Can also be written fully inline when no reuse is needed.
 - **Schemas, tables, volumes, functions, mask/filter ABAC policies** — concrete instances that can reference relevant definitions. Generally you shouldn't need to declare these at the resource level because they're pulled in transitively via the catalog definition. BUt both options are supported.
@@ -288,6 +289,8 @@ Key conventions by type:
 | policies (cross-catalog, reusable) | `<tag_key/domain>>\|<policy_name>` | `pii\|mask_pii_email` |
 
 These keys are the stable identity for each entity and let you reference entities across files via `$defs/<type>/<key>` or `$ref: $defs/<type>/<key>` syntax (inspired by JSON Schema's `$defs` and `$ref` keywords) which also supports selective config overrides (see the **Overrides** section below).
+
+> **Strict keys.** Config models reject **unknown keys**: a field that isn't part of the schema (a typo like `has_tag` for `has_tags`, `too` for `to`, or a key placed on the wrong object type) is a hard validation error, not silently ignored. This surfaces mistakes at load time instead of letting a misspelled field quietly change what gets deployed.
 
 Any definition type (catalogs, schemas, tables, volumes, functions, mask/filter policy) can be promoted to a concrete resource by placing it under `resources:` with a `$ref`/`$defs` reference to the definition. For catalogs this is the usual pattern — the catalog definition captures the shape, and a resource catalog references it. For leaf types (table, volume, function) you can also promote them directly when you need a single deployed instance outside of a catalog composition; these require `catalog_name`/`schema_name` to be set.
 
@@ -682,16 +685,18 @@ Resource configs are concrete, deployable instances (e.g., catalogs and their co
 
 #### Groups
 
-Account groups and their membership are defined under `resources: groups:` (not definitions) because they are account-level singletons. The dictionary key is used as the group's display name if `name` is not provided.
+Account groups and their membership are deployed under `resources: groups:` — they are account-level singletons, so a group resource is what actually gets reconciled. The dictionary key is used as the group's display name if `name` is not provided. (Groups can also be captured as reusable `definitions: groups:` templates and pulled in with `$ref: $defs/groups/<key>` — useful with template variables for environment-based group families; see [Template variables](#template-variables).)
 
 - **`name`** — the group's display name.
 - **`id`** — *(optional)* the group's account-level SCIM / internal id. When set, the engine matches the group by `id` instead of by `name`, which enables **renaming**: keep the `id` fixed and change `name`, and the engine updates the group's display name rather than treating it as a new group. Omit it for groups you never intend to rename.
 - **`members`** — the list of principals (users, groups, or service principals by display name) that must belong to the group.
+- **`expiry_date`** — *(optional)* an ISO date (`YYYY-MM-DD`). When a deployment runs **on or after** this date, all of the group's members are removed (the group itself is **not** deleted). Takes effect only under `enable-group-management` — the flag that reconciles membership — and is a no-op without it. Omit it for groups that never expire. Mirrors the `expiry_date` on grant policies.
 
 Behaviour (governed by two orthogonal, off-by-default flags):
 
 - **Creation (`enable-group-creation`).** Creates a configured group that doesn't yet exist, **with its configured members** (atomically). The engine automatically receives the `MANAGER` role on groups it creates. This flag only brings missing groups into existence; it does not reconcile the membership of existing groups.
 - **Membership management (`enable-group-management`).** Reconciles the membership of **existing** groups: configured members not in the group are added, and members in the group but absent from config are **removed** (an empty/omitted `members` list removes all members — config is the source of truth). Requires the engine principal to hold the `MANAGER` role on each managed group.
+- **Expiry (`enable-group-management`).** When a group sets an `expiry_date` and the deployment runs on or after it, the group is treated as having no configured members, so all current members are removed (the group is left in place). Realised through the same membership-reconciliation path, so it requires `enable-group-management` and is inert without it.
 - **Renaming (`enable-group-management`).** When a configured group sets an `id` and its `name` differs from the group's current display name in the account, the engine renames the group (updates its display name via the account SCIM proxy) instead of creating a new one. Renaming is part of management, so it requires `enable-group-management`. Update your **config** references (securable owners, governed-tag assigners, grant/policy principals) to the **new** name: a config reference to the new name resolves cleanly, while a stale config reference to the **old** name is a fatal error. References in the **already-deployed state** (existing grants, policies, assigners, and memberships still recorded under the old name, since they aren't renamed until the rename applies — and never in dry-run) are transparently mapped from the old name to the new one, so a rename run is idempotent — it does **not** produce spurious grant/policy/assigner churn. A configured `id` that matches no account group is a fatal error, as is renaming a group to a display name already used by a different group.
 - **Gating.** With neither flag the group domain is inert (configured groups are ignored). Under management, a configured group that doesn't exist is a fatal error unless creation is also enabled. To fully provision a brand-new group with its members in one run, pass both flags.
 - **Externally-managed groups are rejected.** An existing group provisioned from an external IdP (it carries an `external_id`) cannot have its membership managed or be renamed here — the run fails with a clear error.
@@ -705,6 +710,7 @@ resources:
     data_engineers:
       name: data_engineers
       # id: "1234567890123456"   # set to rename: keep id, change name above
+      # expiry_date: 2026-12-31  # on/after this date, all members are removed (group kept)
       members:
         - alice@example.com
         - bob@example.com
@@ -870,6 +876,59 @@ resources:
             - name: leads
             `comment: Leads table         # appended; 'orders' from def is preserved
 ```
+
+### Template variables
+
+Definitions can be **parameterised templates**. Any string value in a definition may contain `{{ placeholder }}` tokens; each `$ref` that instantiates the definition supplies concrete values via a sibling `$vars` block. Think of a definition as a function, a `$ref` as a call, and `$vars` as the arguments. This removes the last major source of copy-paste — environment-based names and principals — that plain `$ref` overrides couldn't factor out.
+
+```yaml
+definitions:
+  policies:
+    domain|grant_read_on_finance:
+      name: grant_read_on_{{ env }}_finance
+      type: grant
+      has_tags:
+        finance: '*'
+      privileges:
+        - read
+      to:
+        - finance_{{ env }}_analysts
+        - finance_{{ env }}_engineers
+
+resources:
+  catalogs:
+    gold_prod:
+      name: gold_prod
+      policies:
+        - $ref: $defs/policies/domain|grant_read_on_finance
+          $vars:
+            env: prod
+    gold_uat:
+      name: gold_uat
+      policies:
+        - $ref: $defs/policies/domain|grant_read_on_finance
+          $vars:
+            env: uat
+```
+
+**Syntax.** `{{ name }}` wraps a bare variable name (inner whitespace is insignificant — `{{ env }}` and `{{env}}` are equal; the spaced form is recommended). It is a substitution reference, not a templating engine: no filters or expressions. A literal double-brace in a value (e.g. in a function `return` body) is escaped by doubling — `{{{{` renders `{{` and `}}}}` renders `}}`.
+
+**Defaults and signatures (optional).** A definition may declare its own `$vars` block to give variables default values (`medallion: bronze`) and/or to declare required variables with a null value (`env:`). The effective value of a variable is the definition's default overridden by the `$ref`'s argument (the same deep-merge as any other `$ref` override, honouring `--ref-override-strategy`). Declaring a `$vars` block is optional — with none, variables are implicit and all required — **but a declared block must be complete**: it must list exactly the placeholders the body uses. This makes the block a trustworthy, discoverable signature and catches body typos.
+
+```yaml
+definitions:
+  schemas:
+    ingestion|salesforce:
+      $vars:
+        env: ~              # required — no default
+        medallion: bronze   # optional — defaults to bronze
+      name: salesforce
+      tags:
+        environment: '{{ env }}'
+        quality_tier: '{{ medallion }}'
+```
+
+**Rules.** Variable names must be **bare identifiers** (letters, digits, underscore; not starting with a digit) — an identifier-shaped-but-invalid token like `{{ my-var }}` is rejected rather than passed through as literal text. Variable values are literal strings (a number/bool is rejected with a hint to quote it; `''` is a real empty string, null means "not supplied"; a value that looks like a `$defs/...` reference is rejected — `$vars` carry values, not references). A placeholder is bound by the `$vars` of the **enclosing definition** — the definition in whose text it appears, whether that's the definition's own body or an override the definition writes onto a child `$ref` (*the writer binds it*). A placeholder may therefore appear only inside a definition, never in a dict key, a `$defs/...` reference target, or **anywhere under a `resources:` entry** — a resource is the concrete instance layer and must supply literals, so a placeholder there is a hard error. Because binding is local to the writer, a parent cannot widen a child's variable contract via an override. A multi-level template forwards a variable to a child `$ref` by using `{{ placeholder }}` as the child's `$vars` value. Every placeholder must be bound (by an argument or a default) and every supplied argument must be used; a missing, unused, incomplete-signature, non-string, or resource-placeholder case fails config validation. See the [feature proposal](https://github.com/liamperritt/uc-declarative-abac/issues/18) for the full specification.
 
 ---
 

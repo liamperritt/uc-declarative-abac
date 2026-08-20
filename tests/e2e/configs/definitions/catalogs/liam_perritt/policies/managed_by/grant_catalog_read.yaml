@@ -5,7 +5,7 @@ definitions:
       type: grant
       has_any_of_tags:
         uc_gov_managed_by: uc_declarative_abac
-        uc_gov_env: test
+        uc_gov_env: '{{ env }}'
       privileges:
         - read
       for: catalogs

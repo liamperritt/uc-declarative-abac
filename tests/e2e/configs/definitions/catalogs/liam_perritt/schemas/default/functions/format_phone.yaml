@@ -1,8 +1,11 @@
 definitions:
   functions:
     abac|format_phone:
+      $vars:
+        env: ~
+        redaction_character: '+'
       name: format_phone
-      owner: sp_uc_governor_test
+      owner: sp_uc_governor_{{ env }}
       rfa_destinations:
         - liam.perritt@databricks.com
       parameters:
@@ -10,4 +13,4 @@ definitions:
           type: string
         - name: phone
           type: string
-      return: "concat('+', code, phone)"
+      return: "concat('{{ redaction_character }}', code, phone)"

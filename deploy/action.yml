@@ -188,6 +188,18 @@ inputs:
       groups declared under resources.groups. Off by default.
     required: false
     default: 'false'
+  enable-group-deletion:
+    description: >-
+      If "true", make config authoritative over account group existence: delete
+      any Databricks-managed account group that is absent from resources.groups.
+      Off by default. Only Databricks-managed groups are affected — external
+      (IdP-provisioned) groups and account system groups (account users, account
+      admins) are never deleted. Requires ``enable-group-creation`` and at least
+      one group declared under resources.groups. Requires interactive confirmation
+      unless ``force`` is also "true"; in a non-interactive GitHub Actions runner,
+      ``force`` MUST be set or the run will error out.
+    required: false
+    default: 'false'
   ignore-unresolvable-principals:
     description: >-
       Comma-separated list of actual-state principal identifiers whose
@@ -242,6 +254,7 @@ runs:
         SKIP_USERS_FETCH: ${{ inputs.skip-users-fetch }}
         ENABLE_GROUP_CREATION: ${{ inputs.enable-group-creation }}
         ENABLE_GROUP_MANAGEMENT: ${{ inputs.enable-group-management }}
+        ENABLE_GROUP_DELETION: ${{ inputs.enable-group-deletion }}
         IGNORE_UNRESOLVABLE_PRINCIPALS: ${{ inputs.ignore-unresolvable-principals }}
       run: |
         args=(
@@ -313,6 +326,9 @@ runs:
         fi
         if [[ "$ENABLE_GROUP_MANAGEMENT" == "true" ]]; then
           args+=(--enable-group-management)
+        fi
+        if [[ "$ENABLE_GROUP_DELETION" == "true" ]]; then
+          args+=(--enable-group-deletion)
         fi
         if [[ -n "$IGNORE_UNRESOLVABLE_PRINCIPALS" ]]; then
           args+=(--ignore-unresolvable-principals "$IGNORE_UNRESOLVABLE_PRINCIPALS")

@@ -103,6 +103,16 @@ def test_main_defaults_enable_policy_deletion_off(monkeypatch):
     assert captured["enable_policy_deletion"] is False
 
 
+def test_main_passes_enable_group_deletion_through_to_run(monkeypatch):
+    captured = _run_legacy(monkeypatch, ["--enable-group-deletion"])
+    assert captured["enable_group_deletion"] is True
+
+
+def test_main_defaults_enable_group_deletion_off(monkeypatch):
+    captured = _run_legacy(monkeypatch, [])
+    assert captured["enable_group_deletion"] is False
+
+
 def test_main_passes_delete_policies_namespaces_through_to_run(monkeypatch):
     captured = _run_legacy(
         monkeypatch,
@@ -154,6 +164,23 @@ def test_commands_validate_does_not_construct_workspace_client(
     exit_code = cli.run_cli(["validate", "--config-dir", str(config_dir)])
     assert exit_code == 0
     assert constructed is False
+
+
+def test_commands_reports_success_when_config_is_valid(tmp_path: Path, caplog):
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    (config_dir / "resources.yaml").write_text(
+        "resources:\n  catalogs: {}\n",
+        encoding="utf-8",
+    )
+
+    with caplog.at_level(logging.INFO, logger="uc_declarative_abac"):
+        exit_code = cli.run_cli(["validate", "--config-dir", str(config_dir)])
+
+    output = caplog.text
+    assert exit_code == 0
+    assert "✔" in output or "[OK]" in output
+    assert "Config validation successful." in output
 
 
 def test_commands_return_config_error_code_when_yaml_invalid(tmp_path: Path):
@@ -218,6 +245,24 @@ def test_commands_deploy_missing_warehouse_returns_config_error(monkeypatch):
     monkeypatch.setattr(cli, "WorkspaceClient", lambda **_: object())
     exit_code = cli.run_cli(["deploy", "--config-dir", "cfg"])
     assert exit_code == 3
+
+
+def test_commands_reports_actionable_error_when_warehouse_id_is_missing(
+    monkeypatch, capsys, tmp_path: Path
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("UC_ABAC_WAREHOUSE_ID", raising=False)
+
+    exit_code = cli.run_cli(["deploy", "--config-dir", "cfg"])
+
+    error = capsys.readouterr().err
+    assert exit_code == 3
+    assert "[ERROR]" in error or "✖" in error
+    assert "--warehouse-id" in error
+    assert "HOW TO FIX" in error or (
+        "Hint:" in error
+        and ("--warehouse-id" in error or "settings" in error.lower())
+    )
 
 
 def test_commands_legacy_missing_warehouse_returns_config_error(monkeypatch):

@@ -5,8 +5,16 @@ import sys
 from pathlib import Path
 
 from uc_declarative_abac.cli import __version__
+from uc_declarative_abac.cli.presentation import CliArgumentParser, HelpExample
 
 _SUBCOMMANDS = frozenset({"validate", "deploy"})
+_DESCRIPTION = "UC Declarative ABAC — declarative ABAC governance for Unity Catalog"
+_VALIDATE_EXAMPLE = "uc-abac validate --config-dir ./configs"
+_VALIDATE_PROFILE_EXAMPLE = "uc-abac validate --config-dir ./configs --profile staging"
+_DEPLOY_DRY_RUN_EXAMPLE = (
+    "uc-abac deploy --config-dir ./configs --warehouse-id <id> --dry-run"
+)
+_DEPLOY_EXAMPLE = "uc-abac deploy --config-dir ./configs --warehouse-id <id>"
 
 
 def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
@@ -21,7 +29,7 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         "--system-catalog",
         type=str,
         default=argparse.SUPPRESS,
-        help="Catalog containing Unity Catalog system tables (default: system).",
+        help="Catalog containing Unity Catalog system tables [default: system].",
     )
     parser.add_argument(
         "--use-workspace-scim",
@@ -80,6 +88,7 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--manage-tags-for-namespaces",
         type=str,
+        metavar="NAMESPACES",
         default=argparse.SUPPRESS,
         help=(
             "Comma-separated catalog names or qualified schema names (<catalog>.<schema>) to "
@@ -90,6 +99,7 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--manage-privileges-for-namespaces",
         type=str,
+        metavar="NAMESPACES",
         default=argparse.SUPPRESS,
         help=(
             "Comma-separated catalog names or qualified schema names (<catalog>.<schema>) to "
@@ -100,6 +110,7 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--manage-taggables-for-namespaces",
         type=str,
+        metavar="NAMESPACES",
         default=argparse.SUPPRESS,
         help=(
             "Comma-separated catalog names or qualified schema names (<catalog>.<schema>) to "
@@ -111,6 +122,7 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--create-taggables-for-namespaces",
         type=str,
+        metavar="NAMESPACES",
         default=argparse.SUPPRESS,
         help=(
             "Comma-separated catalog names or qualified schema names (<catalog>.<schema>) to "
@@ -122,6 +134,7 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--delete-policies-for-namespaces",
         type=str,
+        metavar="NAMESPACES",
         default=argparse.SUPPRESS,
         help=(
             "Comma-separated catalog names or qualified schema names (<catalog>.<schema>) to "
@@ -167,6 +180,7 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--ignore-unresolvable-principals",
         type=str,
+        metavar="IDENTIFIERS",
         default=argparse.SUPPRESS,
         help=(
             "Comma-separated list of actual-state principal identifiers — usernames for users, "
@@ -198,6 +212,20 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
             "from config (an empty members list removes all). Off by default. Requires the "
             "engine principal to hold the MANAGER role on each managed group. Does not create "
             "missing groups (use --enable-group-creation for that)."
+        ),
+    )
+    parser.add_argument(
+        "--enable-group-deletion",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help=(
+            "Make config authoritative over account group existence: delete any "
+            "Databricks-managed account group absent from resources.groups. Off by "
+            "default. Only operates on Databricks-managed groups — external "
+            "(IdP-provisioned) groups and account system groups (account users, account "
+            "admins) are never deleted. Requires --enable-group-creation and at least one "
+            "group declared under resources.groups. Requires interactive confirmation at "
+            "the terminal unless --force is set."
         ),
     )
     parser.add_argument(
@@ -240,8 +268,8 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         default=argparse.SUPPRESS,
         help=(
             "How sibling fields on a $ref entry combine with the referenced definition. "
-            "'merge' (default) recursively deep-merges maps and lists; 'replace' shallowly "
-            "replaces top-level keys (legacy behaviour)."
+            "'merge' recursively deep-merges maps and lists; 'replace' shallowly "
+            "replaces top-level keys (legacy behaviour) [default: merge]."
         ),
     )
     parser.add_argument(
@@ -249,8 +277,8 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=argparse.SUPPRESS,
         help=(
-            "Max worker threads used per (securable_type, change_type) execution batch. "
-            "Default 8. Set to 1 to disable parallelism and force sequential execution."
+            "Worker threads per execution batch [default: 8]. Set to 1 to disable "
+            "parallelism and force sequential execution."
         ),
     )
 
@@ -282,17 +310,46 @@ def _add_global_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _build_modern_parser() -> argparse.ArgumentParser:
-    common = _build_common_parser()
-    parser = argparse.ArgumentParser(
-        description="UC Declarative ABAC — declarative ABAC governance for Unity Catalog",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+def _add_config_dir(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--config-dir",
+        type=Path,
+        default=argparse.SUPPRESS,
+        help="Path to the YAML config directory",
     )
+
+
+def _add_version(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
     )
+
+
+def _cli_parser(**kwargs) -> CliArgumentParser:
+    return CliArgumentParser(
+        prog="uc-abac",
+        description=_DESCRIPTION,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        **kwargs,
+    )
+
+
+def _build_modern_parser() -> argparse.ArgumentParser:
+    common = _build_common_parser()
+    parser = _cli_parser(
+        product_name="UC Declarative ABAC",
+        version=__version__,
+        examples=(
+            HelpExample(_VALIDATE_EXAMPLE, "Validate local YAML configuration."),
+            HelpExample(
+                _DEPLOY_DRY_RUN_EXAMPLE,
+                "Preview changes before deploying to Unity Catalog.",
+            ),
+        ),
+    )
+    _add_version(parser)
     _add_global_arguments(parser)
 
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -302,27 +359,33 @@ def _build_modern_parser() -> argparse.ArgumentParser:
         parents=[common],
         help="Parse, resolve, and validate YAML configs without contacting Databricks.",
         description="Validate YAML configs locally (no warehouse or credentials required).",
+        options_title="FLAGS:",
+        examples=(
+            HelpExample(_VALIDATE_EXAMPLE, "Validate the default local configuration."),
+            HelpExample(
+                _VALIDATE_PROFILE_EXAMPLE,
+                "Validate using settings for the staging profile.",
+            ),
+        ),
     )
-    validate_parser.add_argument(
-        "--config-dir",
-        type=Path,
-        default=argparse.SUPPRESS,
-        help="Path to the YAML config directory",
-    )
+    _add_config_dir(validate_parser)
     validate_parser.set_defaults(command="validate")
 
     deploy_parser = subparsers.add_parser(
         "deploy",
         parents=[common],
-        help="Deploy governance changes to Unity Catalog (add --dry-run to preview).",
-        description="Execute planned changes against Unity Catalog.",
+        help="Deploy governance changes (use --dry-run to preview).",
+        description="Deploy declarative governance to Unity Catalog.",
+        options_title="FLAGS:",
+        examples=(
+            HelpExample(
+                _DEPLOY_DRY_RUN_EXAMPLE,
+                "Preview the changes without applying them.",
+            ),
+            HelpExample(_DEPLOY_EXAMPLE, "Apply the configured governance changes."),
+        ),
     )
-    deploy_parser.add_argument(
-        "--config-dir",
-        type=Path,
-        default=argparse.SUPPRESS,
-        help="Path to the YAML config directory",
-    )
+    _add_config_dir(deploy_parser)
     deploy_parser.add_argument(
         "--warehouse-id",
         type=str,
@@ -341,15 +404,8 @@ def _build_modern_parser() -> argparse.ArgumentParser:
 
 
 def _build_legacy_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="UC Declarative ABAC — declarative ABAC governance for Unity Catalog",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=f"%(prog)s {__version__}",
-    )
+    parser = _cli_parser()
+    _add_version(parser)
     _add_global_arguments(parser)
     _add_common_run_arguments(parser)
     parser.add_argument(
@@ -362,12 +418,7 @@ def _build_legacy_parser() -> argparse.ArgumentParser:
     # be supplied via env vars or the settings file. A genuinely missing value is
     # caught after settings resolution (_require_config_dir / _require_warehouse_id
     # -> OrchestratorError -> exit 3), matching the deploy subcommand's behaviour.
-    parser.add_argument(
-        "--config-dir",
-        type=Path,
-        default=argparse.SUPPRESS,
-        help="Path to the YAML config directory",
-    )
+    _add_config_dir(parser)
     parser.add_argument(
         "--warehouse-id",
         type=str,
@@ -407,8 +458,10 @@ def _is_legacy_invocation(argv: list[str]) -> bool:
         if token.startswith(tuple(f"{flag}=" for flag in _VALUE_TAKING_GLOBAL_FLAGS)):
             index += 1
             continue
-        # First non-global token decides: subcommand => modern, anything else => legacy.
-        return token not in _SUBCOMMANDS
+        # Positional tokens use the modern command parser so unknown commands get
+        # the same actionable diagnostic as misspelled known commands. Legacy
+        # invocations are distinguished by their leading flat option flags.
+        return token.startswith("-") and token not in _SUBCOMMANDS
     return False
 
 

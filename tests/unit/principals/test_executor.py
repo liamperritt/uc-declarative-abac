@@ -6,6 +6,7 @@ import pytest
 
 from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.principals import (
+    Group,
     GroupDiff,
     GroupRename,
     Principal,
@@ -375,6 +376,108 @@ def test_group_executor_collects_error_when_rename_fails(ws_helper, change_logge
             ),
         ]
     )
+
+    execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
+
+    assert change_logger.has_errors
+
+
+# ---------------------------------------------------------------------------
+# Group deletion (under --enable-group-deletion)
+# ---------------------------------------------------------------------------
+
+
+def _diff_with_deletes(*names: str) -> GroupDiff:
+    return GroupDiff(
+        groups_to_delete={
+            Group(display_name=name, id=str(i)) for i, name in enumerate(names)
+        }
+    )
+
+
+def test_group_executor_deletes_group_after_yes_confirmation(
+    ws_helper, change_logger, monkeypatch
+):
+    """When `input` returns 'yes', delete_group is invoked for each group (by id)."""
+    monkeypatch.setattr("builtins.input", lambda *_: "yes")
+    diff = _diff_with_deletes("legacy")
+
+    execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
+
+    ws_helper.delete_group.assert_called_once_with("0")
+
+
+def test_group_executor_exits_when_delete_confirmation_not_given(
+    ws_helper, change_logger, monkeypatch
+):
+    """Any response other than 'y'/'yes' aborts the whole run via SystemExit; delete is
+    not invoked."""
+    monkeypatch.setattr("builtins.input", lambda *_: "no")
+    diff = _diff_with_deletes("legacy")
+
+    with pytest.raises(SystemExit):
+        execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
+
+    ws_helper.delete_group.assert_not_called()
+
+
+def test_group_executor_deletes_without_prompt_when_force_enabled(
+    ws_helper, change_logger, monkeypatch
+):
+    """`force=True` bypasses the prompt — `input()` is never called."""
+
+    def _should_not_be_called(*_):
+        raise AssertionError("input() was called even though force=True")
+
+    monkeypatch.setattr("builtins.input", _should_not_be_called)
+    diff = _diff_with_deletes("legacy")
+
+    execute_group_diff(ws_helper, diff, change_logger, dry_run=False, force=True)
+
+    ws_helper.delete_group.assert_called_once_with("0")
+
+
+def test_group_executor_does_not_prompt_or_delete_in_dry_run(
+    ws_helper, change_logger, monkeypatch
+):
+    """Dry-run logs the would-delete list but never prompts or calls the SDK."""
+
+    def _should_not_be_called(*_):
+        raise AssertionError("input() was called during dry-run")
+
+    monkeypatch.setattr("builtins.input", _should_not_be_called)
+    diff = _diff_with_deletes("legacy")
+
+    execute_group_diff(ws_helper, diff, change_logger, dry_run=True)
+
+    ws_helper.delete_group.assert_not_called()
+
+
+def test_group_executor_deletes_run_after_member_ops(
+    ws_helper, change_logger, monkeypatch
+):
+    """Deletes run last, after creates/renames/member add/remove."""
+    monkeypatch.setattr("builtins.input", lambda *_: "yes")
+    diff = GroupDiff(
+        groups_to_create={"new_group": frozenset()},
+        members_to_add={"existing": frozenset({_resolved_user("alice@co.com")})},
+        groups_to_delete={Group(display_name="legacy", id="9")},
+    )
+
+    execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
+
+    method_names = [c[0] for c in ws_helper.method_calls]
+    assert method_names.index("delete_group") > method_names.index("create_group")
+    assert method_names.index("delete_group") > method_names.index("add_group_members")
+
+
+def test_group_executor_collects_error_when_delete_fails(
+    ws_helper, change_logger, monkeypatch
+):
+    """A failing delete_group is logged as an error without crashing execution."""
+    monkeypatch.setattr("builtins.input", lambda *_: "yes")
+    ws_helper.delete_group.side_effect = RuntimeError("boom")
+    diff = _diff_with_deletes("legacy")
 
     execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
 

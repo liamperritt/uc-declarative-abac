@@ -715,7 +715,6 @@ def test_catalog_config_injects_catalog_name_into_policies():
                             "type": "grant",
                             "privileges": ["select"],
                             "to": ["team"],
-                            "tags": {"env": "prod"},
                         }
                     ]
                 }
@@ -741,7 +740,6 @@ def test_schema_config_injects_names_into_policies():
                                     "type": "grant",
                                     "privileges": ["select"],
                                     "to": ["team"],
-                                    "tags": {"env": "prod"},
                                 }
                             ],
                         }
@@ -931,6 +929,36 @@ def test_group_config_accepts_optional_id():
     assert config.groups is not None
     assert config.groups["with_id"].id == "abc-123"
     assert config.groups["without_id"].id is None
+
+
+def test_group_config_accepts_expiry_date():
+    """A group declaring an ``expiry_date`` parses it onto GroupConfig.expiry_date."""
+    from datetime import date
+
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {"cat": {}},
+            "groups": {
+                "temp_access": {"members": ["alice@example.com"], "expiry_date": "2026-12-31"},
+            },
+        }
+    )
+
+    assert config.groups is not None
+    assert config.groups["temp_access"].expiry_date == date(2026, 12, 31)
+
+
+def test_group_config_defaults_expiry_date_to_none():
+    """A group without ``expiry_date`` defaults to None (never expires)."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {"cat": {}},
+            "groups": {"data_engineers": {"members": ["alice@example.com"]}},
+        }
+    )
+
+    assert config.groups is not None
+    assert config.groups["data_engineers"].expiry_date is None
 
 
 def test_group_config_rejects_duplicate_ids_when_two_groups_share_id():
@@ -2711,3 +2739,96 @@ def test_fgac_policy_config_allows_null_for():
         config.catalogs["cat"].schemas[0].tables[0].policies[0].for_securable_type
         is None
     )
+
+
+# ---------------------------------------------------------------------------
+# extra="forbid" — unknown keys are rejected (BaseConfig)
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_key_on_catalog_is_rejected():
+    """An unknown top-level key on a catalog is a hard error, not silently dropped."""
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate(
+            {"catalogs": {"c": {"name": "c", "owener": "someone"}}}
+        )
+    assert any("owener" in str(e["loc"]) for e in exc_info.value.errors())
+
+
+def test_unknown_key_on_schema_is_rejected():
+    """An unknown key on a nested schema is rejected."""
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate(
+            {"catalogs": {"c": {"name": "c", "schemas": [
+                {"name": "s", "unexpected": 1},
+            ]}}}
+        )
+    assert any("unexpected" in str(e["loc"]) for e in exc_info.value.errors())
+
+
+def test_unknown_key_on_function_is_rejected():
+    """An unknown key on a function is rejected (alias `return` is still fine)."""
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate(
+            {"catalogs": {"c": {"name": "c", "schemas": [
+                {"name": "s", "functions": [
+                    {"name": "f", "return": "1", "typpo": "x"},
+                ]},
+            ]}}}
+        )
+    assert any("typpo" in str(e["loc"]) for e in exc_info.value.errors())
+
+
+def test_unknown_key_on_grant_policy_is_rejected():
+    """`tags` is not a policy field (policies match via has_tags) — it must be rejected."""
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate(
+            {"catalogs": {"c": {"name": "c", "policies": [
+                {"name": "g", "type": "grant", "privileges": ["select"],
+                 "to": ["team"], "tags": {"env": "prod"}},
+            ]}}}
+        )
+    assert any("tags" in str(e["loc"]) for e in exc_info.value.errors())
+
+
+def test_unknown_key_on_governed_tag_is_rejected():
+    """An unknown key on a governed tag is rejected."""
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate(
+            {"catalogs": {}, "governed_tags": {"t": {"name": "t", "bogus": 1}}}
+        )
+    assert any("bogus" in str(e["loc"]) for e in exc_info.value.errors())
+
+
+def test_unknown_key_on_group_is_rejected():
+    """An unknown key on a group is rejected."""
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate(
+            {"catalogs": {}, "groups": {"g": {"name": "g", "bogus": 1}}}
+        )
+    assert any("bogus" in str(e["loc"]) for e in exc_info.value.errors())
+
+
+def test_alias_spellings_still_validate_under_forbid():
+    """The documented aliases (`return`, `for`, `except`) are known keys, not extras."""
+    config = ResourcesConfig.model_validate(
+        {"catalogs": {"c": {"name": "c", "schemas": [
+            {"name": "s",
+             "functions": [
+                 {"name": "fn", "return": "1",
+                  "parameters": [{"name": "p", "type": "string"}]},
+             ],
+             "tables": [
+                 {"name": "t", "policies": [
+                     {"name": "m", "type": "mask", "function": "c.s.fn",
+                      "columns": [{"alias": "col", "has_tags": {"pii": "email"}}],
+                      "for": "table", "except": ["svc"]},
+                 ]},
+             ]},
+        ]}}}
+    )
+    fn = config.catalogs["c"].schemas[0].functions[0]
+    assert fn.definition == "1"
+    policy = config.catalogs["c"].schemas[0].tables[0].policies[0]
+    assert policy.for_securable_type == SecurableType.TABLE
+    assert policy.exceptions == ["svc"]

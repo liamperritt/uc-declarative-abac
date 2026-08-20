@@ -46,6 +46,9 @@ class PrivilegeType(str, Enum):
     READ_SECRET = "read_secret"
     REFERENCE_SECRET = "reference_secret"
     WRITE_SECRET = "write_secret"
+    CREATE_SKILL = "create_skill"
+    READ_SKILL = "read_skill"
+    WRITE_SKILL = "write_skill"
     READ_METADATA = "read_metadata"
     BROWSE = "browse"
 
@@ -108,6 +111,9 @@ _SCHEMA_PRIVILEGES = (
         PrivilegeType.READ_SECRET,
         PrivilegeType.REFERENCE_SECRET,
         PrivilegeType.WRITE_SECRET,
+        PrivilegeType.CREATE_SKILL,
+        PrivilegeType.READ_SKILL,
+        PrivilegeType.WRITE_SKILL,
     }
 )
 _CATALOG_PRIVILEGES = _SCHEMA_PRIVILEGES | {

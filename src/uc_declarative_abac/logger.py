@@ -9,6 +9,7 @@ from uc_declarative_abac.utils import ExecutionError
 if TYPE_CHECKING:
     from uc_declarative_abac.governed_tags.state import GovernedTag
     from uc_declarative_abac.policies.state import Policy
+    from uc_declarative_abac.principals.state import Group
     from uc_declarative_abac.privileges.state import SecurablePrivilege
     from uc_declarative_abac.securables.state import (
         AttributeUpdate,
@@ -167,6 +168,7 @@ class ChangeLogger:
         self._groups_renamed = 0
         self._group_members_added = 0
         self._group_members_removed = 0
+        self._groups_deleted = 0
         self._errors: list[ExecutionError] = []
         self._warnings: list[ExecutionError] = []
 
@@ -607,6 +609,20 @@ class ChangeLogger:
             )
         )
 
+    def log_group_delete(self, group: Group) -> None:
+        """Log a Databricks-managed account group being deleted (present in the account
+        but absent from config)."""
+        self._groups_deleted += 1
+        action_verb = "Delete" if self._dry_run else "Deleted"
+        self._log_info(
+            _format_change_line(
+                "-",
+                "GROUP",
+                group.display_name,
+                f"{action_verb} group",
+            )
+        )
+
     # ------------------------------------------------------------------
     # Error section
     # ------------------------------------------------------------------
@@ -691,6 +707,8 @@ class ChangeLogger:
             group_parts.append(f"{self._group_members_added} members added")
         if self._group_members_removed:
             group_parts.append(f"{self._group_members_removed} members removed")
+        if self._groups_deleted:
+            group_parts.append(f"{self._groups_deleted} deleted")
 
         sections: list[str] = []
         if group_parts:
@@ -770,6 +788,8 @@ class ChangeLogger:
             group_parts.append(f"{self._group_members_added} members to add")
         if self._group_members_removed:
             group_parts.append(f"{self._group_members_removed} members to remove")
+        if self._groups_deleted:
+            group_parts.append(f"{self._groups_deleted} to delete")
 
         sections: list[str] = []
         if group_parts:

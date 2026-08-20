@@ -18,6 +18,7 @@ from uc_declarative_abac.principals import (
 )
 from uc_declarative_abac.types import PrincipalType
 from uc_declarative_abac.utils import (
+    SYSTEM_ACCOUNT_GROUPS,
     DuplicateServicePrincipalError,
     OrchestratorError,
     PrincipalValidationError,
@@ -30,8 +31,9 @@ _SCIM_PAGE_SIZE = 100
 
 # Account-level system groups that the workspace SCIM API does not surface (they
 # exist only at the account level) but are near-universally useful as policy
-# targets. Appended to the fetched groups in workspace-SCIM mode.
-_ACCOUNT_SYSTEM_GROUPS = frozenset({"account users", "account admins"})
+# targets. Appended to the fetched groups in workspace-SCIM mode. Sourced from utils
+# (single source of truth, shared with the group-deletion candidate filter).
+_ACCOUNT_SYSTEM_GROUPS = SYSTEM_ACCOUNT_GROUPS
 
 # Account Access Control Proxy ASSIGN role on tag policies.
 # TBD: verify in integration testing; the SDK does not export a constant for
@@ -123,6 +125,9 @@ class WorkspaceHelper:
         # here — it is fetched per-group on demand in fetch_actual_groups.
         self._group_id_by_name: dict[str, str] = {}  # display_name -> group SCIM id
         self._group_name_by_id: dict[str, str] = {}  # group SCIM id -> display_name
+        self._external_id_by_group_name: dict[
+            str, str
+        ] = {}  # display_name -> externalId ("" for Databricks-managed)
         self._renamed_group_new_by_old: dict[
             str, str
         ] = {}  # old display_name -> new display_name
@@ -180,7 +185,9 @@ class WorkspaceHelper:
         # per-group via GET /Groups/{id} in fetch_actual_groups (scoped to config).
         if self._manage_groups:
             users_attrs = "id,userName"
-            groups_attrs = "id,displayName"
+            # externalId lets the deletion path exclude IdP-provisioned groups from the
+            # list call directly, without a per-group GET for every account group.
+            groups_attrs = "id,displayName,externalId"
             sps_attrs = "id,displayName,applicationId"
         else:
             users_attrs = "userName"
@@ -251,6 +258,9 @@ class WorkspaceHelper:
                 self._scim_id_by_identifier[display_name] = scim_id
                 self._group_id_by_name[display_name] = scim_id
                 self._group_name_by_id[scim_id] = display_name
+                self._external_id_by_group_name[display_name] = (
+                    group.get("externalId") or ""
+                )
 
     def _fetch_workspace_principals(self) -> None:
         """Fetch principals via the SDK's workspace SCIM API (workspace principals only).
@@ -474,6 +484,27 @@ class WorkspaceHelper:
             responses = pool.map(self._fetch_group_by_id, targets)
             return {self._build_group_from_response(resp) for resp in responses}
 
+    def list_account_groups(self) -> set[Group]:
+        """Return every account group as membership-less Group state (display name, SCIM
+        id, external_id).
+
+        Built from the group id/external-id maps populated during ``fetch_principals()``
+        — no additional API calls and no membership fetch, since the group-deletion
+        candidate filter only needs identity and provenance (``external_id``). Returns an
+        empty set unless group management (the ``manage_groups`` fetch path) is enabled.
+        Must be called after ``fetch_principals()``.
+        """
+        if not self._manage_groups:
+            return set()
+        return {
+            Group(
+                display_name=name,
+                external_id=self._external_id_by_group_name.get(name, ""),
+                id=scim_id,
+            )
+            for name, scim_id in self._group_id_by_name.items()
+        }
+
     def register_pending_groups(self, names: Iterable[str]) -> None:
         """Add group display names that will be created this run to the principal
         cache so downstream domains can resolve them as GROUP principals before the
@@ -536,6 +567,18 @@ class WorkspaceHelper:
                     {"op": "replace", "path": "displayName", "value": new_display_name},
                 ],
             },
+        )
+
+    def delete_group(self, group_id: str) -> None:
+        """Delete a Databricks-managed account group via the account SCIM proxy.
+
+        TBD: verify in integration testing; the DELETE endpoint shape for the account
+        SCIM proxy is assumed here, consistent with create_group / rename_group. If the
+        API rejects it, adjust accordingly.
+        """
+        self._client.api_client.do(
+            "DELETE",
+            f"/api/2.0/account/scim/v2/Groups/{group_id}",
         )
 
     def create_group(self, display_name: str, members: Iterable[Principal]) -> None:

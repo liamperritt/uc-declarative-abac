@@ -67,6 +67,25 @@ The privileges, securables, governed-tags, **and policies** differs all follow t
 
 The `--ignore-unresolvable-principals` CLI flag (orchestrator param `ignore_unresolvable_principals`, parsed to a standalone `frozenset[str]` named `ignore_unresolvable`) **only suppresses the non-fatal resolution-failure warning** for the listed actual-state identifiers — it changes nothing about resolution itself. A listed principal that resolves is processed exactly as usual; only when it fails to resolve is the warning silenced (the row is dropped from the diff either way, as it always was for unresolvable principals). The check lives **inside `log_principal_resolution_failure`** (`principals/resolver.py`): in the actual-state (identifier-only) warning branch, if `principal.identifier in ignore_unresolvable` it returns without logging; config-side (name) failures stay fatal `ExecutionError`s regardless. The set is a plain parameter threaded `run()` → `compute_*_diff(..., ignore_unresolvable)` → `_resolve_*(..., ignore_unresolvable)` → `log_principal_resolution_failure(..., ignore_unresolvable)` for the privileges, securables (owner), governed-tags (assigners), and policies (`to`/`except`) domains. It is **not** state on `PrincipalResolver` (the resolver has no knowledge of ignoring). Tags reference no principals.
 
+## Adding a CLI flag
+
+A CLI flag is only fully wired when it reaches the engine through **both** entry points —
+the `uc-abac` CLI **and** the composite GitHub Action. It is easy to update the Python
+plumbing and forget the Action, so treat this as a checklist and update every item:
+
+1. **`src/uc_declarative_abac/cli/parser.py`** — add the `argparse` argument.
+2. **`src/uc_declarative_abac/cli/settings.py`** — add the `RunSettings` field **and** the
+   `_ENV_FIELD_MAP` entry (`UC_ABAC_<NAME>` env var).
+3. **`src/uc_declarative_abac/cli/commands.py`** — thread it through `_run_kwargs`.
+4. **`src/uc_declarative_abac/orchestrator.py`** — add the `run()` parameter and wiring.
+5. **`deploy/action.yml`** — **easy to miss.** Three edits in this one file: the
+   `inputs:` entry, the `env:` mapping (`ENABLE_FOO: ${{ inputs.enable-foo }}`), and the
+   `args+=(--enable-foo)` line in the args-building shell step. Grep the file for an
+   existing sibling flag (e.g. `enable-group-management`) — it appears in all three
+   places, so a flag that isn't in all three is under-wired.
+6. **`README.md`** — add the row to the GitHub Action input table (and any prose).
+7. **Tests** — parser help, settings env var, and commands passthrough at minimum.
+
 ## YAML config conventions
 
 ### Definition IDs
@@ -85,17 +104,25 @@ Keys use `|`-delimited segments by convention (e.g. `operations|sales|orders`), 
 
 ### $ref syntax
 
-`$ref: $defs/<type>/<key>` — inspired by JSON Schema's `$defs` and `$ref` keywords. The `<type>` is one of: `schemas`, `tables`, `volumes`, `functions`, `policies`.
+`$ref: $defs/<type>/<key>` — inspired by JSON Schema's `$defs` and `$ref` keywords. The `<type>` is one of: `catalogs`, `schemas`, `tables`, `volumes`, `functions`, `policies`, `groups`. (The resolver is type-agnostic: it resolves `$defs/<type>/<key>` for any `<type>` present under `definitions:`.)
 
 ### Overrides
 
 Any `$ref` entry can include additional fields that override the definition. Unspecified fields fall back to the definition. Overrides support recursive `$ref` nesting.
+
+### Template variables (`$vars` + `{{ placeholder }}`)
+
+A definition may be a *template* containing `{{ placeholder }}` tokens; a `$ref` supplies values via a sibling `$vars` block (a definition is a function, a `$ref` is a call, `$vars` are the arguments). **A placeholder is bound by the `$vars` of the enclosing definition — the definition in whose text it appears (its body, or an override that definition writes onto a child `$ref`): the writer binds it.** Consequently a placeholder may live only inside a definition; one anywhere under a `resources:` entry (plain value, `$ref` override value, or `$vars` value) is an error — resources are concrete. Because binding is local to the writer, a parent cannot widen a child's variable contract via an override, and a child's declared `$vars` signature is a closed contract. A definition may also declare its own `$vars` block for per-variable defaults (`name: value`) and/or a required-variable signature (`name:` / null); **a declared `$vars` block must be complete** (list exactly the placeholders the body uses — counting forwarded and child-`$ref`-override uses). `$vars` values are literal strings (a value beginning with `$defs/` is rejected — vars carry values, not references); variable names must be bare identifiers, so an identifier-shaped-but-invalid token like `{{ my-var }}` is rejected rather than passed through literally. Substitution is resolved during `$ref` expansion and stripped before model validation. Missing, unused, incomplete-signature, non-string, `$defs/`-reference-value, malformed-placeholder, and resource-placeholder cases all raise `TemplateVariableError`. Implemented in `configs/variables.py` + `configs/resolver.py`; see the [feature proposal](https://github.com/liamperritt/uc-declarative-abac/issues/18) for the full spec.
 
 ### `name` field
 
 Optional on resources. If omitted, the dictionary key is used as the UC object name.
 
 This key-derivation applies only to securables (catalogs/schemas/tables/volumes/functions), which are keyed dicts. **Policies are lists, not keyed dicts**, so a policy `name` is never derived from a key — it is **required on every policy type** (mask, filter, grant) and must be set explicitly. Policy names must also be unique among the policies attached to the same securable (enforced by `_check_duplicate_names` in `configs/models.py`).
+
+### Strict keys (`extra="forbid"`)
+
+Every config model in `configs/models.py` inherits from `BaseConfig`, an abstract base that sets `model_config = ConfigDict(extra="forbid")` (Pydantic merges `model_config` down the MRO, so it applies to all subclasses). Unknown keys are a hard `ValidationError`, never silently dropped — a misspelled field (`has_tag`, `too`, `owener`) or a key on the wrong object type fails at load time rather than quietly changing the deployment. Aliases (`for`→`for_securable_type`, `return`→`definition`, `except`→`exceptions`, `type`/`data_type`, `comment`/`description`) are known keys and still accepted. When adding a model field, this base is inherited automatically; no per-model config is needed.
 
 ## Table definitions — security model
 

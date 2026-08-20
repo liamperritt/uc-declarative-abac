@@ -7,11 +7,13 @@ definitions:
         uc_gov_certified: ~
       volumes:
         - name: test_volume
-          owner: uc_governor_test_team
+          owner: uc_governor_{{ env }}_team
           tags:
             uc_gov_classification: internal
       functions:
-        - $defs/functions/abac|format_phone
+        - $ref: $defs/functions/abac|format_phone
+          $vars:
+            env: '{{ env }}'
       tables:
         - name: batch_table
           tags:
