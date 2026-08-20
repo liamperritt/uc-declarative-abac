@@ -865,6 +865,48 @@ def test_privilege_compiler_allows_all_privileges_on_any_securable():
     )
 
 
+def test_privilege_compiler_allows_read_metadata_on_any_securable():
+    """READ_METADATA is compatible with any securable type, including TABLE."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "name": "g",
+                            "type": "grant",
+                            "privileges": ["read_metadata"],
+                            "to": ["team"],
+                            "has_tags": {"zone": "landing"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="cat.raw.events",
+            tag_name="zone",
+            tag_value="landing",
+        ),
+    }
+
+    result = _compile(config, desired_tags)
+
+    assert (
+        SecurablePrivilege(
+            securable_type=SecurableType.TABLE,
+            securable_full_name="cat.raw.events",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.READ_METADATA,
+        )
+        in result
+    )
+
+
 # ---------------------------------------------------------------------------
 # Expiry date
 # ---------------------------------------------------------------------------

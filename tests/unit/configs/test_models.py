@@ -8,7 +8,7 @@ from uc_declarative_abac.configs import (
     ParameterConfig,
     ResourcesConfig,
 )
-from uc_declarative_abac.types import SecurableType
+from uc_declarative_abac.types import PrivilegeType, SecurableType
 from uc_declarative_abac.utils import DuplicateResourceError
 
 
@@ -2594,6 +2594,29 @@ def test_grant_policy_config_accepts_privileges_matching_for_securable_type():
         )
     )
     assert config.catalogs["cat"].policies[0].for_securable_type == SecurableType.VOLUME
+
+
+@pytest.mark.parametrize(
+    "for_type",
+    ["catalog", "schema", "table", "volume"],
+)
+def test_grant_policy_config_accepts_read_metadata_for_every_securable_type(for_type):
+    """READ METADATA applies to every securable type the engine governs, so a
+    grant policy listing it validates regardless of the 'for' type."""
+    config = ResourcesConfig.model_validate(
+        _grant_policy_in_catalog(
+            {
+                "name": "g",
+                "type": "grant",
+                "privileges": ["read_metadata"],
+                "to": ["data_stewards"],
+                "for": for_type,
+            }
+        )
+    )
+    assert config.catalogs["cat"].policies[0].privileges == [
+        PrivilegeType.READ_METADATA
+    ]
 
 
 def test_grant_policy_config_rejects_privileges_mismatching_for_securable_type():
