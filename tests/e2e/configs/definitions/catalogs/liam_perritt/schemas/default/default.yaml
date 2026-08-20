@@ -4,9 +4,10 @@ definitions:
       $ref: $defs/schemas/liam_perritt|base_policies
       $vars:
         env: ~
+        team: platform
       name: default
       tags:
-        uc_gov_team: platform
+        uc_gov_team: '{{ team }}'
         uc_gov_certified: ~
       volumes:
         - name: test_volume
