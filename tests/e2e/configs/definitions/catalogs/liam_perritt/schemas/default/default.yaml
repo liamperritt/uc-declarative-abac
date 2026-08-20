@@ -1,6 +1,9 @@
 definitions:
   schemas:
     liam_perritt|default:
+      $ref: $defs/schemas/liam_perritt|base_policies
+      $vars:
+        env: ~
       name: default
       tags:
         uc_gov_team: platform

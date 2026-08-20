@@ -903,6 +903,7 @@ resources:
         - $ref: $defs/policies/domain|grant_read_on_finance
           $vars:
             env: prod
+
     gold_uat:
       name: gold_uat
       policies:
@@ -928,7 +929,30 @@ definitions:
         quality_tier: '{{ medallion }}'
 ```
 
-**Rules.** Variable names must be **bare identifiers** (letters, digits, underscore; not starting with a digit) — an identifier-shaped-but-invalid token like `{{ my-var }}` is rejected rather than passed through as literal text. Variable values are literal strings (a number/bool is rejected with a hint to quote it; `''` is a real empty string, null means "not supplied"; a value that looks like a `$defs/...` reference is rejected — `$vars` carry values, not references). A placeholder is bound by the `$vars` of the **enclosing definition** — the definition in whose text it appears, whether that's the definition's own body or an override the definition writes onto a child `$ref` (*the writer binds it*). A placeholder may therefore appear only inside a definition, never in a dict key, a `$defs/...` reference target, or **anywhere under a `resources:` entry** — a resource is the concrete instance layer and must supply literals, so a placeholder there is a hard error. Because binding is local to the writer, a parent cannot widen a child's variable contract via an override. A multi-level template forwards a variable to a child `$ref` by using `{{ placeholder }}` as the child's `$vars` value. Every placeholder must be bound (by an argument or a default) and every supplied argument must be used; a missing, unused, incomplete-signature, non-string, or resource-placeholder case fails config validation. See the [feature proposal](https://github.com/liamperritt/uc-declarative-abac/issues/18) for the full specification.
+**Extending a definition (root `$ref`).** A definition may *extend* another by making its body a top-level `$ref` — inheriting the base and layering on its own fields. Because that root `$ref` shares its level with the definition's own `$vars` signature, there is nowhere to write an explicit forwarding `$vars` onto it — so an extending definition forwards its own variables into the base **by name**, for the variables the base accepts. This is the one implicit-forwarding case; nested (non-root) `$ref`s still forward explicitly (via a `{{ placeholder }}` `$vars` value). A variable may be declared purely to pass through to the base, even if the extending definition's own body never uses it.
+
+```yaml
+definitions:
+  schemas:
+    base_policies:
+      $vars:
+        env: ~
+      policies:
+        - $ref: $defs/policies/grant_read
+          $vars:
+            env: '{{ env }}'   # explicit forward to a nested $ref (unchanged)
+
+    default:
+      $ref: $defs/schemas/base_policies   # extends base_policies
+      $vars:
+        env: ~                 # declared here; forwarded into base_policies by name
+      name: default
+      volumes:
+        - name: v
+          owner: uc_gov_{{ env }}_team    # also used locally
+```
+
+**Rules.** Variable names must be **bare identifiers** (letters, digits, underscore; not starting with a digit) — an identifier-shaped-but-invalid token like `{{ my-var }}` is rejected rather than passed through as literal text. Variable values are literal strings (a number/bool is rejected with a hint to quote it; `''` is a real empty string, null means "not supplied"; a value that looks like a `$defs/...` reference is rejected — `$vars` carry values, not references). A placeholder is bound by the `$vars` of the **enclosing definition** — the definition in whose text it appears, whether that's the definition's own body or an override the definition writes onto a child `$ref` (*the writer binds it*). A placeholder may therefore appear only inside a definition, never in a dict key, a `$defs/...` reference target, or **anywhere under a `resources:` entry** — a resource is the concrete instance layer and must supply literals, so a placeholder there is a hard error. Because binding is local to the writer, a parent cannot widen a child's variable contract via an override. A multi-level template forwards a variable to a child `$ref` by using `{{ placeholder }}` as the child's `$vars` value — except a definition's own body-root `$ref` (an *extends*), where a variable forwards into the base by name (see **Extending a definition** above). Every placeholder must be bound (by an argument or a default) and every supplied argument must be used; a missing, unused, incomplete-signature, non-string, or resource-placeholder case fails config validation. See the [feature proposal](https://github.com/liamperritt/uc-declarative-abac/issues/18) for the full specification.
 
 ---
 

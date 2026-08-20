@@ -302,7 +302,11 @@ def check_no_unused(supplied: set[str], used: set[str], *, ref: str) -> None:
 
 
 def check_signature_complete(
-    def_key: str, body: dict, declared_variables: dict[str, Any]
+    def_key: str,
+    body: dict,
+    declared_variables: dict[str, Any],
+    *,
+    inherited_uses: frozenset[str] | set[str] = frozenset(),
 ) -> None:
     """Enforce the "declared => complete" rule for a definition's ``$vars`` signature.
 
@@ -310,6 +314,14 @@ def check_signature_complete(
     declared names and the placeholders the body actually uses must match exactly, in
     both directions. Declared values must be strings (defaults) or ``None`` (required),
     and a default value may not itself contain a placeholder (literal-only defaults).
+
+    ``inherited_uses`` are variables the definition forwards to a base definition it
+    extends via a root ``$ref`` (see ``accepted_vars``). A definition whose body root is
+    a ``$ref`` implicitly forwards its own variables into that base by name, so a declared
+    variable that the base accepts counts as *used* even when the body writes no
+    ``{{ placeholder }}`` for it — this is what lets a variable be declared purely to pass
+    through to the base. Inherited uses relax only the "unused declared variable" direction;
+    they never force a base's internally-defaulted variable into this definition's signature.
     """
     check_string_vars(declared_variables, context=f"definition '{def_key}'")
 
@@ -331,13 +343,28 @@ def check_signature_complete(
             f"(with a default or as null for required)."
         )
 
-    unused = declared - used
+    unused = declared - (used | set(inherited_uses))
     if unused:
         raise TemplateVariableError(
             f"Definition '{def_key}' declares variable(s) {_quote_names(unused)} in "
             f"$vars that its body never uses; remove them or reference them via "
             f"'{{{{ ... }}}}'."
         )
+
+
+def accepted_vars(body: Any) -> set[str]:
+    """The variables a definition accepts: its declared ``$vars`` names plus every
+    placeholder its body writes.
+
+    This is the definition's parameter surface — what a caller (or a definition that
+    extends it via a root ``$ref``) may supply without tripping the "unused argument"
+    check. Empty for a non-dict body (e.g. a bare list of columns), which has no ``$vars``
+    scope. Reuses ``collect_placeholders`` so token detection stays single-sourced.
+    """
+    if not isinstance(body, dict):
+        return set()
+    declared = set(body.get(_VARS_KEY) or {})
+    return declared | collect_placeholders(_body_without_vars(body))
 
 
 def _body_without_vars(body: dict) -> dict:

@@ -2260,3 +2260,180 @@ def test_resolver_raises_on_incomplete_signature_unused_declaration():
 
     with pytest.raises(TemplateVariableError, match="never uses"):
         resolve_refs(definitions, resources)
+
+
+# ---------------------------------------------------------------------------
+# Root-$ref inheritance forwarding (a definition extends another definition)
+# ---------------------------------------------------------------------------
+
+
+def test_resolver_forwards_scope_into_root_ref_base():
+    """A definition whose body root is a $ref forwards its own variable into that base.
+
+    `default` extends `base` via a root $ref and declares `env`. There is no place to write
+    an explicit forwarding $vars onto the root $ref (that slot is `default`'s own signature),
+    so `env` is forwarded by name into `base`, which needs it for its own `{{ env }}` body —
+    and `default` also uses it locally in the volume owner.
+    """
+    definitions = {
+        "policies": {
+            "grant_read": {
+                "$vars": {"env": None},
+                "name": "grant_read_{{ env }}",
+            },
+        },
+        "schemas": {
+            "base": {
+                "$vars": {"env": None},
+                "policies": [
+                    {
+                        "$ref": "$defs/policies/grant_read",
+                        "$vars": {"env": "{{ env }}"},
+                    },
+                ],
+            },
+            "default": {
+                "$ref": "$defs/schemas/base",
+                "$vars": {"env": None},
+                "name": "default",
+                "volumes": [{"name": "v", "owner": "uc_gov_{{ env }}_team"}],
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {"$ref": "$defs/schemas/default", "$vars": {"env": "test"}},
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    schema = result["catalogs"]["c"]["schemas"][0]
+    assert schema["policies"][0]["name"] == "grant_read_test"
+    assert schema["volumes"][0]["owner"] == "uc_gov_test_team"
+
+
+def test_resolver_forwards_scope_into_root_ref_pass_through_only():
+    """A variable declared solely to pass through to the base (unused locally) is forwarded.
+
+    `default` declares `env` but does not use it in its own body — it exists only to reach
+    `base`. The declared-but-locally-unused variable is still forwarded to the base, and the
+    signature check does not reject it because the base accepts it (inherited use).
+    """
+    definitions = {
+        "policies": {
+            "grant_read": {
+                "$vars": {"env": None},
+                "name": "grant_read_{{ env }}",
+            },
+        },
+        "schemas": {
+            "base": {
+                "$vars": {"env": None},
+                "policies": [
+                    {
+                        "$ref": "$defs/policies/grant_read",
+                        "$vars": {"env": "{{ env }}"},
+                    },
+                ],
+            },
+            "default": {
+                "$ref": "$defs/schemas/base",
+                "$vars": {"env": None},
+                "name": "default",
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {"$ref": "$defs/schemas/default", "$vars": {"env": "test"}},
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    schema = result["catalogs"]["c"]["schemas"][0]
+    assert schema["name"] == "default"
+    assert schema["policies"][0]["name"] == "grant_read_test"
+
+
+def test_resolver_root_ref_forward_only_touches_base_accepted_vars():
+    """Forwarding into a base is filtered to what the base accepts — extras are not smuggled.
+
+    `default` uses `region` locally and forwards `env` to a base that accepts only `env`.
+    `region` is not in the base's accepted set, so it is not forwarded (which would otherwise
+    trip the base's unused-argument check).
+    """
+    definitions = {
+        "schemas": {
+            "base": {
+                "$vars": {"env": None},
+                "tags": {"environment": "{{ env }}"},
+            },
+            "default": {
+                "$ref": "$defs/schemas/base",
+                "$vars": {"env": None, "region": None},
+                "name": "default_{{ region }}",
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/default",
+                        "$vars": {"env": "test", "region": "us"},
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    schema = result["catalogs"]["c"]["schemas"][0]
+    assert schema["name"] == "default_us"
+    assert schema["tags"]["environment"] == "test"
+
+
+def test_resolver_root_ref_base_without_vars_unchanged():
+    """A root $ref whose base accepts no variables forwards nothing (backward compatible)."""
+    definitions = {
+        "schemas": {
+            "base": {"tags": {"team": "platform"}},
+            "default": {
+                "$ref": "$defs/schemas/base",
+                "$vars": {"env": None},
+                "name": "default",
+                "volumes": [{"name": "v", "owner": "uc_gov_{{ env }}_team"}],
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {"$ref": "$defs/schemas/default", "$vars": {"env": "test"}},
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    schema = result["catalogs"]["c"]["schemas"][0]
+    assert schema["tags"] == {"team": "platform"}
+    assert schema["volumes"][0]["owner"] == "uc_gov_test_team"

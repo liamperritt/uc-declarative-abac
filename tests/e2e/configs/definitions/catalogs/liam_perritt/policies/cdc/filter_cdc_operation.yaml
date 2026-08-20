@@ -10,7 +10,6 @@ definitions:
             uc_gov_cdc_column: operation
       function:
         name: fn_filter_cdc_operation
-        schema_name: lff_sqlserver_bronze
         comment: Row filter that keeps only CDC rows where __$operation equals 3
         parameters:
           - name: operation

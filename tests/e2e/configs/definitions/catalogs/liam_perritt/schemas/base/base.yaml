@@ -1,0 +1,16 @@
+definitions:
+  schemas:
+    liam_perritt|base_policies:
+      $vars:
+        env: ~
+      policies:
+        - $ref: $defs/policies/managed_by|grant_use_catalog
+        - $ref: $defs/policies/managed_by|grant_catalog_read
+          $vars:
+            env: '{{ env }}'
+        - $ref: $defs/policies/team|grant_schema_access
+        - $ref: $defs/policies/zone|grant_bronze_access
+        - $ref: $defs/policies/zone|grant_landing_read
+        - $ref: $defs/policies/pipeline|grant_pipeline_select
+        - $ref: $defs/policies/pipeline|grant_cascade_pipeline
+        - $ref: $defs/policies/cdc|filter_cdc_operation
