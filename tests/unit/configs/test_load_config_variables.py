@@ -62,3 +62,37 @@ def test_load_config_raises_config_error_on_missing_var(tmp_yaml_dir):
 
     with pytest.raises(TemplateVariableError, match="[Mm]issing"):
         load_config(root)
+
+
+def test_load_config_resolves_placeholder_in_tag_key_end_to_end(tmp_yaml_dir):
+    """A placeholder in a tag-name map key resolves to a concrete tag name through the pipeline."""
+    config = {
+        "definitions": {
+            "schemas": {
+                "ingestion|salesforce": {
+                    "$vars": {"env": None},
+                    "name": "salesforce",
+                    "tags": {"uc_gov_{{ env }}_owner": "platform"},
+                },
+            },
+        },
+        "resources": {
+            "catalogs": {
+                "ingestion_prod": {
+                    "name": "ingestion_prod",
+                    "schemas": [
+                        {
+                            "$ref": "$defs/schemas/ingestion|salesforce",
+                            "$vars": {"env": "prod"},
+                        },
+                    ],
+                },
+            },
+        },
+    }
+    root = tmp_yaml_dir({"ingestion_prod.yaml": config})
+
+    resolved = load_config(root)
+
+    schema = resolved.catalogs["ingestion_prod"].schemas[0]
+    assert schema.tags == {"uc_gov_prod_owner": "platform"}

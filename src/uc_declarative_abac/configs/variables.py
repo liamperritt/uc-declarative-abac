@@ -17,6 +17,12 @@ template body, every string value — plain values, a nested ``$ref``'s ``$vars`
 template's variable scope and is bound here. Only a nested ``$ref``'s target string is
 left untouched (it is resolved structurally and may never hold a placeholder). In short:
 the definition that *writes* a placeholder is the one that binds it.
+
+Dict *keys* are literal by default, with one exception: the keys of a **tag-name map**
+(the fields in ``TEMPLATABLE_KEY_FIELDS`` — ``tags``, ``has_tags``, ``has_any_of_tags``) are
+user data, so a placeholder in such a key is bound and substituted like a value. Every other
+key — config field names, ``$ref``/``$defs`` targets, resource identity keys — stays literal;
+a placeholder there is a hard error at ``finalise``.
 """
 
 from __future__ import annotations
@@ -53,6 +59,14 @@ _MALFORMED_RE = re.compile(
 
 _REF_KEY = "$ref"
 _VARS_KEY = "$vars"
+
+# Fields whose child-dict KEYS are user data (tag names), so a ``{{ placeholder }}`` may appear
+# in those keys and is bound like any value placeholder. Every other key — config field names,
+# ``$ref``/``$defs`` targets, and resource identity keys (catalogs/governed_tags/groups) — stays
+# literal. Mirrors the tag maps in ``configs/models.py`` (``tags`` on taggables, ``has_tags`` and
+# ``has_any_of_tags`` on policies and column aliases); a drift-guard test asserts these names are
+# real model fields, so this stays dependency-light (no runtime import of the model layer).
+TEMPLATABLE_KEY_FIELDS = frozenset({"tags", "has_tags", "has_any_of_tags"})
 
 
 def _quote_names(names) -> str:
@@ -111,34 +125,40 @@ def unescape(text: str) -> str:
 def collect_placeholders(node: Any) -> set[str]:
     """Collect every variable name referenced within a template body, structure-aware.
 
-    Scans string *values* only (never dict keys). At a nested ``$ref`` dict, every value
-    except the ``$ref`` target — its ``$vars`` values (forwarding) and its override
-    values alike — is in the enclosing template's scope and is counted here; only the
-    ``$ref`` target string is skipped. So both a forwarding-only variable (used solely as
-    a nested ``$ref``'s ``$vars`` value) and a variable used only in an override the
-    enclosing template writes onto a child ``$ref`` count as used.
+    Scans string *values*, plus the keys of tag-name maps (``TEMPLATABLE_KEY_FIELDS``) — a
+    placeholder in a tag name counts as used. All other dict keys are literal and skipped. At a
+    nested ``$ref`` dict, every value except the ``$ref`` target — its ``$vars`` values
+    (forwarding) and its override values alike — is in the enclosing template's scope and is
+    counted here; only the ``$ref`` target string is skipped. So both a forwarding-only variable
+    (used solely as a nested ``$ref``'s ``$vars`` value) and a variable used only in an override
+    the enclosing template writes onto a child ``$ref`` count as used.
     """
     found: set[str] = set()
     _collect(node, found)
     return found
 
 
-def _collect(node: Any, found: set[str]) -> None:
+def _collect(node: Any, found: set[str], keys_templatable: bool = False) -> None:
     if isinstance(node, dict):
-        if _REF_KEY in node:
-            # Everything authored at this nested $ref site — its $vars (forwarding) and
-            # its override values — is the enclosing template's text, so its placeholders
-            # count as used here. Only the $ref target is excluded (resolved structurally,
-            # never templated).
-            for key, value in node.items():
-                if key != _REF_KEY:
-                    _collect(value, found)
-            return
-        for value in node.values():
-            _collect(value, found)
+        # ``keys_templatable`` is set by the parent when this dict sits under a tag-map field
+        # (see ``TEMPLATABLE_KEY_FIELDS``): its keys are tag names, so their placeholders count
+        # as used. The $ref/$vars structural keys are never tag names, so they are skipped.
+        if keys_templatable:
+            for key in node:
+                if isinstance(key, str) and key not in (_REF_KEY, _VARS_KEY):
+                    found |= find_placeholders(key)
+        ref_site = _REF_KEY in node
+        for key, value in node.items():
+            # At a nested $ref site only the $ref target is excluded (resolved structurally,
+            # never templated); every other value — $vars forwarding and overrides alike — is
+            # the enclosing template's text. A child's keys are templatable iff its field is a
+            # tag map.
+            if ref_site and key == _REF_KEY:
+                continue
+            _collect(value, found, key in TEMPLATABLE_KEY_FIELDS)
     elif isinstance(node, list):
         for item in node:
-            _collect(item, found)
+            _collect(item, found, keys_templatable)
     elif isinstance(node, str):
         found |= find_placeholders(node)
 
@@ -150,24 +170,34 @@ def substitute_in_body(body: Any, variables: dict[str, str]) -> Any:
     nested ``$ref``'s ``$vars`` values (forwarding), and a nested ``$ref``'s override
     values are all bound in the enclosing template's scope, so they become literals before
     that child ``$ref`` is expanded. Only the ``$ref`` target string is left untouched (it
-    is resolved structurally). The enclosing definition binds every placeholder it writes.
+    is resolved structurally). Tag-name map keys (``TEMPLATABLE_KEY_FIELDS``) are substituted
+    too; all other dict keys are left literal. The enclosing definition binds every placeholder
+    it writes.
     """
     return _substitute(copy.deepcopy(body), variables)
 
 
-def _substitute(node: Any, variables: dict[str, str]) -> Any:
+def _substitute(node: Any, variables: dict[str, str], keys_templatable: bool = False) -> Any:
     if isinstance(node, dict):
-        if _REF_KEY in node:
-            # Substitute everything the enclosing template authored at this nested $ref
-            # site — its $vars (forwarding) and its override values — leaving only the
-            # $ref target string untouched (resolved structurally, never templated).
-            return {
-                key: value if key == _REF_KEY else _substitute(value, variables)
-                for key, value in node.items()
-            }
-        return {key: _substitute(value, variables) for key, value in node.items()}
+        ref_site = _REF_KEY in node
+        result: dict = {}
+        for key, value in node.items():
+            # A tag-map key (parent set ``keys_templatable``) is substituted like a value; the
+            # $ref/$vars structural keys never are. Only the $ref target value is left untouched
+            # (resolved structurally); every other value is substituted, and a child's keys are
+            # templatable iff its field is a tag map.
+            new_key = (
+                substitute(key, variables)
+                if keys_templatable and isinstance(key, str) and key not in (_REF_KEY, _VARS_KEY)
+                else key
+            )
+            if ref_site and key == _REF_KEY:
+                result[new_key] = value
+            else:
+                result[new_key] = _substitute(value, variables, key in TEMPLATABLE_KEY_FIELDS)
+        return result
     if isinstance(node, list):
-        return [_substitute(item, variables) for item in node]
+        return [_substitute(item, variables, keys_templatable) for item in node]
     if isinstance(node, str):
         return substitute(node, variables)
     return node
@@ -190,28 +220,40 @@ def finalise(node: Any) -> Any:
 
 def _finalise(node: Any) -> Any:
     if isinstance(node, dict):
-        return {key: _finalise(value) for key, value in node.items()}
+        # Keys are finalised too: a live placeholder in a key is either an unbound tag-map key
+        # or a placeholder wrongly placed in a non-templatable key — both hard errors here (a
+        # tag-map key is the only key that is ever templated, and it is bound during resolution).
+        return {
+            (_finalise_str(key) if isinstance(key, str) else key): _finalise(value)
+            for key, value in node.items()
+        }
     if isinstance(node, list):
         return [_finalise(item) for item in node]
     if isinstance(node, str):
-        unresolved = find_placeholders(node)
-        if unresolved:
-            raise TemplateVariableError(
-                f"Unbound template variable(s) {_quote_names(unresolved)} in value "
-                f"{node!r}: a '{{{{ ... }}}}' placeholder is bound by the enclosing "
-                f"definition's $vars and may appear only inside a definition (never in a "
-                f"resource, which must be concrete)."
-            )
-        malformed = find_malformed_placeholders(node)
-        if malformed:
-            raise TemplateVariableError(
-                f"Malformed template placeholder(s) {_quote_names(malformed)} in value "
-                f"{node!r}: a '{{{{ ... }}}}' variable reference must be a bare identifier "
-                f"(letters, digits, and underscore, not starting with a digit). Rename the "
-                f"variable, or if the braces are literal escape them by doubling."
-            )
-        return unescape(node)
+        return _finalise_str(node)
     return node
+
+
+def _finalise_str(text: str) -> str:
+    """Finalise one string (a value or a tag-map key): any surviving placeholder is a hard
+    error, a malformed placeholder is a hard error, and escaped braces collapse to literals."""
+    unresolved = find_placeholders(text)
+    if unresolved:
+        raise TemplateVariableError(
+            f"Unbound template variable(s) {_quote_names(unresolved)} in "
+            f"{text!r}: a '{{{{ ... }}}}' placeholder is bound by the enclosing "
+            f"definition's $vars and may appear only inside a definition (in a value, or a "
+            f"tag-name map key), never in a resource, which must be concrete."
+        )
+    malformed = find_malformed_placeholders(text)
+    if malformed:
+        raise TemplateVariableError(
+            f"Malformed template placeholder(s) {_quote_names(malformed)} in "
+            f"{text!r}: a '{{{{ ... }}}}' variable reference must be a bare identifier "
+            f"(letters, digits, and underscore, not starting with a digit). Rename the "
+            f"variable, or if the braces are literal escape them by doubling."
+        )
+    return unescape(text)
 
 
 def check_no_placeholders_in_resources(resources: Any) -> None:
@@ -220,7 +262,8 @@ def check_no_placeholders_in_resources(resources: Any) -> None:
     Placeholders are a *definition* facility, bound by the enclosing definition's
     ``$vars``. Resources are the concrete instance layer and carry no ``$vars`` scope, so
     a placeholder anywhere under ``resources`` (a plain value, a ``$ref`` override value,
-    or a ``$vars`` value) has nothing to bind it and is a hard error. This scans the raw
+    a ``$vars`` value, or a dict key — tag-name keys included) has nothing to bind it and is
+    a hard error. This scans the raw
     resources — before any ``$ref`` expansion inlines definition bodies — so it never sees
     (and never faults) the placeholders that legitimately live inside definitions. Escaped
     ``{{{{ ... }}}}`` sequences are not placeholders and are ignored (they survive to
@@ -232,6 +275,15 @@ def check_no_placeholders_in_resources(resources: Any) -> None:
 def _check_no_placeholders(node: Any, *, path: str) -> None:
     if isinstance(node, dict):
         for key, value in node.items():
+            if isinstance(key, str) and find_placeholders(key):
+                names = find_placeholders(key)
+                raise TemplateVariableError(
+                    f"Template placeholder(s) {_quote_names(names)} found in a resource "
+                    f"key at {path}.{key!r}. Placeholders are bound by the enclosing "
+                    f"definition's $vars; a resource is the concrete instance layer and must "
+                    f"not contain '{{{{ ... }}}}' — supply the literal key, or move the "
+                    f"templating into a definition and instantiate it via $ref + $vars."
+                )
             _check_no_placeholders(value, path=f"{path}.{key}")
     elif isinstance(node, list):
         for index, item in enumerate(node):

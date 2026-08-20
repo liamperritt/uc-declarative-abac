@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from uc_declarative_abac.configs.variables import (
+    TEMPLATABLE_KEY_FIELDS,
     accepted_vars,
     check_no_placeholders_in_resources,
     check_no_unbound,
@@ -163,10 +164,30 @@ def test_collect_placeholders_scans_plain_values():
     assert collect_placeholders(body) == {"env", "layer"}
 
 
-def test_collect_placeholders_skips_dict_keys():
-    """Only values are scanned; keys are never placeholder positions."""
+def test_collect_placeholders_skips_non_tag_dict_keys():
+    """A placeholder in an ordinary (non-tag) dict key is not a variable position."""
     body = {"{{ env }}": "literal"}
     assert collect_placeholders(body) == set()
+
+
+def test_collect_placeholders_counts_tag_map_keys():
+    """A placeholder in a tag-name map key (tags / has_tags / has_any_of_tags) counts as used."""
+    body = {
+        "tags": {"uc_gov_{{ env }}_owner": "platform"},
+        "has_any_of_tags": {"finance_{{ region }}": "*"},
+    }
+    assert collect_placeholders(body) == {"env", "region"}
+
+
+def test_collect_placeholders_skips_ref_and_vars_keys_in_tag_map():
+    """Inside a tag map, the structural $ref / $vars keys are never treated as tag names."""
+    body = {
+        "tags": {
+            "$ref": "$defs/tags/base",
+            "env_{{ e }}": "{{ e }}",  # a real tag name — counted
+        },
+    }
+    assert collect_placeholders(body) == {"e"}
 
 
 def test_collect_placeholders_counts_forwarded_nested_ref_vars():
@@ -488,3 +509,84 @@ def test_check_signature_complete_inherited_use_does_not_excuse_body_typo():
         check_signature_complete(
             "default", body, {"env": None}, inherited_uses={"env"}
         )
+
+
+# ---------------------------------------------------------------------------
+# Tag-name map KEY templating
+# ---------------------------------------------------------------------------
+
+
+def test_substitute_in_body_substitutes_tag_map_key():
+    """A placeholder in a tag-map key is substituted; a non-tag key is left literal."""
+    body = {
+        "name": "s_{{ env }}",
+        "tags": {"uc_gov_{{ env }}_owner": "platform"},
+    }
+    result = substitute_in_body(body, {"env": "test"})
+    assert result == {
+        "name": "s_test",
+        "tags": {"uc_gov_test_owner": "platform"},
+    }
+
+
+def test_substitute_in_body_leaves_ref_key_in_tag_map():
+    """A $ref inside a tag map keeps its structural key; a sibling tag name is substituted."""
+    body = {"tags": {"$ref": "$defs/tags/base", "env_{{ e }}": "{{ e }}"}}
+    result = substitute_in_body(body, {"e": "prod"})
+    assert result == {"tags": {"$ref": "$defs/tags/base", "env_prod": "prod"}}
+
+
+def test_substitute_in_body_leaves_non_tag_key_literal():
+    """A placeholder in a non-tag key is not substituted (only values / tag keys are)."""
+    body = {"weird_{{ env }}_field": "{{ env }}"}
+    assert substitute_in_body(body, {"env": "test"}) == {"weird_{{ env }}_field": "test"}
+
+
+def test_finalise_raises_on_unbound_tag_map_key():
+    """A tag-map key placeholder nothing bound is a hard error at finalise."""
+    with pytest.raises(TemplateVariableError, match="[Uu]nbound"):
+        finalise({"tags": {"uc_gov_{{ env }}_owner": "platform"}})
+
+
+def test_finalise_raises_on_placeholder_in_non_tag_key():
+    """A placeholder wrongly placed in a non-tag key surfaces as a hard error at finalise."""
+    with pytest.raises(TemplateVariableError, match="[Uu]nbound"):
+        finalise({"weird_{{ env }}_field": "x"})
+
+
+def test_finalise_unescapes_tag_map_key():
+    """Escaped braces in a tag-map key collapse to literals, like a value would."""
+    assert finalise({"tags": {"lit_{{{{ x }}}}": "v"}}) == {"tags": {"lit_{{ x }}": "v"}}
+
+
+def test_check_no_placeholders_in_resources_raises_on_tag_key():
+    """A placeholder in a resource tag-map key is rejected — resources are concrete."""
+    resources = {
+        "catalogs": {
+            "c": {"name": "c", "tags": {"uc_gov_{{ env }}_owner": "platform"}},
+        },
+    }
+    with pytest.raises(TemplateVariableError, match="'env'"):
+        check_no_placeholders_in_resources(resources)
+
+
+# ---------------------------------------------------------------------------
+# TEMPLATABLE_KEY_FIELDS drift guard
+# ---------------------------------------------------------------------------
+
+
+def test_templatable_key_fields_are_real_model_fields():
+    """Every templatable-key field name must be an actual model field, so a rename fails loudly."""
+    from uc_declarative_abac.configs.models import (
+        BasePolicyConfig,
+        BaseTaggableConfig,
+        PolicyColumnAliasConfig,
+    )
+
+    assert "tags" in BaseTaggableConfig.model_fields
+    for field in ("has_tags", "has_any_of_tags"):
+        assert field in BasePolicyConfig.model_fields
+        assert field in PolicyColumnAliasConfig.model_fields
+
+    # And the constant lists exactly those tag-name maps — nothing stale, nothing missing.
+    assert TEMPLATABLE_KEY_FIELDS == frozenset({"tags", "has_tags", "has_any_of_tags"})
