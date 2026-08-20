@@ -544,6 +544,8 @@ Policy fields:
   | `create` | `create_table`, `create_schema`, `create_function`, `create_volume`, `create_materialized_view`, `create_model`, `create_model_version` |
 
   Expansion is flat (not securable-type-aware); each expanded privilege then flows through the same compatibility filter and `use_catalog`/`use_schema` cascade as a concrete privilege would. So `read` on a table-matched policy emits `SELECT` (the volume/function-specific entries drop), and `use` on a catalog-attached policy matching a deep child cascades `USE_CATALOG` to the catalog and `USE_SCHEMA` to the containing schema. Abstractions and concrete privileges can be mixed freely in the same list.
+
+  > **Note — `read_metadata`:** `READ METADATA` ([privilege reference](https://learn.microsoft.com/en-us/azure/databricks/data-governance/unity-catalog/access-control/privileges-reference)) grants view-only access to an object's owner-visible metadata (permissions, row filters, column masks, and ABAC policies) without the ability to modify it or read its data. It is rolling out as a preview: if it is not enabled automatically in your workspace, a **workspace admin** must switch it on from the **Previews** page (workspace username menu → **Previews**) before a grant will apply. See [Manage Databricks previews](https://learn.microsoft.com/en-us/azure/databricks/admin/workspace-settings/manage-previews).
 - **`expiry_date`** — (`grant` type only) ISO 8601 date (`YYYY-MM-DD`) after which the grant is automatically revoked.
 
 ```yaml
