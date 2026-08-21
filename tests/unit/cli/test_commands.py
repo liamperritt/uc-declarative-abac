@@ -282,6 +282,44 @@ def test_commands_deploy_writes_json_report_when_output_is_json(monkeypatch, cap
     assert "changes" not in stdout.lower()
 
 
+def test_commands_deploy_writes_logs_to_output_file_when_output_is_json(
+    monkeypatch, tmp_path: Path
+):
+    result = OrchestratorDiffsResult(
+        group_diff=GroupDiff(),
+        securable_diff=SecurableDiff(),
+        governed_tag_diff=GovernedTagDiff(),
+        tag_diff=TagDiff(),
+        policy_diff=PolicyDiff(),
+        privilege_diff=PrivilegeDiff(),
+    )
+
+    def _fake_run(**_kwargs):
+        logging.getLogger("uc_declarative_abac").info("representative deploy log")
+        return result
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "run", _fake_run)
+    monkeypatch.setattr(cli, "WorkspaceClient", lambda **_: object())
+
+    exit_code = cli.run_cli(
+        [
+            "deploy",
+            "--config-dir",
+            "cfg",
+            "--warehouse-id",
+            "wh",
+            "--output",
+            "json",
+        ],
+    )
+
+    assert exit_code == 0
+    assert "representative deploy log" in (tmp_path / "output.log").read_text(
+        encoding="utf-8"
+    )
+
+
 def test_commands_deploy_forwards_system_catalog_from_run_settings_to_orchestrator(
     monkeypatch,
 ):

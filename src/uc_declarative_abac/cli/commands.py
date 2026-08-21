@@ -187,12 +187,25 @@ def cmd_deploy(
 ) -> int:
     dry_run = getattr(namespace, "dry_run", False)
     kwargs = _run_kwargs(settings, namespaces, dry_run=dry_run)
-    workspace_client = WorkspaceClient(profile=settings.profile)
-    result = run(workspace_client=workspace_client, **kwargs)
+    output_log_handler: logging.Handler | None = None
     if settings.output == "json":
-        sys.stdout.write(
-            f"{render_deploy_json(result, config_dir=kwargs['config_dir'], dry_run=dry_run)}\n"
+        output_log_handler = logging.FileHandler(
+            "output.log", mode="w", encoding="utf-8"
         )
+        output_log_handler.setFormatter(logging.Formatter("%(message)s"))
+        _logger.addHandler(output_log_handler)
+
+    try:
+        workspace_client = WorkspaceClient(profile=settings.profile)
+        result = run(workspace_client=workspace_client, **kwargs)
+        if settings.output == "json":
+            sys.stdout.write(
+                f"{render_deploy_json(result, config_dir=kwargs['config_dir'], dry_run=dry_run)}\n"
+            )
+    finally:
+        if output_log_handler is not None:
+            _logger.removeHandler(output_log_handler)
+            output_log_handler.close()
     return EXIT_SUCCESS
 
 
