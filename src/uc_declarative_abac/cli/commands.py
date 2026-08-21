@@ -14,7 +14,7 @@ from pydantic import ValidationError
 from uc_declarative_abac.cli.parser import parse_cli_args
 from uc_declarative_abac.cli.presentation import format_error, format_status
 from uc_declarative_abac.cli.settings import RunSettings, resolve_settings
-from uc_declarative_abac.json_output import render_deploy_json, render_validate_json
+from uc_declarative_abac.output import render_deploy_json, render_validate_json
 from uc_declarative_abac.orchestrator import load_config, run
 from uc_declarative_abac.utils import ExecutionBatchError, OrchestratorError
 

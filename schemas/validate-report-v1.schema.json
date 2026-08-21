@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/liamperritt/uc-declarative-abac/schemas/validate-report-v1.schema.json",
+  "title": "UC Declarative ABAC validate report v1",
+  "type": "object",
+  "required": [
+    "format_version",
+    "mode",
+    "dry_run",
+    "config_dir",
+    "status",
+    "summary",
+    "resources",
+    "warnings",
+    "errors"
+  ],
+  "properties": {
+    "format_version": {"const": "1"},
+    "mode": {"const": "validate"},
+    "dry_run": {"const": false},
+    "config_dir": {"type": "string"},
+    "status": {"const": "valid"},
+    "summary": {
+      "type": "object",
+      "required": ["total", "add", "change", "remove", "by_domain"],
+      "properties": {
+        "total": {"const": 0},
+        "add": {"const": 0},
+        "change": {"const": 0},
+        "remove": {"const": 0},
+        "by_domain": {
+          "type": "object",
+          "maxProperties": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "resources": {
+      "type": "array",
+      "maxItems": 0
+    },
+    "warnings": {
+      "type": "array",
+      "maxItems": 0
+    },
+    "errors": {
+      "type": "array",
+      "maxItems": 0
+    }
+  },
+  "additionalProperties": false
+}

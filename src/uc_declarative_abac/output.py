@@ -1,3 +1,5 @@
+"""Render deterministic machine-readable command output."""
+
 from __future__ import annotations
 
 import json

@@ -82,8 +82,9 @@ uc-abac deploy --config-dir ./configs --warehouse-id <id> --dry-run --output jso
 Human progress logs continue on stderr, while the single versioned JSON document is
 written to stdout. A normal deploy reports the same changes with `status: applied`;
 a dry run uses `status: planned`. `validate --output json` reports local validation
-status only because validation does not query Unity Catalog. The v1 contract is
-published at [`schemas/change-report-v1.schema.json`](schemas/change-report-v1.schema.json).
+status only because validation does not query Unity Catalog. The v1 contracts are
+published separately for [`deploy`](schemas/change-report-v1.schema.json) and
+[`validate`](schemas/validate-report-v1.schema.json) reports.
 
 **Settings file.** Place a `uc_abac.yml` in the working directory (or pass `--settings-file`) to avoid repeating flags on every run:
 

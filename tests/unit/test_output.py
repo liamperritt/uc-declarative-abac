@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from jsonschema import Draft202012Validator
+
 from uc_declarative_abac.governed_tags import GovernedTag, GovernedTagDiff
-from uc_declarative_abac.json_output import render_deploy_json
+from uc_declarative_abac.output import render_deploy_json, render_validate_json
 from uc_declarative_abac.orchestrator import OrchestratorDiffsResult
 from uc_declarative_abac.policies import Policy, PolicyDiff
 from uc_declarative_abac.principals import (
@@ -29,6 +31,18 @@ from uc_declarative_abac.types import (
     PrivilegeType,
     SecurableType,
 )
+
+
+def test_json_output_validate_report_conforms_to_validate_report_schema():
+    repository_root = Path(__file__).parents[2]
+    schema = json.loads(
+        (repository_root / "schemas" / "validate-report-v1.schema.json").read_text()
+    )
+    report = json.loads(render_validate_json(Path("configs/example")))
+
+    errors = list(Draft202012Validator(schema).iter_errors(report))
+
+    assert errors == []
 
 
 def test_json_output_renders_deterministic_versioned_dry_run_report():

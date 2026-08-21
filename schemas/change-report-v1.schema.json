@@ -6,10 +6,9 @@
   "required": ["format_version", "mode", "dry_run", "config_dir", "summary", "resources", "warnings", "errors"],
   "properties": {
     "format_version": {"const": "1"},
-    "mode": {"enum": ["validate", "deploy"]},
+    "mode": {"const": "deploy"},
     "dry_run": {"type": "boolean"},
     "config_dir": {"type": "string"},
-    "status": {"const": "valid"},
     "summary": {
       "type": "object",
       "required": ["total", "add", "change", "remove", "by_domain"],
