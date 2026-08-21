@@ -18,6 +18,10 @@ inputs:
       replaces top-level keys (legacy behaviour).
     required: false
     default: 'merge'
+  output:
+    description: Output format. Use "json" for a versioned validation result.
+    required: false
+    default: text
 
 runs:
   using: composite
@@ -40,6 +44,7 @@ runs:
       env:
         CONFIG_DIR: ${{ inputs.config-dir }}
         REF_OVERRIDE_STRATEGY: ${{ inputs.ref-override-strategy }}
+        OUTPUT: ${{ inputs.output }}
       run: |
         args=(
           "validate"
@@ -48,4 +53,5 @@ runs:
         if [[ -n "$REF_OVERRIDE_STRATEGY" ]]; then
           args+=(--ref-override-strategy "$REF_OVERRIDE_STRATEGY")
         fi
+        args+=(--output "$OUTPUT")
         uc-abac "${args[@]}"

@@ -100,3 +100,9 @@ def test_settings_empty_bool_env_does_not_override_default(monkeypatch):
     monkeypatch.setenv("UC_ABAC_ENABLE_TAG_MANAGEMENT", "")
     settings = resolve_settings({}, settings_file=None)
     assert settings.enable_tag_management is False
+
+
+def test_settings_resolves_output_from_environment(monkeypatch):
+    monkeypatch.setenv("UC_ABAC_OUTPUT", "json")
+    settings = resolve_settings({}, settings_file=None)
+    assert settings.output == "json"

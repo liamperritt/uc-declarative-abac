@@ -115,6 +115,15 @@ def test_parser_displays_polished_deploy_help(capsys):
     assert all(len(line) <= 80 for line in output.splitlines())
 
 
+def test_parser_help_lists_json_output_for_validate_and_deploy(capsys):
+    validate_output = _help_output(["validate", "--help"], capsys)
+    deploy_output = _help_output(["deploy", "--help"], capsys)
+
+    for output in (validate_output, deploy_output):
+        assert "--output" in output
+        assert re.search(r"\bjson\b", output, re.IGNORECASE)
+
+
 def test_parser_reports_actionable_error_when_command_is_unknown(capsys):
     with pytest.raises(SystemExit) as exc_info:
         parse_cli_args(["unknown"])

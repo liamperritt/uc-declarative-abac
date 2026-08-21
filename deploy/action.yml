@@ -30,6 +30,10 @@ inputs:
     description: If "true", print the planned changes without executing them.
     required: false
     default: 'false'
+  output:
+    description: Output format. Use "json" for a versioned machine-readable change report.
+    required: false
+    default: text
   use-workspace-scim:
     description: >-
       If "true", fetch principals from the workspace SCIM API instead of the account
@@ -232,6 +236,7 @@ runs:
         SYSTEM_CATALOG: ${{ inputs.system-catalog }}
         PROFILE: ${{ inputs.profile }}
         DRY_RUN: ${{ inputs.dry-run }}
+        OUTPUT: ${{ inputs.output }}
         USE_WORKSPACE_SCIM: ${{ inputs.use-workspace-scim }}
         ENABLE_TAG_MANAGEMENT: ${{ inputs.enable-tag-management }}
         ENABLE_PRIVILEGE_MANAGEMENT: ${{ inputs.enable-privilege-management }}
@@ -266,6 +271,7 @@ runs:
         if [[ "$DRY_RUN" == "true" ]]; then
           args+=(--dry-run)
         fi
+        args+=(--output "$OUTPUT")
         if [[ -n "$PROFILE" ]]; then
           args+=(--profile "$PROFILE")
         fi
