@@ -72,6 +72,20 @@ The CLI has two subcommands:
 
 Global flags: `--version`, `--verbose`, `--quiet`, `--settings-file <path>`.
 
+Both subcommands accept `--output text` (the default) or `--output json`. For a
+complete, non-truncated deployment plan, write the dry-run JSON document to a file:
+
+```bash
+uc-abac deploy --config-dir ./configs --warehouse-id <id> --dry-run --output json > changes.json
+```
+
+Human progress logs continue on stderr, while the single versioned JSON document is
+written to stdout. A normal deploy reports the same changes with `status: applied`;
+a dry run uses `status: planned`. `validate --output json` reports local validation
+status only because validation does not query Unity Catalog. The v1 contracts are
+published separately for [`deploy`](schemas/change-report-v1.schema.json) and
+[`validate`](schemas/validate-report-v1.schema.json) reports.
+
 **Settings file.** Place a `uc_abac.yml` in the working directory (or pass `--settings-file`) to avoid repeating flags on every run:
 
 ```yaml
@@ -135,6 +149,7 @@ The repo ships a composite GitHub Action at `deploy/action.yml` so any other rep
 | `system-catalog` | no | `'system'` | Catalog containing the `information_schema` views used for actual-state queries |
 | `profile` | no | `''` | Databricks CLI profile name from `~/.databrickscfg`; omit to use env-based auth (see the [Authentication](#authentication) table) |
 | `dry-run` | no | `'false'` | Print planned changes without executing when `'true'` |
+| `output` | no | `'text'` | Output format: `text` or a versioned, machine-readable `json` change report |
 | `use-workspace-scim` | no | `'false'` | Fetch principals from the workspace SCIM API instead of the account SCIM proxy when `'true'`. The account-level system groups `account users` and `account admins` are automatically included, since the workspace SCIM API does not surface them. **Incompatible with configuring `resources.groups`** — group management requires the account SCIM proxy, so combining the two errors out |
 | `skip-users-fetch` | no | `'false'` | Skip listing users and treat the user set as empty when `'true'`. For organisations that govern access only via groups and service principals, this avoids the slowest SCIM list call and speeds up the initial fetch significantly in accounts with many users. It is useful when running interactively for a faster fetch time, but **it is not intended for production use.** |
 | `enable-group-creation` | no | `'false'` | Permit the engine to create account groups declared under `resources.groups` that don't yet exist, **with their configured members** (the engine automatically gets the `MANAGER` role on groups it creates). Independent of `enable-group-management`: this flag only creates missing groups |

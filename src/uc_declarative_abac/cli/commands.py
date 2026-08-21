@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from uc_declarative_abac.cli.parser import parse_cli_args
 from uc_declarative_abac.cli.presentation import format_error, format_status
 from uc_declarative_abac.cli.settings import RunSettings, resolve_settings
+from uc_declarative_abac.output import render_deploy_json, render_validate_json
 from uc_declarative_abac.orchestrator import load_config, run
 from uc_declarative_abac.utils import ExecutionBatchError, OrchestratorError
 
@@ -172,7 +173,10 @@ def _run_kwargs(
 def cmd_validate(settings: RunSettings) -> int:
     config_dir = _require_config_dir(settings)
     load_config(config_dir, settings.ref_override_strategy)
-    _logger.info(format_status("success", "Config validation successful."))
+    if settings.output == "json":
+        sys.stdout.write(f"{render_validate_json(config_dir)}\n")
+    else:
+        _logger.info(format_status("success", "Config validation successful."))
     return EXIT_SUCCESS
 
 
@@ -183,8 +187,25 @@ def cmd_deploy(
 ) -> int:
     dry_run = getattr(namespace, "dry_run", False)
     kwargs = _run_kwargs(settings, namespaces, dry_run=dry_run)
-    workspace_client = WorkspaceClient(profile=settings.profile)
-    run(workspace_client=workspace_client, **kwargs)
+    output_log_handler: logging.Handler | None = None
+    if settings.output == "json":
+        output_log_handler = logging.FileHandler(
+            "output.log", mode="w", encoding="utf-8"
+        )
+        output_log_handler.setFormatter(logging.Formatter("%(message)s"))
+        _logger.addHandler(output_log_handler)
+
+    try:
+        workspace_client = WorkspaceClient(profile=settings.profile)
+        result = run(workspace_client=workspace_client, **kwargs)
+        if settings.output == "json":
+            sys.stdout.write(
+                f"{render_deploy_json(result, config_dir=kwargs['config_dir'], dry_run=dry_run)}\n"
+            )
+    finally:
+        if output_log_handler is not None:
+            _logger.removeHandler(output_log_handler)
+            output_log_handler.close()
     return EXIT_SUCCESS
 
 

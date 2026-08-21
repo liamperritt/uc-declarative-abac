@@ -20,6 +20,12 @@ _DEPLOY_EXAMPLE = "uc-abac deploy --config-dir ./configs --warehouse-id <id>"
 def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
     """Register optional run flags shared by validate, deploy, and legacy mode."""
     parser.add_argument(
+        "--output",
+        choices=["text", "json"],
+        default=argparse.SUPPRESS,
+        help="Output format [default: text].",
+    )
+    parser.add_argument(
         "--profile",
         type=str,
         default=argparse.SUPPRESS,

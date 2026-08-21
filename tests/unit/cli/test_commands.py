@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
 import uc_declarative_abac.cli.commands as cli
 from uc_declarative_abac.cli.settings import RunSettings
+from uc_declarative_abac.governed_tags import GovernedTagDiff
+from uc_declarative_abac.orchestrator import OrchestratorDiffsResult
+from uc_declarative_abac.policies import PolicyDiff
+from uc_declarative_abac.principals import GroupDiff
+from uc_declarative_abac.privileges import PrivilegeDiff
+from uc_declarative_abac.securables import SecurableDiff
+from uc_declarative_abac.tags import TagDiff
 
 # ---------------------------------------------------------------------------
 # Legacy flat invocation (regression coverage for pre-subcommand CLI)
@@ -183,6 +191,27 @@ def test_commands_reports_success_when_config_is_valid(tmp_path: Path, caplog):
     assert "Config validation successful." in output
 
 
+def test_commands_validate_writes_json_result_when_output_is_json(
+    monkeypatch, capsys, tmp_path: Path
+):
+    config_dir = tmp_path / "configs"
+    monkeypatch.setattr(cli, "load_config", lambda *_args, **_kwargs: object())
+
+    exit_code = cli.run_cli(
+        ["validate", "--config-dir", str(config_dir), "--output", "json"]
+    )
+
+    report = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert report["format_version"] == "1"
+    assert report["mode"] == "validate"
+    assert report["dry_run"] is False
+    assert report["config_dir"] == str(config_dir)
+    assert report["status"] == "valid"
+    assert report["resources"] == []
+    assert report["summary"]["total"] == 0
+
+
 def test_commands_return_config_error_code_when_yaml_invalid(tmp_path: Path):
     config_dir = tmp_path / "configs"
     config_dir.mkdir()
@@ -219,6 +248,76 @@ def test_commands_deploy_passes_dry_run_false(monkeypatch):
     )
     assert exit_code == 0
     assert captured["dry_run"] is False
+
+
+def test_commands_deploy_writes_json_report_when_output_is_json(monkeypatch, capsys):
+    result = OrchestratorDiffsResult(
+        group_diff=GroupDiff(),
+        securable_diff=SecurableDiff(),
+        governed_tag_diff=GovernedTagDiff(),
+        tag_diff=TagDiff(),
+        policy_diff=PolicyDiff(),
+        privilege_diff=PrivilegeDiff(),
+    )
+    monkeypatch.setattr(cli, "run", lambda **_: result)
+    monkeypatch.setattr(cli, "WorkspaceClient", lambda **_: object())
+
+    exit_code = cli.run_cli(
+        [
+            "deploy",
+            "--config-dir",
+            "cfg",
+            "--warehouse-id",
+            "wh",
+            "--output",
+            "json",
+        ],
+    )
+
+    stdout = capsys.readouterr().out
+    report = json.loads(stdout)
+    assert exit_code == 0
+    assert report["mode"] == "deploy"
+    assert "successful" not in stdout.lower()
+    assert "changes" not in stdout.lower()
+
+
+def test_commands_deploy_writes_logs_to_output_file_when_output_is_json(
+    monkeypatch, tmp_path: Path
+):
+    result = OrchestratorDiffsResult(
+        group_diff=GroupDiff(),
+        securable_diff=SecurableDiff(),
+        governed_tag_diff=GovernedTagDiff(),
+        tag_diff=TagDiff(),
+        policy_diff=PolicyDiff(),
+        privilege_diff=PrivilegeDiff(),
+    )
+
+    def _fake_run(**_kwargs):
+        logging.getLogger("uc_declarative_abac").info("representative deploy log")
+        return result
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "run", _fake_run)
+    monkeypatch.setattr(cli, "WorkspaceClient", lambda **_: object())
+
+    exit_code = cli.run_cli(
+        [
+            "deploy",
+            "--config-dir",
+            "cfg",
+            "--warehouse-id",
+            "wh",
+            "--output",
+            "json",
+        ],
+    )
+
+    assert exit_code == 0
+    assert "representative deploy log" in (tmp_path / "output.log").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_commands_deploy_forwards_system_catalog_from_run_settings_to_orchestrator(

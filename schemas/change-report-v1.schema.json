@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/liamperritt/uc-declarative-abac/schemas/change-report-v1.schema.json",
+  "title": "UC Declarative ABAC change report v1",
+  "type": "object",
+  "required": ["format_version", "mode", "dry_run", "config_dir", "summary", "resources", "warnings", "errors"],
+  "properties": {
+    "format_version": {"const": "1"},
+    "mode": {"const": "deploy"},
+    "dry_run": {"type": "boolean"},
+    "config_dir": {"type": "string"},
+    "summary": {
+      "type": "object",
+      "required": ["total", "add", "change", "remove", "by_domain"],
+      "properties": {
+        "total": {"type": "integer", "minimum": 0},
+        "add": {"type": "integer", "minimum": 0},
+        "change": {"type": "integer", "minimum": 0},
+        "remove": {"type": "integer", "minimum": 0},
+        "by_domain": {"type": "object", "additionalProperties": {"$ref": "#/$defs/counts"}}
+      },
+      "additionalProperties": false
+    },
+    "resources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "full_name", "changes"],
+        "properties": {
+          "type": {"type": "string"},
+          "full_name": {"type": "string"},
+          "changes": {"type": "array", "items": {"$ref": "#/$defs/change"}}
+        },
+        "additionalProperties": false
+      }
+    },
+    "warnings": {"type": "array", "items": {"type": "object"}},
+    "errors": {"type": "array", "items": {"type": "object"}}
+  },
+  "$defs": {
+    "counts": {
+      "type": "object",
+      "required": ["add", "change", "remove"],
+      "properties": {
+        "add": {"type": "integer", "minimum": 0},
+        "change": {"type": "integer", "minimum": 0},
+        "remove": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "change": {
+      "type": "object",
+      "required": ["domain", "operation", "status", "payload"],
+      "properties": {
+        "domain": {"enum": ["groups", "securables", "governed_tags", "tags", "policies", "privileges"]},
+        "operation": {"enum": ["add", "change", "remove"]},
+        "status": {"enum": ["planned", "applied"]},
+        "payload": {"type": "object"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
