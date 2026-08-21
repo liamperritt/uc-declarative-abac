@@ -766,14 +766,50 @@ def test_workspace_helper_update_tag_policy_uses_provided_update_mask() -> None:
     )
 
 
-def test_workspace_helper_delete_tag_policy_passes_sdk_args() -> None:
-    """delete_tag_policy forwards the tag_key verbatim to the SDK."""
+@pytest.mark.parametrize(
+    ("tag_key", "encoded_tag_key"),
+    [
+        ("domain/sub domain", "domain%2Fsub%20domain"),
+        ("pii", "pii"),
+    ],
+)
+def test_workspace_helper_update_tag_policy_encodes_tag_key_as_path_segment(
+    tag_key: str, encoded_tag_key: str
+) -> None:
+    """Path-unsafe tag keys are fully encoded while the policy body keeps the raw key."""
+    from databricks.sdk.service.tags import TagPolicy
+
+    client = MagicMock()
+    helper = WorkspaceHelper(client)
+    policy = TagPolicy(tag_key=tag_key, description="Updated")
+
+    helper.update_tag_policy(tag_key, policy, update_mask="description")
+
+    client.tag_policies.update_tag_policy.assert_called_once_with(
+        tag_key=encoded_tag_key,
+        tag_policy=policy,
+        update_mask="description",
+    )
+    assert policy.tag_key == tag_key
+
+
+@pytest.mark.parametrize(
+    ("tag_key", "encoded_tag_key"),
+    [
+        ("domain/sub domain", "domain%2Fsub%20domain"),
+        ("pii", "pii"),
+    ],
+)
+def test_workspace_helper_delete_tag_policy_encodes_tag_key_as_path_segment(
+    tag_key: str, encoded_tag_key: str
+) -> None:
+    """Path-unsafe tag keys are passed to the SDK as one fully encoded segment."""
     client = MagicMock()
     helper = WorkspaceHelper(client)
 
-    helper.delete_tag_policy("pii")
+    helper.delete_tag_policy(tag_key)
 
-    client.tag_policies.delete_tag_policy.assert_called_once_with("pii")
+    client.tag_policies.delete_tag_policy.assert_called_once_with(encoded_tag_key)
 
 
 # ---------------------------------------------------------------------------

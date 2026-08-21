@@ -4,6 +4,7 @@ import logging
 import threading
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import quote
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.iam import GrantRule, RuleSetResponse, RuleSetUpdateRequest
@@ -52,6 +53,11 @@ _GROUP_FETCH_WORKERS = 8
 def _ruleset_name(account_id: str, tag_id: str) -> str:
     """Build the AccessControl proxy ruleset resource name for a tag policy."""
     return f"accounts/{account_id}/tagPolicies/{tag_id}/ruleSets/default"
+
+
+def _encode_path_segment(value: str) -> str:
+    """Percent-encode a value for use as a single URL path segment."""
+    return quote(value, safe="")
 
 
 def _parse_ruleset_principal(s: str) -> str:
@@ -798,16 +804,21 @@ class WorkspaceHelper:
     def update_tag_policy(
         self, tag_key: str, policy: TagPolicy, update_mask: str
     ) -> TagPolicy:
-        """Update an existing tag policy. `update_mask` is a comma-separated list
-        of field names (e.g. 'description,values'); `*` is discouraged by the SDK."""
+        """Update a tag policy, encoding its key as one URL path segment.
+
+        ``update_mask`` is a comma-separated list of field names (for example,
+        ``description,values``); ``*`` is discouraged by the SDK.
+        """
         return self._client.tag_policies.update_tag_policy(
-            tag_key=tag_key,
+            tag_key=_encode_path_segment(tag_key),
             tag_policy=policy,
             update_mask=update_mask,
         )
 
     def delete_tag_policy(self, tag_key: str) -> None:
-        """Delete a governed tag (account-level tag policy) by its key. Thin
-        passthrough to the SDK — gated at the orchestrator boundary by the
-        ``--enable-governed-tag-deletion`` flag and interactive confirmation."""
-        self._client.tag_policies.delete_tag_policy(tag_key)
+        """Delete a governed tag, encoding its key as one URL path segment.
+
+        Deletion is gated at the orchestrator boundary by the
+        ``--enable-governed-tag-deletion`` flag and interactive confirmation.
+        """
+        self._client.tag_policies.delete_tag_policy(_encode_path_segment(tag_key))
