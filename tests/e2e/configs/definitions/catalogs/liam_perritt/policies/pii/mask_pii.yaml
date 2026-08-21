@@ -7,9 +7,6 @@ definitions:
       name: mask_pii
       comment: Policy for masking columns with PII values via 'uc_gov_pii' column tag
       type: mask
-      has_identity_attributes:
-        country: AU
-        department: Finance
       columns:
         - alias: pii
           has_any_of_tags:
