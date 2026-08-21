@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import date, datetime
 
 from uc_declarative_abac.configs import (
@@ -116,6 +117,10 @@ def _ungoverned_tag_keys(
     referenced: set[str] = set()
     referenced |= set(policy.has_tags or {})
     referenced |= set(policy.has_any_of_tags or {})
+    # For identity-attribute tag-matches the dict VALUES are governed tag keys on
+    # the resource (the keys are identity-attribute names, not tags).
+    referenced |= set((policy.has_identity_attribute_tag_matches or {}).values())
+    referenced |= set((policy.has_any_of_identity_attribute_tag_matches or {}).values())
     for col in policy.columns or []:
         if isinstance(col, PolicyColumnAliasConfig):
             referenced |= set(col.has_tags or {})
@@ -143,7 +148,7 @@ def _build_policy(
             Principal(principal_type=PrincipalType.UNKNOWN, name=n)
             for n in (policy.exceptions or [])
         ),
-        when_condition=_render_when(policy.has_tags, policy.has_any_of_tags),
+        when_condition=_render_when(policy),
         match_columns=match_columns,
         on_column=on_column,
         using_columns=using_columns,
@@ -152,25 +157,38 @@ def _build_policy(
     )
 
 
-def _render_when(
-    has_tags: dict[str, str] | None,
-    has_any_of_tags: dict[str, str] | None,
-) -> str | None:
-    return _render_match_expr(has_tags, has_any_of_tags)
+def _render_when(policy: BaseFgacPolicyConfig) -> str | None:
+    """Render the policy's WHEN clause. Combines the tag predicate with the two
+    identity-attribute predicate families (mask-only; always empty on filters),
+    AND-joining every non-empty sub-expression."""
+    parts = [
+        _render_match_expr(policy.has_tags, policy.has_any_of_tags, _render_tag_atom),
+        _render_match_expr(
+            policy.has_identity_attributes,
+            policy.has_any_of_identity_attributes,
+            _render_identity_attribute_atom,
+        ),
+        _render_match_expr(
+            policy.has_identity_attribute_tag_matches,
+            policy.has_any_of_identity_attribute_tag_matches,
+            _render_identity_attribute_tag_match_atom,
+        ),
+    ]
+    joined = " AND ".join(p for p in parts if p)
+    return joined or None
 
 
 def _render_match_expr(
-    has_tags: dict[str, str] | None,
-    has_any_of_tags: dict[str, str] | None,
+    has_all: dict[str, str] | None,
+    has_any: dict[str, str] | None,
+    atom: Callable[[str, str], str],
 ) -> str | None:
-    """Combine the AND group (``has_tags``) and the OR group (``has_any_of_tags``)
-    into one boolean tag expression. AND atoms come first (sorted by key); the OR
-    group is appended last, parenthesised when it has more than one atom. Returns
-    None when both groups are empty."""
-    parts = [_render_tag_atom(k, v) for k, v in sorted((has_tags or {}).items())]
-    or_atoms = [
-        _render_tag_atom(k, v) for k, v in sorted((has_any_of_tags or {}).items())
-    ]
+    """Combine the AND group (``has_all``) and the OR group (``has_any``) into one
+    boolean expression, rendering each entry via ``atom``. AND atoms come first
+    (sorted by key); the OR group is appended last, parenthesised when it has more
+    than one atom. Returns None when both groups are empty."""
+    parts = [atom(k, v) for k, v in sorted((has_all or {}).items())]
+    or_atoms = [atom(k, v) for k, v in sorted((has_any or {}).items())]
     if or_atoms:
         or_expr = " OR ".join(or_atoms)
         parts.append(f"({or_expr})" if len(or_atoms) > 1 else or_expr)
@@ -185,6 +203,14 @@ def _render_tag_atom(key: str, value: str) -> str:
     return f"has_tag_value('{key}', '{value}')"
 
 
+def _render_identity_attribute_atom(key: str, value: str) -> str:
+    return f"has_identity_attribute_value('{key}', '{value}')"
+
+
+def _render_identity_attribute_tag_match_atom(key: str, value: str) -> str:
+    return f"has_identity_attribute_tag_match('{key}', '{value}')"
+
+
 def _build_match_columns(
     columns: list[PolicyColumnConfig] | None,
 ) -> tuple[tuple[str, str], ...]:
@@ -193,7 +219,7 @@ def _build_match_columns(
     if not columns:
         return ()
     return tuple(
-        (col.alias, _render_match_expr(col.has_tags, col.has_any_of_tags) or "")
+        (col.alias, _render_match_expr(col.has_tags, col.has_any_of_tags, _render_tag_atom) or "")
         for col in columns
         if isinstance(col, PolicyColumnAliasConfig)
     )

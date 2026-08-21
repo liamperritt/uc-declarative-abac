@@ -54,6 +54,31 @@ def _coerce_null_tag_values(tags: dict | None) -> dict | None:
     return {k: (v if v is not None else "") for k, v in tags.items()}
 
 
+# The identity-attribute predicate fields — mask-only WHEN-clause refinements. Listed once so
+# the base wildcard validator and the filter-policy rejection stay in lockstep.
+_IDENTITY_ATTRIBUTE_FIELDS = (
+    "has_identity_attributes",
+    "has_any_of_identity_attributes",
+    "has_identity_attribute_tag_matches",
+    "has_any_of_identity_attribute_tag_matches",
+)
+
+
+def _reject_identity_attribute_wildcards(attrs: dict | None) -> dict | None:
+    """Identity attributes require an exact key AND value — no wildcards.
+    Rejects a None/empty value and a literal '*' (which users may expect to
+    wildcard, as it does for has_tags; these functions match it literally)."""
+    if attrs is None:
+        return None
+    for k, v in attrs.items():
+        if v is None or v == "" or v == "*":
+            raise ValueError(
+                f"identity attribute '{k}' must have an exact non-empty value; "
+                "wildcards ('*'), empty, and null values are not supported"
+            )
+    return attrs
+
+
 def _check_duplicate_names(
     items: list,
     child_label: str,
@@ -244,6 +269,10 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
     for_securable_type: Literal[SecurableType.TABLE] | None = Field(
         default=SecurableType.TABLE, alias="for"
     )
+    has_identity_attributes: dict[str, str] | None = None
+    has_any_of_identity_attributes: dict[str, str] | None = None
+    has_identity_attribute_tag_matches: dict[str, str] | None = None
+    has_any_of_identity_attribute_tag_matches: dict[str, str] | None = None
 
     @field_validator("to", mode="before")
     @classmethod
@@ -251,6 +280,13 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
         """An explicit null 'to' falls back to the default (the default_factory
         only covers the omitted-key case)."""
         return list(_DEFAULT_FGAC_TO) if v is None else v
+
+    @field_validator(*_IDENTITY_ATTRIBUTE_FIELDS, mode="before")
+    @classmethod
+    def _reject_identity_attribute_wildcards(cls, v: dict | None) -> dict | None:
+        """Identity attributes require an exact key and value — unlike ``has_tags``,
+        they support no wildcard. A no-op on FilterPolicyConfig (always None)."""
+        return _reject_identity_attribute_wildcards(v)
 
     @model_validator(mode="after")
     def _qualify_function(self) -> BaseFgacPolicyConfig:
@@ -312,6 +348,20 @@ class MaskPolicyConfig(BaseFgacPolicyConfig):
 
 class FilterPolicyConfig(BaseFgacPolicyConfig):
     type: Literal[PolicyType.FILTER] = PolicyType.FILTER
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_identity_attributes(cls, data: dict) -> dict:
+        """Identity attribute functions gate on the querying principal in a column
+        mask's WHEN clause; they are not yet supported for a row filter."""
+        if isinstance(data, dict):
+            present = [f for f in _IDENTITY_ATTRIBUTE_FIELDS if data.get(f) is not None]
+            if present:
+                raise ValueError(
+                    f"identity attribute field(s) {', '.join(sorted(present))} are "
+                    "not yet supported on filter policies, only on mask policies"
+                )
+        return data
 
 
 def _privilege_applies(

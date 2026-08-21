@@ -178,7 +178,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: liamperritt/uc-declarative-abac/deploy@v0.9.1
+      - uses: liamperritt/uc-declarative-abac/deploy@v0.9.2
         with:
           config-dir: configs/
           warehouse-id: ${{ vars.DATABRICKS_WAREHOUSE_ID }}
@@ -219,7 +219,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: liamperritt/uc-declarative-abac/validate@v0.9.1
+      - uses: liamperritt/uc-declarative-abac/validate@v0.9.2
         with:
           config-dir: configs/
 ```
@@ -533,6 +533,10 @@ Policy fields:
 - **`except`** — (`mask` and `filter` types only) principals exempted from the policy. Exempted principals see the original unmasked data or unfiltered rows.
 - **`has_tags`** — a tag-match block that scopes the policy to tagged objects (grants scope to securables within the attached level; masks/filters scope to tagged tables). AND semantics across multiple entries. Supports `'*'` wildcard tag values for matching only against the tag key. See the paragraphs below the examples for the full per-type behaviour.
 - **`has_any_of_tags`** — the same as `has_tags`, but with **OR** semantics: an object matches if it carries **any one** of the listed tags. Supports the same `'*'` wildcard values. May be specified on its own or alongside `has_tags`; when both are present they combine as **AND-of-groups** — an object must match **all** `has_tags` **and** at least one `has_any_of_tags`. Available on all three policy types.
+- **`has_identity_attributes`** — (**`mask` type only**) an identity-attribute match block that gates the mask on attributes of the **querying principal** (an [identity attribute function](https://docs.databricks.com/aws/en/data-governance/unity-catalog/abac/core-concepts#identity-attribute-functions-beta), beta), rendered into the mask policy's `WHEN` clause. Each `key: value` entry becomes `has_identity_attribute_value('key', 'value')`; multiple entries are **AND**-joined. Unlike `has_tags`, **no wildcard is supported** — every entry must have an exact, non-empty key **and** value (`'*'`, empty, and null values are rejected at config-load).
+- **`has_any_of_identity_attributes`** — the same as `has_identity_attributes`, but with **OR** semantics (the querying principal must match **any one** entry). Combines with the other predicates as AND-of-groups.
+- **`has_identity_attribute_tag_matches`** — (**`mask` type only**) matches a querying-principal identity attribute against a **governed tag on the resource**. Each `attribute_key: tag_key` entry becomes `has_identity_attribute_tag_match('attribute_key', 'tag_key')`; the **value** (`tag_key`) must be a governed tag (validated like `has_tags` keys). AND semantics; no wildcard.
+- **`has_any_of_identity_attribute_tag_matches`** — the same, but with **OR** semantics. All identity-attribute predicates and the tag predicates (`has_tags` / `has_any_of_tags`) combine into one `WHEN` clause as **AND-of-groups**.
 - **`column`/`columns`** — (`mask` and `filter` types only) a single column, or an ordered list of column slots. Every slot is passed as an argument to the `function` in declaration order, so the list must match the function's parameter signature. A slot is one of two kinds:
   - **alias column** — has an `alias` (a local name used to reference the column within this policy) and a `has_tags` and/or `has_any_of_tags` block that selects the actual table column by tag (at least one of the two is required). For **mask** policies, the **first** column in the list must be an alias column — it is the one the mask function is applied to (i.e. it becomes `ON COLUMN <alias>` in the generated SQL) and is also passed as the first argument to the function.
   - **constant column** — has a single `constant: <value>` and no tags. It is passed to the function as a constant rather than a table column, which is useful for parameterising a shared masking/filtering function per policy (e.g. a per-policy replacement value).
@@ -952,7 +956,7 @@ definitions:
           owner: uc_gov_{{ env }}_team    # also used locally
 ```
 
-**Tag-name keys.** Most dict keys are structural (field names, `$ref`/`$defs` targets, resource identities) and stay literal, but a **tag name is user data** — so `{{ placeholder }}` is allowed in the *keys* of the tag-name maps `tags`, `has_tags`, and `has_any_of_tags` (on securables, columns, and policies), bound by the enclosing definition's `$vars` just like a value. A placeholder in any other key is still an error.
+**User-data map keys.** Most dict keys are structural (field names, `$ref`/`$defs` targets, resource identities) and stay literal, but a **tag or identity-attribute name is user data** — so `{{ placeholder }}` is allowed in the *keys* of the user-data maps `tags`, `has_tags`, and `has_any_of_tags` (on securables, columns, and policies) and the mask-policy identity-attribute maps (`has_identity_attributes`, `has_any_of_identity_attributes`, `has_identity_attribute_tag_matches`, `has_any_of_identity_attribute_tag_matches`), bound by the enclosing definition's `$vars` just like a value. A placeholder in any other key is still an error.
 
 ```yaml
 definitions:
@@ -977,7 +981,7 @@ definitions:
 
 Two limitations: substitution happens after `$ref` override merge, so a tag key that still holds a placeholder cannot be targeted by an outer-level override (the outer writes a concrete key, which won't align); and two templated keys that resolve to the same tag name collapse (last wins).
 
-**Rules.** Variable names must be **bare identifiers** (letters, digits, underscore; not starting with a digit) — an identifier-shaped-but-invalid token like `{{ my-var }}` is rejected rather than passed through as literal text. Variable values are literal strings (a number/bool is rejected with a hint to quote it; `''` is a real empty string, null means "not supplied"; a value that looks like a `$defs/...` reference is rejected — `$vars` carry values, not references). A placeholder is bound by the `$vars` of the **enclosing definition** — the definition in whose text it appears, whether that's the definition's own body or an override the definition writes onto a child `$ref` (*the writer binds it*). A placeholder may therefore appear only inside a definition — in a value, or in a **tag-name map key** (`tags`, `has_tags`, `has_any_of_tags`; see **Tag-name keys** below) — never in any other dict key, a `$defs/...` reference target, or **anywhere under a `resources:` entry** — a resource is the concrete instance layer and must supply literals, so a placeholder there is a hard error. Because binding is local to the writer, a parent cannot widen a child's variable contract via an override. A multi-level template forwards a variable to a child `$ref` by using `{{ placeholder }}` as the child's `$vars` value — except a definition's own body-root `$ref` (an *extends*), where a variable forwards into the base by name (see **Extending a definition** above). Every placeholder must be bound (by an argument or a default) and every supplied argument must be used; a missing, unused, incomplete-signature, non-string, or resource-placeholder case fails config validation. See the [feature proposal](https://github.com/liamperritt/uc-declarative-abac/issues/18) for the full specification.
+**Rules.** Variable names must be **bare identifiers** (letters, digits, underscore; not starting with a digit) — an identifier-shaped-but-invalid token like `{{ my-var }}` is rejected rather than passed through as literal text. Variable values are literal strings (a number/bool is rejected with a hint to quote it; `''` is a real empty string, null means "not supplied"; a value that looks like a `$defs/...` reference is rejected — `$vars` carry values, not references). A placeholder is bound by the `$vars` of the **enclosing definition** — the definition in whose text it appears, whether that's the definition's own body or an override the definition writes onto a child `$ref` (*the writer binds it*). A placeholder may therefore appear only inside a definition — in a value, or in a **user-data map key** (`tags`, `has_tags`, `has_any_of_tags`, and the identity-attribute maps; see **User-data map keys** below) — never in any other dict key, a `$defs/...` reference target, or **anywhere under a `resources:` entry** — a resource is the concrete instance layer and must supply literals, so a placeholder there is a hard error. Because binding is local to the writer, a parent cannot widen a child's variable contract via an override. A multi-level template forwards a variable to a child `$ref` by using `{{ placeholder }}` as the child's `$vars` value — except a definition's own body-root `$ref` (an *extends*), where a variable forwards into the base by name (see **Extending a definition** above). Every placeholder must be bound (by an argument or a default) and every supplied argument must be used; a missing, unused, incomplete-signature, non-string, or resource-placeholder case fails config validation. See the [feature proposal](https://github.com/liamperritt/uc-declarative-abac/issues/18) for the full specification.
 
 ---
 
@@ -1101,6 +1105,7 @@ Mask and filter policies are additive by default (create/update, never delete). 
 #### Policies domain (mask / filter ABAC)
 - **Policy compilation** — walks catalog → schema → table hierarchy, emitting `MASK` and `FILTER` policy definitions; grant policies are filtered out and handled by the privileges domain
 - **Tag-to-WHEN translation** — policy `has_tags` maps to a `WHEN` clause: `has_tag_value('k', 'v')` for concrete values, `has_tag('k')` for the `'*'` wildcard, AND-joined
+- **Identity-attribute-to-WHEN translation** — (`mask` only) `has_identity_attributes` maps to `has_identity_attribute_value('k', 'v')` and `has_identity_attribute_tag_matches` to `has_identity_attribute_tag_match('k', 'tag_k')` (with `has_any_of_*` OR-group variants); every family is AND-joined into the same `WHEN` clause as the tag predicates. No wildcard — exact key+value required
 - **Column-tag-to-MATCH-COLUMNS translation** — per-column `has_tags` maps to `MATCH COLUMNS <condition> AS <alias>` entries
 - **MASK column split** — the first `columns[]` entry becomes `ON COLUMN <alias>`; remaining columns become `USING COLUMNS (...)` args
 - **FILTER columns** — no `ON COLUMN`; all columns become `USING COLUMNS (...)` args
