@@ -589,6 +589,86 @@ def test_mask_policy_column_rejects_neither_tag_field():
 
 
 # ---------------------------------------------------------------------------
+# Identity attribute functions (mask-only WHEN-clause predicates)
+# ---------------------------------------------------------------------------
+
+
+def _mask_policy_with(**overrides) -> dict:
+    """A minimal valid mask policy dict with the given fields merged in."""
+    policy = {
+        "name": "p",
+        "type": "mask",
+        "function": "cat.s.fn",
+        "columns": [{"alias": "c", "has_tags": {"pii": "email"}}],
+    }
+    policy.update(overrides)
+    return policy
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "has_identity_attributes",
+        "has_any_of_identity_attributes",
+        "has_identity_attribute_tag_matches",
+        "has_any_of_identity_attribute_tag_matches",
+    ],
+)
+def test_mask_policy_accepts_identity_attributes_with_exact_values(field):
+    """Each identity-attribute field accepts an exact key+value dict."""
+    config = ResourcesConfig.model_validate(
+        _fgac_policy_in_table(_mask_policy_with(**{field: {"k": "v"}}))
+    )
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert getattr(policy, field) == {"k": "v"}
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "has_identity_attributes",
+        "has_any_of_identity_attributes",
+        "has_identity_attribute_tag_matches",
+        "has_any_of_identity_attribute_tag_matches",
+    ],
+)
+@pytest.mark.parametrize("bad_value", ["*", "", None])
+def test_mask_policy_rejects_wildcard_empty_or_null_identity_attribute(field, bad_value):
+    """Identity attributes support no wildcard: '*', empty, and null values are rejected."""
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate(
+            _fgac_policy_in_table(_mask_policy_with(**{field: {"k": bad_value}}))
+        )
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "has_identity_attributes",
+        "has_any_of_identity_attributes",
+        "has_identity_attribute_tag_matches",
+        "has_any_of_identity_attribute_tag_matches",
+    ],
+)
+def test_filter_policy_rejects_identity_attributes(field):
+    """Identity attributes apply only to mask policies; a filter policy setting one is
+    rejected with a descriptive message (not the terse None-type error)."""
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate(
+            _fgac_policy_in_table(
+                {
+                    "name": "p",
+                    "type": "filter",
+                    "function": "cat.s.fn",
+                    field: {"k": "v"},
+                }
+            )
+        )
+    assert "only on mask policies" in str(exc_info.value)
+    assert field in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
 # Expiry date
 # ---------------------------------------------------------------------------
 

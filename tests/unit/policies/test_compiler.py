@@ -348,6 +348,119 @@ def test_policy_compiler_logs_error_when_has_any_of_tags_references_ungoverned_t
 
 
 # ---------------------------------------------------------------------------
+# identity attribute functions → WHEN clause (mask policies only)
+# ---------------------------------------------------------------------------
+
+
+def test_policy_compiler_renders_when_from_has_identity_attributes():
+    """has_identity_attributes renders as has_identity_attribute_value(k, v), AND-joined."""
+    policy_dict = _fgac_policy(
+        has_identity_attributes={"region": "emea", "dept": "fin"}
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.when_condition == (
+        "has_identity_attribute_value('dept', 'fin') "
+        "AND has_identity_attribute_value('region', 'emea')"
+    )
+
+
+def test_policy_compiler_renders_when_from_has_any_of_identity_attributes():
+    """has_any_of_identity_attributes OR-joins (sorted) and parenthesises when >1."""
+    policy_dict = _fgac_policy(
+        has_any_of_identity_attributes={"tier": "gold", "alt": "silver"}
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.when_condition == (
+        "(has_identity_attribute_value('alt', 'silver') "
+        "OR has_identity_attribute_value('tier', 'gold'))"
+    )
+
+
+def test_policy_compiler_renders_when_from_has_identity_attribute_tag_matches():
+    """has_identity_attribute_tag_matches renders as has_identity_attribute_tag_match(k, v)."""
+    policy_dict = _fgac_policy(
+        has_identity_attribute_tag_matches={"clearance": "pii"}
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.when_condition == (
+        "has_identity_attribute_tag_match('clearance', 'pii')"
+    )
+
+
+def test_policy_compiler_combines_tags_and_identity_attribute_families_with_and():
+    """The tag predicate and both identity-attribute families AND-join into one
+    WHEN clause, each family's OR group parenthesised."""
+    policy_dict = _fgac_policy(
+        has_tags={"domain": "sales"},
+        has_identity_attributes={"region": "emea"},
+        has_any_of_identity_attributes={"tier": "gold", "alt": "silver"},
+        has_identity_attribute_tag_matches={"clearance": "pii"},
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.when_condition == (
+        "has_tag_value('domain', 'sales') "
+        "AND has_identity_attribute_value('region', 'emea') "
+        "AND (has_identity_attribute_value('alt', 'silver') "
+        "OR has_identity_attribute_value('tier', 'gold')) "
+        "AND has_identity_attribute_tag_match('clearance', 'pii')"
+    )
+
+
+def test_policy_compiler_logs_error_when_identity_attribute_tag_match_is_ungoverned():
+    """The VALUE of a *_tag_matches entry is a governed tag key; an ungoverned one
+    drops the policy and logs an UngovernedTagError."""
+    policy_dict = _fgac_policy(
+        has_identity_attribute_tag_matches={"clearance": "ungoverned_key"}
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+    change_logger = _change_logger()
+
+    result = _compile(config, governed_tag_names={"pii"}, change_logger=change_logger)
+
+    assert change_logger.has_errors
+    exceptions = [e.exception for e in change_logger.errors]
+    assert any(isinstance(e, UngovernedTagError) for e in exceptions)
+    combined = " ".join(str(e) for e in exceptions)
+    assert "ungoverned_key" in combined
+    assert result == set()
+
+
+def test_policy_compiler_identity_attribute_value_is_not_tag_validated():
+    """The keys/values of has_identity_attributes are identity data, not tags, so
+    they are never checked against the governed-tag set."""
+    policy_dict = _fgac_policy(
+        has_identity_attributes={"not_a_tag": "some_value"}
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+    change_logger = _change_logger()
+
+    result = _compile(config, governed_tag_names={"pii"}, change_logger=change_logger)
+
+    assert not change_logger.has_errors
+    assert len(result) == 1
+
+
+# ---------------------------------------------------------------------------
 # columns → MATCH COLUMNS, on_column, using_columns
 # ---------------------------------------------------------------------------
 

@@ -179,6 +179,23 @@ def test_collect_placeholders_counts_tag_map_keys():
     assert collect_placeholders(body) == {"env", "region"}
 
 
+def test_collect_placeholders_counts_identity_attribute_map_keys():
+    """A placeholder in an identity-attribute map key counts as used (like a tag map)."""
+    body = {
+        "has_identity_attributes": {"region_{{ env }}": "emea"},
+        "has_identity_attribute_tag_matches": {"clearance_{{ team }}": "uc_gov_pii"},
+    }
+    assert collect_placeholders(body) == {"env", "team"}
+
+
+def test_substitute_in_body_substitutes_identity_attribute_map_key():
+    """A placeholder in an identity-attribute map key is substituted."""
+    body = {"has_identity_attributes": {"region_{{ env }}": "emea"}}
+    assert substitute_in_body(body, {"env": "prod"}) == {
+        "has_identity_attributes": {"region_prod": "emea"}
+    }
+
+
 def test_collect_placeholders_skips_ref_and_vars_keys_in_tag_map():
     """Inside a tag map, the structural $ref / $vars keys are never treated as tag names."""
     body = {
@@ -578,6 +595,7 @@ def test_check_no_placeholders_in_resources_raises_on_tag_key():
 def test_templatable_key_fields_are_real_model_fields():
     """Every templatable-key field name must be an actual model field, so a rename fails loudly."""
     from uc_declarative_abac.configs.models import (
+        BaseFgacPolicyConfig,
         BasePolicyConfig,
         BaseTaggableConfig,
         PolicyColumnAliasConfig,
@@ -587,6 +605,23 @@ def test_templatable_key_fields_are_real_model_fields():
     for field in ("has_tags", "has_any_of_tags"):
         assert field in BasePolicyConfig.model_fields
         assert field in PolicyColumnAliasConfig.model_fields
+    for field in (
+        "has_identity_attributes",
+        "has_any_of_identity_attributes",
+        "has_identity_attribute_tag_matches",
+        "has_any_of_identity_attribute_tag_matches",
+    ):
+        assert field in BaseFgacPolicyConfig.model_fields
 
-    # And the constant lists exactly those tag-name maps — nothing stale, nothing missing.
-    assert TEMPLATABLE_KEY_FIELDS == frozenset({"tags", "has_tags", "has_any_of_tags"})
+    # And the constant lists exactly those user-data maps — nothing stale, nothing missing.
+    assert TEMPLATABLE_KEY_FIELDS == frozenset(
+        {
+            "tags",
+            "has_tags",
+            "has_any_of_tags",
+            "has_identity_attributes",
+            "has_any_of_identity_attributes",
+            "has_identity_attribute_tag_matches",
+            "has_any_of_identity_attribute_tag_matches",
+        }
+    )
