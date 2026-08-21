@@ -7,7 +7,6 @@ from typing import Any
 
 from uc_declarative_abac.orchestrator import OrchestratorDiffsResult
 
-
 Change = dict[str, Any]
 ResourceChanges = dict[tuple[str, str], list[Change]]
 
