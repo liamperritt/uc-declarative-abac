@@ -605,11 +605,16 @@ def test_templatable_key_fields_are_real_model_fields():
     for field in ("has_tags", "has_any_of_tags"):
         assert field in BasePolicyConfig.model_fields
         assert field in PolicyColumnAliasConfig.model_fields
+    # has_none_of_tags is FGAC-only (not on the grant-shared BasePolicyConfig).
+    assert "has_none_of_tags" in BaseFgacPolicyConfig.model_fields
+    assert "has_none_of_tags" in PolicyColumnAliasConfig.model_fields
     for field in (
         "has_identity_attributes",
         "has_any_of_identity_attributes",
+        "has_none_of_identity_attributes",
         "has_identity_attribute_tag_matches",
         "has_any_of_identity_attribute_tag_matches",
+        "has_none_of_identity_attribute_tag_matches",
     ):
         assert field in BaseFgacPolicyConfig.model_fields
 
@@ -619,9 +624,12 @@ def test_templatable_key_fields_are_real_model_fields():
             "tags",
             "has_tags",
             "has_any_of_tags",
+            "has_none_of_tags",
             "has_identity_attributes",
             "has_any_of_identity_attributes",
+            "has_none_of_identity_attributes",
             "has_identity_attribute_tag_matches",
             "has_any_of_identity_attribute_tag_matches",
+            "has_none_of_identity_attribute_tag_matches",
         }
     )

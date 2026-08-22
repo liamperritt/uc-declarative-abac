@@ -73,10 +73,13 @@ TEMPLATABLE_KEY_FIELDS = frozenset(
         "tags",
         "has_tags",
         "has_any_of_tags",
+        "has_none_of_tags",
         "has_identity_attributes",
         "has_any_of_identity_attributes",
+        "has_none_of_identity_attributes",
         "has_identity_attribute_tag_matches",
         "has_any_of_identity_attribute_tag_matches",
+        "has_none_of_identity_attribute_tag_matches",
     }
 )
 

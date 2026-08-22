@@ -556,30 +556,87 @@ def test_mask_policy_column_accepts_has_any_of_tags_without_has_tags():
     assert column.has_any_of_tags == {"pii": "email", "pii_alt": "ssn"}
 
 
-def test_mask_policy_column_rejects_neither_tag_field():
-    """A policy column with neither has_tags nor has_any_of_tags is rejected."""
+def test_mask_policy_column_accepts_no_tag_field():
+    """A policy column with no tag predicate is accepted — it matches every column
+    (the secure-by-default MATCH COLUMNS TRUE pattern)."""
+    config = ResourcesConfig.model_validate(
+        _fgac_policy_in_table(_mask_policy_with(columns=[{"alias": "c"}]))
+    )
+    column = config.catalogs["cat"].schemas[0].tables[0].policies[0].columns[0]
+    assert column.has_tags is None
+    assert column.has_any_of_tags is None
+    assert column.has_none_of_tags is None
+
+
+def test_mask_policy_column_accepts_has_none_of_tags_standalone():
+    """has_none_of_tags may be the only tag predicate on a column."""
+    config = ResourcesConfig.model_validate(
+        _fgac_policy_in_table(
+            _mask_policy_with(
+                columns=[{"alias": "c", "has_none_of_tags": {"geo": "us"}}]
+            )
+        )
+    )
+    column = config.catalogs["cat"].schemas[0].tables[0].policies[0].columns[0]
+    assert column.has_none_of_tags == {"geo": "us"}
+
+
+# ---------------------------------------------------------------------------
+# has_none_of_tags (NOR semantics) — FGAC policy level
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("policy_type", ["mask", "filter"])
+def test_fgac_policy_accepts_has_none_of_tags(policy_type):
+    """Both mask and filter policies accept a policy-level has_none_of_tags block,
+    including the '*' wildcard value."""
+    config = ResourcesConfig.model_validate(
+        _fgac_policy_in_table(
+            {
+                "name": "p",
+                "type": policy_type,
+                "function": "cat.s.fn",
+                "columns": [{"alias": "c", "has_tags": {"pii": "email"}}],
+                "has_none_of_tags": {"restricted": "true", "geo": "*"},
+            }
+        )
+    )
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert policy.has_none_of_tags == {"restricted": "true", "geo": "*"}
+
+
+def test_fgac_policy_coerces_null_has_none_of_tags_values_to_empty_string():
+    """has_none_of_tags entries with None values are coerced to empty strings,
+    matching has_tags / has_any_of_tags."""
+    config = ResourcesConfig.model_validate(
+        _fgac_policy_in_table(
+            {
+                "name": "p",
+                "type": "filter",
+                "function": "cat.s.fn",
+                "has_none_of_tags": {"env": "prod", "operations": None},
+            }
+        )
+    )
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert policy.has_none_of_tags == {"env": "prod", "operations": ""}
+
+
+def test_grant_policy_rejects_has_none_of_tags():
+    """has_none_of_tags is FGAC-only; a grant policy setting it is rejected as an
+    unknown field (extra='forbid')."""
     with pytest.raises(ValidationError):
         ResourcesConfig.model_validate(
             {
                 "catalogs": {
                     "cat": {
-                        "schemas": [
+                        "policies": [
                             {
-                                "name": "s",
-                                "tables": [
-                                    {
-                                        "name": "t",
-                                        "policies": [
-                                            {
-                                                "name": "p",
-                                                "type": "mask",
-                                                "function": "cat.s.fn",
-                                                "to": ["team"],
-                                                "columns": [{"alias": "c"}],
-                                            }
-                                        ],
-                                    }
-                                ],
+                                "name": "g1",
+                                "type": "grant",
+                                "privileges": ["select"],
+                                "to": ["team"],
+                                "has_none_of_tags": {"env": "prod"},
                             }
                         ],
                     }
@@ -610,8 +667,10 @@ def _mask_policy_with(**overrides) -> dict:
     [
         "has_identity_attributes",
         "has_any_of_identity_attributes",
+        "has_none_of_identity_attributes",
         "has_identity_attribute_tag_matches",
         "has_any_of_identity_attribute_tag_matches",
+        "has_none_of_identity_attribute_tag_matches",
     ],
 )
 def test_mask_policy_accepts_identity_attributes_with_exact_values(field):
@@ -628,8 +687,10 @@ def test_mask_policy_accepts_identity_attributes_with_exact_values(field):
     [
         "has_identity_attributes",
         "has_any_of_identity_attributes",
+        "has_none_of_identity_attributes",
         "has_identity_attribute_tag_matches",
         "has_any_of_identity_attribute_tag_matches",
+        "has_none_of_identity_attribute_tag_matches",
     ],
 )
 @pytest.mark.parametrize("bad_value", ["*", "", None])
@@ -646,8 +707,10 @@ def test_mask_policy_rejects_wildcard_empty_or_null_identity_attribute(field, ba
     [
         "has_identity_attributes",
         "has_any_of_identity_attributes",
+        "has_none_of_identity_attributes",
         "has_identity_attribute_tag_matches",
         "has_any_of_identity_attribute_tag_matches",
+        "has_none_of_identity_attribute_tag_matches",
     ],
 )
 def test_filter_policy_rejects_identity_attributes(field):
