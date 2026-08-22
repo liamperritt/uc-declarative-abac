@@ -232,7 +232,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: liamperritt/uc-declarative-abac/deploy@v0.9.3
+      - uses: liamperritt/uc-declarative-abac/deploy@v0.9.4
         with:
           config-dir: configs/
           warehouse-id: ${{ vars.DATABRICKS_WAREHOUSE_ID }}
@@ -273,7 +273,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: liamperritt/uc-declarative-abac/validate@v0.9.3
+      - uses: liamperritt/uc-declarative-abac/validate@v0.9.4
         with:
           config-dir: configs/
 ```
