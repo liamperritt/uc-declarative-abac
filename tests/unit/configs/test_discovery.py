@@ -201,3 +201,96 @@ def test_discovery_rejects_duplicate_catalog_resource_keys(tmp_yaml_dir):
     paths = discover_yaml_files(root)
     with pytest.raises(DuplicateResourceError):
         load_raw_configs(paths)
+
+
+# ---------------------------------------------------------------------------
+# Within-file duplicate mapping keys (strict loader)
+# ---------------------------------------------------------------------------
+#
+# These write raw YAML text rather than using the tmp_yaml_dir fixture, which
+# dumps Python dicts and so can never produce a duplicate key.
+
+
+def test_discovery_raises_on_within_file_duplicate_top_level_key(tmp_path):
+    """A repeated top-level key in a single file raises DuplicateKeyError."""
+    path = tmp_path / "dup.yaml"
+    path.write_text(
+        "definitions:\n"
+        "  schemas:\n"
+        "    ops|sales:\n"
+        "      name: sales\n"
+        "definitions:\n"
+        "  schemas:\n"
+        "    ops|other:\n"
+        "      name: other\n"
+    )
+    with pytest.raises(DuplicateKeyError):
+        load_raw_configs([path])
+
+
+def test_discovery_raises_on_within_file_duplicate_definition_key(tmp_path):
+    """Two entries in the same file sharing a definition id raise DuplicateKeyError
+    (previously silently collapsed by safe_load before the cross-file merge)."""
+    path = tmp_path / "dup.yaml"
+    path.write_text(
+        "definitions:\n"
+        "  policies:\n"
+        "    pii|mask:\n"
+        "      name: mask_a\n"
+        "    pii|mask:\n"
+        "      name: mask_b\n"
+    )
+    with pytest.raises(DuplicateKeyError):
+        load_raw_configs([path])
+
+
+def test_discovery_raises_on_deeply_nested_duplicate_key(tmp_path):
+    """A duplicate key nested well below definitions/resources (here a repeated tag
+    key on a policy) is still caught."""
+    path = tmp_path / "dup.yaml"
+    path.write_text(
+        "definitions:\n"
+        "  policies:\n"
+        "    pii|mask:\n"
+        "      name: mask\n"
+        "      type: mask\n"
+        "      has_tags:\n"
+        "        pii: email\n"
+        "        pii: ssn\n"
+    )
+    with pytest.raises(DuplicateKeyError):
+        load_raw_configs([path])
+
+
+def test_within_file_duplicate_key_error_names_file_and_line(tmp_path):
+    """The raised error names the offending file and a line number."""
+    path = tmp_path / "dup.yaml"
+    path.write_text(
+        "resources:\n"
+        "  catalogs:\n"
+        "    my_catalog:\n"
+        "      comment: first\n"
+        "    my_catalog:\n"
+        "      comment: second\n"
+    )
+    with pytest.raises(DuplicateKeyError) as exc_info:
+        load_raw_configs([path])
+    message = str(exc_info.value)
+    assert "my_catalog" in message
+    assert "line" in message
+    assert str(path) in message
+
+
+def test_discovery_accepts_valid_yaml_without_duplicates(tmp_path):
+    """Regression: a duplicate-free file with repeated *values* (not keys) parses fine."""
+    path = tmp_path / "ok.yaml"
+    path.write_text(
+        "definitions:\n"
+        "  schemas:\n"
+        "    ops|a:\n"
+        "      name: shared\n"
+        "    ops|b:\n"
+        "      name: shared\n"  # same value, different key — allowed
+    )
+    definitions, _resources = load_raw_configs([path])
+    assert set(definitions["schemas"]) == {"ops|a", "ops|b"}

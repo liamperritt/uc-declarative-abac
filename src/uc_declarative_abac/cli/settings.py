@@ -4,8 +4,9 @@ import os
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field
+
+from uc_declarative_abac.utils import load_yaml_file
 
 _ENV_PREFIX = "UC_ABAC_"
 _DEFAULT_SETTINGS_FILE = Path("uc_abac.yml")
@@ -94,8 +95,7 @@ def _coerce_env_value(field_name: str, raw: str, field_info: Any) -> Any:
 
 
 def _load_settings_file(path: Path) -> dict[str, Any]:
-    with path.open(encoding="utf-8") as handle:
-        data = yaml.safe_load(handle) or {}
+    data = load_yaml_file(path) or {}
     if not isinstance(data, dict):
         raise TypeError(
             f"Settings file {path} must contain a YAML mapping at the top level."
