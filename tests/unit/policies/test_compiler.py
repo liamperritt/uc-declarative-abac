@@ -348,6 +348,98 @@ def test_policy_compiler_logs_error_when_has_any_of_tags_references_ungoverned_t
 
 
 # ---------------------------------------------------------------------------
+# has_none_of_tags → WHEN clause (NOR semantics)
+# ---------------------------------------------------------------------------
+
+
+def test_policy_compiler_renders_single_has_none_of_tags_as_negated_atom():
+    """A single has_none_of_tags entry renders as a single negated atom."""
+    policy_dict = _fgac_policy(has_none_of_tags={"domain": "sales"})
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.when_condition == "NOT has_tag_value('domain', 'sales')"
+
+
+def test_policy_compiler_joins_multiple_has_none_of_tags_with_and():
+    """Multiple has_none_of_tags entries are each negated and AND-joined (sorted)."""
+    policy_dict = _fgac_policy(has_none_of_tags={"b_tag": "v2", "a_tag": "v1"})
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.when_condition == (
+        "NOT has_tag_value('a_tag', 'v1') AND NOT has_tag_value('b_tag', 'v2')"
+    )
+
+
+def test_policy_compiler_renders_has_none_of_tags_with_wildcard():
+    """has_none_of_tags value '*' renders as NOT has_tag(k) (absence of the key)."""
+    policy_dict = _fgac_policy(has_none_of_tags={"geo": "*", "domain": "sales"})
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.when_condition == (
+        "NOT has_tag_value('domain', 'sales') AND NOT has_tag('geo')"
+    )
+
+
+def test_policy_compiler_combines_all_three_tag_groups_with_and():
+    """has_tags (AND), has_any_of_tags (parenthesised OR) and has_none_of_tags
+    (negated NOR, last) combine into one AND-joined expression, in that order."""
+    policy_dict = _fgac_policy(
+        has_tags={"a_tag": "v1"},
+        has_any_of_tags={"geo": "us", "domain": "sales"},
+        has_none_of_tags={"lvl": "high"},
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.when_condition == (
+        "has_tag_value('a_tag', 'v1') "
+        "AND (has_tag_value('domain', 'sales') OR has_tag_value('geo', 'us')) "
+        "AND NOT has_tag_value('lvl', 'high')"
+    )
+
+
+def test_policy_compiler_escapes_single_quotes_in_tag_atoms():
+    """A tag key or value containing a single quote is escaped (doubled) so it can't
+    break out of the rendered WHEN-clause atom."""
+    policy_dict = _fgac_policy(has_none_of_tags={"owner": "O'Brien"})
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config, governed_tag_names={"owner", "pii"})
+    assert policy.when_condition == "NOT has_tag_value('owner', 'O''Brien')"
+
+
+def test_policy_compiler_logs_error_when_has_none_of_tags_references_ungoverned_tag():
+    """An ungoverned tag key in has_none_of_tags is detected and logged."""
+    policy_dict = _fgac_policy(has_none_of_tags={"ungoverned_key": "x"})
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+    change_logger = _change_logger()
+
+    result = _compile(config, governed_tag_names={"pii"}, change_logger=change_logger)
+
+    assert change_logger.has_errors
+    exceptions = [e.exception for e in change_logger.errors]
+    assert any(isinstance(e, UngovernedTagError) for e in exceptions)
+    combined = " ".join(str(e) for e in exceptions)
+    assert "ungoverned_key" in combined
+    assert result == set()
+
+
+# ---------------------------------------------------------------------------
 # identity attribute functions → WHEN clause (mask policies only)
 # ---------------------------------------------------------------------------
 
@@ -397,6 +489,58 @@ def test_policy_compiler_renders_when_from_has_identity_attribute_tag_matches():
     assert policy.when_condition == (
         "has_identity_attribute_tag_match('clearance', 'pii')"
     )
+
+
+def test_policy_compiler_renders_when_from_has_none_of_identity_attributes():
+    """has_none_of_identity_attributes negates each atom and AND-joins them."""
+    policy_dict = _fgac_policy(
+        has_none_of_identity_attributes={"region": "emea", "dept": "fin"}
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.when_condition == (
+        "NOT has_identity_attribute_value('dept', 'fin') "
+        "AND NOT has_identity_attribute_value('region', 'emea')"
+    )
+
+
+def test_policy_compiler_renders_when_from_has_none_of_identity_attribute_tag_matches():
+    """has_none_of_identity_attribute_tag_matches renders as a negated tag-match atom."""
+    policy_dict = _fgac_policy(
+        has_none_of_identity_attribute_tag_matches={"clearance": "pii"}
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.when_condition == (
+        "NOT has_identity_attribute_tag_match('clearance', 'pii')"
+    )
+
+
+def test_policy_compiler_logs_error_when_has_none_of_identity_attribute_tag_match_is_ungoverned():
+    """The VALUE of a has_none_of_identity_attribute_tag_matches entry is a governed
+    tag key; an ungoverned one drops the policy and logs an UngovernedTagError."""
+    policy_dict = _fgac_policy(
+        has_none_of_identity_attribute_tag_matches={"clearance": "ungoverned_key"}
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+    change_logger = _change_logger()
+
+    result = _compile(config, governed_tag_names={"pii"}, change_logger=change_logger)
+
+    assert change_logger.has_errors
+    exceptions = [e.exception for e in change_logger.errors]
+    assert any(isinstance(e, UngovernedTagError) for e in exceptions)
+    combined = " ".join(str(e) for e in exceptions)
+    assert "ungoverned_key" in combined
+    assert result == set()
 
 
 def test_policy_compiler_combines_tags_and_identity_attribute_families_with_and():
@@ -538,6 +682,57 @@ def test_policy_compiler_columns_match_uses_and_joined_when_multiple_has_tags():
     assert policy.match_columns == (
         ("c", "has_tag_value('a', 'v1') AND has_tag_value('b', 'v2')"),
     )
+
+
+def test_policy_compiler_columns_match_negates_has_none_of_tags():
+    """A column with has_none_of_tags renders each entry negated in MATCH COLUMNS."""
+    policy_dict = _fgac_policy(
+        columns=[
+            {"alias": "c", "has_none_of_tags": {"b": "v2", "a": "v1"}},
+        ],
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.match_columns == (
+        ("c", "NOT has_tag_value('a', 'v1') AND NOT has_tag_value('b', 'v2')"),
+    )
+
+
+def test_policy_compiler_columns_match_combines_positive_and_none_of_tags():
+    """A column may combine a positive selector with has_none_of_tags as a refinement."""
+    policy_dict = _fgac_policy(
+        columns=[
+            {
+                "alias": "c",
+                "has_tags": {"pii": "*"},
+                "has_none_of_tags": {"geo": "us"},
+            },
+        ],
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.match_columns == (
+        ("c", "has_tag('pii') AND NOT has_tag_value('geo', 'us')"),
+    )
+
+
+def test_policy_compiler_tagless_column_matches_all_via_true():
+    """A mask column with no tag predicate matches every column via a TRUE condition
+    (the secure-by-default pattern). It is still the ON COLUMN target."""
+    policy_dict = _fgac_policy(columns=[{"alias": "c"}])
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.match_columns == (("c", "TRUE"),)
+    assert policy.on_column == "c"
 
 
 # ---------------------------------------------------------------------------

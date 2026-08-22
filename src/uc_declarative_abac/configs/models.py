@@ -59,8 +59,10 @@ def _coerce_null_tag_values(tags: dict | None) -> dict | None:
 _IDENTITY_ATTRIBUTE_FIELDS = (
     "has_identity_attributes",
     "has_any_of_identity_attributes",
+    "has_none_of_identity_attributes",
     "has_identity_attribute_tag_matches",
     "has_any_of_identity_attribute_tag_matches",
+    "has_none_of_identity_attribute_tag_matches",
 )
 
 
@@ -184,19 +186,12 @@ class PolicyColumnAliasConfig(BaseConfig):
     alias: str
     has_tags: dict[str, str] | None = None
     has_any_of_tags: dict[str, str] | None = None
+    has_none_of_tags: dict[str, str] | None = None
 
-    @field_validator("has_tags", "has_any_of_tags", mode="before")
+    @field_validator("has_tags", "has_any_of_tags", "has_none_of_tags", mode="before")
     @classmethod
     def _coerce_null_tags(cls, v: dict) -> dict:
         return _coerce_null_tag_values(v)
-
-    @model_validator(mode="after")
-    def _require_a_tag_match(self) -> PolicyColumnAliasConfig:
-        if not self.has_tags and not self.has_any_of_tags:
-            raise ValueError(
-                "policy column must specify 'has_tags' or 'has_any_of_tags'"
-            )
-        return self
 
 
 class PolicyColumnConstantConfig(BaseConfig):
@@ -269,10 +264,17 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
     for_securable_type: Literal[SecurableType.TABLE] | None = Field(
         default=SecurableType.TABLE, alias="for"
     )
+    # NOR ("has none of") tag predicate — an object matches only when it carries none
+    # of these tags. Unlike has_tags/has_any_of_tags (which live on BasePolicyConfig and
+    # are shared with grant policies), this is FGAC-only: it renders into the WHEN clause
+    # and has no meaning for grant matching, so it is declared here.
+    has_none_of_tags: dict[str, str] | None = None
     has_identity_attributes: dict[str, str] | None = None
     has_any_of_identity_attributes: dict[str, str] | None = None
+    has_none_of_identity_attributes: dict[str, str] | None = None
     has_identity_attribute_tag_matches: dict[str, str] | None = None
     has_any_of_identity_attribute_tag_matches: dict[str, str] | None = None
+    has_none_of_identity_attribute_tag_matches: dict[str, str] | None = None
 
     @field_validator("to", mode="before")
     @classmethod
@@ -280,6 +282,13 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
         """An explicit null 'to' falls back to the default (the default_factory
         only covers the omitted-key case)."""
         return list(_DEFAULT_FGAC_TO) if v is None else v
+
+    @field_validator("has_none_of_tags", mode="before")
+    @classmethod
+    def _coerce_null_none_of_tags(cls, v: dict) -> dict:
+        """Coerce null values to empty strings, matching has_tags/has_any_of_tags.
+        Like them, has_none_of_tags supports the '*' wildcard (presence check)."""
+        return _coerce_null_tag_values(v)
 
     @field_validator(*_IDENTITY_ATTRIBUTE_FIELDS, mode="before")
     @classmethod
@@ -348,6 +357,23 @@ class MaskPolicyConfig(BaseFgacPolicyConfig):
 
 class FilterPolicyConfig(BaseFgacPolicyConfig):
     type: Literal[PolicyType.FILTER] = PolicyType.FILTER
+
+    @model_validator(mode="after")
+    def _require_column_tag_match(self) -> FilterPolicyConfig:
+        """A filter column must positively select the table column it binds to. A
+        tagless alias would compile to ``MATCH COLUMNS TRUE``, binding the alias to
+        *every* column, so it is ambiguous which value feeds the filter function.
+        (Mask columns may be tagless — that is the secure-by-default match-all
+        pattern, which is well-defined via the per-column ``ON COLUMN`` application.)"""
+        for col in self.columns or []:
+            if isinstance(col, PolicyColumnAliasConfig) and not (
+                col.has_tags or col.has_any_of_tags or col.has_none_of_tags
+            ):
+                raise ValueError(
+                    "filter policy column must specify 'has_tags', "
+                    "'has_any_of_tags', or 'has_none_of_tags'"
+                )
+        return self
 
     @model_validator(mode="before")
     @classmethod
