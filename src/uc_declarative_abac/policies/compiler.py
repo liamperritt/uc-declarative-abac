@@ -213,18 +213,25 @@ def _render_match_expr(
     return " AND ".join(parts)
 
 
+def _quote(value: str) -> str:
+    """Render a string as a single-quoted SQL literal, escaping embedded single
+    quotes by doubling them (e.g. ``O'Brien`` → ``'O''Brien'``) so a tag/attribute
+    key or value containing a quote can't break out of the WHEN-clause atom."""
+    return "'" + value.replace("'", "''") + "'"
+
+
 def _render_tag_atom(key: str, value: str) -> str:
     if value == _WILDCARD:
-        return f"has_tag('{key}')"
-    return f"has_tag_value('{key}', '{value}')"
+        return f"has_tag({_quote(key)})"
+    return f"has_tag_value({_quote(key)}, {_quote(value)})"
 
 
 def _render_identity_attribute_atom(key: str, value: str) -> str:
-    return f"has_identity_attribute_value('{key}', '{value}')"
+    return f"has_identity_attribute_value({_quote(key)}, {_quote(value)})"
 
 
 def _render_identity_attribute_tag_match_atom(key: str, value: str) -> str:
-    return f"has_identity_attribute_tag_match('{key}', '{value}')"
+    return f"has_identity_attribute_tag_match({_quote(key)}, {_quote(value)})"
 
 
 def _build_match_columns(

@@ -581,6 +581,40 @@ def test_mask_policy_column_accepts_has_none_of_tags_standalone():
     assert column.has_none_of_tags == {"geo": "us"}
 
 
+def test_filter_policy_column_rejects_no_tag_field():
+    """Match-all (tagless column → MATCH COLUMNS TRUE) is mask-only. A filter column
+    with no tag predicate is rejected — it would bind its alias ambiguously to every
+    column."""
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate(
+            _fgac_policy_in_table(
+                {
+                    "name": "p",
+                    "type": "filter",
+                    "function": "cat.s.fn",
+                    "columns": [{"alias": "c"}],
+                }
+            )
+        )
+    assert "filter policy column must specify" in str(exc_info.value)
+
+
+def test_filter_policy_column_accepts_has_none_of_tags_standalone():
+    """A filter column satisfies the requirement with has_none_of_tags alone."""
+    config = ResourcesConfig.model_validate(
+        _fgac_policy_in_table(
+            {
+                "name": "p",
+                "type": "filter",
+                "function": "cat.s.fn",
+                "columns": [{"alias": "c", "has_none_of_tags": {"geo": "us"}}],
+            }
+        )
+    )
+    column = config.catalogs["cat"].schemas[0].tables[0].policies[0].columns[0]
+    assert column.has_none_of_tags == {"geo": "us"}
+
+
 # ---------------------------------------------------------------------------
 # has_none_of_tags (NOR semantics) — FGAC policy level
 # ---------------------------------------------------------------------------

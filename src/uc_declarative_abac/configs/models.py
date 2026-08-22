@@ -358,6 +358,23 @@ class MaskPolicyConfig(BaseFgacPolicyConfig):
 class FilterPolicyConfig(BaseFgacPolicyConfig):
     type: Literal[PolicyType.FILTER] = PolicyType.FILTER
 
+    @model_validator(mode="after")
+    def _require_column_tag_match(self) -> FilterPolicyConfig:
+        """A filter column must positively select the table column it binds to. A
+        tagless alias would compile to ``MATCH COLUMNS TRUE``, binding the alias to
+        *every* column, so it is ambiguous which value feeds the filter function.
+        (Mask columns may be tagless — that is the secure-by-default match-all
+        pattern, which is well-defined via the per-column ``ON COLUMN`` application.)"""
+        for col in self.columns or []:
+            if isinstance(col, PolicyColumnAliasConfig) and not (
+                col.has_tags or col.has_any_of_tags or col.has_none_of_tags
+            ):
+                raise ValueError(
+                    "filter policy column must specify 'has_tags', "
+                    "'has_any_of_tags', or 'has_none_of_tags'"
+                )
+        return self
+
     @model_validator(mode="before")
     @classmethod
     def _reject_identity_attributes(cls, data: dict) -> dict:

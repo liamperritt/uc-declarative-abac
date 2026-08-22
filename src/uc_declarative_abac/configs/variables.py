@@ -20,7 +20,8 @@ the definition that *writes* a placeholder is the one that binds it.
 
 Dict *keys* are literal by default, with one exception: the keys of a **user-data map**
 (the fields in ``TEMPLATABLE_KEY_FIELDS`` — the tag-name maps ``tags``, ``has_tags``,
-``has_any_of_tags``, plus the identity-attribute maps ``has_identity_attributes`` and friends)
+``has_any_of_tags``, ``has_none_of_tags``, plus the identity-attribute maps
+``has_identity_attributes`` and friends)
 are user data, so a placeholder in such a key is bound and substituted like a value. Every other
 key — config field names, ``$ref``/``$defs`` targets, resource identity keys — stays literal;
 a placeholder there is a hard error at ``finalise``.
@@ -64,10 +65,11 @@ _VARS_KEY = "$vars"
 # Fields whose child-dict KEYS are user data, so a ``{{ placeholder }}`` may appear in those keys
 # and is bound like any value placeholder. Every other key — config field names, ``$ref``/``$defs``
 # targets, and resource identity keys (catalogs/governed_tags/groups) — stays literal. Mirrors the
-# user-data maps in ``configs/models.py``: ``tags`` on taggables, ``has_tags``/``has_any_of_tags``
-# on policies and column aliases, and the identity-attribute maps on FGAC policies (whose keys are
-# identity-attribute names). A drift-guard test asserts these names are real model fields, so this
-# stays dependency-light (no runtime import of the model layer).
+# user-data maps in ``configs/models.py``: ``tags`` on taggables,
+# ``has_tags``/``has_any_of_tags``/``has_none_of_tags`` on policies and column aliases, and the
+# identity-attribute maps (``has_*_identity_attributes`` and ``has_*_identity_attribute_tag_matches``)
+# on FGAC policies (whose keys are identity-attribute names). A drift-guard test asserts these names
+# are real model fields, so this stays dependency-light (no runtime import of the model layer).
 TEMPLATABLE_KEY_FIELDS = frozenset(
     {
         "tags",

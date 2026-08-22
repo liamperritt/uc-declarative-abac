@@ -409,6 +409,18 @@ def test_policy_compiler_combines_all_three_tag_groups_with_and():
     )
 
 
+def test_policy_compiler_escapes_single_quotes_in_tag_atoms():
+    """A tag key or value containing a single quote is escaped (doubled) so it can't
+    break out of the rendered WHEN-clause atom."""
+    policy_dict = _fgac_policy(has_none_of_tags={"owner": "O'Brien"})
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config, governed_tag_names={"owner", "pii"})
+    assert policy.when_condition == "NOT has_tag_value('owner', 'O''Brien')"
+
+
 def test_policy_compiler_logs_error_when_has_none_of_tags_references_ungoverned_tag():
     """An ungoverned tag key in has_none_of_tags is detected and logged."""
     policy_dict = _fgac_policy(has_none_of_tags={"ungoverned_key": "x"})
