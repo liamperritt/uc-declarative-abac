@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import yaml
-
 from uc_declarative_abac.utils import (
     DuplicateKeyError,
     DuplicateResourceError,
+    load_yaml_file,
 )
 
 
@@ -18,9 +17,11 @@ def discover_yaml_files(root: Path) -> list[Path]:
 
 
 def _parse_yaml_file(path: Path) -> dict | None:
-    """Parse a YAML file, returning None if it doesn't contain a dict."""
-    with open(path) as f:
-        data = yaml.safe_load(f)
+    """Parse a YAML file, returning None if it doesn't contain a dict.
+
+    Uses a strict loader that raises ``DuplicateKeyError`` on a repeated mapping
+    key rather than silently keeping the last value (see ``load_yaml_file``)."""
+    data = load_yaml_file(path)
     return data if isinstance(data, dict) else None
 
 

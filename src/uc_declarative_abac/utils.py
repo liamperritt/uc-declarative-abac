@@ -4,7 +4,10 @@ import re
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Literal, TypeVar
+from pathlib import Path
+from typing import Any, Literal, TypeVar
+
+import yaml
 
 from uc_declarative_abac.types import SecurableType
 
@@ -354,7 +357,11 @@ class ResolutionError(OrchestratorError):
 
 
 class DuplicateKeyError(OrchestratorError):
-    """Raised when duplicate definition keys are found across YAML files."""
+    """Raised for a duplicate mapping key in a YAML config.
+
+    Covers a key repeated within a single file (caught at parse time by the strict
+    loader, at any nesting depth) as well as duplicate definition keys found across
+    files during the definitions/resources merge."""
 
 
 class DuplicateResourceError(OrchestratorError):
@@ -471,3 +478,46 @@ class ExecutionBatchError(OrchestratorError):
         for err in self.errors:
             lines.append(f"  - {err.context}: {err.exception}")
         return "\n".join(lines)
+
+
+class UniqueKeySafeLoader(yaml.SafeLoader):
+    """A ``SafeLoader`` that rejects duplicate mapping keys.
+
+    PyYAML's default behaviour is to silently keep the last value when a mapping
+    repeats a key — a dangerous footgun for a config-driven governance tool, where
+    an accidental duplicate would deploy a silently-different result. This loader
+    raises ``DuplicateKeyError`` on the first repeated key instead. The check runs
+    inside ``construct_mapping``, which fires for *every* mapping node, so a
+    duplicate is caught at any nesting depth (top level, ``definitions`` /
+    ``resources``, a policy's ``tags``, a column map, etc.).
+    """
+
+    def construct_mapping(self, node, deep=False):  # type: ignore[override]
+        seen: set = set()
+        for key_node, _ in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            if key in seen:
+                mark = key_node.start_mark
+                raise DuplicateKeyError(
+                    f"Duplicate key {key!r} at line {mark.line + 1}, "
+                    f"column {mark.column + 1}"
+                )
+            seen.add(key)
+        # Delegate to the base implementation for the actual, type-correct mapping
+        # (it re-uses the objects already constructed above via PyYAML's cache).
+        return super().construct_mapping(node, deep)
+
+
+def load_yaml_file(path: Path) -> Any:
+    """Parse a YAML file, failing loudly on duplicate mapping keys.
+
+    A ``DuplicateKeyError`` raised by :class:`UniqueKeySafeLoader` is re-raised with
+    the file path appended so the message points the author at the offending file
+    and line. Other ``yaml.YAMLError`` variants (malformed YAML) propagate unchanged
+    and are handled at the CLI boundary.
+    """
+    with open(path, encoding="utf-8") as f:
+        try:
+            return yaml.load(f, Loader=UniqueKeySafeLoader)
+        except DuplicateKeyError as exc:
+            raise DuplicateKeyError(f"{exc} in {path}") from exc

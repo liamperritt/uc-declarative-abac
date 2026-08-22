@@ -12,6 +12,9 @@ definitions:
           has_any_of_tags:
             uc_gov_pii: '*'
             uc_gov_pipeline: '{{ pipeline }}'
+          has_none_of_tags:
+            uc_gov_zone: bronze
+            uc_gov_managed_by: uc_declarative_abac
         - constant: '{{ constant }}'
       function:
         parameters:

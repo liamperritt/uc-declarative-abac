@@ -117,14 +117,17 @@ def _ungoverned_tag_keys(
     referenced: set[str] = set()
     referenced |= set(policy.has_tags or {})
     referenced |= set(policy.has_any_of_tags or {})
+    referenced |= set(policy.has_none_of_tags or {})
     # For identity-attribute tag-matches the dict VALUES are governed tag keys on
     # the resource (the keys are identity-attribute names, not tags).
     referenced |= set((policy.has_identity_attribute_tag_matches or {}).values())
     referenced |= set((policy.has_any_of_identity_attribute_tag_matches or {}).values())
+    referenced |= set((policy.has_none_of_identity_attribute_tag_matches or {}).values())
     for col in policy.columns or []:
         if isinstance(col, PolicyColumnAliasConfig):
             referenced |= set(col.has_tags or {})
             referenced |= set(col.has_any_of_tags or {})
+            referenced |= set(col.has_none_of_tags or {})
     return referenced - governed_tag_names
 
 
@@ -160,17 +163,26 @@ def _build_policy(
 def _render_when(policy: BaseFgacPolicyConfig) -> str | None:
     """Render the policy's WHEN clause. Combines the tag predicate with the two
     identity-attribute predicate families (mask-only; always empty on filters),
-    AND-joining every non-empty sub-expression."""
+    AND-joining every non-empty sub-expression. Each family contributes an AND
+    group (``has_*``), an OR group (``has_any_of_*``), and a NOR group
+    (``has_none_of_*``)."""
     parts = [
-        _render_match_expr(policy.has_tags, policy.has_any_of_tags, _render_tag_atom),
+        _render_match_expr(
+            policy.has_tags,
+            policy.has_any_of_tags,
+            policy.has_none_of_tags,
+            _render_tag_atom,
+        ),
         _render_match_expr(
             policy.has_identity_attributes,
             policy.has_any_of_identity_attributes,
+            policy.has_none_of_identity_attributes,
             _render_identity_attribute_atom,
         ),
         _render_match_expr(
             policy.has_identity_attribute_tag_matches,
             policy.has_any_of_identity_attribute_tag_matches,
+            policy.has_none_of_identity_attribute_tag_matches,
             _render_identity_attribute_tag_match_atom,
         ),
     ]
@@ -181,45 +193,63 @@ def _render_when(policy: BaseFgacPolicyConfig) -> str | None:
 def _render_match_expr(
     has_all: dict[str, str] | None,
     has_any: dict[str, str] | None,
+    has_none: dict[str, str] | None,
     atom: Callable[[str, str], str],
 ) -> str | None:
-    """Combine the AND group (``has_all``) and the OR group (``has_any``) into one
-    boolean expression, rendering each entry via ``atom``. AND atoms come first
-    (sorted by key); the OR group is appended last, parenthesised when it has more
-    than one atom. Returns None when both groups are empty."""
+    """Combine the AND group (``has_all``), the OR group (``has_any``), and the NOR
+    group (``has_none``) into one boolean expression, rendering each entry via
+    ``atom``. AND atoms come first (sorted by key); the OR group is appended next,
+    parenthesised when it has more than one atom; the NOR group is appended last,
+    each atom negated (``NOT ...``) and sorted by key. Returns None when all three
+    groups are empty."""
     parts = [atom(k, v) for k, v in sorted((has_all or {}).items())]
     or_atoms = [atom(k, v) for k, v in sorted((has_any or {}).items())]
     if or_atoms:
         or_expr = " OR ".join(or_atoms)
         parts.append(f"({or_expr})" if len(or_atoms) > 1 else or_expr)
+    parts.extend(f"NOT {atom(k, v)}" for k, v in sorted((has_none or {}).items()))
     if not parts:
         return None
     return " AND ".join(parts)
 
 
+def _quote(value: str) -> str:
+    """Render a string as a single-quoted SQL literal, escaping embedded single
+    quotes by doubling them (e.g. ``O'Brien`` → ``'O''Brien'``) so a tag/attribute
+    key or value containing a quote can't break out of the WHEN-clause atom."""
+    return "'" + value.replace("'", "''") + "'"
+
+
 def _render_tag_atom(key: str, value: str) -> str:
     if value == _WILDCARD:
-        return f"has_tag('{key}')"
-    return f"has_tag_value('{key}', '{value}')"
+        return f"has_tag({_quote(key)})"
+    return f"has_tag_value({_quote(key)}, {_quote(value)})"
 
 
 def _render_identity_attribute_atom(key: str, value: str) -> str:
-    return f"has_identity_attribute_value('{key}', '{value}')"
+    return f"has_identity_attribute_value({_quote(key)}, {_quote(value)})"
 
 
 def _render_identity_attribute_tag_match_atom(key: str, value: str) -> str:
-    return f"has_identity_attribute_tag_match('{key}', '{value}')"
+    return f"has_identity_attribute_tag_match({_quote(key)}, {_quote(value)})"
 
 
 def _build_match_columns(
     columns: list[PolicyColumnConfig] | None,
 ) -> tuple[tuple[str, str], ...]:
     """Build the MATCH COLUMNS entries. Only alias columns are tag-matched;
-    constant columns contribute no entry."""
+    constant columns contribute no entry. An alias column with no tag predicate
+    matches every column via a ``TRUE`` condition (the secure-by-default pattern)."""
     if not columns:
         return ()
     return tuple(
-        (col.alias, _render_match_expr(col.has_tags, col.has_any_of_tags, _render_tag_atom) or "")
+        (
+            col.alias,
+            _render_match_expr(
+                col.has_tags, col.has_any_of_tags, col.has_none_of_tags, _render_tag_atom
+            )
+            or "TRUE",
+        )
         for col in columns
         if isinstance(col, PolicyColumnAliasConfig)
     )
