@@ -16,11 +16,17 @@ definitions:
             uc_gov_zone: bronze
             uc_gov_managed_by: uc_declarative_abac
         - constant: '{{ constant }}'
+        - expression:
+            get_column_tag_value: uc_gov_pipeline
+            column_alias: pii
+
       function:
         parameters:
           - name: pii
             type: string
           - name: mask_value
+            type: string
+          - name: tag_value
             type: string
         return: "CONCAT(mask_value, SUBSTRING(pii, -4))"
       except:

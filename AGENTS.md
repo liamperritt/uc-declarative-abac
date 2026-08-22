@@ -154,6 +154,7 @@ Always use the `.venv` virtual environment when running `python`, `pip`, `pytest
 - Minimise nesting and cognitive complexity — extract logic into well-named helper functions to keep top-level functions flat
 - Prefer immutability — helper functions should return new values rather than modifying state passed in as arguments
 - No forward references within a module — always define a function/helper *above* the function that calls it. The top-level public function(s) of a module should sit at the bottom, so a reader scrolling top-down sees primitives → helpers → entry point. Python allows forward references at runtime, but readability suffers when you have to scroll down to find a definition
+- Respect sub-package boundaries — each sub-package (`configs`, `policies`, `principals`, `securables`, `privileges`, `tags`, `helpers`, etc.) exposes its public interface through its package `__init__.py`. Code **outside** a sub-package must import from the package (e.g. `from uc_declarative_abac.policies import render_tag_value`), never reach into its submodules (`from uc_declarative_abac.policies.compiler import ...`). When a symbol needs to be used externally, add it to the sub-package's `__init__.py` (import + `__all__`). Imports *within* the same sub-package may reference sibling submodules directly.
 
 ## Testing
 
