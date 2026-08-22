@@ -6,12 +6,15 @@ import time
 import pytest
 
 from uc_declarative_abac.utils import (
+    Scope,
     catalog_of,
     classify_rfa_destination,
-    in_namespace_scope,
     is_system_governed_tag,
     parallel_for_each,
+    parse_flat_scope,
+    parse_hierarchical_scope,
     parse_namespace_filter,
+    scope_from_namespace_tokens,
     validate_rfa_destinations,
 )
 
@@ -48,39 +51,117 @@ def test_utils_catalog_of_returns_first_segment_for_column_full_name():
 
 
 # ---------------------------------------------------------------------------
-# in_namespace_scope
+# Scope — hierarchical (securable) domain
 # ---------------------------------------------------------------------------
 
 
-def test_utils_in_namespace_scope_matches_catalog_entry_for_any_descendant():
-    scope = frozenset({"cat_a"})
-    assert in_namespace_scope("cat_a", scope)
-    assert in_namespace_scope("cat_a.sch", scope)
-    assert in_namespace_scope("cat_a.sch.tbl", scope)
-    assert in_namespace_scope("cat_a.sch.tbl.col", scope)
+def test_utils_scope_empty_spec_is_inert():
+    scope = parse_hierarchical_scope("")
+    assert scope.is_active() is False
+    assert not scope.matches("cat_a")
+    assert parse_hierarchical_scope(None).is_active() is False
 
 
-def test_utils_in_namespace_scope_matches_qualified_schema_entry_for_schema_and_children():
-    scope = frozenset({"cat_a.sch1"})
-    assert in_namespace_scope("cat_a.sch1", scope)
-    assert in_namespace_scope("cat_a.sch1.tbl", scope)
-    assert in_namespace_scope("cat_a.sch1.tbl.col", scope)
+def test_utils_scope_bare_node_matches_node_and_subtree_only():
+    scope = parse_hierarchical_scope("main")
+    assert scope.is_active() is True
+    assert scope.matches("main")
+    assert scope.matches("main.sales")
+    assert scope.matches("main.sales.orders")
+    assert scope.matches("main.sales.orders.col")
+    # No partial-segment leak into a sibling catalog.
+    assert not scope.matches("maintenance")
+    assert not scope.matches("main_archive")
 
 
-def test_utils_in_namespace_scope_qualified_schema_entry_excludes_parent_catalog():
-    scope = frozenset({"cat_a.sch1"})
-    assert not in_namespace_scope("cat_a", scope)
+def test_utils_scope_trailing_star_on_dot_excludes_catalog_node():
+    scope = parse_hierarchical_scope("main.*")
+    assert not scope.matches("main")
+    assert scope.matches("main.sales")
+    assert scope.matches("main.sales.orders")
 
 
-def test_utils_in_namespace_scope_qualified_schema_entry_excludes_sibling_schema():
-    scope = frozenset({"cat_a.sch1"})
-    assert not in_namespace_scope("cat_a.sch2", scope)
-    assert not in_namespace_scope("cat_a.sch2.tbl", scope)
+def test_utils_scope_trailing_star_is_raw_prefix_for_partial_segment():
+    scope = parse_hierarchical_scope("main.salesforce*")
+    assert scope.matches("main.salesforce_bronze")
+    assert scope.matches("main.salesforce_bronze.orders")
+    assert scope.matches("main.salesforce_silver")
+    assert not scope.matches("main.sales")
+    assert not scope.matches("main")
 
 
-def test_utils_in_namespace_scope_empty_scope_matches_nothing():
-    assert not in_namespace_scope("cat_a", frozenset())
-    assert not in_namespace_scope("cat_a.sch1.tbl", frozenset())
+def test_utils_scope_star_matches_everything():
+    scope = parse_hierarchical_scope("*")
+    assert scope.matches("main")
+    assert scope.matches("main.sales.orders.col")
+
+
+def test_utils_scope_comma_list_and_whitespace():
+    scope = parse_hierarchical_scope(" main.sales , other ")
+    assert scope.matches("main.sales.t")
+    assert scope.matches("other.x")
+    assert not scope.matches("main")
+
+
+@pytest.mark.parametrize("bad", ["*.pii", "main.*.orders", "ma*.sales", "a**"])
+def test_utils_scope_rejects_leading_or_middle_wildcards(bad):
+    with pytest.raises(ValueError) as exc_info:
+        parse_hierarchical_scope(bad)
+    assert "final character" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# Scope — flat (group / governed-tag) domain
+# ---------------------------------------------------------------------------
+
+
+def test_utils_flat_scope_exact_name_only():
+    scope = parse_flat_scope("data_eng")
+    assert scope.matches("data_eng")
+    assert not scope.matches("data_engineers")
+    # Dots are literal in flat identifiers (no inheritance).
+    assert not scope.matches("data_eng.sub")
+
+
+def test_utils_flat_scope_trailing_star_is_prefix():
+    scope = parse_flat_scope("team_*")
+    assert scope.matches("team_a")
+    assert scope.matches("team_b")
+    assert not scope.matches("teamx")
+
+
+def test_utils_flat_scope_star_matches_all():
+    assert parse_flat_scope("*").matches("anything.at.all")
+
+
+# ---------------------------------------------------------------------------
+# Scope — zero-match detection + legacy equivalence
+# ---------------------------------------------------------------------------
+
+
+def test_utils_scope_unmatched_entries_flags_typos():
+    scope = parse_hierarchical_scope("main.sales,mian.*")
+    unmatched = scope.unmatched_entries({"main", "main.sales", "main.sales.orders"})
+    assert unmatched == ["mian.*"]
+
+
+def test_utils_scope_from_namespace_tokens_matches_legacy_in_namespace_scope():
+    # Byte-for-byte equivalent to the old in_namespace_scope over the same tokens.
+    catalog_scope = scope_from_namespace_tokens({"cat_a"})
+    assert catalog_scope.matches("cat_a")
+    assert catalog_scope.matches("cat_a.sch.tbl.col")
+    assert not catalog_scope.matches("cat_ab")
+
+    schema_scope = scope_from_namespace_tokens({"cat_a.sch1"})
+    assert schema_scope.matches("cat_a.sch1")
+    assert schema_scope.matches("cat_a.sch1.tbl")
+    assert not schema_scope.matches("cat_a")
+    assert not schema_scope.matches("cat_a.sch2")
+
+
+def test_utils_empty_scope_matches_nothing():
+    assert not Scope().is_active()
+    assert not Scope().matches("cat_a")
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 config_dir: ./configs
-enable_tag_management: true
-enable_privilege_management: true
-enable_policy_deletion: true
+tag_management_scopes: '*'
+privilege_management_scopes: '*'
+policy_deletion_scopes: '*'
 use_workspace_scim: true
 profile: field-eng-east

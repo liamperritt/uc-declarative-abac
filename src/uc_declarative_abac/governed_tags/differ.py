@@ -18,6 +18,7 @@ from uc_declarative_abac.utils import (
     ExecutionError,
     OrchestratorError,
     PrincipalValidationError,
+    Scope,
     is_system_governed_tag,
 )
 
@@ -120,15 +121,21 @@ def _diff_governed_tag_deletes(
     desired_by_name: dict[str, GovernedTag],
     actual_by_name: dict[str, GovernedTag],
     enable_deletion: bool,
+    deletion_scope: Scope | None = None,
 ) -> set[GovernedTag]:
     """Actual tags absent from desired, when deletion is enabled. System tags are never
-    deletion candidates — UC rejects deleting them, which would fail the run."""
+    deletion candidates — UC rejects deleting them, which would fail the run.
+
+    ``deletion_scope`` (``None`` ⇒ unscoped, the legacy default) further restricts
+    deletion to tags whose name it matches."""
     if not enable_deletion:
         return set()
     return {
         gt
         for name, gt in actual_by_name.items()
-        if name not in desired_by_name and not is_system_governed_tag(name)
+        if name not in desired_by_name
+        and not is_system_governed_tag(name)
+        and (deletion_scope is None or deletion_scope.matches(name))
     }
 
 
@@ -139,6 +146,7 @@ def compute_governed_tag_diff(
     change_logger: ChangeLogger,
     enable_deletion: bool = False,
     ignore_unresolvable: frozenset[str] = frozenset(),
+    deletion_scope: Scope | None = None,
 ) -> GovernedTagDiff:
     """Compute create / update / delete diff between desired and actual governed tags.
 
@@ -173,7 +181,7 @@ def compute_governed_tag_diff(
     )
     to_update, old_values = _diff_governed_tag_updates(desired_by_name, actual_by_name)
     to_delete = _diff_governed_tag_deletes(
-        desired_by_name, actual_by_name, enable_deletion
+        desired_by_name, actual_by_name, enable_deletion, deletion_scope
     )
 
     return GovernedTagDiff(

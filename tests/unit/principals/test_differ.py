@@ -11,7 +11,7 @@ from uc_declarative_abac.principals import (
     compute_group_diff,
 )
 from uc_declarative_abac.types import PrincipalType
-from uc_declarative_abac.utils import PrincipalValidationError
+from uc_declarative_abac.utils import PrincipalValidationError, parse_flat_scope
 
 
 def _group(
@@ -774,3 +774,71 @@ def test_group_differ_does_not_delete_group_matched_by_desired_id_on_rename():
     )
 
     assert diff.groups_to_delete == set()
+
+
+# ---------------------------------------------------------------------------
+# Per-scope filtering (creation / management / deletion)
+# ---------------------------------------------------------------------------
+
+
+def test_group_differ_creation_scope_filters_by_display_name():
+    """Only desired groups matching the creation scope are created."""
+    desired = {_group("team_data", members=set()), _group("analysts", members=set())}
+
+    diff = compute_group_diff(
+        desired,
+        set(),
+        _resolver_passthrough(),
+        ChangeLogger(),
+        enable_group_creation=True,
+        creation_scope=parse_flat_scope("team_*"),
+    )
+
+    assert set(diff.groups_to_create) == {"team_data"}
+
+
+def test_group_differ_management_scope_filters_reconciliation():
+    """An existing group outside the management scope is left untouched."""
+    desired = {
+        _group(
+            "team_data",
+            members={Principal(PrincipalType.UNKNOWN, name="alice@example.com")},
+        ),
+        _group(
+            "analysts",
+            members={Principal(PrincipalType.UNKNOWN, name="alice@example.com")},
+        ),
+    }
+    actual = {_group("team_data", members=set()), _group("analysts", members=set())}
+
+    diff = compute_group_diff(
+        desired,
+        actual,
+        _resolver(name_to_principal={"alice@example.com": _alice_resolved}),
+        ChangeLogger(),
+        enable_group_management=True,
+        management_scope=parse_flat_scope("team_*"),
+    )
+
+    assert "team_data" in diff.members_to_add
+    assert "analysts" not in diff.members_to_add
+
+
+def test_group_differ_deletion_scope_filters_candidates():
+    """Only undeclared managed groups matching the deletion scope are deleted."""
+    legacy_a = _group_with_id("legacy_a", "2")
+    temp_b = _group_with_id("temp_b", "3")
+    desired = {_group_with_id("analysts", "1")}
+    all_account_groups = {_group_with_id("analysts", "1"), legacy_a, temp_b}
+
+    diff = compute_group_diff(
+        desired,
+        set(),
+        _resolver_passthrough(),
+        ChangeLogger(),
+        enable_group_deletion=True,
+        all_account_groups=all_account_groups,
+        deletion_scope=parse_flat_scope("legacy_*"),
+    )
+
+    assert diff.groups_to_delete == {legacy_a}

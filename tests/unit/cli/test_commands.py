@@ -269,3 +269,106 @@ def test_commands_legacy_missing_warehouse_returns_config_error(monkeypatch):
     monkeypatch.setattr(cli, "WorkspaceClient", lambda **_: object())
     exit_code = cli.run_cli(["--config-dir", "cfg"])
     assert exit_code == 3
+
+
+# ---------------------------------------------------------------------------
+# New --*-scopes flags: pass-through, conflict, deprecation, validation
+# ---------------------------------------------------------------------------
+
+
+def test_main_passes_new_scope_flag_through_to_run(monkeypatch):
+    captured = _run_legacy(
+        monkeypatch, ["--privilege-management-scopes", "main.*"]
+    )
+    assert captured["privilege_management_scopes"] == "main.*"
+
+
+def test_main_new_scope_defaults_to_none_when_unset(monkeypatch):
+    captured = _run_legacy(monkeypatch, [])
+    assert captured["tag_management_scopes"] is None
+    assert captured["group_deletion_scopes"] is None
+
+
+def test_main_passes_new_scope_from_env_through_to_run(monkeypatch):
+    monkeypatch.setenv("UC_ABAC_TAG_MANAGEMENT_SCOPES", "main.sales*")
+    captured = _run_legacy(monkeypatch, [])
+    assert captured["tag_management_scopes"] == "main.sales*"
+
+
+def test_main_fails_when_new_scope_combined_with_deprecated_enable(monkeypatch):
+    exit_code = cli.run_cli(
+        [
+            "deploy",
+            "--config-dir",
+            "cfg",
+            "--warehouse-id",
+            "wh",
+            "--enable-tag-management",
+            "--tag-management-scopes",
+            "*",
+        ],
+    )
+    assert exit_code == 2
+
+
+def test_main_fails_when_new_scope_combined_with_deprecated_namespaces(monkeypatch):
+    exit_code = cli.run_cli(
+        [
+            "deploy",
+            "--config-dir",
+            "cfg",
+            "--warehouse-id",
+            "wh",
+            "--manage-tags-for-namespaces",
+            "cat_a",
+            "--tag-management-scopes",
+            "cat_a",
+        ],
+    )
+    assert exit_code == 2
+
+
+def test_main_new_scope_for_one_feature_does_not_conflict_with_legacy_of_another(
+    monkeypatch,
+):
+    # Staged migration: new-style privileges alongside legacy tag management.
+    captured = _run_legacy(
+        monkeypatch,
+        [
+            "--enable-tag-management",
+            "--privilege-management-scopes",
+            "main.*",
+        ],
+    )
+    assert captured["privilege_management_scopes"] == "main.*"
+    assert captured["enable_tag_management"] is True
+
+
+def test_main_warns_when_deprecated_enable_used_alone(monkeypatch, caplog):
+    with caplog.at_level(logging.WARNING, logger="uc_declarative_abac"):
+        _run_legacy(monkeypatch, ["--enable-privilege-management"])
+    assert any(
+        "--enable-privilege-management" in r.getMessage()
+        and "--privilege-management-scopes" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_main_fails_on_malformed_new_scope(monkeypatch):
+    exit_code = cli.run_cli(
+        [
+            "deploy",
+            "--config-dir",
+            "cfg",
+            "--warehouse-id",
+            "wh",
+            "--privilege-management-scopes",
+            "main.*.orders",
+        ],
+    )
+    assert exit_code == 2
+
+
+def test_main_passes_group_creation_scope_through_to_run(monkeypatch):
+    captured = _run_legacy(monkeypatch, ["--group-creation-scopes", "team_*"])
+    assert captured["group_creation_scopes"] == "team_*"

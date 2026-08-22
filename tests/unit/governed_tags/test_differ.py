@@ -459,3 +459,24 @@ def test_governed_tag_differ_ignores_system_tag_definition_differences():
 
     assert diff.to_update == set()
     assert diff.to_create == set()
+
+
+def test_governed_tag_differ_deletion_scope_filters_candidates():
+    """With a deletion scope, only actual-only tags matching the scope are deleted."""
+    from uc_declarative_abac.utils import parse_flat_scope
+
+    legacy = _gt("legacy_tag", "legacy", {"a"})
+    temp = _gt("temp_tag", "temp", {"b"})
+    desired = {_gt("pii", "PII", {"name"})}
+    actual = {_gt("pii", "PII", {"name"}), legacy, temp}
+
+    diff = compute_governed_tag_diff(
+        desired,
+        actual,
+        _resolver_passthrough(),
+        ChangeLogger(),
+        enable_deletion=True,
+        deletion_scope=parse_flat_scope("legacy_*"),
+    )
+
+    assert diff.to_delete == {legacy}
