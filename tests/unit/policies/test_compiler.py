@@ -566,6 +566,110 @@ def test_policy_compiler_combines_tags_and_identity_attribute_families_with_and(
     )
 
 
+# ---------------------------------------------------------------------------
+# context attribute functions → WHEN clause (mask and filter policies)
+# ---------------------------------------------------------------------------
+
+
+def test_policy_compiler_renders_when_from_has_context_attributes():
+    """has_context_attributes renders as has_context_attribute_value(k, v), AND-joined."""
+    policy_dict = _fgac_policy(
+        has_context_attributes={"request.client_id": "databricks-cli", "b": "v"}
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.when_condition == (
+        "has_context_attribute_value('b', 'v') "
+        "AND has_context_attribute_value('request.client_id', 'databricks-cli')"
+    )
+
+
+def test_policy_compiler_renders_when_from_has_context_attributes_wildcard():
+    """A '*' context-attribute value renders as a presence check has_context_attribute(k)."""
+    policy_dict = _fgac_policy(
+        has_context_attributes={"request.is_on_behalf_of": "*"}
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.when_condition == "has_context_attribute('request.is_on_behalf_of')"
+
+
+def test_policy_compiler_renders_when_from_has_any_of_context_attributes():
+    """has_any_of_context_attributes OR-joins (sorted) and parenthesises when >1."""
+    policy_dict = _fgac_policy(
+        has_any_of_context_attributes={"tier": "gold", "alt": "silver"}
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.when_condition == (
+        "(has_context_attribute_value('alt', 'silver') "
+        "OR has_context_attribute_value('tier', 'gold'))"
+    )
+
+
+def test_policy_compiler_renders_when_from_has_none_of_context_attributes():
+    """has_none_of_context_attributes negates each atom and AND-joins them."""
+    policy_dict = _fgac_policy(
+        has_none_of_context_attributes={"a": "v1", "b": "*"}
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.when_condition == (
+        "NOT has_context_attribute_value('a', 'v1') "
+        "AND NOT has_context_attribute('b')"
+    )
+
+
+def test_policy_compiler_renders_context_attributes_on_filter_policy():
+    """Context attributes apply to filter policies too (unlike identity attributes)."""
+    policy_dict = _fgac_policy(
+        type="filter",
+        function="cat.default.filter_fn",
+        has_context_attributes={"request.is_on_behalf_of": "true"},
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.policy_type == PolicyType.FILTER
+    assert policy.when_condition == (
+        "has_context_attribute_value('request.is_on_behalf_of', 'true')"
+    )
+
+
+def test_policy_compiler_combines_tags_context_and_identity_families_with_and():
+    """The tag, context-attribute, and identity-attribute families AND-join into one
+    WHEN clause, in that order, each OR group parenthesised."""
+    policy_dict = _fgac_policy(
+        has_tags={"domain": "sales"},
+        has_context_attributes={"request.client_id": "databricks-cli"},
+        has_identity_attributes={"region": "emea"},
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.when_condition == (
+        "has_tag_value('domain', 'sales') "
+        "AND has_context_attribute_value('request.client_id', 'databricks-cli') "
+        "AND has_identity_attribute_value('region', 'emea')"
+    )
+
+
 def test_policy_compiler_logs_error_when_identity_attribute_tag_match_is_ungoverned():
     """The VALUE of a *_tag_matches entry is a governed tag key; an ungoverned one
     drops the policy and logs an UngovernedTagError."""

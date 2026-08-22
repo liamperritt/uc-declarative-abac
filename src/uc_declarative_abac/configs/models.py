@@ -81,6 +81,31 @@ def _reject_identity_attribute_wildcards(attrs: dict | None) -> dict | None:
     return attrs
 
 
+# The context-attribute predicate fields — WHEN-clause refinements on both mask and
+# filter policies (the underlying functions gate on the request context in either
+# clause). Listed once so the shared validator stays in sync.
+_CONTEXT_ATTRIBUTE_FIELDS = (
+    "has_context_attributes",
+    "has_any_of_context_attributes",
+    "has_none_of_context_attributes",
+)
+
+
+def _reject_empty_context_attribute_values(attrs: dict | None) -> dict | None:
+    """Context attributes need a non-empty value or the '*' presence wildcard.
+    Unlike identity attributes, '*' is allowed (renders has_context_attribute);
+    unlike has_tags, null/empty are NOT coerced — they are rejected."""
+    if attrs is None:
+        return None
+    for k, v in attrs.items():
+        if v is None or v == "":
+            raise ValueError(
+                f"context attribute '{k}' must have a non-empty value or the "
+                "'*' wildcard; empty and null values are not supported"
+            )
+    return attrs
+
+
 def _check_duplicate_names(
     items: list,
     child_label: str,
@@ -264,11 +289,11 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
     for_securable_type: Literal[SecurableType.TABLE] | None = Field(
         default=SecurableType.TABLE, alias="for"
     )
-    # NOR ("has none of") tag predicate — an object matches only when it carries none
-    # of these tags. Unlike has_tags/has_any_of_tags (which live on BasePolicyConfig and
-    # are shared with grant policies), this is FGAC-only: it renders into the WHEN clause
-    # and has no meaning for grant matching, so it is declared here.
+    # NOR ("has none of") is FGAC only — an object matches only when it carries none of these tags/attributes.
     has_none_of_tags: dict[str, str] | None = None
+    has_context_attributes: dict[str, str] | None = None
+    has_any_of_context_attributes: dict[str, str] | None = None
+    has_none_of_context_attributes: dict[str, str] | None = None
     has_identity_attributes: dict[str, str] | None = None
     has_any_of_identity_attributes: dict[str, str] | None = None
     has_none_of_identity_attributes: dict[str, str] | None = None
@@ -296,6 +321,14 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
         """Identity attributes require an exact key and value — unlike ``has_tags``,
         they support no wildcard. A no-op on FilterPolicyConfig (always None)."""
         return _reject_identity_attribute_wildcards(v)
+
+    @field_validator(*_CONTEXT_ATTRIBUTE_FIELDS, mode="before")
+    @classmethod
+    def _reject_empty_context_attribute_values(cls, v: dict | None) -> dict | None:
+        """Context attributes accept the '*' presence wildcard (like ``has_tags``)
+        but, unlike ``has_tags``, reject null/empty values rather than coercing
+        them. Applies to both mask and filter policies."""
+        return _reject_empty_context_attribute_values(v)
 
     @model_validator(mode="after")
     def _qualify_function(self) -> BaseFgacPolicyConfig:
