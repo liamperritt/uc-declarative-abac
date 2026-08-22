@@ -4,6 +4,7 @@ import argparse
 import logging
 import sys
 import traceback
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -15,7 +16,12 @@ from uc_declarative_abac.cli.parser import parse_cli_args
 from uc_declarative_abac.cli.presentation import format_error, format_status
 from uc_declarative_abac.cli.settings import RunSettings, resolve_settings
 from uc_declarative_abac.orchestrator import load_config, run
-from uc_declarative_abac.utils import ExecutionBatchError, OrchestratorError
+from uc_declarative_abac.utils import (
+    ExecutionBatchError,
+    OrchestratorError,
+    parse_flat_scope,
+    parse_hierarchical_scope,
+)
 
 _logger = logging.getLogger("uc_declarative_abac")
 
@@ -34,6 +40,81 @@ _DEPRECATED_CATALOG_FLAGS = frozenset(
         "manage_taggables_for_catalogs",
         "create_taggables_for_catalogs",
     }
+)
+
+
+@dataclass(frozen=True)
+class _ScopeFeature:
+    """Maps a new ``--*-scopes`` flag to the deprecated flags it supersedes.
+
+    ``namespace_*`` / ``catalog_*`` are ``None`` for the flat domains (groups,
+    governed tags), which only ever had an enable gate.
+    """
+
+    new_field: str
+    new_flag: str
+    enable_field: str
+    enable_flag: str
+    namespace_field: str | None = None
+    namespace_flag: str | None = None
+    catalog_attr: str | None = None
+    catalog_flag: str | None = None
+    hierarchical: bool = True
+
+
+# One entry per new scope flag, listing the deprecated flags it replaces. Used to
+# (a) reject a new + deprecated combination for the same feature, and (b) warn
+# when a deprecated flag is used on its own.
+_SCOPE_FEATURES: tuple[_ScopeFeature, ...] = (
+    _ScopeFeature(
+        "tag_management_scopes", "--tag-management-scopes",
+        "enable_tag_management", "--enable-tag-management",
+        "manage_tags_for_namespaces", "--manage-tags-for-namespaces",
+        "manage_tags_for_catalogs", "--manage-tags-for-catalogs",
+    ),
+    _ScopeFeature(
+        "privilege_management_scopes", "--privilege-management-scopes",
+        "enable_privilege_management", "--enable-privilege-management",
+        "manage_privileges_for_namespaces", "--manage-privileges-for-namespaces",
+        "manage_privileges_for_catalogs", "--manage-privileges-for-catalogs",
+    ),
+    _ScopeFeature(
+        "taggable_management_scopes", "--taggable-management-scopes",
+        "enable_taggable_management", "--enable-taggable-management",
+        "manage_taggables_for_namespaces", "--manage-taggables-for-namespaces",
+        "manage_taggables_for_catalogs", "--manage-taggables-for-catalogs",
+    ),
+    _ScopeFeature(
+        "taggable_creation_scopes", "--taggable-creation-scopes",
+        "enable_taggable_creation", "--enable-taggable-creation",
+        "create_taggables_for_namespaces", "--create-taggables-for-namespaces",
+        "create_taggables_for_catalogs", "--create-taggables-for-catalogs",
+    ),
+    _ScopeFeature(
+        "policy_deletion_scopes", "--policy-deletion-scopes",
+        "enable_policy_deletion", "--enable-policy-deletion",
+        "delete_policies_for_namespaces", "--delete-policies-for-namespaces",
+    ),
+    _ScopeFeature(
+        "group_creation_scopes", "--group-creation-scopes",
+        "enable_group_creation", "--enable-group-creation",
+        hierarchical=False,
+    ),
+    _ScopeFeature(
+        "group_management_scopes", "--group-management-scopes",
+        "enable_group_management", "--enable-group-management",
+        hierarchical=False,
+    ),
+    _ScopeFeature(
+        "group_deletion_scopes", "--group-deletion-scopes",
+        "enable_group_deletion", "--enable-group-deletion",
+        hierarchical=False,
+    ),
+    _ScopeFeature(
+        "governed_tag_deletion_scopes", "--governed-tag-deletion-scopes",
+        "enable_governed_tag_deletion", "--enable-governed-tag-deletion",
+        hierarchical=False,
+    ),
 )
 
 EXIT_SUCCESS = 0
@@ -104,6 +185,65 @@ def _resolve_namespace_values(
     }
 
 
+def _deprecated_flags_for_warning(
+    feature: _ScopeFeature, settings: RunSettings
+) -> list[str]:
+    """Deprecated flags for ``feature`` that are meaningfully set (enable True or
+    namespace non-None). Excludes the ``*-for-catalogs`` flags, whose own
+    deprecation warning is owned by ``_resolve_namespace_flag``."""
+    used: list[str] = []
+    if getattr(settings, feature.enable_field):
+        used.append(feature.enable_flag)
+    if feature.namespace_field and getattr(settings, feature.namespace_field) is not None:
+        used.append(feature.namespace_flag)
+    return used
+
+
+def _resolve_scope_flags(
+    settings: RunSettings, namespace: argparse.Namespace
+) -> None:
+    """Validate the new ``--*-scopes`` flags against the deprecated flags they
+    supersede.
+
+    For each feature, combining a new scope flag with any deprecated counterpart
+    (enable, ``*-for-namespaces``, or ``*-for-catalogs``) is a fast usage error;
+    using a deprecated flag on its own logs a one-off migration warning. Purely
+    additive — an all-legacy invocation only warns, never fails.
+    """
+    for feature in _SCOPE_FEATURES:
+        new_spec = getattr(settings, feature.new_field)
+        new_set = new_spec is not None
+        deprecated = _deprecated_flags_for_warning(feature, settings)
+        if new_set:
+            conflicting = list(deprecated)
+            if feature.catalog_attr and (
+                getattr(namespace, feature.catalog_attr, None) is not None
+            ):
+                conflicting.append(feature.catalog_flag)
+            if conflicting:
+                raise CliUsageError(
+                    f"{feature.new_flag} cannot be combined with deprecated "
+                    f"flag(s): {', '.join(conflicting)}. Use {feature.new_flag} only."
+                )
+            # Validate the grammar up front (so `validate` catches it too, and
+            # deploy fails before contacting Databricks). ValueError -> exit 2.
+            parse = (
+                parse_hierarchical_scope
+                if feature.hierarchical
+                else parse_flat_scope
+            )
+            try:
+                parse(new_spec)
+            except ValueError as exc:
+                raise CliUsageError(f"{feature.new_flag}: {exc}") from exc
+        elif deprecated:
+            _logger.warning(
+                "%s deprecated; use %s instead.",
+                ", ".join(deprecated),
+                feature.new_flag,
+            )
+
+
 def _configure_logging(namespace: argparse.Namespace) -> None:
     if getattr(namespace, "quiet", False):
         level = logging.ERROR
@@ -162,6 +302,15 @@ def _run_kwargs(
             "create_taggables_for_namespaces"
         ],
         "delete_policies_for_namespaces": delete_policies,
+        "tag_management_scopes": settings.tag_management_scopes,
+        "privilege_management_scopes": settings.privilege_management_scopes,
+        "taggable_management_scopes": settings.taggable_management_scopes,
+        "taggable_creation_scopes": settings.taggable_creation_scopes,
+        "policy_deletion_scopes": settings.policy_deletion_scopes,
+        "group_creation_scopes": settings.group_creation_scopes,
+        "group_management_scopes": settings.group_management_scopes,
+        "group_deletion_scopes": settings.group_deletion_scopes,
+        "governed_tag_deletion_scopes": settings.governed_tag_deletion_scopes,
         "retain_tag_prefixes": settings.retain_tag_prefixes,
         "force": settings.force,
         "ref_override_strategy": settings.ref_override_strategy,
@@ -244,9 +393,11 @@ def run_cli(argv: list[str] | None = None) -> int:
     settings = resolve_settings(cli_overrides, settings_file=settings_file)
 
     try:
-        # Resolve/validate namespace scope flags up front so the deprecated+new
-        # conflict check (CliUsageError -> exit 2) fires for every command, not
-        # just deploy.
+        # Resolve/validate scope flags up front so the deprecated+new conflict
+        # check (CliUsageError -> exit 2) fires for every command, not just
+        # deploy. New-vs-deprecated conflicts are checked before the legacy
+        # namespace resolution so the clearer error wins over a stale warning.
+        _resolve_scope_flags(settings, namespace)
         namespaces = _resolve_namespace_values(settings, namespace)
         if namespace.command == "validate":
             return cmd_validate(settings)

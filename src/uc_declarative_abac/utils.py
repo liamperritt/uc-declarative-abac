@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Literal, TypeVar
@@ -91,21 +91,6 @@ def catalog_of(full_name: str) -> str:
     return full_name.split(".", 1)[0]
 
 
-def in_namespace_scope(full_name: str, scope: frozenset[str]) -> bool:
-    """Return whether a UC ``full_name`` falls at or below any namespace in ``scope``.
-
-    A namespace in ``scope`` is either a bare catalog name (covers everything
-    under that catalog) or a qualified ``catalog.schema`` name (covers that schema
-    and its children, but not the catalog above it). A ``full_name`` matches when
-    its catalog is in ``scope`` or its two-segment ``catalog.schema`` prefix is in
-    ``scope``. An empty ``scope`` matches nothing.
-    """
-    parts = full_name.split(".")
-    if parts[0] in scope:
-        return True
-    return len(parts) >= 2 and ".".join(parts[:2]) in scope
-
-
 def parse_namespace_filter(
     spec: str, configured_namespaces: set[str]
 ) -> frozenset[str]:
@@ -132,6 +117,134 @@ def parse_namespace_filter(
             f"{', '.join(unknown)}. Configured catalogs: {configured_list}"
         )
     return frozenset(names)
+
+
+@dataclass(frozen=True)
+class _ScopeEntry:
+    """One parsed scope entry, retaining its source text for diagnostics.
+
+    ``is_prefix`` entries came from a trailing ``*`` and match by ``startswith``
+    on ``match_value`` (the text before the ``*``). Non-prefix entries match the
+    exact ``match_value``; for ``hierarchical`` scopes they additionally match
+    the entry's dotted subtree (downward inheritance).
+    """
+
+    source: str
+    match_value: str
+    is_prefix: bool
+    hierarchical: bool
+
+    def matches(self, identifier: str) -> bool:
+        if self.is_prefix:
+            return identifier.startswith(self.match_value)
+        if identifier == self.match_value:
+            return True
+        return self.hierarchical and identifier.startswith(f"{self.match_value}.")
+
+
+@dataclass(frozen=True)
+class Scope:
+    """Resolved per-feature scope: which resources a feature applies to.
+
+    Built from a comma-separated spec via ``parse_hierarchical_scope`` (dotted
+    securable full names, with downward inheritance) or ``parse_flat_scope``
+    (atomic identifiers such as group display names / governed-tag names). An
+    empty ``Scope`` (no entries) matches nothing — the representation of a
+    disabled feature. ``"*"`` yields a single match-everything entry.
+    """
+
+    entries: tuple[_ScopeEntry, ...] = ()
+
+    def is_active(self) -> bool:
+        """True when the scope has any entry (i.e. the feature is enabled)."""
+        return bool(self.entries)
+
+    def matches(self, identifier: str) -> bool:
+        """True when ``identifier`` is matched by any entry."""
+        return any(entry.matches(identifier) for entry in self.entries)
+
+    def unmatched_entries(self, universe: Iterable[str]) -> list[str]:
+        """Return the source text of entries that match nothing in ``universe``.
+
+        Used to warn (never fail) about likely typos in a new-style scope. Order
+        follows the original spec; ``"*"`` only appears when ``universe`` is empty.
+        """
+        candidates = list(universe)
+        return [
+            entry.source
+            for entry in self.entries
+            if not any(entry.matches(item) for item in candidates)
+        ]
+
+
+def _parse_scope_entry(token: str, *, hierarchical: bool) -> _ScopeEntry:
+    star_count = token.count("*")
+    if star_count == 0:
+        return _ScopeEntry(
+            source=token, match_value=token, is_prefix=False, hierarchical=hierarchical
+        )
+    if star_count > 1 or not token.endswith("*"):
+        raise ValueError(
+            f"Invalid scope entry {token!r}: '*' is only allowed as the final "
+            f"character (e.g. 'main.*' or 'main.salesforce*'). Leading or middle "
+            f"wildcards are not supported."
+        )
+    return _ScopeEntry(
+        source=token, match_value=token[:-1], is_prefix=True, hierarchical=hierarchical
+    )
+
+
+def _parse_scope(spec: str | None, *, hierarchical: bool) -> Scope:
+    if not spec or not spec.strip():
+        return Scope()
+    entries = [
+        _parse_scope_entry(token.strip(), hierarchical=hierarchical)
+        for token in spec.split(",")
+        if token.strip()
+    ]
+    return Scope(entries=tuple(entries))
+
+
+def parse_hierarchical_scope(spec: str | None) -> Scope:
+    """Parse a securable-domain scope spec (dotted full names, with inheritance).
+
+    Empty/whitespace ⇒ disabled. ``"*"`` ⇒ everything. A trailing ``*`` is a raw
+    string prefix (``main.*`` ⇒ descendants of ``main``; ``main.salesforce*`` ⇒
+    the ``salesforce*`` schemas and their subtrees). An entry without ``*``
+    matches the exact node and its subtree (``main`` ⇒ the catalog and everything
+    under it, but not ``maintenance``). Wildcards are permitted only as the final
+    character; leading/middle wildcards raise ``ValueError``.
+    """
+    return _parse_scope(spec, hierarchical=True)
+
+
+def parse_flat_scope(spec: str | None) -> Scope:
+    """Parse a flat-domain scope spec (group display names / governed-tag names).
+
+    Identifiers are atomic — dots are literal and there is no inheritance. Empty
+    ⇒ disabled; ``"*"`` ⇒ all; ``prefix*`` ⇒ names with that raw prefix; anything
+    else ⇒ that exact name. Wildcards are permitted only as the final character.
+    """
+    return _parse_scope(spec, hierarchical=False)
+
+
+def scope_from_namespace_tokens(tokens: Iterable[str]) -> Scope:
+    """Build a hierarchical ``Scope`` from resolved legacy namespace tokens.
+
+    Each token is a catalog or ``catalog.schema`` name (as validated/expanded by
+    ``parse_namespace_filter``). The resulting scope is equivalent to the legacy
+    ``in_namespace_scope`` predicate over the same token set — this is what lets
+    the deprecated ``*-for-namespaces`` flags share the new matcher without any
+    behaviour change.
+    """
+    return Scope(
+        entries=tuple(
+            _ScopeEntry(
+                source=token, match_value=token, is_prefix=False, hierarchical=True
+            )
+            for token in tokens
+        )
+    )
 
 
 def _match_rfa_destination(value: str) -> RfaDestinationKind | None:
@@ -332,8 +445,8 @@ class NonexistentSecurableError(OrchestratorError):
             message = f"{base} {hint}"
         else:
             message = (
-                f"{base} Please add the --enable-taggable-creation flag to have "
-                "the engine create it, or remove it from config."
+                f"{base} Please add its namespace to --taggable-creation-scopes "
+                "to have the engine create it, or remove it from config."
             )
         super().__init__(message)
 

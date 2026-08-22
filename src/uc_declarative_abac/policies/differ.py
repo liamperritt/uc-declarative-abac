@@ -16,8 +16,11 @@ from uc_declarative_abac.principals import (
 )
 from uc_declarative_abac.utils import (
     PrincipalValidationError,
-    in_namespace_scope,
+    Scope,
 )
+
+# Empty (inert) scope: the default when policy deletion is off — matches nothing.
+_EMPTY_SCOPE = Scope()
 
 
 def compute_policy_diff(
@@ -26,7 +29,7 @@ def compute_policy_diff(
     resolver: PrincipalResolver,
     change_logger: ChangeLogger,
     ignore_unresolvable: frozenset[str] = frozenset(),
-    delete_scope: frozenset[str] = frozenset(),
+    delete_scope: Scope = _EMPTY_SCOPE,
 ) -> PolicyDiff:
     """Compute the diff between desired and actual mask/filter policies.
 
@@ -41,10 +44,9 @@ def compute_policy_diff(
     - to_replace: policy present in both but fields differ
     - to_delete: policy present only in actual, on a securable in ``delete_scope``
 
-    ``delete_scope`` is the namespace scope (as produced by
-    ``parse_namespace_filter``) that policy deletion applies to; an actual policy
-    absent from the desired set whose securable falls in scope is a deletion
-    candidate. The default empty scope means "never delete" — so with policy
+    ``delete_scope`` is the ``Scope`` that policy deletion applies to; an actual
+    policy absent from the desired set whose securable falls in scope is a
+    deletion candidate. The default empty scope means "never delete" — so with policy
     deletion off this is byte-identical to the additive-only behaviour. The
     ``actual`` set now holds *every* mask/filter policy discovered in the in-scope
     catalogs (via the ``abac_policy_definitions`` system table), regardless of
@@ -79,7 +81,7 @@ def compute_policy_diff(
     to_delete = {
         p
         for p in actual_resolved
-        if in_namespace_scope(p.securable_full_name, delete_scope)
+        if delete_scope.matches(p.securable_full_name)
         and _identity(p) not in desired_ids
     }
 

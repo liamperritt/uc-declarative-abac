@@ -20,13 +20,16 @@ from uc_declarative_abac.types import (
     PrincipalType,
     SecurableType,
 )
-from uc_declarative_abac.utils import NonexistentSecurableError
+from uc_declarative_abac.utils import (
+    NonexistentSecurableError,
+    scope_from_namespace_tokens,
+)
 
 # Catalogs referenced across the test fixtures. Tests opting into creation pass
 # this set as ``creation_in_scope_namespaces`` — equivalent to "create everything"
 # under the whole-catalog model. Tests exercising the disabled path pass an
 # explicit ``frozenset()`` instead.
-_ALL_TEST_CATALOGS = frozenset(
+_ALL_TEST_CATALOGS = scope_from_namespace_tokens(
     {
         "cat",
         "new_cat",
@@ -625,7 +628,7 @@ def test_securable_differ_does_not_emit_comment_update_for_newly_created_catalog
         set(),
         _resolver(),
         _change_logger(),
-        creation_in_scope_namespaces=frozenset({"new_cat"}),
+        creation_in_scope_namespaces=scope_from_namespace_tokens({"new_cat"}),
     )
 
     assert catalog in diff.securables_to_create
@@ -659,7 +662,7 @@ def test_securable_differ_does_not_emit_comment_update_for_newly_created_table()
         set(),
         _resolver(),
         _change_logger(),
-        creation_in_scope_namespaces=frozenset({"new_cat"}),
+        creation_in_scope_namespaces=scope_from_namespace_tokens({"new_cat"}),
     )
 
     attribute_names = {u.attribute for u in diff.attributes_to_update}
@@ -683,7 +686,7 @@ def test_securable_differ_still_emits_owner_update_for_newly_created_catalog():
         set(),
         _resolver(),
         _change_logger(),
-        creation_in_scope_namespaces=frozenset({"new_cat"}),
+        creation_in_scope_namespaces=scope_from_namespace_tokens({"new_cat"}),
     )
 
     attribute_names = {u.attribute for u in diff.attributes_to_update}
@@ -1351,9 +1354,9 @@ def test_securable_differ_skips_column_check_for_table_being_created():
 # ---------------------------------------------------------------------------
 
 
-def test_nonexistent_securable_error_message_recommends_enable_taggable_creation_flag():
-    """Without a hint (flag off → existence check), the message tells the user to set
-    --enable-taggable-creation rather than asking them to create the object manually."""
+def test_nonexistent_securable_error_message_recommends_taggable_creation_scopes():
+    """Without a hint (scope inert → existence check), the message tells the user to
+    add the namespace to --taggable-creation-scopes rather than create it manually."""
     desired = {_sec(SecurableType.CATALOG, "ghost_catalog")}
     change_logger = _change_logger()
 
@@ -1365,7 +1368,7 @@ def test_nonexistent_securable_error_message_recommends_enable_taggable_creation
         if isinstance(e.exception, NonexistentSecurableError)
     )
     msg = str(err)
-    assert "--enable-taggable-creation" in msg
+    assert "--taggable-creation-scopes" in msg
     # The old phrasing should be gone.
     assert "Either create it in UC" not in msg
 
@@ -1693,4 +1696,4 @@ def test_nonexistent_securable_error_uses_hint_when_provided_instead_of_flag_boi
     # The hint is surfaced.
     assert "Configure at least one column" in msg
     # The flag-boilerplate should NOT appear when a hint is present.
-    assert "--enable-taggable-creation" not in msg
+    assert "--taggable-creation-scopes" not in msg

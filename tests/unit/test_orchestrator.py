@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import pathlib
 import time
 from unittest.mock import MagicMock, patch
@@ -2058,6 +2059,56 @@ def test_orchestrator_filter_is_no_op_when_corresponding_enable_flag_is_off(
     )
 
     assert result.tag_diff == TagDiff()
+
+
+def test_orchestrator_new_tag_management_scopes_filters_like_legacy(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    """The new --tag-management-scopes flag scopes the tag diff exactly like the
+    legacy enable + namespaces pair (no enable flag needed)."""
+    config = _two_catalog_tags_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        tag_management_scopes="cat_a",
+    )
+
+    catalogs_in_diff = {
+        t.securable_full_name.split(".", 1)[0] for t in result.tag_diff.to_add
+    }
+    assert catalogs_in_diff == {"cat_a"}
+
+
+def test_orchestrator_new_scope_zero_match_warns_but_does_not_raise(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch, caplog
+):
+    """A new-style scope that matches no configured securable logs a warning and
+    leaves the domain inert — unlike the legacy flag, it never raises."""
+    config = _two_catalog_tags_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+
+    with caplog.at_level(logging.WARNING, logger="uc_declarative_abac"):
+        result = run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            tag_management_scopes="mian",  # typo for a configured catalog
+        )
+
+    assert result.tag_diff == TagDiff()
+    assert any(
+        "mian" in r.getMessage() and "--tag-management-scopes" in r.getMessage()
+        for r in caplog.records
+    )
     set_tag_stmts = [
         s for s in mock_workspace_client.executed_sql if "SET TAGS" in s.upper()
     ]

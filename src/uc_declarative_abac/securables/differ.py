@@ -23,10 +23,13 @@ from uc_declarative_abac.utils import (
     NonexistentSecurableError,
     OrchestratorError,
     PrincipalValidationError,
-    in_namespace_scope,
+    Scope,
 )
 
 _GOVERNED_ATTRIBUTES = ["owner", "comment", "rfa_destinations"]
+
+# Empty (inert) scope: the default when creation is disabled — matches nothing.
+_EMPTY_SCOPE = Scope()
 
 
 def _to_frozenset(attr: str, value: object) -> frozenset:
@@ -63,7 +66,7 @@ def compute_securable_diff(
     actual_securables: set[Securable],
     resolver: PrincipalResolver,
     change_logger: ChangeLogger,
-    creation_in_scope_namespaces: frozenset[str] = frozenset(),
+    creation_in_scope_namespaces: Scope = _EMPTY_SCOPE,
     ignore_unresolvable: frozenset[str] = frozenset(),
 ) -> SecurableDiff:
     """Compute the diff between desired and actual securable state.
@@ -252,7 +255,7 @@ def _diff_table_columns(
     actual: set[Securable],
     table_full_names_being_created: set[str],
     change_logger: ChangeLogger,
-    creation_in_scope_namespaces: frozenset[str],
+    creation_in_scope_namespaces: Scope,
 ) -> list[Column]:
     """For each desired Table that already exists in UC (i.e. NOT being created
     this run), compare its declared columns against the columns fetched from UC
@@ -280,7 +283,7 @@ def _diff_table_columns(
             if col.full_name in actual_column_names:
                 continue  # already exists in UC
 
-            if in_namespace_scope(col.full_name, creation_in_scope_namespaces):
+            if creation_in_scope_namespaces.matches(col.full_name):
                 blocker = _column_creation_blocker(col)
                 if blocker is None:
                     columns_to_create.append(col)
@@ -311,7 +314,7 @@ def _diff_table_columns(
 
 def _partition_by_creation_scope(
     to_create: list[Securable],
-    in_scope_namespaces: frozenset[str],
+    in_scope_namespaces: Scope,
 ) -> tuple[list[Securable], list[Securable]]:
     """Split ``to_create`` into (creatable, blocked).
 
@@ -322,9 +325,7 @@ def _partition_by_creation_scope(
     creatable: list[Securable] = []
     blocked: list[Securable] = []
     for sec in to_create:
-        if isinstance(sec, Function) or in_namespace_scope(
-            sec.full_name, in_scope_namespaces
-        ):
+        if isinstance(sec, Function) or in_scope_namespaces.matches(sec.full_name):
             creatable.append(sec)
         else:
             blocked.append(sec)
