@@ -7,6 +7,7 @@ import yaml
 from pydantic import ValidationError
 
 from uc_declarative_abac.cli.settings import resolve_settings
+from uc_declarative_abac.utils import DuplicateKeyError
 
 
 @pytest.mark.parametrize(
@@ -69,6 +70,17 @@ def test_settings_rejects_unknown_key_in_settings_file(tmp_path: Path):
     settings_path = tmp_path / "settings.yml"
     settings_path.write_text(yaml.dump({"not_a_real_field": True}), encoding="utf-8")
     with pytest.raises(ValidationError):
+        resolve_settings({}, settings_file=settings_path)
+
+
+def test_settings_rejects_duplicate_key_in_settings_file(tmp_path: Path):
+    """A duplicate key in the settings file fails loudly rather than silently
+    keeping the last value."""
+    settings_path = tmp_path / "settings.yml"
+    settings_path.write_text(
+        "warehouse_id: first\nwarehouse_id: second\n", encoding="utf-8"
+    )
+    with pytest.raises(DuplicateKeyError):
         resolve_settings({}, settings_file=settings_path)
 
 
