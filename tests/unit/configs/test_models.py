@@ -766,6 +766,56 @@ def test_filter_policy_rejects_identity_attributes(field):
 
 
 # ---------------------------------------------------------------------------
+# Context attribute functions (mask + filter WHEN-clause predicates)
+# ---------------------------------------------------------------------------
+
+_CONTEXT_ATTRIBUTE_FIELDS = [
+    "has_context_attributes",
+    "has_any_of_context_attributes",
+    "has_none_of_context_attributes",
+]
+
+
+@pytest.mark.parametrize("field", _CONTEXT_ATTRIBUTE_FIELDS)
+@pytest.mark.parametrize("good_value", ["databricks-cli", "*"])
+def test_mask_policy_accepts_context_attributes_with_value_or_wildcard(field, good_value):
+    """Each context-attribute field accepts a concrete value and the '*' wildcard."""
+    config = ResourcesConfig.model_validate(
+        _fgac_policy_in_table(_mask_policy_with(**{field: {"request.client_id": good_value}}))
+    )
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert getattr(policy, field) == {"request.client_id": good_value}
+
+
+@pytest.mark.parametrize("field", _CONTEXT_ATTRIBUTE_FIELDS)
+@pytest.mark.parametrize("bad_value", ["", None])
+def test_mask_policy_rejects_empty_or_null_context_attribute(field, bad_value):
+    """Context attributes reject empty and null values (but, unlike identity
+    attributes, '*' is accepted)."""
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate(
+            _fgac_policy_in_table(_mask_policy_with(**{field: {"k": bad_value}}))
+        )
+
+
+@pytest.mark.parametrize("field", _CONTEXT_ATTRIBUTE_FIELDS)
+def test_filter_policy_accepts_context_attributes(field):
+    """Context attributes apply to filter policies too (unlike identity attributes)."""
+    config = ResourcesConfig.model_validate(
+        _fgac_policy_in_table(
+            {
+                "name": "p",
+                "type": "filter",
+                "function": "cat.s.fn",
+                field: {"request.is_on_behalf_of": "true"},
+            }
+        )
+    )
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert getattr(policy, field) == {"request.is_on_behalf_of": "true"}
+
+
+# ---------------------------------------------------------------------------
 # Expiry date
 # ---------------------------------------------------------------------------
 

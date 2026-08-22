@@ -161,7 +161,8 @@ def _build_policy(
 
 
 def _render_when(policy: BaseFgacPolicyConfig) -> str | None:
-    """Render the policy's WHEN clause. Combines the tag predicate with the two
+    """Render the policy's WHEN clause. Combines the tag predicate, the
+    context-attribute predicate family (mask and filter), and the two
     identity-attribute predicate families (mask-only; always empty on filters),
     AND-joining every non-empty sub-expression. Each family contributes an AND
     group (``has_*``), an OR group (``has_any_of_*``), and a NOR group
@@ -172,6 +173,12 @@ def _render_when(policy: BaseFgacPolicyConfig) -> str | None:
             policy.has_any_of_tags,
             policy.has_none_of_tags,
             _render_tag_atom,
+        ),
+        _render_match_expr(
+            policy.has_context_attributes,
+            policy.has_any_of_context_attributes,
+            policy.has_none_of_context_attributes,
+            _render_context_attribute_atom,
         ),
         _render_match_expr(
             policy.has_identity_attributes,
@@ -224,6 +231,12 @@ def _render_tag_atom(key: str, value: str) -> str:
     if value == _WILDCARD:
         return f"has_tag({_quote(key)})"
     return f"has_tag_value({_quote(key)}, {_quote(value)})"
+
+
+def _render_context_attribute_atom(key: str, value: str) -> str:
+    if value == _WILDCARD:
+        return f"has_context_attribute({_quote(key)})"
+    return f"has_context_attribute_value({_quote(key)}, {_quote(value)})"
 
 
 def _render_identity_attribute_atom(key: str, value: str) -> str:
