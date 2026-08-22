@@ -553,11 +553,14 @@ Policy fields:
     The tag key must be non-empty and governed (validated like `has_tags` keys — an ungoverned key drops the policy at config-load). Example:
 
     ```yaml
+    name: mask_pii
+    type: mask
     columns:
       - alias: pii                    # the masked column
-        has_tags: {uc_gov_pii: '*'}
+        has_tags:
+          pii_type: '*'
       - expression:
-          get_column_tag_value: uc_gov_pii   # → get_column_tag_value(pii, 'uc_gov_pii')
+          get_column_tag_value: pii_type   # → get_column_tag_value(pii, 'pii_type')
           column_alias: pii
     function: platform.abac.mask_by_pii_type
     ```
