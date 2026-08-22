@@ -8,6 +8,7 @@ from uc_declarative_abac.configs import (
     PolicyColumnAliasConfig,
     PolicyColumnConfig,
     PolicyColumnConstantConfig,
+    PolicyColumnExpressionConfig,
     ResourcesConfig,
 )
 from uc_declarative_abac.logger import ChangeLogger
@@ -128,6 +129,12 @@ def _ungoverned_tag_keys(
             referenced |= set(col.has_tags or {})
             referenced |= set(col.has_any_of_tags or {})
             referenced |= set(col.has_none_of_tags or {})
+        elif isinstance(col, PolicyColumnExpressionConfig):
+            # A tag-introspection expression reads a governed tag key at query time.
+            expr = col.expression
+            tag_key = expr.get_column_tag_value or expr.get_tag_value
+            if tag_key:
+                referenced.add(tag_key)
     return referenced - governed_tag_names
 
 
@@ -227,6 +234,19 @@ def _quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+def render_column_tag_value(column_alias: str, tag_key: str) -> str:
+    """Render a ``get_column_tag_value`` tag-introspection USING COLUMNS argument.
+    Shared by the compiler (config → SQL) and the fetcher (SDK → SQL) so the desired
+    and actual tokens are byte-identical and the policy diff converges."""
+    return f"get_column_tag_value({column_alias}, {_quote(tag_key)})"
+
+
+def render_tag_value(tag_key: str) -> str:
+    """Render a ``get_tag_value`` tag-introspection USING COLUMNS argument. Shared by
+    the compiler and the fetcher (see ``render_column_tag_value``)."""
+    return f"get_tag_value({_quote(tag_key)})"
+
+
 def _render_tag_atom(key: str, value: str) -> str:
     if value == _WILDCARD:
         return f"has_tag({_quote(key)})"
@@ -297,9 +317,19 @@ def _render_sql_constant(value: bool | float | str | date | datetime) -> str:
 
 def _using_token(col: PolicyColumnConfig) -> str:
     """The token a column contributes to USING COLUMNS — a SQL literal for a
-    constant column, or the column alias otherwise."""
+    constant column, a rendered tag-introspection function for an expression
+    column, or the column alias otherwise."""
     if isinstance(col, PolicyColumnConstantConfig):
         return _render_sql_constant(col.constant)
+    if isinstance(col, PolicyColumnExpressionConfig):
+        expr = col.expression
+        if expr.get_column_tag_value is not None:
+            # column_alias is guaranteed present alongside get_column_tag_value
+            # by TagIntrospectionExpressionConfig validation.
+            return render_column_tag_value(
+                expr.column_alias or "", expr.get_column_tag_value
+            )
+        return render_tag_value(expr.get_tag_value or "")
     return col.alias
 
 

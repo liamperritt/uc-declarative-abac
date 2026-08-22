@@ -223,7 +223,61 @@ class PolicyColumnConstantConfig(BaseConfig):
     constant: PolicyColumnConstantValue
 
 
-PolicyColumnConfig = PolicyColumnAliasConfig | PolicyColumnConstantConfig
+class TagIntrospectionExpressionConfig(BaseConfig):
+    """A tag-introspection expression passed as a USING COLUMNS argument (beta;
+    requires DBR 18 LTS+). Exactly one variant is set, and its value is the
+    governed tag key:
+
+    - ``get_column_tag_value`` (with ``column_alias``) → ``get_column_tag_value(alias,
+      'tag')`` reads a governed tag on a matched column.
+    - ``get_tag_value`` → ``get_tag_value('tag')`` reads a securable-level governed tag.
+    """
+
+    get_column_tag_value: str | None = None
+    column_alias: str | None = None
+    get_tag_value: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_variant(self) -> TagIntrospectionExpressionConfig:
+        variants = [
+            name
+            for name, value in (
+                ("get_column_tag_value", self.get_column_tag_value),
+                ("get_tag_value", self.get_tag_value),
+            )
+            if value is not None
+        ]
+        if len(variants) != 1:
+            raise ValueError(
+                "expression column must set exactly one of 'get_column_tag_value' "
+                "or 'get_tag_value'"
+            )
+        tag_key = self.get_column_tag_value or self.get_tag_value
+        if not tag_key or not tag_key.strip():
+            raise ValueError(
+                "expression column tag key must be a non-empty, non-whitespace value"
+            )
+        if self.get_column_tag_value is not None:
+            if not self.column_alias or not self.column_alias.strip():
+                raise ValueError(
+                    "'get_column_tag_value' expression requires a non-empty "
+                    "'column_alias' referencing a column alias in the same policy"
+                )
+        elif self.column_alias is not None:
+            raise ValueError(
+                "'column_alias' is only valid with 'get_column_tag_value', "
+                "not 'get_tag_value'"
+            )
+        return self
+
+
+class PolicyColumnExpressionConfig(BaseConfig):
+    expression: TagIntrospectionExpressionConfig
+
+
+PolicyColumnConfig = (
+    PolicyColumnAliasConfig | PolicyColumnConstantConfig | PolicyColumnExpressionConfig
+)
 
 
 class BasePolicyConfig(BaseConfig, ABC):
@@ -351,8 +405,8 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
         column = data["column"]
         if not isinstance(column, dict):
             raise ValueError(  # noqa: TRY004 — pydantic wraps ValueError, not TypeError
-                "'column' must be a mapping — either an 'alias' with "
-                "'has_tags'/'has_any_of_tags', or a 'constant'"
+                "'column' must be a mapping — an 'alias' with "
+                "'has_tags'/'has_any_of_tags', a 'constant', or an 'expression'"
             )
         return {**{k: v for k, v in data.items() if k != "column"}, "columns": [column]}
 
@@ -367,6 +421,26 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
                 key="alias",
             )
         return data
+
+    @model_validator(mode="after")
+    def _validate_expression_column_aliases(self) -> BaseFgacPolicyConfig:
+        """A ``get_column_tag_value`` expression column's ``column_alias`` must name an
+        alias column declared in the same policy — it is the MATCH COLUMNS alias the
+        tag is read from (mirrors the SDK's ColumnTagValueExtraction requirement)."""
+        declared = {
+            c.alias
+            for c in (self.columns or [])
+            if isinstance(c, PolicyColumnAliasConfig)
+        }
+        for c in self.columns or []:
+            if isinstance(c, PolicyColumnExpressionConfig):
+                alias = c.expression.column_alias
+                if alias is not None and alias not in declared:
+                    raise ValueError(
+                        f"expression column references unknown column_alias '{alias}'; "
+                        "it must match an alias column in the same policy"
+                    )
+        return self
 
 
 class MaskPolicyConfig(BaseFgacPolicyConfig):
@@ -383,7 +457,7 @@ class MaskPolicyConfig(BaseFgacPolicyConfig):
         if self.columns and not isinstance(self.columns[0], PolicyColumnAliasConfig):
             raise ValueError(
                 "The first column of a mask policy must be a column alias, "
-                "not a constant (it is the column being masked)"
+                "not a constant nor an expression (it is the column being masked)"
             )
         return self
 

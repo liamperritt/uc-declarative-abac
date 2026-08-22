@@ -2164,6 +2164,154 @@ def test_mask_policy_config_accepts_singular_constant_column():
 
 
 # ---------------------------------------------------------------------------
+# Expression columns (tag-introspection USING COLUMNS arguments)
+# ---------------------------------------------------------------------------
+
+
+def test_mask_policy_config_accepts_column_tag_value_expression():
+    """A get_column_tag_value expression column is accepted when its column_alias
+    names an alias column in the same policy."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "pii", "has_tags": {"uc_gov_pii": "*"}},
+            {"expression": {"get_column_tag_value": "uc_gov_pii", "column_alias": "pii"}},
+        ],
+    )
+    config = ResourcesConfig.model_validate(data)
+    columns = config.catalogs["cat"].schemas[0].tables[0].policies[0].columns
+    assert columns[1].expression.get_column_tag_value == "uc_gov_pii"
+    assert columns[1].expression.column_alias == "pii"
+
+
+def test_mask_policy_config_accepts_tag_value_expression():
+    """A get_tag_value expression column (securable-level tag, no column_alias) is accepted."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "pii", "has_tags": {"uc_gov_pii": "*"}},
+            {"expression": {"get_tag_value": "classification"}},
+        ],
+    )
+    config = ResourcesConfig.model_validate(data)
+    columns = config.catalogs["cat"].schemas[0].tables[0].policies[0].columns
+    assert columns[1].expression.get_tag_value == "classification"
+
+
+def test_filter_policy_config_accepts_expression_column():
+    """Expression columns are allowed on filter policies too."""
+    data = _mask_or_filter_policy_catalog(
+        "filter",
+        columns=[
+            {"alias": "region", "has_tags": {"geo": "*"}},
+            {"expression": {"get_tag_value": "classification"}},
+        ],
+    )
+    config = ResourcesConfig.model_validate(data)
+    columns = config.catalogs["cat"].schemas[0].tables[0].policies[0].columns
+    assert columns[1].expression.get_tag_value == "classification"
+
+
+def test_mask_policy_config_rejects_expression_with_both_variants():
+    """An expression setting both get_column_tag_value and get_tag_value is rejected."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "pii", "has_tags": {"uc_gov_pii": "*"}},
+            {
+                "expression": {
+                    "get_column_tag_value": "uc_gov_pii",
+                    "column_alias": "pii",
+                    "get_tag_value": "classification",
+                }
+            },
+        ],
+    )
+    with pytest.raises(ValidationError, match="exactly one"):
+        ResourcesConfig.model_validate(data)
+
+
+def test_mask_policy_config_rejects_expression_with_no_variant():
+    """An empty expression block sets neither variant and is rejected."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "pii", "has_tags": {"uc_gov_pii": "*"}},
+            {"expression": {}},
+        ],
+    )
+    with pytest.raises(ValidationError, match="exactly one"):
+        ResourcesConfig.model_validate(data)
+
+
+@pytest.mark.parametrize("bad_tag", ["", "   "])
+def test_mask_policy_config_rejects_empty_expression_tag_key(bad_tag):
+    """An empty or whitespace-only tag key is rejected."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "pii", "has_tags": {"uc_gov_pii": "*"}},
+            {"expression": {"get_tag_value": bad_tag}},
+        ],
+    )
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate(data)
+
+
+def test_mask_policy_config_rejects_column_tag_value_without_column_alias():
+    """get_column_tag_value requires a column_alias."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "pii", "has_tags": {"uc_gov_pii": "*"}},
+            {"expression": {"get_column_tag_value": "uc_gov_pii"}},
+        ],
+    )
+    with pytest.raises(ValidationError, match="column_alias"):
+        ResourcesConfig.model_validate(data)
+
+
+def test_mask_policy_config_rejects_column_alias_with_tag_value_variant():
+    """column_alias is only valid with get_column_tag_value, not get_tag_value."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "pii", "has_tags": {"uc_gov_pii": "*"}},
+            {"expression": {"get_tag_value": "classification", "column_alias": "pii"}},
+        ],
+    )
+    with pytest.raises(ValidationError, match="column_alias"):
+        ResourcesConfig.model_validate(data)
+
+
+def test_mask_policy_config_rejects_expression_column_alias_not_declared():
+    """A column_alias that names no alias column in the policy is rejected."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "pii", "has_tags": {"uc_gov_pii": "*"}},
+            {"expression": {"get_column_tag_value": "uc_gov_pii", "column_alias": "nope"}},
+        ],
+    )
+    with pytest.raises(ValidationError, match="unknown column_alias"):
+        ResourcesConfig.model_validate(data)
+
+
+def test_mask_policy_config_rejects_leading_expression_column():
+    """A mask policy whose first column is an expression is rejected — the masked
+    column must be an alias."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"expression": {"get_tag_value": "classification"}},
+            {"alias": "pii", "has_tags": {"uc_gov_pii": "*"}},
+        ],
+    )
+    with pytest.raises(ValidationError, match="alias"):
+        ResourcesConfig.model_validate(data)
+
+
+# ---------------------------------------------------------------------------
 # Partial function-name qualification
 # ---------------------------------------------------------------------------
 

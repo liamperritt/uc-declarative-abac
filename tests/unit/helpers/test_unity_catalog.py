@@ -4,6 +4,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import sqlglot
+from databricks.sdk.service.catalog import (
+    ColumnTagValueExtraction,
+    FunctionArgExpression,
+    FunctionArgument,
+    TagIntrospectionExpression,
+    TagValueExtraction,
+)
 from databricks.sdk.service.sql import Disposition, StatementState
 
 from uc_declarative_abac.helpers import UnityCatalogHelper
@@ -2162,6 +2169,56 @@ def test_uc_helper_fetch_actual_policies_preserves_constant_using_columns_in_row
 
     (policy,) = helper.fetch_actual_policies(["cat"])
     assert policy.using_columns == ("region", "'EU'")
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetch_actual_policies_reconstructs_column_tag_value_expression(
+    mock_fetch,
+):
+    """A get_column_tag_value USING COLUMNS arg round-trips to the same token the
+    compiler emits, so an expression column doesn't look changed on every run."""
+    mock_fetch.return_value = [["TABLE", "cat.s.t"]]
+    client = _make_mock_workspace_client()
+    info = _make_column_mask_policy_info()
+    info.column_mask.using = [
+        FunctionArgument(alias="pii"),
+        FunctionArgument(
+            function_arg_expression=FunctionArgExpression(
+                tag_introspection=TagIntrospectionExpression(
+                    column_tag_value=ColumnTagValueExtraction(
+                        column_alias="pii", tag_key="uc_gov_pii"
+                    )
+                )
+            )
+        ),
+    ]
+    client.policies.list_policies.return_value = iter([info])
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    (policy,) = helper.fetch_actual_policies(["cat"])
+    assert policy.using_columns == ("pii", "get_column_tag_value(pii, 'uc_gov_pii')")
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetch_actual_policies_reconstructs_tag_value_expression(mock_fetch):
+    """A get_tag_value USING COLUMNS arg round-trips to get_tag_value('tag')."""
+    mock_fetch.return_value = [["TABLE", "cat.s.t"]]
+    client = _make_mock_workspace_client()
+    info = _make_row_filter_policy_info()
+    info.row_filter.using = [
+        FunctionArgument(
+            function_arg_expression=FunctionArgExpression(
+                tag_introspection=TagIntrospectionExpression(
+                    tag_value=TagValueExtraction(tag_key="classification")
+                )
+            )
+        ),
+    ]
+    client.policies.list_policies.return_value = iter([info])
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    (policy,) = helper.fetch_actual_policies(["cat"])
+    assert policy.using_columns == ("get_tag_value('classification')",)
 
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")

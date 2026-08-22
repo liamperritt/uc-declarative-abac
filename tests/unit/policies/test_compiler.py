@@ -989,6 +989,89 @@ def test_policy_compiler_constant_column_does_not_break_ungoverned_tag_check():
 
 
 # ---------------------------------------------------------------------------
+# Expression columns (tag-introspection USING COLUMNS arguments)
+# ---------------------------------------------------------------------------
+
+
+def test_policy_compiler_renders_column_tag_value_expression_into_using():
+    """A get_column_tag_value expression renders get_column_tag_value(alias, 'tag')."""
+    policy_dict = _fgac_policy(
+        columns=[
+            {"alias": "email", "has_tags": {"pii": "email"}},
+            {"expression": {"get_column_tag_value": "pii", "column_alias": "email"}},
+        ],
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.on_column == "email"
+    assert policy.using_columns == ("get_column_tag_value(email, 'pii')",)
+    assert policy.match_columns == (("email", "has_tag_value('pii', 'email')"),)
+
+
+def test_policy_compiler_renders_tag_value_expression_into_using():
+    """A get_tag_value expression renders get_tag_value('tag')."""
+    policy_dict = _fgac_policy(
+        columns=[
+            {"alias": "email", "has_tags": {"pii": "email"}},
+            {"expression": {"get_tag_value": "domain"}},
+        ],
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.using_columns == ("get_tag_value('domain')",)
+
+
+def test_policy_compiler_preserves_expression_column_order_with_alias_and_constant():
+    """Expression, alias, and constant columns keep declaration order in using_columns."""
+    policy_dict = _fgac_policy(
+        columns=[
+            {"alias": "email", "has_tags": {"pii": "email"}},
+            {"expression": {"get_column_tag_value": "pii", "column_alias": "email"}},
+            {"constant": "REDACTED"},
+            {"expression": {"get_tag_value": "domain"}},
+        ],
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.using_columns == (
+        "get_column_tag_value(email, 'pii')",
+        "'REDACTED'",
+        "get_tag_value('domain')",
+    )
+
+
+def test_policy_compiler_logs_error_when_expression_tag_key_is_ungoverned():
+    """An expression column referencing an ungoverned tag drops the policy and logs."""
+    policy_dict = _fgac_policy(
+        columns=[
+            {"alias": "email", "has_tags": {"pii": "email"}},
+            {"expression": {"get_tag_value": "ungoverned_key"}},
+        ],
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+    change_logger = _change_logger()
+
+    result = _compile(config, governed_tag_names={"pii"}, change_logger=change_logger)
+
+    assert change_logger.has_errors
+    exceptions = [e.exception for e in change_logger.errors]
+    assert any(isinstance(e, UngovernedTagError) for e in exceptions)
+    assert "ungoverned_key" in " ".join(str(e) for e in exceptions)
+    assert result == set()
+
+
+# ---------------------------------------------------------------------------
 # Grant policies are ignored
 # ---------------------------------------------------------------------------
 

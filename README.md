@@ -543,9 +543,27 @@ Policy fields:
 - **`has_identity_attribute_tag_matches`** — (**`mask` type only**) matches a querying-principal identity attribute against a **governed tag on the resource**. Each `attribute_key: tag_key` entry becomes `has_identity_attribute_tag_match('attribute_key', 'tag_key')`; the **value** (`tag_key`) must be a governed tag (validated like `has_tags` keys). AND semantics; no wildcard.
 - **`has_any_of_identity_attribute_tag_matches`** — the same, but with **OR** semantics.
 - **`has_none_of_identity_attribute_tag_matches`** — (**`mask` type only**) the negation: each `attribute_key: tag_key` entry becomes `NOT has_identity_attribute_tag_match('attribute_key', 'tag_key')`; the **value** (`tag_key`) must be a governed tag; **AND**-joined; no wildcard. All identity-attribute predicates, the context-attribute predicates (`has_context_attributes` / `has_any_of_context_attributes` / `has_none_of_context_attributes`), and the tag predicates (`has_tags` / `has_any_of_tags` / `has_none_of_tags`) combine into one `WHEN` clause as **AND-of-groups**.
-- **`column`/`columns`** — (`mask` and `filter` types only) a single column, or an ordered list of column slots. Every slot is passed as an argument to the `function` in declaration order, so the list must match the function's parameter signature. A slot is one of two kinds:
+- **`column`/`columns`** — (`mask` and `filter` types only) a single column, or an ordered list of column slots. Every slot is passed as an argument to the `function` in declaration order, so the list must match the function's parameter signature. A slot is one of three kinds:
   - **alias column** — has an `alias` (a local name used to reference the column within this policy) and an optional `has_tags` / `has_any_of_tags` / `has_none_of_tags` block that selects the actual table column by tag (rendered as the `MATCH COLUMNS <condition> AS <alias>` clause, with the same AND / OR / negated-NOR semantics as the policy-level predicates). **If no tag block is given, the column matches *every* column** via `MATCH COLUMNS TRUE` — the [secure-by-default](https://docs.databricks.com/aws/en/data-governance/unity-catalog/abac/secure-by-default) pattern, where a schema-level mask gated on a `WHEN` clause (e.g. `review_status = pending`) masks all columns until a reviewer clears them. For **mask** policies, the **first** column in the list must be an alias column — it is the one the mask function is applied to (i.e. it becomes `ON COLUMN <alias>` in the generated SQL) and is also passed as the first argument to the function.
   - **constant column** — has a single `constant: <value>` and no tags. It is passed to the function as a constant rather than a table column, which is useful for parameterising a shared masking/filtering function per policy (e.g. a per-policy replacement value).
+  - **expression column** — has a single `expression:` block holding a **tag-introspection function** ([beta](https://docs.databricks.com/aws/en/data-governance/unity-catalog/abac/core-concepts#tag-introspection-functions-beta), **requires DBR 18 LTS+**) that reads a governed tag's value at query time and passes it as a function argument — letting one shared function branch on a tag value. Exactly one of two variants, keyed to mirror the SQL function it renders:
+    - `get_column_tag_value: <tag_key>` **plus** `column_alias: <alias>` → `get_column_tag_value(<alias>, '<tag_key>')`, the value of `<tag_key>` on the matched column named by `<alias>` (which must be an alias column declared in the same policy).
+    - `get_tag_value: <tag_key>` → `get_tag_value('<tag_key>')`, the value of a securable-level `<tag_key>` (table/schema/catalog).
+
+    The tag key must be non-empty and governed (validated like `has_tags` keys — an ungoverned key drops the policy at config-load). Example:
+
+    ```yaml
+    name: mask_pii
+    type: mask
+    columns:
+      - alias: pii                    # the masked column
+        has_tags:
+          pii_type: '*'
+      - expression:
+          get_column_tag_value: pii_type   # → get_column_tag_value(pii, 'pii_type')
+          column_alias: pii
+    function: platform.abac.mask_by_pii_type
+    ```
 - **`for`** — restricts the policy to a single securable type. Accepts any case and the trailing-`s` plural form (e.g. `tables`, `Schema`, `CATALOGS`), normalised to the canonical type. For **`mask`** and **`filter`** policies it must be `table` (the default) — these only apply to tables. For **`grant`** policies it may be any of `catalog`, `schema`, `table`, `volume`; when set, every listed privilege must be applicable to that type (e.g. only `read_volume`, `write_volume`, `manage`, `read_metadata`, `all_privileges` apply to `volume`) or config-load fails, and the grant is only applied to matched securables of that type.
 - **`privileges`** — (`grant` type only) the UC privileges to assign. Supported values include the concrete UC privileges (`select`, `modify`, `create_table`, `create_schema`, `create_function`, `create_volume`, `use_catalog`, `use_schema`, `read_volume`, `write_volume`, `execute`, `refresh`, `create_materialized_view`, `create_model`, `create_model_version`, `create_feature`, `read_feature`, `browse`, `read_metadata`, `all_privileges`, `external_use_schema`, `manage`) and four shorthand **abstractions** that each expand to a fixed set of UC privileges:
 
@@ -1116,6 +1134,7 @@ Mask and filter policies are additive by default (create/update, never delete). 
 - **Column-tag-to-MATCH-COLUMNS translation** — per-column `has_tags` / `has_any_of_tags` / `has_none_of_tags` map to `MATCH COLUMNS <condition> AS <alias>` entries; a column with no tag-match block renders `MATCH COLUMNS TRUE` (matches every column — secure-by-default)
 - **MASK column split** — the first `columns[]` entry becomes `ON COLUMN <alias>`; remaining columns become `USING COLUMNS (...)` args
 - **FILTER columns** — no `ON COLUMN`; all columns become `USING COLUMNS (...)` args
+- **Column-kind-to-USING-COLUMNS translation** — an alias column contributes its `<alias>`; a constant column its rendered SQL literal; an expression column a tag-introspection function — `get_column_tag_value(<alias>, '<tag_key>')` or `get_tag_value('<tag_key>')` (the same text is reconstructed on read-back so re-runs stay idempotent)
 - **Policy state discovery + fetch** — a single query against `system.information_schema.abac_policy_definitions` (filtered to the configured catalogs) discovers which securables carry a mask/filter policy; `WorkspaceClient.policies.list_policies` is then invoked per discovered securable concurrently via a `ThreadPoolExecutor(max_workers=16)` pool to read full policy detail
 - **Policy diffing** — computes creates and replaces keyed by `(securable_type, full_name, name)`; actual-only policies are deletion candidates only when `--enable-policy-deletion` is set and the securable falls in `--delete-policies-for-namespaces` scope (additive by default — an empty scope never deletes)
 - **Policy execution** — generates and executes `CREATE POLICY` / `CREATE OR REPLACE POLICY` SQL with `ON`, `TO`, optional `EXCEPT`, `FOR TABLES`, optional `WHEN`, optional `MATCH COLUMNS`, `ON COLUMN` (MASK only), and `USING COLUMNS`
