@@ -4,8 +4,10 @@ import re
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Literal, TypeVar
+from zoneinfo import ZoneInfo
 
 import yaml
 
@@ -135,6 +137,11 @@ def parse_namespace_filter(
             f"{', '.join(unknown)}. Configured catalogs: {configured_list}"
         )
     return frozenset(names)
+
+
+def run_date_for_timezone(timezone: str) -> date:
+    """Today's date in the given IANA timezone (e.g. 'Australia/Melbourne')."""
+    return datetime.now(ZoneInfo(timezone)).date()
 
 
 def _match_rfa_destination(value: str) -> RfaDestinationKind | None:

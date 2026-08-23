@@ -138,6 +138,7 @@ def _run_kwargs(
         "config_dir": _require_config_dir(settings),
         "warehouse_id": _require_warehouse_id(settings),
         "system_catalog": settings.system_catalog,
+        "timezone": settings.timezone,
         "dry_run": dry_run,
         "use_workspace_scim": settings.use_workspace_scim,
         "skip_users_fetch": settings.skip_users_fetch,

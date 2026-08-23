@@ -112,3 +112,84 @@ def test_settings_empty_bool_env_does_not_override_default(monkeypatch):
     monkeypatch.setenv("UC_ABAC_ENABLE_TAG_MANAGEMENT", "")
     settings = resolve_settings({}, settings_file=None)
     assert settings.enable_tag_management is False
+
+
+# ---------------------------------------------------------------------------
+# timezone
+# ---------------------------------------------------------------------------
+
+
+def test_settings_timezone_defaults_to_utc_when_unset(monkeypatch, tmp_path: Path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("UC_ABAC_TIMEZONE", raising=False)
+    settings = resolve_settings({}, settings_file=None)
+    assert settings.timezone == "UTC"
+
+
+@pytest.mark.parametrize(
+    ("file_value", "env_value", "cli_value", "expected"),
+    [
+        pytest.param(None, None, None, "UTC", id="default"),
+        pytest.param("Australia/Melbourne", None, None, "Australia/Melbourne", id="settings-file"),
+        pytest.param(
+            "Australia/Melbourne",
+            "America/New_York",
+            None,
+            "America/New_York",
+            id="environment-over-file",
+        ),
+        pytest.param(
+            "Australia/Melbourne",
+            "America/New_York",
+            "Europe/London",
+            "Europe/London",
+            id="cli-over-environment",
+        ),
+    ],
+)
+def test_given_timezone_sources_when_settings_are_resolved_then_normal_precedence_applies(
+    file_value: str | None,
+    env_value: str | None,
+    cli_value: str | None,
+    expected: str,
+    monkeypatch,
+    tmp_path: Path,
+):
+    # Given
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("UC_ABAC_TIMEZONE", raising=False)
+    if file_value is not None:
+        (tmp_path / "uc_abac.yml").write_text(
+            yaml.dump({"timezone": file_value}), encoding="utf-8"
+        )
+    if env_value is not None:
+        monkeypatch.setenv("UC_ABAC_TIMEZONE", env_value)
+    cli_overrides = {"timezone": cli_value} if cli_value is not None else {}
+
+    # When
+    settings = resolve_settings(cli_overrides, settings_file=None)
+
+    # Then
+    assert settings.timezone == expected
+
+
+def test_settings_loads_timezone_from_env(monkeypatch):
+    monkeypatch.setenv("UC_ABAC_TIMEZONE", "Australia/Melbourne")
+    settings = resolve_settings({}, settings_file=None)
+    assert settings.timezone == "Australia/Melbourne"
+
+
+def test_settings_accepts_valid_iana_timezone_from_file(tmp_path: Path):
+    settings_path = tmp_path / "settings.yml"
+    settings_path.write_text(
+        yaml.dump({"timezone": "Australia/Melbourne"}), encoding="utf-8"
+    )
+    settings = resolve_settings({}, settings_file=settings_path)
+    assert settings.timezone == "Australia/Melbourne"
+
+
+def test_settings_rejects_unknown_timezone(monkeypatch, tmp_path: Path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("UC_ABAC_TIMEZONE", raising=False)
+    with pytest.raises(ValidationError):
+        resolve_settings({"timezone": "Not/AZone"}, settings_file=None)

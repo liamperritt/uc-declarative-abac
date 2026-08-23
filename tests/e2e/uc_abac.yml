@@ -4,3 +4,4 @@ enable_privilege_management: true
 enable_policy_deletion: true
 use_workspace_scim: true
 profile: field-eng-east
+timezone: Australia/Melbourne

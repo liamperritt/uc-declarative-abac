@@ -115,6 +115,44 @@ def test_parser_displays_polished_deploy_help(capsys):
     assert all(len(line) <= 80 for line in output.splitlines())
 
 
+def test_parser_displays_timezone_flag_in_validate_help(capsys):
+    output = _help_output(["validate", "--help"], capsys)
+    assert "--timezone" in output
+
+
+def test_parser_displays_timezone_flag_in_deploy_help(capsys):
+    output = _help_output(["deploy", "--help"], capsys)
+    assert "--timezone" in output
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        [
+            "deploy",
+            "--config-dir",
+            "cfg",
+            "--warehouse-id",
+            "wh",
+            "--timezone",
+            "Australia/Melbourne",
+        ],
+        [
+            "--config-dir",
+            "cfg",
+            "--warehouse-id",
+            "wh",
+            "--timezone",
+            "Australia/Melbourne",
+        ],
+    ],
+    ids=["modern-deploy", "legacy-invocation"],
+)
+def test_parser_accepts_timezone_for_deploy_invocations(args):
+    namespace = parse_cli_args(args)
+    assert namespace.timezone == "Australia/Melbourne"
+
+
 def test_parser_reports_actionable_error_when_command_is_unknown(capsys):
     with pytest.raises(SystemExit) as exc_info:
         parse_cli_args(["unknown"])
