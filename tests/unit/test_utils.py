@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import time
 from datetime import date, datetime
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pytest
 
@@ -59,7 +59,7 @@ def test_utils_run_date_for_timezone_can_differ_from_utc_across_zones():
 
 
 def test_utils_run_date_for_timezone_raises_for_unknown_zone():
-    with pytest.raises(Exception):
+    with pytest.raises(ZoneInfoNotFoundError):
         run_date_for_timezone("Not/AZone")
 
 

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import uc_declarative_abac.orchestrator as orchestrator
+from uc_declarative_abac import orchestrator
 from uc_declarative_abac.orchestrator import run
 from uc_declarative_abac.policies import (
     PolicyDiff,

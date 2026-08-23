@@ -130,7 +130,9 @@ def test_settings_timezone_defaults_to_utc_when_unset(monkeypatch, tmp_path: Pat
     ("file_value", "env_value", "cli_value", "expected"),
     [
         pytest.param(None, None, None, "UTC", id="default"),
-        pytest.param("Australia/Melbourne", None, None, "Australia/Melbourne", id="settings-file"),
+        pytest.param(
+            "Australia/Melbourne", None, None, "Australia/Melbourne", id="settings-file"
+        ),
         pytest.param(
             "Australia/Melbourne",
             "America/New_York",

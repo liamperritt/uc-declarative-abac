@@ -280,8 +280,7 @@ def test_commands_reports_actionable_error_when_warehouse_id_is_missing(
     assert "[ERROR]" in error or "✖" in error
     assert "--warehouse-id" in error
     assert "HOW TO FIX" in error or (
-        "Hint:" in error
-        and ("--warehouse-id" in error or "settings" in error.lower())
+        "Hint:" in error and ("--warehouse-id" in error or "settings" in error.lower())
     )
 
 
