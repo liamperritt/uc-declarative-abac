@@ -16,8 +16,8 @@ from uc_declarative_abac.utils import (
     parse_flat_scope,
     parse_hierarchical_scope,
     parse_namespace_filter,
-    scope_from_namespace_tokens,
     run_date_for_timezone,
+    scope_from_namespace_tokens,
     validate_rfa_destinations,
 )
 

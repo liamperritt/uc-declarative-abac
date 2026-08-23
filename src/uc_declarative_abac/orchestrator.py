@@ -68,8 +68,8 @@ from uc_declarative_abac.utils import (
     parse_flat_scope,
     parse_hierarchical_scope,
     parse_namespace_filter,
-    scope_from_namespace_tokens,
     run_date_for_timezone,
+    scope_from_namespace_tokens,
 )
 
 _logger = logging.getLogger("uc_declarative_abac")
