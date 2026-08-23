@@ -728,7 +728,9 @@ def test_mask_policy_accepts_identity_attributes_with_exact_values(field):
     ],
 )
 @pytest.mark.parametrize("bad_value", ["*", "", None])
-def test_mask_policy_rejects_wildcard_empty_or_null_identity_attribute(field, bad_value):
+def test_mask_policy_rejects_wildcard_empty_or_null_identity_attribute(
+    field, bad_value
+):
     """Identity attributes support no wildcard: '*', empty, and null values are rejected."""
     with pytest.raises(ValidationError):
         ResourcesConfig.model_validate(
@@ -763,6 +765,60 @@ def test_filter_policy_rejects_identity_attributes(field):
         )
     assert "only on mask policies" in str(exc_info.value)
     assert field in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# Context attribute functions (mask + filter WHEN-clause predicates)
+# ---------------------------------------------------------------------------
+
+_CONTEXT_ATTRIBUTE_FIELDS = [
+    "has_context_attributes",
+    "has_any_of_context_attributes",
+    "has_none_of_context_attributes",
+]
+
+
+@pytest.mark.parametrize("field", _CONTEXT_ATTRIBUTE_FIELDS)
+@pytest.mark.parametrize("good_value", ["databricks-cli", "*"])
+def test_mask_policy_accepts_context_attributes_with_value_or_wildcard(
+    field, good_value
+):
+    """Each context-attribute field accepts a concrete value and the '*' wildcard."""
+    config = ResourcesConfig.model_validate(
+        _fgac_policy_in_table(
+            _mask_policy_with(**{field: {"request.client_id": good_value}})
+        )
+    )
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert getattr(policy, field) == {"request.client_id": good_value}
+
+
+@pytest.mark.parametrize("field", _CONTEXT_ATTRIBUTE_FIELDS)
+@pytest.mark.parametrize("bad_value", ["", None])
+def test_mask_policy_rejects_empty_or_null_context_attribute(field, bad_value):
+    """Context attributes reject empty and null values (but, unlike identity
+    attributes, '*' is accepted)."""
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate(
+            _fgac_policy_in_table(_mask_policy_with(**{field: {"k": bad_value}}))
+        )
+
+
+@pytest.mark.parametrize("field", _CONTEXT_ATTRIBUTE_FIELDS)
+def test_filter_policy_accepts_context_attributes(field):
+    """Context attributes apply to filter policies too (unlike identity attributes)."""
+    config = ResourcesConfig.model_validate(
+        _fgac_policy_in_table(
+            {
+                "name": "p",
+                "type": "filter",
+                "function": "cat.s.fn",
+                field: {"request.is_on_behalf_of": "true"},
+            }
+        )
+    )
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert getattr(policy, field) == {"request.is_on_behalf_of": "true"}
 
 
 # ---------------------------------------------------------------------------
@@ -1116,7 +1172,10 @@ def test_group_config_accepts_expiry_date():
         {
             "catalogs": {"cat": {}},
             "groups": {
-                "temp_access": {"members": ["alice@example.com"], "expiry_date": "2026-12-31"},
+                "temp_access": {
+                    "members": ["alice@example.com"],
+                    "expiry_date": "2026-12-31",
+                },
             },
         }
     )
@@ -2114,6 +2173,165 @@ def test_mask_policy_config_accepts_singular_constant_column():
 
 
 # ---------------------------------------------------------------------------
+# Expression columns (tag-introspection USING COLUMNS arguments)
+# ---------------------------------------------------------------------------
+
+
+def test_mask_policy_config_accepts_column_tag_value_expression():
+    """A get_column_tag_value expression column is accepted when its alias
+    names an alias column in the same policy."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "pii", "has_tags": {"uc_gov_pii": "*"}},
+            {
+                "expression": {
+                    "get_column_tag_value": {"alias": "pii", "tag": "uc_gov_pii"}
+                }
+            },
+        ],
+    )
+    config = ResourcesConfig.model_validate(data)
+    columns = config.catalogs["cat"].schemas[0].tables[0].policies[0].columns
+    assert columns[1].expression.get_column_tag_value.alias == "pii"
+    assert columns[1].expression.get_column_tag_value.tag == "uc_gov_pii"
+
+
+def test_mask_policy_config_accepts_tag_value_expression():
+    """A get_tag_value expression column (securable-level tag, no alias) is accepted."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "pii", "has_tags": {"uc_gov_pii": "*"}},
+            {"expression": {"get_tag_value": {"tag": "classification"}}},
+        ],
+    )
+    config = ResourcesConfig.model_validate(data)
+    columns = config.catalogs["cat"].schemas[0].tables[0].policies[0].columns
+    assert columns[1].expression.get_tag_value.tag == "classification"
+
+
+def test_filter_policy_config_accepts_expression_column():
+    """Expression columns are allowed on filter policies too."""
+    data = _mask_or_filter_policy_catalog(
+        "filter",
+        columns=[
+            {"alias": "region", "has_tags": {"geo": "*"}},
+            {"expression": {"get_tag_value": {"tag": "classification"}}},
+        ],
+    )
+    config = ResourcesConfig.model_validate(data)
+    columns = config.catalogs["cat"].schemas[0].tables[0].policies[0].columns
+    assert columns[1].expression.get_tag_value.tag == "classification"
+
+
+def test_mask_policy_config_rejects_expression_with_both_variants():
+    """An expression setting both get_column_tag_value and get_tag_value is rejected."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "pii", "has_tags": {"uc_gov_pii": "*"}},
+            {
+                "expression": {
+                    "get_column_tag_value": {"alias": "pii", "tag": "uc_gov_pii"},
+                    "get_tag_value": {"tag": "classification"},
+                }
+            },
+        ],
+    )
+    with pytest.raises(ValidationError, match="exactly one"):
+        ResourcesConfig.model_validate(data)
+
+
+def test_mask_policy_config_rejects_expression_with_no_variant():
+    """An empty expression block sets neither variant and is rejected."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "pii", "has_tags": {"uc_gov_pii": "*"}},
+            {"expression": {}},
+        ],
+    )
+    with pytest.raises(ValidationError, match="exactly one"):
+        ResourcesConfig.model_validate(data)
+
+
+@pytest.mark.parametrize("bad_tag", ["", "   "])
+def test_mask_policy_config_rejects_empty_expression_tag_key(bad_tag):
+    """An empty or whitespace-only tag key is rejected."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "pii", "has_tags": {"uc_gov_pii": "*"}},
+            {"expression": {"get_tag_value": {"tag": bad_tag}}},
+        ],
+    )
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate(data)
+
+
+def test_mask_policy_config_rejects_column_tag_value_without_alias():
+    """get_column_tag_value requires an alias field."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "pii", "has_tags": {"uc_gov_pii": "*"}},
+            {"expression": {"get_column_tag_value": {"tag": "uc_gov_pii"}}},
+        ],
+    )
+    with pytest.raises(ValidationError, match="alias"):
+        ResourcesConfig.model_validate(data)
+
+
+def test_mask_policy_config_rejects_alias_key_on_tag_value_variant():
+    """The alias key is not allowed on the get_tag_value variant (extra='forbid')."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "pii", "has_tags": {"uc_gov_pii": "*"}},
+            {
+                "expression": {
+                    "get_tag_value": {"tag": "classification", "alias": "pii"}
+                }
+            },
+        ],
+    )
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate(data)
+
+
+def test_mask_policy_config_rejects_expression_column_alias_not_declared():
+    """An alias that names no alias column in the policy is rejected."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "pii", "has_tags": {"uc_gov_pii": "*"}},
+            {
+                "expression": {
+                    "get_column_tag_value": {"alias": "nope", "tag": "uc_gov_pii"}
+                }
+            },
+        ],
+    )
+    with pytest.raises(ValidationError, match="unknown column_alias"):
+        ResourcesConfig.model_validate(data)
+
+
+def test_mask_policy_config_rejects_leading_expression_column():
+    """A mask policy whose first column is an expression is rejected — the masked
+    column must be an alias."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"expression": {"get_tag_value": {"tag": "classification"}}},
+            {"alias": "pii", "has_tags": {"uc_gov_pii": "*"}},
+        ],
+    )
+    with pytest.raises(ValidationError, match="alias"):
+        ResourcesConfig.model_validate(data)
+
+
+# ---------------------------------------------------------------------------
 # Partial function-name qualification
 # ---------------------------------------------------------------------------
 
@@ -2936,9 +3154,16 @@ def test_unknown_key_on_schema_is_rejected():
     """An unknown key on a nested schema is rejected."""
     with pytest.raises(ValidationError) as exc_info:
         ResourcesConfig.model_validate(
-            {"catalogs": {"c": {"name": "c", "schemas": [
-                {"name": "s", "unexpected": 1},
-            ]}}}
+            {
+                "catalogs": {
+                    "c": {
+                        "name": "c",
+                        "schemas": [
+                            {"name": "s", "unexpected": 1},
+                        ],
+                    }
+                }
+            }
         )
     assert any("unexpected" in str(e["loc"]) for e in exc_info.value.errors())
 
@@ -2947,11 +3172,21 @@ def test_unknown_key_on_function_is_rejected():
     """An unknown key on a function is rejected (alias `return` is still fine)."""
     with pytest.raises(ValidationError) as exc_info:
         ResourcesConfig.model_validate(
-            {"catalogs": {"c": {"name": "c", "schemas": [
-                {"name": "s", "functions": [
-                    {"name": "f", "return": "1", "typpo": "x"},
-                ]},
-            ]}}}
+            {
+                "catalogs": {
+                    "c": {
+                        "name": "c",
+                        "schemas": [
+                            {
+                                "name": "s",
+                                "functions": [
+                                    {"name": "f", "return": "1", "typpo": "x"},
+                                ],
+                            },
+                        ],
+                    }
+                }
+            }
         )
     assert any("typpo" in str(e["loc"]) for e in exc_info.value.errors())
 
@@ -2960,10 +3195,22 @@ def test_unknown_key_on_grant_policy_is_rejected():
     """`tags` is not a policy field (policies match via has_tags) — it must be rejected."""
     with pytest.raises(ValidationError) as exc_info:
         ResourcesConfig.model_validate(
-            {"catalogs": {"c": {"name": "c", "policies": [
-                {"name": "g", "type": "grant", "privileges": ["select"],
-                 "to": ["team"], "tags": {"env": "prod"}},
-            ]}}}
+            {
+                "catalogs": {
+                    "c": {
+                        "name": "c",
+                        "policies": [
+                            {
+                                "name": "g",
+                                "type": "grant",
+                                "privileges": ["select"],
+                                "to": ["team"],
+                                "tags": {"env": "prod"},
+                            },
+                        ],
+                    }
+                }
+            }
         )
     assert any("tags" in str(e["loc"]) for e in exc_info.value.errors())
 
@@ -2989,20 +3236,45 @@ def test_unknown_key_on_group_is_rejected():
 def test_alias_spellings_still_validate_under_forbid():
     """The documented aliases (`return`, `for`, `except`) are known keys, not extras."""
     config = ResourcesConfig.model_validate(
-        {"catalogs": {"c": {"name": "c", "schemas": [
-            {"name": "s",
-             "functions": [
-                 {"name": "fn", "return": "1",
-                  "parameters": [{"name": "p", "type": "string"}]},
-             ],
-             "tables": [
-                 {"name": "t", "policies": [
-                     {"name": "m", "type": "mask", "function": "c.s.fn",
-                      "columns": [{"alias": "col", "has_tags": {"pii": "email"}}],
-                      "for": "table", "except": ["svc"]},
-                 ]},
-             ]},
-        ]}}}
+        {
+            "catalogs": {
+                "c": {
+                    "name": "c",
+                    "schemas": [
+                        {
+                            "name": "s",
+                            "functions": [
+                                {
+                                    "name": "fn",
+                                    "return": "1",
+                                    "parameters": [{"name": "p", "type": "string"}],
+                                },
+                            ],
+                            "tables": [
+                                {
+                                    "name": "t",
+                                    "policies": [
+                                        {
+                                            "name": "m",
+                                            "type": "mask",
+                                            "function": "c.s.fn",
+                                            "columns": [
+                                                {
+                                                    "alias": "col",
+                                                    "has_tags": {"pii": "email"},
+                                                }
+                                            ],
+                                            "for": "table",
+                                            "except": ["svc"],
+                                        },
+                                    ],
+                                },
+                            ],
+                        },
+                    ],
+                }
+            }
+        }
     )
     fn = config.catalogs["c"].schemas[0].functions[0]
     assert fn.definition == "1"

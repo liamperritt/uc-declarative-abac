@@ -81,6 +81,40 @@ def _reject_identity_attribute_wildcards(attrs: dict | None) -> dict | None:
     return attrs
 
 
+# The context-attribute predicate fields — WHEN-clause refinements on both mask and
+# filter policies (the underlying functions gate on the request context in either
+# clause). Listed once so the shared validator stays in sync.
+_CONTEXT_ATTRIBUTE_FIELDS = (
+    "has_context_attributes",
+    "has_any_of_context_attributes",
+    "has_none_of_context_attributes",
+)
+
+
+def _reject_empty_context_attribute_values(attrs: dict | None) -> dict | None:
+    """Context attributes need a non-empty value or the '*' presence wildcard.
+    Unlike identity attributes, '*' is allowed (renders has_context_attribute);
+    unlike has_tags, null/empty are NOT coerced — they are rejected."""
+    if attrs is None:
+        return None
+    for k, v in attrs.items():
+        if v is None or v == "":
+            raise ValueError(
+                f"context attribute '{k}' must have a non-empty value or the "
+                "'*' wildcard; empty and null values are not supported"
+            )
+    return attrs
+
+
+def _reject_blank_str(value: str, field_label: str) -> str:
+    """Reject a string that is empty or contains only whitespace."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(
+            f"{field_label} must be a non-empty, non-whitespace string value"
+        )
+    return value
+
+
 def _check_duplicate_names(
     items: list,
     child_label: str,
@@ -198,7 +232,74 @@ class PolicyColumnConstantConfig(BaseConfig):
     constant: PolicyColumnConstantValue
 
 
-PolicyColumnConfig = PolicyColumnAliasConfig | PolicyColumnConstantConfig
+class ColumnTagValueExtractionConfig(BaseConfig):
+    """Args for get_column_tag_value(alias, 'tag') — a governed tag on the matched
+    column named by ``alias``. Mirrors the SDK's ColumnTagValueExtraction."""
+
+    alias: str
+    tag: str
+
+    @field_validator("alias", mode="after")
+    @classmethod
+    def _validate_alias(cls, v: str) -> str:
+        return _reject_blank_str(v, "alias")
+
+    @field_validator("tag", mode="after")
+    @classmethod
+    def _validate_tag(cls, v: str) -> str:
+        return _reject_blank_str(v, "tag")
+
+
+class TagValueExtractionConfig(BaseConfig):
+    """Arg for get_tag_value('tag') — a securable-level governed tag. Mirrors the
+    SDK's TagValueExtraction."""
+
+    tag: str
+
+    @field_validator("tag", mode="after")
+    @classmethod
+    def _validate_tag(cls, v: str) -> str:
+        return _reject_blank_str(v, "tag")
+
+
+class TagIntrospectionExpressionConfig(BaseConfig):
+    """A tag-introspection expression passed as a USING COLUMNS argument (beta;
+    requires DBR 18 LTS+). Exactly one variant must be set:
+
+    - ``get_column_tag_value`` with nested ``alias`` and ``tag`` fields →
+      ``get_column_tag_value(alias, 'tag')`` reads a governed tag on a matched column.
+    - ``get_tag_value`` with nested ``tag`` field → ``get_tag_value('tag')`` reads a
+      securable-level governed tag.
+    """
+
+    get_column_tag_value: ColumnTagValueExtractionConfig | None = None
+    get_tag_value: TagValueExtractionConfig | None = None
+
+    @model_validator(mode="after")
+    def _validate_variant(self) -> TagIntrospectionExpressionConfig:
+        variants = [
+            name
+            for name, value in (
+                ("get_column_tag_value", self.get_column_tag_value),
+                ("get_tag_value", self.get_tag_value),
+            )
+            if value is not None
+        ]
+        if len(variants) != 1:
+            raise ValueError(
+                "expression column must set exactly one of 'get_column_tag_value' "
+                "or 'get_tag_value'"
+            )
+        return self
+
+
+class PolicyColumnExpressionConfig(BaseConfig):
+    expression: TagIntrospectionExpressionConfig
+
+
+PolicyColumnConfig = (
+    PolicyColumnAliasConfig | PolicyColumnConstantConfig | PolicyColumnExpressionConfig
+)
 
 
 class BasePolicyConfig(BaseConfig, ABC):
@@ -264,11 +365,11 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
     for_securable_type: Literal[SecurableType.TABLE] | None = Field(
         default=SecurableType.TABLE, alias="for"
     )
-    # NOR ("has none of") tag predicate — an object matches only when it carries none
-    # of these tags. Unlike has_tags/has_any_of_tags (which live on BasePolicyConfig and
-    # are shared with grant policies), this is FGAC-only: it renders into the WHEN clause
-    # and has no meaning for grant matching, so it is declared here.
+    # NOR ("has none of") is FGAC only — an object matches only when it carries none of these tags/attributes.
     has_none_of_tags: dict[str, str] | None = None
+    has_context_attributes: dict[str, str] | None = None
+    has_any_of_context_attributes: dict[str, str] | None = None
+    has_none_of_context_attributes: dict[str, str] | None = None
     has_identity_attributes: dict[str, str] | None = None
     has_any_of_identity_attributes: dict[str, str] | None = None
     has_none_of_identity_attributes: dict[str, str] | None = None
@@ -297,6 +398,14 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
         they support no wildcard. A no-op on FilterPolicyConfig (always None)."""
         return _reject_identity_attribute_wildcards(v)
 
+    @field_validator(*_CONTEXT_ATTRIBUTE_FIELDS, mode="before")
+    @classmethod
+    def _reject_empty_context_attribute_values(cls, v: dict | None) -> dict | None:
+        """Context attributes accept the '*' presence wildcard (like ``has_tags``)
+        but, unlike ``has_tags``, reject null/empty values rather than coercing
+        them. Applies to both mask and filter policies."""
+        return _reject_empty_context_attribute_values(v)
+
     @model_validator(mode="after")
     def _qualify_function(self) -> BaseFgacPolicyConfig:
         """Complete a partially-qualified ``function`` from the policy's own
@@ -318,8 +427,8 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
         column = data["column"]
         if not isinstance(column, dict):
             raise ValueError(  # noqa: TRY004 — pydantic wraps ValueError, not TypeError
-                "'column' must be a mapping — either an 'alias' with "
-                "'has_tags'/'has_any_of_tags', or a 'constant'"
+                "'column' must be a mapping — an 'alias' with "
+                "'has_tags'/'has_any_of_tags', a 'constant', or an 'expression'"
             )
         return {**{k: v for k, v in data.items() if k != "column"}, "columns": [column]}
 
@@ -334,6 +443,29 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
                 key="alias",
             )
         return data
+
+    @model_validator(mode="after")
+    def _validate_expression_column_aliases(self) -> BaseFgacPolicyConfig:
+        """A ``get_column_tag_value`` expression column's ``alias`` must name an
+        alias column declared in the same policy — it is the MATCH COLUMNS alias the
+        tag is read from (mirrors the SDK's ColumnTagValueExtraction requirement)."""
+        declared = {
+            c.alias
+            for c in (self.columns or [])
+            if isinstance(c, PolicyColumnAliasConfig)
+        }
+        for c in self.columns or []:
+            if (
+                isinstance(c, PolicyColumnExpressionConfig)
+                and c.expression.get_column_tag_value is not None
+            ):
+                alias = c.expression.get_column_tag_value.alias
+                if alias not in declared:
+                    raise ValueError(
+                        f"expression column references unknown column_alias '{alias}'; "
+                        "it must match an alias column in the same policy"
+                    )
+        return self
 
 
 class MaskPolicyConfig(BaseFgacPolicyConfig):
@@ -350,7 +482,7 @@ class MaskPolicyConfig(BaseFgacPolicyConfig):
         if self.columns and not isinstance(self.columns[0], PolicyColumnAliasConfig):
             raise ValueError(
                 "The first column of a mask policy must be a column alias, "
-                "not a constant (it is the column being masked)"
+                "not a constant nor an expression (it is the column being masked)"
             )
         return self
 

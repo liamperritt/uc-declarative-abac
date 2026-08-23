@@ -28,7 +28,11 @@ from databricks.sdk.service.sql import (
     StatementState,
 )
 
-from uc_declarative_abac.policies import Policy
+from uc_declarative_abac.policies import (
+    Policy,
+    render_column_tag_value,
+    render_tag_value,
+)
 from uc_declarative_abac.principals import Principal
 from uc_declarative_abac.privileges import SecurablePrivilege
 from uc_declarative_abac.securables import (
@@ -577,8 +581,9 @@ def _normalise_policy_info(
 def _extract_using_columns(using) -> tuple[str, ...]:
     """Project each USING COLUMNS function argument to its token, preserving
     declaration order. A column reference contributes its ``alias``; a constant
-    contributes its ``constant`` literal verbatim (e.g. ``'####'``) — the same
-    text the compiler emits, so constant args don't look changed on every run.
+    contributes its ``constant`` literal verbatim (e.g. ``'####'``); a
+    tag-introspection expression is rendered with the same compiler helpers the
+    desired side uses — all so args don't look changed on every run.
     """
     if not using:
         return ()
@@ -588,7 +593,27 @@ def _extract_using_columns(using) -> tuple[str, ...]:
             tokens.append(arg.alias)
         elif arg.constant is not None:
             tokens.append(arg.constant)
+        else:
+            expr_token = _render_using_expression(arg)
+            if expr_token is not None:
+                tokens.append(expr_token)
     return tuple(tokens)
+
+
+def _render_using_expression(arg) -> str | None:
+    """Render a tag-introspection USING COLUMNS argument to the same token the
+    compiler emits, so a round-tripped expression arg matches the desired state.
+    Returns None for an argument carrying no recognised expression."""
+    expr = getattr(arg, "function_arg_expression", None)
+    introspection = getattr(expr, "tag_introspection", None)
+    if introspection is None:
+        return None
+    if introspection.column_tag_value is not None:
+        col = introspection.column_tag_value
+        return render_column_tag_value(col.column_alias, col.tag_key)
+    if introspection.tag_value is not None:
+        return render_tag_value(introspection.tag_value.tag_key)
+    return None
 
 
 _RFA_KIND_TO_SDK_TYPE: dict[str, DestinationType] = {

@@ -187,6 +187,30 @@ def test_policy_executor_column_mask_renders_constant_using_token_verbatim():
     _assert_sql_contains(sql, "ON COLUMN email", "USING COLUMNS (domain, 'REDACTED')")
 
 
+def test_policy_executor_column_mask_renders_tag_introspection_using_tokens_verbatim():
+    """Pre-rendered tag-introspection tokens in using_columns are emitted verbatim."""
+    uc_helper = MagicMock()
+    diff = PolicyDiff(
+        to_create={
+            _make_policy(
+                match_columns=(("email", "has_column_tag_value('pii', 'email')"),),
+                on_column="email",
+                using_columns=(
+                    "get_column_tag_value(email, 'pii')",
+                    "get_tag_value('classification')",
+                ),
+            )
+        }
+    )
+
+    (sql,) = execute_policy_diff(uc_helper, diff, ChangeLogger())
+    _assert_sql_contains(
+        sql,
+        "USING COLUMNS (get_column_tag_value(email, 'pii'), "
+        "get_tag_value('classification'))",
+    )
+
+
 def test_policy_executor_column_mask_omits_using_when_no_extras():
     uc_helper = MagicMock()
     diff = PolicyDiff(to_create={_make_policy()})

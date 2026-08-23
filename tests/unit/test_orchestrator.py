@@ -3,10 +3,12 @@ from __future__ import annotations
 import logging
 import pathlib
 import time
+from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from uc_declarative_abac import orchestrator
 from uc_declarative_abac.orchestrator import run
 from uc_declarative_abac.policies import (
     PolicyDiff,
@@ -3727,6 +3729,107 @@ def test_orchestrator_keeps_members_of_group_with_future_expiry(
         workspace_client=mock_workspace_client,
         warehouse_id="test-warehouse-id",
         enable_group_management=True,
+    )
+
+    assert result.group_diff.members_to_remove == {}
+    assert result.group_diff.members_to_add == {}
+
+
+# ---------------------------------------------------------------------------
+# timezone → run_date routing (expiry evaluated in the configured timezone)
+# ---------------------------------------------------------------------------
+
+
+def test_orchestrator_uses_configured_timezone_to_compute_run_date_for_group_expiry(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    """The `timezone` arg is routed to the run_date used for expiry evaluation:
+    a group whose expiry_date equals 'today' in the configured timezone is
+    expired (members removed), proving the timezone reaches the run_date."""
+    captured_tz: list[str] = []
+
+    def _fake_run_date(timezone: str) -> date:
+        captured_tz.append(timezone)
+        return date(2025, 6, 15)
+
+    monkeypatch.setattr(orchestrator, "run_date_for_timezone", _fake_run_date)
+
+    config = {
+        "resources": {
+            "catalogs": {"my_catalog": {}},
+            "groups": {
+                "data_engineers": {
+                    "members": ["alice@example.com"],
+                    # expiry_date == injected run_date → expired (on-or-past)
+                    "expiry_date": "2025-06-15",
+                }
+            },
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_group_state(
+        mock_workspace_client,
+        group_name="data_engineers",
+        group_id="g-1",
+        member_ids=["u-1"],
+        users=[("u-1", "alice@example.com")],
+    )
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_group_management=True,
+        timezone="Australia/Melbourne",
+    )
+
+    assert "Australia/Melbourne" in captured_tz
+    assert "data_engineers" in result.group_diff.members_to_remove
+    removed = {p.name for p in result.group_diff.members_to_remove["data_engineers"]}
+    assert removed == {"alice@example.com"}
+
+
+def test_orchestrator_keeps_members_when_timezone_run_date_is_before_expiry(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    """When the timezone-derived run_date is before the group's expiry_date, the
+    group is active and members are retained."""
+
+    def _fake_run_date(timezone: str) -> date:
+        return date(2025, 6, 15)
+
+    monkeypatch.setattr(orchestrator, "run_date_for_timezone", _fake_run_date)
+
+    config = {
+        "resources": {
+            "catalogs": {"my_catalog": {}},
+            "groups": {
+                "data_engineers": {
+                    "members": ["alice@example.com"],
+                    "expiry_date": "2025-06-16",  # one day after run_date → active
+                }
+            },
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_group_state(
+        mock_workspace_client,
+        group_name="data_engineers",
+        group_id="g-1",
+        member_ids=["u-1"],
+        users=[("u-1", "alice@example.com")],
+    )
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_group_management=True,
+        timezone="Australia/Melbourne",
     )
 
     assert result.group_diff.members_to_remove == {}

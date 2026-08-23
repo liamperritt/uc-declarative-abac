@@ -8,6 +8,7 @@ from uc_declarative_abac.configs import (
     PolicyColumnAliasConfig,
     PolicyColumnConfig,
     PolicyColumnConstantConfig,
+    PolicyColumnExpressionConfig,
     ResourcesConfig,
 )
 from uc_declarative_abac.logger import ChangeLogger
@@ -122,12 +123,21 @@ def _ungoverned_tag_keys(
     # the resource (the keys are identity-attribute names, not tags).
     referenced |= set((policy.has_identity_attribute_tag_matches or {}).values())
     referenced |= set((policy.has_any_of_identity_attribute_tag_matches or {}).values())
-    referenced |= set((policy.has_none_of_identity_attribute_tag_matches or {}).values())
+    referenced |= set(
+        (policy.has_none_of_identity_attribute_tag_matches or {}).values()
+    )
     for col in policy.columns or []:
         if isinstance(col, PolicyColumnAliasConfig):
             referenced |= set(col.has_tags or {})
             referenced |= set(col.has_any_of_tags or {})
             referenced |= set(col.has_none_of_tags or {})
+        elif isinstance(col, PolicyColumnExpressionConfig):
+            # A tag-introspection expression reads a governed tag key at query time.
+            expr = col.expression
+            if expr.get_column_tag_value is not None:
+                referenced.add(expr.get_column_tag_value.tag)
+            elif expr.get_tag_value is not None:
+                referenced.add(expr.get_tag_value.tag)
     return referenced - governed_tag_names
 
 
@@ -161,7 +171,8 @@ def _build_policy(
 
 
 def _render_when(policy: BaseFgacPolicyConfig) -> str | None:
-    """Render the policy's WHEN clause. Combines the tag predicate with the two
+    """Render the policy's WHEN clause. Combines the tag predicate, the
+    context-attribute predicate family (mask and filter), and the two
     identity-attribute predicate families (mask-only; always empty on filters),
     AND-joining every non-empty sub-expression. Each family contributes an AND
     group (``has_*``), an OR group (``has_any_of_*``), and a NOR group
@@ -172,6 +183,12 @@ def _render_when(policy: BaseFgacPolicyConfig) -> str | None:
             policy.has_any_of_tags,
             policy.has_none_of_tags,
             _render_tag_atom,
+        ),
+        _render_match_expr(
+            policy.has_context_attributes,
+            policy.has_any_of_context_attributes,
+            policy.has_none_of_context_attributes,
+            _render_context_attribute_atom,
         ),
         _render_match_expr(
             policy.has_identity_attributes,
@@ -220,10 +237,29 @@ def _quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+def render_column_tag_value(column_alias: str, tag_key: str) -> str:
+    """Render a ``get_column_tag_value`` tag-introspection USING COLUMNS argument.
+    Shared by the compiler (config → SQL) and the fetcher (SDK → SQL) so the desired
+    and actual tokens are byte-identical and the policy diff converges."""
+    return f"get_column_tag_value({column_alias}, {_quote(tag_key)})"
+
+
+def render_tag_value(tag_key: str) -> str:
+    """Render a ``get_tag_value`` tag-introspection USING COLUMNS argument. Shared by
+    the compiler and the fetcher (see ``render_column_tag_value``)."""
+    return f"get_tag_value({_quote(tag_key)})"
+
+
 def _render_tag_atom(key: str, value: str) -> str:
     if value == _WILDCARD:
         return f"has_tag({_quote(key)})"
     return f"has_tag_value({_quote(key)}, {_quote(value)})"
+
+
+def _render_context_attribute_atom(key: str, value: str) -> str:
+    if value == _WILDCARD:
+        return f"has_context_attribute({_quote(key)})"
+    return f"has_context_attribute_value({_quote(key)}, {_quote(value)})"
 
 
 def _render_identity_attribute_atom(key: str, value: str) -> str:
@@ -246,7 +282,10 @@ def _build_match_columns(
         (
             col.alias,
             _render_match_expr(
-                col.has_tags, col.has_any_of_tags, col.has_none_of_tags, _render_tag_atom
+                col.has_tags,
+                col.has_any_of_tags,
+                col.has_none_of_tags,
+                _render_tag_atom,
             )
             or "TRUE",
         )
@@ -284,9 +323,16 @@ def _render_sql_constant(value: bool | float | str | date | datetime) -> str:
 
 def _using_token(col: PolicyColumnConfig) -> str:
     """The token a column contributes to USING COLUMNS — a SQL literal for a
-    constant column, or the column alias otherwise."""
+    constant column, a rendered tag-introspection function for an expression
+    column, or the column alias otherwise."""
     if isinstance(col, PolicyColumnConstantConfig):
         return _render_sql_constant(col.constant)
+    if isinstance(col, PolicyColumnExpressionConfig):
+        expr = col.expression
+        if expr.get_column_tag_value is not None:
+            v = expr.get_column_tag_value
+            return render_column_tag_value(v.alias, v.tag)
+        return render_tag_value(expr.get_tag_value.tag)
     return col.alias
 
 

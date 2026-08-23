@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import date, datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pytest
 
@@ -15,6 +17,7 @@ from uc_declarative_abac.utils import (
     parse_hierarchical_scope,
     parse_namespace_filter,
     scope_from_namespace_tokens,
+    run_date_for_timezone,
     validate_rfa_destinations,
 )
 
@@ -31,6 +34,36 @@ def test_utils_is_system_governed_tag_true_for_dotted_name():
 def test_utils_is_system_governed_tag_false_for_user_defined_name():
     assert is_system_governed_tag("pii") is False
     assert is_system_governed_tag("legacy_tag") is False
+
+
+# ---------------------------------------------------------------------------
+# run_date_for_timezone
+# ---------------------------------------------------------------------------
+
+
+def test_utils_run_date_for_timezone_returns_a_date():
+    assert isinstance(run_date_for_timezone("UTC"), date)
+
+
+@pytest.mark.parametrize("timezone", ["UTC", "Australia/Melbourne", "America/New_York"])
+def test_utils_run_date_for_timezone_matches_today_in_that_zone(timezone: str):
+    """The run date is 'today' as seen in the given IANA timezone."""
+    expected = datetime.now(ZoneInfo(timezone)).date()
+    assert run_date_for_timezone(timezone) == expected
+
+
+def test_utils_run_date_for_timezone_can_differ_from_utc_across_zones():
+    """Melbourne is well ahead of Honolulu; on some UTC instants the two zones
+    fall on different calendar dates. This asserts the function reads the zone
+    (not a single hardcoded UTC date) — the dates differ by at most one day."""
+    melbourne = run_date_for_timezone("Australia/Melbourne")
+    honolulu = run_date_for_timezone("Pacific/Honolulu")
+    assert abs((melbourne - honolulu).days) <= 1
+
+
+def test_utils_run_date_for_timezone_raises_for_unknown_zone():
+    with pytest.raises(ZoneInfoNotFoundError):
+        run_date_for_timezone("Not/AZone")
 
 
 # ---------------------------------------------------------------------------

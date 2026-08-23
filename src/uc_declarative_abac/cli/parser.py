@@ -32,6 +32,15 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         help="Catalog containing Unity Catalog system tables [default: system].",
     )
     parser.add_argument(
+        "--timezone",
+        type=str,
+        default=argparse.SUPPRESS,
+        help=(
+            "IANA timezone used to compute the run date for evaluating expiry_date "
+            "on groups and grant policies [default: UTC]. e.g. Australia/Melbourne."
+        ),
+    )
+    parser.add_argument(
         "--use-workspace-scim",
         action="store_true",
         default=argparse.SUPPRESS,

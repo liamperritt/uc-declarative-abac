@@ -4,3 +4,4 @@ privilege_management_scopes: '*'
 policy_deletion_scopes: '*'
 use_workspace_scim: true
 profile: field-eng-east
+timezone: Australia/Melbourne

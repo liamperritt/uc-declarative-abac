@@ -478,9 +478,7 @@ def test_policy_compiler_renders_when_from_has_any_of_identity_attributes():
 
 def test_policy_compiler_renders_when_from_has_identity_attribute_tag_matches():
     """has_identity_attribute_tag_matches renders as has_identity_attribute_tag_match(k, v)."""
-    policy_dict = _fgac_policy(
-        has_identity_attribute_tag_matches={"clearance": "pii"}
-    )
+    policy_dict = _fgac_policy(has_identity_attribute_tag_matches={"clearance": "pii"})
     config = ResourcesConfig.model_validate(
         _catalog_with_policy(policy_dict, level="table")
     )
@@ -566,6 +564,105 @@ def test_policy_compiler_combines_tags_and_identity_attribute_families_with_and(
     )
 
 
+# ---------------------------------------------------------------------------
+# context attribute functions → WHEN clause (mask and filter policies)
+# ---------------------------------------------------------------------------
+
+
+def test_policy_compiler_renders_when_from_has_context_attributes():
+    """has_context_attributes renders as has_context_attribute_value(k, v), AND-joined."""
+    policy_dict = _fgac_policy(
+        has_context_attributes={"request.client_id": "databricks-cli", "b": "v"}
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.when_condition == (
+        "has_context_attribute_value('b', 'v') "
+        "AND has_context_attribute_value('request.client_id', 'databricks-cli')"
+    )
+
+
+def test_policy_compiler_renders_when_from_has_context_attributes_wildcard():
+    """A '*' context-attribute value renders as a presence check has_context_attribute(k)."""
+    policy_dict = _fgac_policy(has_context_attributes={"request.is_on_behalf_of": "*"})
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.when_condition == "has_context_attribute('request.is_on_behalf_of')"
+
+
+def test_policy_compiler_renders_when_from_has_any_of_context_attributes():
+    """has_any_of_context_attributes OR-joins (sorted) and parenthesises when >1."""
+    policy_dict = _fgac_policy(
+        has_any_of_context_attributes={"tier": "gold", "alt": "silver"}
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.when_condition == (
+        "(has_context_attribute_value('alt', 'silver') "
+        "OR has_context_attribute_value('tier', 'gold'))"
+    )
+
+
+def test_policy_compiler_renders_when_from_has_none_of_context_attributes():
+    """has_none_of_context_attributes negates each atom and AND-joins them."""
+    policy_dict = _fgac_policy(has_none_of_context_attributes={"a": "v1", "b": "*"})
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.when_condition == (
+        "NOT has_context_attribute_value('a', 'v1') AND NOT has_context_attribute('b')"
+    )
+
+
+def test_policy_compiler_renders_context_attributes_on_filter_policy():
+    """Context attributes apply to filter policies too (unlike identity attributes)."""
+    policy_dict = _fgac_policy(
+        type="filter",
+        function="cat.default.filter_fn",
+        has_context_attributes={"request.is_on_behalf_of": "true"},
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.policy_type == PolicyType.FILTER
+    assert policy.when_condition == (
+        "has_context_attribute_value('request.is_on_behalf_of', 'true')"
+    )
+
+
+def test_policy_compiler_combines_tags_context_and_identity_families_with_and():
+    """The tag, context-attribute, and identity-attribute families AND-join into one
+    WHEN clause, in that order, each OR group parenthesised."""
+    policy_dict = _fgac_policy(
+        has_tags={"domain": "sales"},
+        has_context_attributes={"request.client_id": "databricks-cli"},
+        has_identity_attributes={"region": "emea"},
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.when_condition == (
+        "has_tag_value('domain', 'sales') "
+        "AND has_context_attribute_value('request.client_id', 'databricks-cli') "
+        "AND has_identity_attribute_value('region', 'emea')"
+    )
+
+
 def test_policy_compiler_logs_error_when_identity_attribute_tag_match_is_ungoverned():
     """The VALUE of a *_tag_matches entry is a governed tag key; an ungoverned one
     drops the policy and logs an UngovernedTagError."""
@@ -590,9 +687,7 @@ def test_policy_compiler_logs_error_when_identity_attribute_tag_match_is_ungover
 def test_policy_compiler_identity_attribute_value_is_not_tag_validated():
     """The keys/values of has_identity_attributes are identity data, not tags, so
     they are never checked against the governed-tag set."""
-    policy_dict = _fgac_policy(
-        has_identity_attributes={"not_a_tag": "some_value"}
-    )
+    policy_dict = _fgac_policy(has_identity_attributes={"not_a_tag": "some_value"})
     config = ResourcesConfig.model_validate(
         _catalog_with_policy(policy_dict, level="table")
     )
@@ -882,6 +977,89 @@ def test_policy_compiler_constant_column_does_not_break_ungoverned_tag_check():
     assert not change_logger.has_errors
     (policy,) = result
     assert policy.using_columns == ("'REDACTED'",)
+
+
+# ---------------------------------------------------------------------------
+# Expression columns (tag-introspection USING COLUMNS arguments)
+# ---------------------------------------------------------------------------
+
+
+def test_policy_compiler_renders_column_tag_value_expression_into_using():
+    """A get_column_tag_value expression renders get_column_tag_value(alias, 'tag')."""
+    policy_dict = _fgac_policy(
+        columns=[
+            {"alias": "email", "has_tags": {"pii": "email"}},
+            {"expression": {"get_column_tag_value": {"alias": "email", "tag": "pii"}}},
+        ],
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.on_column == "email"
+    assert policy.using_columns == ("get_column_tag_value(email, 'pii')",)
+    assert policy.match_columns == (("email", "has_tag_value('pii', 'email')"),)
+
+
+def test_policy_compiler_renders_tag_value_expression_into_using():
+    """A get_tag_value expression renders get_tag_value('tag')."""
+    policy_dict = _fgac_policy(
+        columns=[
+            {"alias": "email", "has_tags": {"pii": "email"}},
+            {"expression": {"get_tag_value": {"tag": "domain"}}},
+        ],
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.using_columns == ("get_tag_value('domain')",)
+
+
+def test_policy_compiler_preserves_expression_column_order_with_alias_and_constant():
+    """Expression, alias, and constant columns keep declaration order in using_columns."""
+    policy_dict = _fgac_policy(
+        columns=[
+            {"alias": "email", "has_tags": {"pii": "email"}},
+            {"expression": {"get_column_tag_value": {"alias": "email", "tag": "pii"}}},
+            {"constant": "REDACTED"},
+            {"expression": {"get_tag_value": {"tag": "domain"}}},
+        ],
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.using_columns == (
+        "get_column_tag_value(email, 'pii')",
+        "'REDACTED'",
+        "get_tag_value('domain')",
+    )
+
+
+def test_policy_compiler_logs_error_when_expression_tag_key_is_ungoverned():
+    """An expression column referencing an ungoverned tag drops the policy and logs."""
+    policy_dict = _fgac_policy(
+        columns=[
+            {"alias": "email", "has_tags": {"pii": "email"}},
+            {"expression": {"get_tag_value": {"tag": "ungoverned_key"}}},
+        ],
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+    change_logger = _change_logger()
+
+    result = _compile(config, governed_tag_names={"pii"}, change_logger=change_logger)
+
+    assert change_logger.has_errors
+    exceptions = [e.exception for e in change_logger.errors]
+    assert any(isinstance(e, UngovernedTagError) for e in exceptions)
+    assert "ungoverned_key" in " ".join(str(e) for e in exceptions)
+    assert result == set()
 
 
 # ---------------------------------------------------------------------------

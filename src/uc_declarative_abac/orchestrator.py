@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -70,6 +69,7 @@ from uc_declarative_abac.utils import (
     parse_hierarchical_scope,
     parse_namespace_filter,
     scope_from_namespace_tokens,
+    run_date_for_timezone,
 )
 
 _logger = logging.getLogger("uc_declarative_abac")
@@ -225,6 +225,7 @@ def run(
     workspace_client: WorkspaceClient,
     warehouse_id: str,
     system_catalog: str = "system",
+    timezone: str = "UTC",
     dry_run: bool = False,
     use_workspace_scim: bool = False,
     skip_users_fetch: bool = False,
@@ -314,6 +315,11 @@ def run(
     system service principals that appear in system tables but aren't resolvable
     via SCIM. Empty by default.
     """
+    # The run date used to evaluate every expiry_date (groups and grant policies)
+    # is computed once, in the configured timezone, so both compilers agree even
+    # across a midnight boundary.
+    run_date = run_date_for_timezone(timezone)
+
     # 1. Discover + load + resolve YAML
     config = load_config(config_dir, ref_override_strategy)
     catalog_names = [c.full_name for c in config.catalogs.values()]
@@ -461,7 +467,7 @@ def run(
     #      independently of the flag (mirroring ``_filter_taggable_attributes``). Without
     #      this the function's actual RFA state stays ``None`` when the flag is off, and an
     #      explicit empty list ("remove all") silently no-ops against a ``None`` actual.
-    desired_groups = compile_desired_groups(config, run_date=datetime.now(UTC).date())
+    desired_groups = compile_desired_groups(config, run_date=run_date)
     desired_group_names = {g.display_name for g in desired_groups}
     desired_group_ids = {g.id for g in desired_groups if g.id}
     desired_governed_tags = compile_desired_governed_tags(config)
@@ -682,7 +688,7 @@ def run(
             tags_for_privilege_matching,
             governed_tag_names,
             change_logger,
-            run_date=datetime.now(UTC).date(),
+            run_date=run_date,
         )
         in_scope_compiled_privileges = {
             p

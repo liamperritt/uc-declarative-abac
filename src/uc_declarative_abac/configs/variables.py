@@ -20,7 +20,8 @@ the definition that *writes* a placeholder is the one that binds it.
 
 Dict *keys* are literal by default, with one exception: the keys of a **user-data map**
 (the fields in ``TEMPLATABLE_KEY_FIELDS`` — the tag-name maps ``tags``, ``has_tags``,
-``has_any_of_tags``, ``has_none_of_tags``, plus the identity-attribute maps
+``has_any_of_tags``, ``has_none_of_tags``, plus the context-attribute maps
+``has_context_attributes`` and friends and the identity-attribute maps
 ``has_identity_attributes`` and friends)
 are user data, so a placeholder in such a key is bound and substituted like a value. Every other
 key — config field names, ``$ref``/``$defs`` targets, resource identity keys — stays literal;
@@ -66,8 +67,9 @@ _VARS_KEY = "$vars"
 # and is bound like any value placeholder. Every other key — config field names, ``$ref``/``$defs``
 # targets, and resource identity keys (catalogs/governed_tags/groups) — stays literal. Mirrors the
 # user-data maps in ``configs/models.py``: ``tags`` on taggables,
-# ``has_tags``/``has_any_of_tags``/``has_none_of_tags`` on policies and column aliases, and the
-# identity-attribute maps (``has_*_identity_attributes`` and ``has_*_identity_attribute_tag_matches``)
+# ``has_tags``/``has_any_of_tags``/``has_none_of_tags`` on policies and column aliases, the
+# context-attribute maps (``has_*_context_attributes``, whose keys are context-attribute names)
+# and the identity-attribute maps (``has_*_identity_attributes`` and ``has_*_identity_attribute_tag_matches``)
 # on FGAC policies (whose keys are identity-attribute names). A drift-guard test asserts these names
 # are real model fields, so this stays dependency-light (no runtime import of the model layer).
 TEMPLATABLE_KEY_FIELDS = frozenset(
@@ -76,6 +78,9 @@ TEMPLATABLE_KEY_FIELDS = frozenset(
         "has_tags",
         "has_any_of_tags",
         "has_none_of_tags",
+        "has_context_attributes",
+        "has_any_of_context_attributes",
+        "has_none_of_context_attributes",
         "has_identity_attributes",
         "has_any_of_identity_attributes",
         "has_none_of_identity_attributes",
