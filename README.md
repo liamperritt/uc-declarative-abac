@@ -548,8 +548,8 @@ Policy fields:
   - **alias column** — has an `alias` (a local name used to reference the column within this policy) and an optional `has_tags` / `has_any_of_tags` / `has_none_of_tags` block that selects the actual table column by tag (rendered as the `MATCH COLUMNS <condition> AS <alias>` clause, with the same AND / OR / negated-NOR semantics as the policy-level predicates). **If no tag block is given, the column matches *every* column** via `MATCH COLUMNS TRUE` — the [secure-by-default](https://docs.databricks.com/aws/en/data-governance/unity-catalog/abac/secure-by-default) pattern, where a schema-level mask gated on a `WHEN` clause (e.g. `review_status = pending`) masks all columns until a reviewer clears them. For **mask** policies, the **first** column in the list must be an alias column — it is the one the mask function is applied to (i.e. it becomes `ON COLUMN <alias>` in the generated SQL) and is also passed as the first argument to the function.
   - **constant column** — has a single `constant: <value>` and no tags. It is passed to the function as a constant rather than a table column, which is useful for parameterising a shared masking/filtering function per policy (e.g. a per-policy replacement value).
   - **expression column** — has a single `expression:` block holding a **tag-introspection function** ([beta](https://docs.databricks.com/aws/en/data-governance/unity-catalog/abac/core-concepts#tag-introspection-functions-beta), **requires DBR 18 LTS+**) that reads a governed tag's value at query time and passes it as a function argument — letting one shared function branch on a tag value. Exactly one of two variants, keyed to mirror the SQL function it renders:
-    - `get_column_tag_value: <tag_key>` **plus** `column_alias: <alias>` → `get_column_tag_value(<alias>, '<tag_key>')`, the value of `<tag_key>` on the matched column named by `<alias>` (which must be an alias column declared in the same policy).
-    - `get_tag_value: <tag_key>` → `get_tag_value('<tag_key>')`, the value of a securable-level `<tag_key>` (table/schema/catalog).
+    - `get_column_tag_value: {alias: <alias>, tag: <tag_key>}` → `get_column_tag_value(<alias>, '<tag_key>')`, the value of `<tag_key>` on the matched column named by `<alias>` (which must be an alias column declared in the same policy).
+    - `get_tag_value: {tag: <tag_key>}` → `get_tag_value('<tag_key>')`, the value of a securable-level `<tag_key>` (table/schema/catalog).
 
     The tag key must be non-empty and governed (validated like `has_tags` keys — an ungoverned key drops the policy at config-load). Example:
 
@@ -561,8 +561,9 @@ Policy fields:
         has_tags:
           pii_type: '*'
       - expression:
-          get_column_tag_value: pii_type   # → get_column_tag_value(pii, 'pii_type')
-          column_alias: pii
+          get_column_tag_value:            # → get_column_tag_value(pii, 'pii_type')
+            alias: pii
+            tag: pii_type
     function: platform.abac.mask_by_pii_type
     ```
 - **`for`** — restricts the policy to a single securable type. Accepts any case and the trailing-`s` plural form (e.g. `tables`, `Schema`, `CATALOGS`), normalised to the canonical type. For **`mask`** and **`filter`** policies it must be `table` (the default) — these only apply to tables. For **`grant`** policies it may be any of `catalog`, `schema`, `table`, `volume`; when set, every listed privilege must be applicable to that type (e.g. only `read_volume`, `write_volume`, `manage`, `read_metadata`, `all_privileges` apply to `volume`) or config-load fails, and the grant is only applied to matched securables of that type.

@@ -123,7 +123,9 @@ def _ungoverned_tag_keys(
     # the resource (the keys are identity-attribute names, not tags).
     referenced |= set((policy.has_identity_attribute_tag_matches or {}).values())
     referenced |= set((policy.has_any_of_identity_attribute_tag_matches or {}).values())
-    referenced |= set((policy.has_none_of_identity_attribute_tag_matches or {}).values())
+    referenced |= set(
+        (policy.has_none_of_identity_attribute_tag_matches or {}).values()
+    )
     for col in policy.columns or []:
         if isinstance(col, PolicyColumnAliasConfig):
             referenced |= set(col.has_tags or {})
@@ -132,9 +134,10 @@ def _ungoverned_tag_keys(
         elif isinstance(col, PolicyColumnExpressionConfig):
             # A tag-introspection expression reads a governed tag key at query time.
             expr = col.expression
-            tag_key = expr.get_column_tag_value or expr.get_tag_value
-            if tag_key:
-                referenced.add(tag_key)
+            if expr.get_column_tag_value is not None:
+                referenced.add(expr.get_column_tag_value.tag)
+            elif expr.get_tag_value is not None:
+                referenced.add(expr.get_tag_value.tag)
     return referenced - governed_tag_names
 
 
@@ -279,7 +282,10 @@ def _build_match_columns(
         (
             col.alias,
             _render_match_expr(
-                col.has_tags, col.has_any_of_tags, col.has_none_of_tags, _render_tag_atom
+                col.has_tags,
+                col.has_any_of_tags,
+                col.has_none_of_tags,
+                _render_tag_atom,
             )
             or "TRUE",
         )
@@ -324,12 +330,9 @@ def _using_token(col: PolicyColumnConfig) -> str:
     if isinstance(col, PolicyColumnExpressionConfig):
         expr = col.expression
         if expr.get_column_tag_value is not None:
-            # column_alias is guaranteed present alongside get_column_tag_value
-            # by TagIntrospectionExpressionConfig validation.
-            return render_column_tag_value(
-                expr.column_alias or "", expr.get_column_tag_value
-            )
-        return render_tag_value(expr.get_tag_value or "")
+            v = expr.get_column_tag_value
+            return render_column_tag_value(v.alias, v.tag)
+        return render_tag_value(expr.get_tag_value.tag)
     return col.alias
 
 

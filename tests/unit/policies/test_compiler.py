@@ -478,9 +478,7 @@ def test_policy_compiler_renders_when_from_has_any_of_identity_attributes():
 
 def test_policy_compiler_renders_when_from_has_identity_attribute_tag_matches():
     """has_identity_attribute_tag_matches renders as has_identity_attribute_tag_match(k, v)."""
-    policy_dict = _fgac_policy(
-        has_identity_attribute_tag_matches={"clearance": "pii"}
-    )
+    policy_dict = _fgac_policy(has_identity_attribute_tag_matches={"clearance": "pii"})
     config = ResourcesConfig.model_validate(
         _catalog_with_policy(policy_dict, level="table")
     )
@@ -589,9 +587,7 @@ def test_policy_compiler_renders_when_from_has_context_attributes():
 
 def test_policy_compiler_renders_when_from_has_context_attributes_wildcard():
     """A '*' context-attribute value renders as a presence check has_context_attribute(k)."""
-    policy_dict = _fgac_policy(
-        has_context_attributes={"request.is_on_behalf_of": "*"}
-    )
+    policy_dict = _fgac_policy(has_context_attributes={"request.is_on_behalf_of": "*"})
     config = ResourcesConfig.model_validate(
         _catalog_with_policy(policy_dict, level="table")
     )
@@ -618,17 +614,14 @@ def test_policy_compiler_renders_when_from_has_any_of_context_attributes():
 
 def test_policy_compiler_renders_when_from_has_none_of_context_attributes():
     """has_none_of_context_attributes negates each atom and AND-joins them."""
-    policy_dict = _fgac_policy(
-        has_none_of_context_attributes={"a": "v1", "b": "*"}
-    )
+    policy_dict = _fgac_policy(has_none_of_context_attributes={"a": "v1", "b": "*"})
     config = ResourcesConfig.model_validate(
         _catalog_with_policy(policy_dict, level="table")
     )
 
     (policy,) = _compile(config)
     assert policy.when_condition == (
-        "NOT has_context_attribute_value('a', 'v1') "
-        "AND NOT has_context_attribute('b')"
+        "NOT has_context_attribute_value('a', 'v1') AND NOT has_context_attribute('b')"
     )
 
 
@@ -694,9 +687,7 @@ def test_policy_compiler_logs_error_when_identity_attribute_tag_match_is_ungover
 def test_policy_compiler_identity_attribute_value_is_not_tag_validated():
     """The keys/values of has_identity_attributes are identity data, not tags, so
     they are never checked against the governed-tag set."""
-    policy_dict = _fgac_policy(
-        has_identity_attributes={"not_a_tag": "some_value"}
-    )
+    policy_dict = _fgac_policy(has_identity_attributes={"not_a_tag": "some_value"})
     config = ResourcesConfig.model_validate(
         _catalog_with_policy(policy_dict, level="table")
     )
@@ -998,7 +989,7 @@ def test_policy_compiler_renders_column_tag_value_expression_into_using():
     policy_dict = _fgac_policy(
         columns=[
             {"alias": "email", "has_tags": {"pii": "email"}},
-            {"expression": {"get_column_tag_value": "pii", "column_alias": "email"}},
+            {"expression": {"get_column_tag_value": {"alias": "email", "tag": "pii"}}},
         ],
     )
     config = ResourcesConfig.model_validate(
@@ -1016,7 +1007,7 @@ def test_policy_compiler_renders_tag_value_expression_into_using():
     policy_dict = _fgac_policy(
         columns=[
             {"alias": "email", "has_tags": {"pii": "email"}},
-            {"expression": {"get_tag_value": "domain"}},
+            {"expression": {"get_tag_value": {"tag": "domain"}}},
         ],
     )
     config = ResourcesConfig.model_validate(
@@ -1032,9 +1023,9 @@ def test_policy_compiler_preserves_expression_column_order_with_alias_and_consta
     policy_dict = _fgac_policy(
         columns=[
             {"alias": "email", "has_tags": {"pii": "email"}},
-            {"expression": {"get_column_tag_value": "pii", "column_alias": "email"}},
+            {"expression": {"get_column_tag_value": {"alias": "email", "tag": "pii"}}},
             {"constant": "REDACTED"},
-            {"expression": {"get_tag_value": "domain"}},
+            {"expression": {"get_tag_value": {"tag": "domain"}}},
         ],
     )
     config = ResourcesConfig.model_validate(
@@ -1054,7 +1045,7 @@ def test_policy_compiler_logs_error_when_expression_tag_key_is_ungoverned():
     policy_dict = _fgac_policy(
         columns=[
             {"alias": "email", "has_tags": {"pii": "email"}},
-            {"expression": {"get_tag_value": "ungoverned_key"}},
+            {"expression": {"get_tag_value": {"tag": "ungoverned_key"}}},
         ],
     )
     config = ResourcesConfig.model_validate(

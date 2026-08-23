@@ -7,6 +7,8 @@ definitions:
       name: mask_pii
       comment: Policy for masking columns with PII values via 'uc_gov_pii' column tag
       type: mask
+      has_tags:
+        uc_gov_pipeline: '*'
       columns:
         - alias: pii
           has_any_of_tags:
@@ -17,8 +19,12 @@ definitions:
             uc_gov_managed_by: uc_declarative_abac
         - constant: '{{ constant }}'
         - expression:
-            get_column_tag_value: uc_gov_pipeline
-            column_alias: pii
+            get_column_tag_value:
+              alias: pii
+              tag: uc_gov_pipeline
+        - expression:
+            get_tag_value:
+              tag: uc_gov_pipeline
 
       function:
         parameters:
@@ -26,7 +32,9 @@ definitions:
             type: string
           - name: mask_value
             type: string
-          - name: tag_value
+          - name: pipeline1
+            type: string
+          - name: pipeline2
             type: string
         return: "CONCAT(mask_value, SUBSTRING(pii, -4))"
       except:

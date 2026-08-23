@@ -106,6 +106,15 @@ def _reject_empty_context_attribute_values(attrs: dict | None) -> dict | None:
     return attrs
 
 
+def _reject_blank_str(value: str, field_label: str) -> str:
+    """Reject a string that is empty or contains only whitespace."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(
+            f"{field_label} must be a non-empty, non-whitespace string value"
+        )
+    return value
+
+
 def _check_duplicate_names(
     items: list,
     child_label: str,
@@ -223,19 +232,48 @@ class PolicyColumnConstantConfig(BaseConfig):
     constant: PolicyColumnConstantValue
 
 
+class ColumnTagValueExtractionConfig(BaseConfig):
+    """Args for get_column_tag_value(alias, 'tag') — a governed tag on the matched
+    column named by ``alias``. Mirrors the SDK's ColumnTagValueExtraction."""
+
+    alias: str
+    tag: str
+
+    @field_validator("alias", mode="after")
+    @classmethod
+    def _validate_alias(cls, v: str) -> str:
+        return _reject_blank_str(v, "alias")
+
+    @field_validator("tag", mode="after")
+    @classmethod
+    def _validate_tag(cls, v: str) -> str:
+        return _reject_blank_str(v, "tag")
+
+
+class TagValueExtractionConfig(BaseConfig):
+    """Arg for get_tag_value('tag') — a securable-level governed tag. Mirrors the
+    SDK's TagValueExtraction."""
+
+    tag: str
+
+    @field_validator("tag", mode="after")
+    @classmethod
+    def _validate_tag(cls, v: str) -> str:
+        return _reject_blank_str(v, "tag")
+
+
 class TagIntrospectionExpressionConfig(BaseConfig):
     """A tag-introspection expression passed as a USING COLUMNS argument (beta;
-    requires DBR 18 LTS+). Exactly one variant is set, and its value is the
-    governed tag key:
+    requires DBR 18 LTS+). Exactly one variant must be set:
 
-    - ``get_column_tag_value`` (with ``column_alias``) → ``get_column_tag_value(alias,
-      'tag')`` reads a governed tag on a matched column.
-    - ``get_tag_value`` → ``get_tag_value('tag')`` reads a securable-level governed tag.
+    - ``get_column_tag_value`` with nested ``alias`` and ``tag`` fields →
+      ``get_column_tag_value(alias, 'tag')`` reads a governed tag on a matched column.
+    - ``get_tag_value`` with nested ``tag`` field → ``get_tag_value('tag')`` reads a
+      securable-level governed tag.
     """
 
-    get_column_tag_value: str | None = None
-    column_alias: str | None = None
-    get_tag_value: str | None = None
+    get_column_tag_value: ColumnTagValueExtractionConfig | None = None
+    get_tag_value: TagValueExtractionConfig | None = None
 
     @model_validator(mode="after")
     def _validate_variant(self) -> TagIntrospectionExpressionConfig:
@@ -251,22 +289,6 @@ class TagIntrospectionExpressionConfig(BaseConfig):
             raise ValueError(
                 "expression column must set exactly one of 'get_column_tag_value' "
                 "or 'get_tag_value'"
-            )
-        tag_key = self.get_column_tag_value or self.get_tag_value
-        if not tag_key or not tag_key.strip():
-            raise ValueError(
-                "expression column tag key must be a non-empty, non-whitespace value"
-            )
-        if self.get_column_tag_value is not None:
-            if not self.column_alias or not self.column_alias.strip():
-                raise ValueError(
-                    "'get_column_tag_value' expression requires a non-empty "
-                    "'column_alias' referencing a column alias in the same policy"
-                )
-        elif self.column_alias is not None:
-            raise ValueError(
-                "'column_alias' is only valid with 'get_column_tag_value', "
-                "not 'get_tag_value'"
             )
         return self
 
@@ -424,7 +446,7 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
 
     @model_validator(mode="after")
     def _validate_expression_column_aliases(self) -> BaseFgacPolicyConfig:
-        """A ``get_column_tag_value`` expression column's ``column_alias`` must name an
+        """A ``get_column_tag_value`` expression column's ``alias`` must name an
         alias column declared in the same policy — it is the MATCH COLUMNS alias the
         tag is read from (mirrors the SDK's ColumnTagValueExtraction requirement)."""
         declared = {
@@ -433,9 +455,12 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
             if isinstance(c, PolicyColumnAliasConfig)
         }
         for c in self.columns or []:
-            if isinstance(c, PolicyColumnExpressionConfig):
-                alias = c.expression.column_alias
-                if alias is not None and alias not in declared:
+            if (
+                isinstance(c, PolicyColumnExpressionConfig)
+                and c.expression.get_column_tag_value is not None
+            ):
+                alias = c.expression.get_column_tag_value.alias
+                if alias not in declared:
                     raise ValueError(
                         f"expression column references unknown column_alias '{alias}'; "
                         "it must match an alias column in the same policy"
