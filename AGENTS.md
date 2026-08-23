@@ -143,6 +143,18 @@ Multiple tags on a policy use AND semantics — all must match.
 
 Always use the `.venv` virtual environment when running `python`, `pip`, `pytest`, or any other Python tool — e.g. `.venv/bin/python`, `.venv/bin/pytest`.
 
+## Linting
+
+**Always run `ruff` after making changes — before considering any task done.** CI enforces
+both, and a green `pytest` is not enough on its own:
+
+- `.venv/bin/ruff check <files>` — lints. This covers **test files too**, not just `src/`
+  (e.g. `B017` blind-except, `PLR0402` import-alias) — run it over every file you touched,
+  including anything a tester/implementer sub-agent wrote.
+- `.venv/bin/ruff format --check <files>` — verifies formatting; fix with
+  `.venv/bin/ruff format <files>`. Scope the command to the files you changed so you don't
+  sweep in unrelated pre-existing drift.
+
 ## Code style
 
 - Python project — use standard Python conventions

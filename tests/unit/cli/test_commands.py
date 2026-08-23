@@ -241,6 +241,26 @@ def test_commands_deploy_forwards_system_catalog_from_run_settings_to_orchestrat
     assert captured["system_catalog"] == "system_catalog_proxy"
 
 
+def test_commands_deploy_forwards_timezone_from_run_settings_to_orchestrator(
+    monkeypatch,
+):
+    captured: dict = {}
+    settings = RunSettings(
+        config_dir=Path("cfg"),
+        warehouse_id="wh",
+        timezone="Australia/Melbourne",
+    )
+
+    monkeypatch.setattr(cli, "resolve_settings", lambda *_args, **_kwargs: settings)
+    monkeypatch.setattr(cli, "run", lambda **kwargs: captured.update(kwargs))
+    monkeypatch.setattr(cli, "WorkspaceClient", lambda **_: object())
+
+    exit_code = cli.run_cli(["deploy"])
+
+    assert exit_code == 0
+    assert captured["timezone"] == "Australia/Melbourne"
+
+
 def test_commands_deploy_missing_warehouse_returns_config_error(monkeypatch):
     monkeypatch.setattr(cli, "WorkspaceClient", lambda **_: object())
     exit_code = cli.run_cli(["deploy", "--config-dir", "cfg"])
@@ -260,8 +280,7 @@ def test_commands_reports_actionable_error_when_warehouse_id_is_missing(
     assert "[ERROR]" in error or "✖" in error
     assert "--warehouse-id" in error
     assert "HOW TO FIX" in error or (
-        "Hint:" in error
-        and ("--warehouse-id" in error or "settings" in error.lower())
+        "Hint:" in error and ("--warehouse-id" in error or "settings" in error.lower())
     )
 
 

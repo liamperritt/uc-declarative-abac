@@ -3,8 +3,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from uc_declarative_abac.utils import load_yaml_file
 
@@ -27,6 +28,7 @@ _ENV_FIELD_MAP: dict[str, str] = {
     "system_catalog": "SYSTEM_CATALOG",
     "warehouse_id": "WAREHOUSE_ID",
     "profile": "PROFILE",
+    "timezone": "TIMEZONE",
     "use_workspace_scim": "USE_WORKSPACE_SCIM",
     "skip_users_fetch": "SKIP_USERS_FETCH",
     "enable_tag_management": "ENABLE_TAG_MANAGEMENT",
@@ -60,6 +62,7 @@ class RunSettings(BaseModel):
     system_catalog: str = "system"
     warehouse_id: str | None = None
     profile: str | None = None
+    timezone: str = "UTC"
     use_workspace_scim: bool = False
     skip_users_fetch: bool = False
     enable_tag_management: bool = False
@@ -81,6 +84,17 @@ class RunSettings(BaseModel):
     force: bool = False
     ref_override_strategy: Literal["merge", "replace"] = "merge"
     max_parallel_changes: int = Field(default=8, ge=1)
+
+    @field_validator("timezone")
+    @classmethod
+    def _validate_timezone(cls, v: str) -> str:
+        """Reject an unknown IANA timezone at load time (fail loud), so a typo
+        never silently skews the run date used for expiry_date evaluation."""
+        try:
+            ZoneInfo(v)
+        except Exception as exc:
+            raise ValueError(f"unknown timezone '{v}'") from exc
+        return v
 
 
 def _coerce_env_value(field_name: str, raw: str, field_info: Any) -> Any:
