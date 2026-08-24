@@ -17,8 +17,15 @@ from uc_declarative_abac.utils import (
     ExecutionError,
     OrchestratorError,
     PrincipalValidationError,
+    Scope,
     is_system_account_group,
 )
+
+
+def _in_scope(scope: Scope | None, name: str) -> bool:
+    """Whether ``name`` is in ``scope``. ``None`` ⇒ unscoped (matches all) — the
+    default that keeps the legacy enable-only behaviour unchanged."""
+    return scope is None or scope.matches(name)
 
 
 def _resolve_group_members(
@@ -114,8 +121,8 @@ def _handle_missing_group(
             ExecutionError(
                 context=f"Configure GROUP {name}",
                 exception=OrchestratorError(
-                    f"Group '{name}' does not exist. Pass "
-                    "--enable-group-creation to create it."
+                    f"Group '{name}' does not exist. Add it to "
+                    "--group-creation-scopes to create it."
                 ),
             )
         )
@@ -189,6 +196,7 @@ def _diff_group_deletes(
     desired: set[Group],
     all_account_groups: set[Group],
     enable_deletion: bool,
+    deletion_scope: Scope | None = None,
 ) -> set[Group]:
     """Account groups absent from config that should be deleted, when deletion is enabled.
 
@@ -210,6 +218,7 @@ def _diff_group_deletes(
         and not (g.id and g.id in desired_ids)
         and not g.external_id
         and not is_system_account_group(g.display_name)
+        and _in_scope(deletion_scope, g.display_name)
     }
 
 
@@ -223,6 +232,9 @@ def compute_group_diff(
     enable_group_deletion: bool = False,
     ignore_unresolvable: frozenset[str] = frozenset(),
     all_account_groups: set[Group] = frozenset(),
+    creation_scope: Scope | None = None,
+    management_scope: Scope | None = None,
+    deletion_scope: Scope | None = None,
 ) -> GroupDiff:
     """Compute the group-management diff between desired and actual.
 
@@ -258,15 +270,27 @@ def compute_group_diff(
     ``ignore_unresolvable`` silences the resolution-failure warning for the
     listed actual-state member identifiers (the member is still dropped, so it is
     never removed).
+
+    ``creation_scope`` / ``management_scope`` / ``deletion_scope`` further restrict
+    each gate to groups whose display name they match; ``None`` (the default)
+    means unscoped, preserving the legacy enable-only behaviour.
     """
     actual_by_name = {g.display_name: g for g in actual}
     actual_by_id = {g.id: g for g in actual if g.id}
 
     diff = GroupDiff()
     diff.groups_to_delete = _diff_group_deletes(
-        desired, all_account_groups, enable_group_deletion
+        desired, all_account_groups, enable_group_deletion, deletion_scope
     )
     for desired_group in desired:
+        # Per-group effective gates: a gate applies only when it is enabled AND
+        # the group's display name is in its scope.
+        name = desired_group.display_name
+        grp_create = enable_group_creation and _in_scope(creation_scope, name)
+        grp_manage = enable_group_management and _in_scope(management_scope, name)
+        if not grp_create and not grp_manage:
+            continue
+
         actual_group, ok = _find_actual_group(
             desired_group, actual_by_name, actual_by_id, change_logger
         )
@@ -279,14 +303,14 @@ def compute_group_diff(
                 resolver,
                 change_logger,
                 ignore_unresolvable,
-                enable_group_creation,
-                enable_group_management,
+                grp_create,
+                grp_manage,
                 diff,
             )
             continue
 
         # Existing group: only reconciled (and renamed) under group management.
-        if not enable_group_management:
+        if not grp_manage:
             continue
         if actual_group.external_id:
             change_logger.log_error(

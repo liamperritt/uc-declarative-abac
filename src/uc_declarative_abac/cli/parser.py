@@ -68,13 +68,19 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         "--enable-tag-management",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="Permit the engine to create/update/remove tag assignments on securables. Off by default.",
+        help=(
+            "Permit the engine to create/update/remove tag assignments on securables. "
+            "Off by default. (Deprecated: use --tag-management-scopes.)"
+        ),
     )
     parser.add_argument(
         "--enable-privilege-management",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="Permit the engine to GRANT/REVOKE privileges via SQL. Off by default.",
+        help=(
+            "Permit the engine to GRANT/REVOKE privileges via SQL. Off by default. "
+            "(Deprecated: use --privilege-management-scopes.)"
+        ),
     )
     parser.add_argument(
         "--enable-taggable-management",
@@ -82,7 +88,7 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         default=argparse.SUPPRESS,
         help=(
             "Permit the engine to update attributes (e.g. owner) on existing catalogs, schemas, "
-            "tables, and volumes. Off by default."
+            "tables, and volumes. Off by default. (Deprecated: use --taggable-management-scopes.)"
         ),
     )
     parser.add_argument(
@@ -91,7 +97,7 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         default=argparse.SUPPRESS,
         help=(
             "Permit the engine to create catalogs, schemas, tables, and volumes declared in "
-            "config but absent from UC. Off by default."
+            "config but absent from UC. Off by default. (Deprecated: use --taggable-creation-scopes.)"
         ),
     )
     parser.add_argument(
@@ -102,7 +108,7 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         help=(
             "Comma-separated catalog names or qualified schema names (<catalog>.<schema>) to "
             "scope tag management to (default = all configured catalogs). No effect unless "
-            "--enable-tag-management is set."
+            "--enable-tag-management is set. (Deprecated: use --tag-management-scopes.)"
         ),
     )
     parser.add_argument(
@@ -113,7 +119,8 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         help=(
             "Comma-separated catalog names or qualified schema names (<catalog>.<schema>) to "
             "scope privilege management to (default = all configured catalogs). No effect "
-            "unless --enable-privilege-management is set."
+            "unless --enable-privilege-management is set. "
+            "(Deprecated: use --privilege-management-scopes.)"
         ),
     )
     parser.add_argument(
@@ -125,7 +132,7 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
             "Comma-separated catalog names or qualified schema names (<catalog>.<schema>) to "
             "scope taggable attribute updates (e.g. owner) to (default = all configured "
             "catalogs). Function attributes always flow through. No effect unless "
-            "--enable-taggable-management is set."
+            "--enable-taggable-management is set. (Deprecated: use --taggable-management-scopes.)"
         ),
     )
     parser.add_argument(
@@ -137,7 +144,7 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
             "Comma-separated catalog names or qualified schema names (<catalog>.<schema>) to "
             "scope creation of missing catalogs/schemas/tables/volumes to (default = all "
             "configured catalogs). Function creation always flows through. No effect unless "
-            "--enable-taggable-creation is set."
+            "--enable-taggable-creation is set. (Deprecated: use --taggable-creation-scopes.)"
         ),
     )
     parser.add_argument(
@@ -148,7 +155,121 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         help=(
             "Comma-separated catalog names or qualified schema names (<catalog>.<schema>) to "
             "scope policy deletion to (default = all configured catalogs). No effect unless "
-            "--enable-policy-deletion is set."
+            "--enable-policy-deletion is set. (Deprecated: use --policy-deletion-scopes.)"
+        ),
+    )
+    _HIER_SCOPE_GRAMMAR = (
+        "Comma-separated dotted namespace prefixes. Empty (default) disables the "
+        "feature; '*' covers all resources; a trailing '*' is a raw name prefix "
+        "('main.*' = everything under main excluding the catalog node, "
+        "'main.sales*' = matching schemas and their subtrees); an entry without "
+        "'*' covers that node and its whole subtree ('main' = the catalog and "
+        "everything under it, but not 'maintenance')."
+    )
+    _FLAT_SCOPE_GRAMMAR = (
+        "Comma-separated names. Empty (default) disables the feature; '*' covers "
+        "all; a trailing '*' is a raw name prefix ('team_*'); any other entry is "
+        "an exact name."
+    )
+    parser.add_argument(
+        "--tag-management-scopes",
+        type=str,
+        metavar="SCOPES",
+        default=argparse.SUPPRESS,
+        help=(
+            "Scope tag-assignment management to matching securables. "
+            f"{_HIER_SCOPE_GRAMMAR} Supersedes --enable-tag-management and "
+            "--manage-tags-for-namespaces."
+        ),
+    )
+    parser.add_argument(
+        "--privilege-management-scopes",
+        type=str,
+        metavar="SCOPES",
+        default=argparse.SUPPRESS,
+        help=(
+            "Scope GRANT/REVOKE privilege management to matching securables. "
+            f"{_HIER_SCOPE_GRAMMAR} Supersedes --enable-privilege-management and "
+            "--manage-privileges-for-namespaces."
+        ),
+    )
+    parser.add_argument(
+        "--taggable-management-scopes",
+        type=str,
+        metavar="SCOPES",
+        default=argparse.SUPPRESS,
+        help=(
+            "Scope taggable attribute updates (e.g. owner) to matching securables. "
+            f"Function attributes always flow through. {_HIER_SCOPE_GRAMMAR} "
+            "Supersedes --enable-taggable-management and "
+            "--manage-taggables-for-namespaces."
+        ),
+    )
+    parser.add_argument(
+        "--taggable-creation-scopes",
+        type=str,
+        metavar="SCOPES",
+        default=argparse.SUPPRESS,
+        help=(
+            "Scope creation of missing catalogs/schemas/tables/volumes to matching "
+            f"securables. Function creation always flows through. {_HIER_SCOPE_GRAMMAR} "
+            "Supersedes --enable-taggable-creation and --create-taggables-for-namespaces."
+        ),
+    )
+    parser.add_argument(
+        "--policy-deletion-scopes",
+        type=str,
+        metavar="SCOPES",
+        default=argparse.SUPPRESS,
+        help=(
+            "Scope mask/filter policy deletion to matching securables. "
+            f"{_HIER_SCOPE_GRAMMAR} Requires interactive confirmation unless --force "
+            "is set. Supersedes --enable-policy-deletion and "
+            "--delete-policies-for-namespaces."
+        ),
+    )
+    parser.add_argument(
+        "--group-creation-scopes",
+        type=str,
+        metavar="SCOPES",
+        default=argparse.SUPPRESS,
+        help=(
+            "Scope account-group creation to matching groups (by display name). "
+            f"{_FLAT_SCOPE_GRAMMAR} Supersedes --enable-group-creation."
+        ),
+    )
+    parser.add_argument(
+        "--group-management-scopes",
+        type=str,
+        metavar="SCOPES",
+        default=argparse.SUPPRESS,
+        help=(
+            "Scope account-group membership reconciliation to matching groups (by "
+            f"display name). {_FLAT_SCOPE_GRAMMAR} Supersedes --enable-group-management."
+        ),
+    )
+    parser.add_argument(
+        "--group-deletion-scopes",
+        type=str,
+        metavar="SCOPES",
+        default=argparse.SUPPRESS,
+        help=(
+            "Scope account-group deletion to matching groups (by display name). "
+            f"{_FLAT_SCOPE_GRAMMAR} Requires --group-creation-scopes to be active and "
+            "interactive confirmation unless --force is set. Supersedes "
+            "--enable-group-deletion."
+        ),
+    )
+    parser.add_argument(
+        "--governed-tag-deletion-scopes",
+        type=str,
+        metavar="SCOPES",
+        default=argparse.SUPPRESS,
+        help=(
+            "Scope governed-tag deletion to matching tags (by name). "
+            f"{_FLAT_SCOPE_GRAMMAR} System-managed tags are never deleted. Requires "
+            "interactive confirmation unless --force is set. Supersedes "
+            "--enable-governed-tag-deletion."
         ),
     )
     parser.add_argument(
@@ -208,7 +329,8 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
             "don't yet exist, with their configured members (the engine automatically gets the "
             "MANAGER role on groups it creates). Off by default. Independent of "
             "--enable-group-management: this flag only creates missing groups; managing the "
-            "membership of existing groups requires --enable-group-management."
+            "membership of existing groups requires --enable-group-management. "
+            "(Deprecated: use --group-creation-scopes.)"
         ),
     )
     parser.add_argument(
@@ -220,7 +342,8 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
             "under resources.groups — adding configured members and removing members absent "
             "from config (an empty members list removes all). Off by default. Requires the "
             "engine principal to hold the MANAGER role on each managed group. Does not create "
-            "missing groups (use --enable-group-creation for that)."
+            "missing groups (use --enable-group-creation for that). "
+            "(Deprecated: use --group-management-scopes.)"
         ),
     )
     parser.add_argument(
@@ -234,7 +357,7 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
             "(IdP-provisioned) groups and account system groups (account users, account "
             "admins) are never deleted. Requires --enable-group-creation and at least one "
             "group declared under resources.groups. Requires interactive confirmation at "
-            "the terminal unless --force is set."
+            "the terminal unless --force is set. (Deprecated: use --group-deletion-scopes.)"
         ),
     )
     parser.add_argument(
@@ -244,7 +367,8 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         help=(
             "Permit the engine to delete governed tags (account-level tag policies) that exist "
             "in the account but are absent from config. Off by default. Requires interactive "
-            "confirmation at the terminal unless --force is set."
+            "confirmation at the terminal unless --force is set. "
+            "(Deprecated: use --governed-tag-deletion-scopes.)"
         ),
     )
     parser.add_argument(

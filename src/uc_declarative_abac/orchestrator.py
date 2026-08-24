@@ -64,9 +64,12 @@ from uc_declarative_abac.types import SecurableType
 from uc_declarative_abac.utils import (
     ExecutionBatchError,
     OrchestratorError,
-    in_namespace_scope,
+    Scope,
+    parse_flat_scope,
+    parse_hierarchical_scope,
     parse_namespace_filter,
     run_date_for_timezone,
+    scope_from_namespace_tokens,
 )
 
 _logger = logging.getLogger("uc_declarative_abac")
@@ -89,20 +92,20 @@ class OrchestratorDiffsResult:
 
 def _filter_taggable_attributes(
     attrs: set[SecurableAttributes],
-    in_scope_namespaces: frozenset[str],
+    scope: Scope,
 ) -> set[SecurableAttributes]:
     """Drop non-function attributes whose namespace isn't in scope.
 
     FUNCTION attributes always flow through (functions are engine-managed
-    independently of the taggable-management gate). When ``in_scope_namespaces``
-    is empty, this collapses to "function attributes only" — which is the
-    behaviour when ``--enable-taggable-management`` is off.
+    independently of the taggable-management gate). When ``scope`` is empty
+    (inert), this collapses to "function attributes only" — which is the
+    behaviour when taggable management is off.
     """
     return {
         a
         for a in attrs
         if a.securable_type == SecurableType.FUNCTION
-        or in_namespace_scope(a.full_name, in_scope_namespaces)
+        or scope.matches(a.full_name)
     }
 
 
@@ -119,6 +122,88 @@ def _collect_configured_namespaces(config: ResourcesConfig) -> set[str]:
         for schema in catalog.schemas or []:
             namespaces.add(schema.full_name)
     return namespaces
+
+
+def _collect_configured_full_names(config: ResourcesConfig) -> set[str]:
+    """Every configured securable full name at every level.
+
+    Unlike ``_collect_configured_namespaces`` (catalog/schema only, kept narrow so
+    the legacy ``parse_namespace_filter`` validation is unchanged), this reaches
+    tables, columns, volumes, and functions — the universe a new-style
+    hierarchical scope is checked against for zero-match warnings.
+    """
+    names: set[str] = set()
+    for catalog in config.catalogs.values():
+        names.add(catalog.full_name)
+        for schema in catalog.schemas or []:
+            names.add(schema.full_name)
+            for table in schema.tables or []:
+                names.add(table.full_name)
+                for column in table.columns or []:
+                    names.add(column.full_name)
+            for volume in schema.volumes or []:
+                names.add(volume.full_name)
+            for function in schema.functions or []:
+                names.add(function.full_name)
+    return names
+
+
+def _build_hierarchical_scope(
+    new_spec: str | None,
+    *,
+    legacy_enabled: bool,
+    legacy_namespaces: str,
+    configured_namespaces: set[str],
+) -> Scope:
+    """Resolve one securable-domain feature to a ``Scope``.
+
+    A new-style spec (non-``None``) wins and is parsed leniently. Otherwise the
+    legacy enable + ``*_for_namespaces`` pair is honoured: when enabled, the
+    namespace string is validated strictly via ``parse_namespace_filter`` and
+    wrapped as a hierarchical scope byte-equivalent to the old
+    ``in_namespace_scope``; when disabled, an empty (inert) scope.
+    """
+    if new_spec is not None:
+        return parse_hierarchical_scope(new_spec)
+    if legacy_enabled:
+        tokens = parse_namespace_filter(legacy_namespaces, configured_namespaces)
+        return scope_from_namespace_tokens(tokens)
+    return Scope()
+
+
+def _build_flat_scope(new_spec: str | None, *, legacy_enabled: bool) -> Scope:
+    """Resolve one flat-domain feature (groups, governed tags) to a ``Scope``.
+
+    A new-style spec wins; otherwise the legacy enable bool maps to match-all
+    when set, or an empty (inert) scope when unset.
+    """
+    if new_spec is not None:
+        return parse_flat_scope(new_spec)
+    return parse_flat_scope("*") if legacy_enabled else Scope()
+
+
+def _warn_unmatched_scopes(
+    named_scopes: list[tuple[str, str | None, Scope]],
+    universe: set[str],
+) -> None:
+    """Warn (never fail) about new-style scope entries that match nothing.
+
+    Only new-style specs (``new_spec is not None``) are checked — legacy flags
+    retain their own strict validation. Each unmatched entry is a likely typo.
+    """
+    for flag, new_spec, scope in named_scopes:
+        if new_spec is None:
+            continue
+        unmatched = scope.unmatched_entries(universe)
+        if unmatched:
+            _logger.warning(
+                "%s: scope entr%s %s matched no configured resource — "
+                "possible typo (this feature will govern nothing for %s).",
+                flag,
+                "y" if len(unmatched) == 1 else "ies",
+                ", ".join(repr(u) for u in unmatched),
+                "it" if len(unmatched) == 1 else "them",
+            )
 
 
 def load_config(
@@ -159,6 +244,15 @@ def run(
     manage_taggables_for_namespaces: str = "*",
     create_taggables_for_namespaces: str = "*",
     delete_policies_for_namespaces: str = "*",
+    tag_management_scopes: str | None = None,
+    privilege_management_scopes: str | None = None,
+    taggable_management_scopes: str | None = None,
+    taggable_creation_scopes: str | None = None,
+    policy_deletion_scopes: str | None = None,
+    group_creation_scopes: str | None = None,
+    group_management_scopes: str | None = None,
+    group_deletion_scopes: str | None = None,
+    governed_tag_deletion_scopes: str | None = None,
     retain_tag_prefixes: str = "class.",
     force: bool = False,
     ref_override_strategy: Literal["merge", "replace"] = "merge",
@@ -169,14 +263,23 @@ def run(
     Returns the computed diffs for every domain in execution order.
     In dry-run mode, diffs are computed but no SQL is executed.
 
-    The four ``enable_*`` flags gate mutation classes. Each defaults to False;
-    when unset the corresponding domain is skipped in both dry-run and real-run
-    (no fetch, no diff, no log, no execute). ``enable_privilege_management=True``
-    with ``enable_tag_management=False`` makes the privileges compiler match its
-    grant policies against the on-disk (``actual``) tag state instead of the
-    config's desired tags.
+    **Feature gating.** Each mutating feature resolves to a single ``Scope`` (see
+    ``uc_declarative_abac.utils.Scope``) via ``_build_hierarchical_scope`` /
+    ``_build_flat_scope``. A new-style ``*_scopes`` argument (non-``None``) wins
+    and is parsed leniently — empty ⇒ disabled, ``"*"`` ⇒ all, otherwise a
+    comma-separated pattern list (securable domains use dotted prefixes with
+    downward inheritance; flat domains match names/prefixes). Otherwise the
+    deprecated ``enable_*`` + ``*_for_namespaces`` pair is honoured with identical
+    behaviour (strict ``parse_namespace_filter`` validation preserved). Effective
+    enablement is ``scope.is_active()``: when a scope is empty the corresponding
+    domain is skipped in both dry-run and real-run (no fetch, no diff, no log, no
+    execute). An active ``privilege_management`` scope with an inactive
+    ``tag_management`` scope makes the privileges compiler match its grant
+    policies against the on-disk (``actual``) tag state instead of the config's
+    desired tags. A new-style scope entry that matches no configured securable
+    logs a warning (likely typo) but never fails the run.
 
-    The four ``*_for_namespaces`` strings further scope each enabled domain to a
+    The deprecated ``*_for_namespaces`` strings scope each enabled domain to a
     subset of the configured namespaces. Each comma-separated entry is either a
     bare catalog name (covers everything under that catalog) or a qualified
     ``catalog.schema`` name (covers that schema and its children). ``"*"`` (the
@@ -221,12 +324,96 @@ def run(
     config = load_config(config_dir, ref_override_strategy)
     catalog_names = [c.full_name for c in config.catalogs.values()]
     configured_namespaces = _collect_configured_namespaces(config)
+    configured_full_names = _collect_configured_full_names(config)
+
+    # Resolve every feature to a single Scope (empty ⇒ inert). A new-style
+    # --*-scopes spec wins; otherwise the deprecated enable_* + *_for_namespaces
+    # pair is honoured with identical behaviour. Effective enablement then derives
+    # from scope activeness, so the rest of the pipeline is scope-driven.
+    tag_scope = _build_hierarchical_scope(
+        tag_management_scopes,
+        legacy_enabled=enable_tag_management,
+        legacy_namespaces=manage_tags_for_namespaces,
+        configured_namespaces=configured_namespaces,
+    )
+    privilege_scope = _build_hierarchical_scope(
+        privilege_management_scopes,
+        legacy_enabled=enable_privilege_management,
+        legacy_namespaces=manage_privileges_for_namespaces,
+        configured_namespaces=configured_namespaces,
+    )
+    taggable_management_scope = _build_hierarchical_scope(
+        taggable_management_scopes,
+        legacy_enabled=enable_taggable_management,
+        legacy_namespaces=manage_taggables_for_namespaces,
+        configured_namespaces=configured_namespaces,
+    )
+    taggable_creation_scope = _build_hierarchical_scope(
+        taggable_creation_scopes,
+        legacy_enabled=enable_taggable_creation,
+        legacy_namespaces=create_taggables_for_namespaces,
+        configured_namespaces=configured_namespaces,
+    )
+    policy_delete_scope = _build_hierarchical_scope(
+        policy_deletion_scopes,
+        legacy_enabled=enable_policy_deletion,
+        legacy_namespaces=delete_policies_for_namespaces,
+        configured_namespaces=configured_namespaces,
+    )
+    group_creation_scope = _build_flat_scope(
+        group_creation_scopes, legacy_enabled=enable_group_creation
+    )
+    group_management_scope = _build_flat_scope(
+        group_management_scopes, legacy_enabled=enable_group_management
+    )
+    group_deletion_scope = _build_flat_scope(
+        group_deletion_scopes, legacy_enabled=enable_group_deletion
+    )
+    governed_tag_deletion_scope = _build_flat_scope(
+        governed_tag_deletion_scopes, legacy_enabled=enable_governed_tag_deletion
+    )
+
+    # Effective enablement: a feature is on iff its scope has any entry.
+    enable_tag_management = tag_scope.is_active()
+    enable_privilege_management = privilege_scope.is_active()
+    enable_taggable_management = taggable_management_scope.is_active()
+    enable_taggable_creation = taggable_creation_scope.is_active()
+    enable_policy_deletion = policy_delete_scope.is_active()
+    enable_group_creation = group_creation_scope.is_active()
+    enable_group_management = group_management_scope.is_active()
+    enable_group_deletion = group_deletion_scope.is_active()
+    enable_governed_tag_deletion = governed_tag_deletion_scope.is_active()
+
+    # Warn (never fail) about new-style hierarchical scope entries that match no
+    # configured securable — a likely typo that would silently govern nothing.
+    _warn_unmatched_scopes(
+        [
+            ("--tag-management-scopes", tag_management_scopes, tag_scope),
+            (
+                "--privilege-management-scopes",
+                privilege_management_scopes,
+                privilege_scope,
+            ),
+            (
+                "--taggable-management-scopes",
+                taggable_management_scopes,
+                taggable_management_scope,
+            ),
+            (
+                "--taggable-creation-scopes",
+                taggable_creation_scopes,
+                taggable_creation_scope,
+            ),
+            ("--policy-deletion-scopes", policy_deletion_scopes, policy_delete_scope),
+        ],
+        configured_full_names,
+    )
 
     # Group creation/management operate at the account level via the account SCIM
     # proxy. The workspace SCIM API surfaces only workspace-level groups and cannot
-    # create or manage account groups, so enabling a group flag under
+    # create or manage account groups, so enabling a group scope under
     # --use-workspace-scim is unsupported. (Configuring groups without any group
-    # flag is inert and compatible with --use-workspace-scim.)
+    # scope is inert and compatible with --use-workspace-scim.)
     group_domain_active = enable_group_creation or enable_group_management
     if config.groups and group_domain_active and use_workspace_scim:
         raise OrchestratorError(
@@ -243,48 +430,21 @@ def run(
             "to create or manage the groups declared in config."
         )
     # Group deletion makes config authoritative over group existence — it is only
-    # usable alongside --enable-group-creation, and never against an empty config (a
+    # usable alongside group creation, and never against an empty config (a
     # destructive account-wide sweep with no declared groups is disallowed outright).
     if enable_group_deletion and not config.groups:
         raise OrchestratorError(
-            "--enable-group-deletion was set but no groups are declared under "
-            "resources.groups. Declare the groups config should own, or drop the flag."
+            "Group deletion is enabled but no groups are declared under "
+            "resources.groups. Declare the groups config should own, or disable "
+            "group deletion."
         )
     if enable_group_deletion and not enable_group_creation:
         raise OrchestratorError(
-            "--enable-group-deletion requires --enable-group-creation (config must be "
-            "authoritative over group existence). Pass --enable-group-creation, or drop "
-            "--enable-group-deletion."
+            "Group deletion requires group creation to also be active (config must "
+            "be authoritative over group existence). Enable group creation, or "
+            "disable group deletion."
         )
 
-    # Parse per-domain namespace filters. Each scope is empty when its paired
-    # enable flag is off — that single representation drives the rest of the
-    # pipeline (empty set ⇒ domain inert for every namespace).
-    tag_scope = (
-        parse_namespace_filter(manage_tags_for_namespaces, configured_namespaces)
-        if enable_tag_management
-        else frozenset()
-    )
-    privilege_scope = (
-        parse_namespace_filter(manage_privileges_for_namespaces, configured_namespaces)
-        if enable_privilege_management
-        else frozenset()
-    )
-    taggable_management_scope = (
-        parse_namespace_filter(manage_taggables_for_namespaces, configured_namespaces)
-        if enable_taggable_management
-        else frozenset()
-    )
-    taggable_creation_scope = (
-        parse_namespace_filter(create_taggables_for_namespaces, configured_namespaces)
-        if enable_taggable_creation
-        else frozenset()
-    )
-    policy_delete_scope = (
-        parse_namespace_filter(delete_policies_for_namespaces, configured_namespaces)
-        if enable_policy_deletion
-        else frozenset()
-    )
     # Tag-key prefixes whose tags are never removed (only added/updated). Empty
     # string ⇒ no retention. Defaults to "class." to protect auto-classification.
     retain_prefixes = frozenset(
@@ -406,6 +566,9 @@ def run(
             enable_group_deletion=enable_group_deletion,
             ignore_unresolvable=ignore_unresolvable,
             all_account_groups=all_account_groups,
+            creation_scope=group_creation_scope,
+            management_scope=group_management_scope,
+            deletion_scope=group_deletion_scope,
         )
         if group_domain_active
         else GroupDiff()
@@ -431,6 +594,7 @@ def run(
         change_logger,
         enable_deletion=enable_governed_tag_deletion,
         ignore_unresolvable=ignore_unresolvable,
+        deletion_scope=governed_tag_deletion_scope,
     )
     # Union of declared governed tags (desired from config + actual on UC).
     # The names are used by the policies/privileges compilers to reject references
@@ -472,17 +636,17 @@ def run(
         in_scope_desired_tags = {
             t
             for t in desired_tags
-            if in_namespace_scope(t.securable_full_name, tag_scope)
+            if tag_scope.matches(t.securable_full_name)
         }
         in_scope_actual_tags = {
             t
             for t in actual_tags
-            if in_namespace_scope(t.securable_full_name, tag_scope)
+            if tag_scope.matches(t.securable_full_name)
         }
         out_of_scope_actual_tags = {
             t
             for t in actual_tags
-            if not in_namespace_scope(t.securable_full_name, tag_scope)
+            if not tag_scope.matches(t.securable_full_name)
         }
         tag_diff = compute_tag_diff(in_scope_desired_tags, in_scope_actual_tags)
         tag_diff, retained_tags = filter_retained_removals(tag_diff, retain_prefixes)
@@ -529,12 +693,12 @@ def run(
         in_scope_compiled_privileges = {
             p
             for p in compiled_privileges
-            if in_namespace_scope(p.securable_full_name, privilege_scope)
+            if privilege_scope.matches(p.securable_full_name)
         }
         in_scope_actual_privileges = {
             p
             for p in actual_privileges
-            if in_namespace_scope(p.securable_full_name, privilege_scope)
+            if privilege_scope.matches(p.securable_full_name)
         }
         privilege_diff = compute_privilege_diff(
             in_scope_compiled_privileges,

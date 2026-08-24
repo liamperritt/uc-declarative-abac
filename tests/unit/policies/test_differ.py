@@ -17,6 +17,7 @@ from uc_declarative_abac.types import (
     PrincipalType,
     SecurableType,
 )
+from uc_declarative_abac.utils import Scope, scope_from_namespace_tokens
 
 
 def _resolver() -> PrincipalResolver:
@@ -312,7 +313,7 @@ def test_policy_differ_emits_to_delete_for_in_scope_actual_only():
         actual,
         _resolver(),
         _change_logger(),
-        delete_scope=frozenset({"cat"}),
+        delete_scope=scope_from_namespace_tokens({"cat"}),
     )
 
     assert diff.to_delete == actual
@@ -330,7 +331,7 @@ def test_policy_differ_deletes_all_in_scope_when_desired_empty():
         actual,
         _resolver(),
         _change_logger(),
-        delete_scope=frozenset({"cat"}),
+        delete_scope=scope_from_namespace_tokens({"cat"}),
     )
 
     assert diff.to_delete == actual
@@ -347,7 +348,7 @@ def test_policy_differ_no_delete_when_scope_empty():
         actual,
         _resolver(),
         _change_logger(),
-        delete_scope=frozenset(),
+        delete_scope=Scope(),
     )
 
     assert diff.to_delete == set()
@@ -364,7 +365,7 @@ def test_policy_differ_no_delete_when_securable_out_of_scope():
         actual,
         _resolver(),
         _change_logger(),
-        delete_scope=frozenset({"other_catalog"}),
+        delete_scope=scope_from_namespace_tokens({"other_catalog"}),
     )
 
     assert diff.to_delete == set()
@@ -381,7 +382,7 @@ def test_policy_differ_never_deletes_a_desired_policy():
         {kept, stale},
         _resolver(),
         _change_logger(),
-        delete_scope=frozenset({"cat"}),
+        delete_scope=scope_from_namespace_tokens({"cat"}),
     )
 
     assert diff.to_delete == {stale}

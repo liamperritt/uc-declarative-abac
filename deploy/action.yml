@@ -108,6 +108,76 @@ inputs:
       No effect unless ``enable-policy-deletion`` is set.
     required: false
     default: ''
+  tag-management-scopes:
+    description: >-
+      Scope tag-assignment management to matching securables. Comma-separated
+      dotted namespace prefixes: empty (default) disables it, "*" covers all, a
+      trailing "*" is a raw name prefix ("main.*" = everything under main
+      excluding the catalog node, "main.sales*" = matching schemas and their
+      subtrees), an entry without "*" covers that node and its whole subtree
+      ("main" = the catalog and everything under it). Supersedes the
+      ``enable-tag-management`` + ``manage-tags-for-namespaces`` inputs.
+    required: false
+    default: ''
+  privilege-management-scopes:
+    description: >-
+      Scope GRANT/REVOKE privilege management to matching securables (same
+      dotted-prefix grammar as ``tag-management-scopes``). Supersedes
+      ``enable-privilege-management`` + ``manage-privileges-for-namespaces``.
+    required: false
+    default: ''
+  taggable-management-scopes:
+    description: >-
+      Scope taggable attribute updates (e.g. owner) to matching securables
+      (function attributes always flow through). Supersedes
+      ``enable-taggable-management`` + ``manage-taggables-for-namespaces``.
+    required: false
+    default: ''
+  taggable-creation-scopes:
+    description: >-
+      Scope creation of missing catalogs/schemas/tables/volumes to matching
+      securables (function creation always flows through). Supersedes
+      ``enable-taggable-creation`` + ``create-taggables-for-namespaces``.
+    required: false
+    default: ''
+  policy-deletion-scopes:
+    description: >-
+      Scope mask/filter policy deletion to matching securables. Requires
+      interactive confirmation unless ``force`` is "true". Supersedes
+      ``enable-policy-deletion`` + ``delete-policies-for-namespaces``.
+    required: false
+    default: ''
+  group-creation-scopes:
+    description: >-
+      Scope account-group creation to matching groups by display name.
+      Comma-separated: empty (default) disables it, "*" covers all, a trailing
+      "*" is a name prefix ("team_*"), any other entry is an exact name.
+      Supersedes ``enable-group-creation``.
+    required: false
+    default: ''
+  group-management-scopes:
+    description: >-
+      Scope account-group membership reconciliation to matching groups by
+      display name (same flat grammar as ``group-creation-scopes``). Supersedes
+      ``enable-group-management``.
+    required: false
+    default: ''
+  group-deletion-scopes:
+    description: >-
+      Scope account-group deletion to matching groups by display name (same flat
+      grammar as ``group-creation-scopes``). Requires ``group-creation-scopes``
+      to be active and interactive confirmation unless ``force`` is "true".
+      Supersedes ``enable-group-deletion``.
+    required: false
+    default: ''
+  governed-tag-deletion-scopes:
+    description: >-
+      Scope governed-tag deletion to matching tags by name (same flat grammar as
+      ``group-creation-scopes``). System-managed tags are never deleted. Requires
+      interactive confirmation unless ``force`` is "true". Supersedes
+      ``enable-governed-tag-deletion``.
+    required: false
+    default: ''
   manage-tags-for-catalogs:
     description: >-
       Deprecated — use ``manage-tags-for-namespaces``. Forwarded to the CLI's
@@ -250,6 +320,15 @@ runs:
         MANAGE_TAGGABLES_FOR_NAMESPACES: ${{ inputs.manage-taggables-for-namespaces }}
         CREATE_TAGGABLES_FOR_NAMESPACES: ${{ inputs.create-taggables-for-namespaces }}
         DELETE_POLICIES_FOR_NAMESPACES: ${{ inputs.delete-policies-for-namespaces }}
+        TAG_MANAGEMENT_SCOPES: ${{ inputs.tag-management-scopes }}
+        PRIVILEGE_MANAGEMENT_SCOPES: ${{ inputs.privilege-management-scopes }}
+        TAGGABLE_MANAGEMENT_SCOPES: ${{ inputs.taggable-management-scopes }}
+        TAGGABLE_CREATION_SCOPES: ${{ inputs.taggable-creation-scopes }}
+        POLICY_DELETION_SCOPES: ${{ inputs.policy-deletion-scopes }}
+        GROUP_CREATION_SCOPES: ${{ inputs.group-creation-scopes }}
+        GROUP_MANAGEMENT_SCOPES: ${{ inputs.group-management-scopes }}
+        GROUP_DELETION_SCOPES: ${{ inputs.group-deletion-scopes }}
+        GOVERNED_TAG_DELETION_SCOPES: ${{ inputs.governed-tag-deletion-scopes }}
         MANAGE_TAGS_FOR_CATALOGS: ${{ inputs.manage-tags-for-catalogs }}
         MANAGE_PRIVILEGES_FOR_CATALOGS: ${{ inputs.manage-privileges-for-catalogs }}
         MANAGE_TAGGABLES_FOR_CATALOGS: ${{ inputs.manage-taggables-for-catalogs }}
@@ -321,6 +400,33 @@ runs:
         fi
         if [[ -n "$CREATE_TAGGABLES_FOR_CATALOGS" ]]; then
           args+=(--create-taggables-for-catalogs "$CREATE_TAGGABLES_FOR_CATALOGS")
+        fi
+        if [[ -n "$TAG_MANAGEMENT_SCOPES" ]]; then
+          args+=(--tag-management-scopes "$TAG_MANAGEMENT_SCOPES")
+        fi
+        if [[ -n "$PRIVILEGE_MANAGEMENT_SCOPES" ]]; then
+          args+=(--privilege-management-scopes "$PRIVILEGE_MANAGEMENT_SCOPES")
+        fi
+        if [[ -n "$TAGGABLE_MANAGEMENT_SCOPES" ]]; then
+          args+=(--taggable-management-scopes "$TAGGABLE_MANAGEMENT_SCOPES")
+        fi
+        if [[ -n "$TAGGABLE_CREATION_SCOPES" ]]; then
+          args+=(--taggable-creation-scopes "$TAGGABLE_CREATION_SCOPES")
+        fi
+        if [[ -n "$POLICY_DELETION_SCOPES" ]]; then
+          args+=(--policy-deletion-scopes "$POLICY_DELETION_SCOPES")
+        fi
+        if [[ -n "$GROUP_CREATION_SCOPES" ]]; then
+          args+=(--group-creation-scopes "$GROUP_CREATION_SCOPES")
+        fi
+        if [[ -n "$GROUP_MANAGEMENT_SCOPES" ]]; then
+          args+=(--group-management-scopes "$GROUP_MANAGEMENT_SCOPES")
+        fi
+        if [[ -n "$GROUP_DELETION_SCOPES" ]]; then
+          args+=(--group-deletion-scopes "$GROUP_DELETION_SCOPES")
+        fi
+        if [[ -n "$GOVERNED_TAG_DELETION_SCOPES" ]]; then
+          args+=(--governed-tag-deletion-scopes "$GOVERNED_TAG_DELETION_SCOPES")
         fi
         args+=(--retain-tag-prefixes "$RETAIN_TAG_PREFIXES")
         if [[ "$ENABLE_GOVERNED_TAG_DELETION" == "true" ]]; then
