@@ -16,7 +16,7 @@ definitions:
           comment: Test comment 3
         - name: email_address
           type: string
-          comment: Test comment 4
+          comment: Test comment 4 updated
         - name: phone_number
           type: string
-          comment: Test comment 5
+          comment: Test comment 5 updated

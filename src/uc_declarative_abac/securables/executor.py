@@ -421,34 +421,63 @@ def _run_column_create_batch(
     return [stmt for (_p, _c, stmt), _r, error in results if error is None]
 
 
-def _run_base_table_column_comment_batch(
+def _build_column_comment_work_items(
+    updates: list[AttributeUpdate], fallback_tables: frozenset[str]
+) -> list[tuple[list[AttributeUpdate], str]]:
+    """Build ``(updates, sql)`` work items covering every column comment update.
+
+    Base-table columns (types that support ``ALTER TABLE … ALTER COLUMN``) are grouped
+    into one batched ALTER per parent table; columns on ``fallback_tables`` (views,
+    metric/materialized views, streaming tables) get one ``COMMENT ON COLUMN`` each. Each
+    item carries the update(s) it covers so the executor logs every column, even for a
+    batched ALTER. Base items precede fallback items so the returned statement order is
+    stable.
+    """
+    base = [u for u in updates if _column_parent_table(u) not in fallback_tables]
+    fallback = [u for u in updates if _column_parent_table(u) in fallback_tables]
+
+    items: list[tuple[list[AttributeUpdate], str]] = [
+        (ups, _build_alter_table_column_comments_sql(parent, ups))
+        for parent, ups in _group_comment_updates_by_parent(base)
+    ]
+    items.extend(
+        (
+            [update],
+            _build_comment_update_sql(
+                update.securable_type,
+                update.full_name,
+                _column_comment_value(update),
+            ),
+        )
+        for update in fallback
+    )
+    return items
+
+
+def _run_column_comment_batch(
     uc_helper: UnityCatalogHelper,
     updates: list[AttributeUpdate],
+    fallback_tables: frozenset[str],
     change_logger: ChangeLogger,
     dry_run: bool,
     max_workers: int,
 ) -> list[str]:
-    """Apply base-table column comments as one batched ALTER per parent table, in parallel.
+    """Apply all column comment updates in a single parallel batch (width ``max_workers``).
 
-    All of a table's column comments collapse into a single
-    ``ALTER TABLE … ALTER COLUMN …`` statement (fewer statements, one Delta commit
-    per table). Per-column log granularity is preserved via ``on_complete``.
+    Base-table comments batch into one ``ALTER TABLE … ALTER COLUMN`` per table;
+    view-family comments use ``COMMENT ON COLUMN`` per column. Both kinds run together in
+    one thread pool — there is no sequential phase between them, so no statement waits on
+    a separate sub-batch. Per-column log granularity is preserved via ``on_complete``.
     """
-    groups = _group_comment_updates_by_parent(updates)
-    work_items: list[tuple[str, list[AttributeUpdate], str]] = [
-        (parent, ups, _build_alter_table_column_comments_sql(parent, ups))
-        for parent, ups in groups
-    ]
+    work_items = _build_column_comment_work_items(updates, fallback_tables)
 
-    def worker(item: tuple[str, list[AttributeUpdate], str]) -> None:
-        _parent, _ups, stmt = item
+    def worker(item: tuple[list[AttributeUpdate], str]) -> None:
+        _ups, stmt = item
         if not dry_run:
             uc_helper.execute_sql(stmt)
 
-    def on_complete(
-        item: tuple[str, list[AttributeUpdate], str], _result, error
-    ) -> None:
-        _parent, ups, stmt = item
+    def on_complete(item: tuple[list[AttributeUpdate], str], _result, error) -> None:
+        ups, stmt = item
         if error is not None:
             change_logger.log_error(ExecutionError(context=stmt, exception=error))
             return
@@ -463,85 +492,7 @@ def _run_base_table_column_comment_batch(
     )
     if dry_run:
         return []
-    return [stmt for (_p, _u, stmt), _r, error in results if error is None]
-
-
-def _run_fallback_column_comment_batch(
-    uc_helper: UnityCatalogHelper,
-    updates: list[AttributeUpdate],
-    change_logger: ChangeLogger,
-    dry_run: bool,
-    max_workers: int,
-) -> list[str]:
-    """Apply column comments one ``COMMENT ON COLUMN`` per column, in parallel.
-
-    Used for columns whose parent table type doesn't support
-    ``ALTER TABLE … ALTER COLUMN`` (views, metric/materialized views, streaming tables).
-    """
-    work_items: list[tuple[AttributeUpdate, str]] = [
-        (
-            update,
-            _build_comment_update_sql(
-                update.securable_type,
-                update.full_name,
-                _column_comment_value(update),
-            ),
-        )
-        for update in updates
-    ]
-
-    def worker(item: tuple[AttributeUpdate, str]) -> None:
-        _update, stmt = item
-        if not dry_run:
-            uc_helper.execute_sql(stmt)
-
-    def on_complete(item: tuple[AttributeUpdate, str], _result, error) -> None:
-        update, stmt = item
-        if error is not None:
-            change_logger.log_error(ExecutionError(context=stmt, exception=error))
-            return
-        change_logger.log_attribute_update(update)
-
-    results = parallel_for_each(
-        work_items,
-        worker,
-        max_workers=max_workers,
-        on_complete=on_complete,
-    )
-    if dry_run:
-        return []
-    return [stmt for (_u, stmt), _r, error in results if error is None]
-
-
-def _run_column_comment_batch(
-    uc_helper: UnityCatalogHelper,
-    updates: list[AttributeUpdate],
-    fallback_tables: frozenset[str],
-    change_logger: ChangeLogger,
-    dry_run: bool,
-    max_workers: int,
-) -> list[str]:
-    """Apply all column comment updates, routing by parent table type.
-
-    Columns on ``fallback_tables`` (types that don't support ``ALTER TABLE … ALTER
-    COLUMN``) go one-per-column via ``COMMENT ON COLUMN``; all others batch into one
-    ``ALTER TABLE … ALTER COLUMN`` per parent table.
-    """
-    base = [u for u in updates if _column_parent_table(u) not in fallback_tables]
-    fallback = [u for u in updates if _column_parent_table(u) in fallback_tables]
-
-    statements: list[str] = []
-    statements.extend(
-        _run_base_table_column_comment_batch(
-            uc_helper, base, change_logger, dry_run, max_workers
-        )
-    )
-    statements.extend(
-        _run_fallback_column_comment_batch(
-            uc_helper, fallback, change_logger, dry_run, max_workers
-        )
-    )
-    return statements
+    return [stmt for (_ups, stmt), _r, error in results if error is None]
 
 
 def _run_create_batch(

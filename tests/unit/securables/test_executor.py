@@ -2011,6 +2011,66 @@ def test_securable_executor_batches_base_table_column_comments_into_one_alter():
     uc_helper.execute_sql.assert_called_once()
 
 
+def test_securable_executor_runs_base_and_view_column_comments_in_one_batch():
+    """A diff mixing base-table columns and a view column applies both kinds together:
+    one batched ALTER TABLE for the base table plus one COMMENT ON COLUMN for the view
+    column, all executed and each column logged (no separate sequential sub-batch)."""
+    uc_helper = MagicMock()
+    change_logger = ChangeLogger()
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.tbl.c1",
+                attribute="comment",
+                old_value=frozenset(),
+                new_value=frozenset({"cmt1"}),
+            ),
+            AttributeUpdate(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.tbl.c2",
+                attribute="comment",
+                old_value=frozenset(),
+                new_value=frozenset({"cmt2"}),
+            ),
+            AttributeUpdate(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.v.vc",
+                attribute="comment",
+                old_value=frozenset(),
+                new_value=frozenset({"view cmt"}),
+            ),
+        ],
+    )
+    actual_securables = {
+        Table(
+            securable_type=SecurableType.TABLE,
+            full_name="cat.sch.tbl",
+            columns=(),
+            table_type="MANAGED",
+        ),
+        Table(
+            securable_type=SecurableType.TABLE,
+            full_name="cat.sch.v",
+            columns=(),
+            table_type="VIEW",
+        ),
+    }
+
+    stmts = execute_securable_diff(
+        uc_helper, diff, change_logger, actual_securables=actual_securables
+    )
+
+    # One batched ALTER (base table, 2 columns) + one COMMENT ON COLUMN (view) = 2 statements.
+    assert len(stmts) == 2
+    assert uc_helper.execute_sql.call_count == 2
+    joined = " || ".join(stmts).upper().replace("`", "")
+    assert "ALTER TABLE CAT.SCH.TBL ALTER COLUMN" in joined
+    assert "COMMENT ON COLUMN CAT.SCH.V.VC" in joined
+    # Every column (both base + the view column) is logged.
+    assert change_logger._attributes_updated == 3
+
+
 def test_securable_executor_uses_comment_on_column_for_view_columns():
     """A COLUMN comment update whose parent table is table_type=VIEW (via actual_securables)
     produces a COMMENT ON COLUMN ... IS "..." statement (not ALTER TABLE)."""
