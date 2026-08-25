@@ -1804,6 +1804,42 @@ def test_uc_helper_column_comments_query_filters_by_parent_table(mock_fetch):
 
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_column_comments_query_prunes_by_catalog_and_schema(mock_fetch):
+    """The column-comment query filters on the raw ``table_catalog`` and
+    ``table_schema`` columns (so Spark can prune ``information_schema.columns``
+    instead of scanning the whole metastore), before the exact table concat filter."""
+    securables_rows = [
+        ["TABLE", "cat.sch.tbl", "owner", None, None, None, "[]", None, "MANAGED"],
+    ]
+    mock_fetch.side_effect = [securables_rows, []]
+
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.fetch_actual_securables(["cat"], column_comment_tables={"cat.sch.tbl"})
+
+    calls = client.statement_execution.execute_statement.call_args_list
+    sql = (
+        calls[1].kwargs.get("statement")
+        if calls[1].kwargs.get("statement")
+        else calls[1].args[0]
+    )
+    lowered = sql.lower()
+
+    # Prunable raw-column predicates must be present.
+    assert "table_catalog in ('cat')" in lowered, (
+        f"Expected raw table_catalog IN filter for pruning: {sql}"
+    )
+    assert "table_schema in ('sch')" in lowered, (
+        f"Expected raw table_schema IN filter for pruning: {sql}"
+    )
+    # Catalog/schema pruning predicates come before the exact table concat filter.
+    assert lowered.index("table_catalog in (") < lowered.index(
+        "concat(table_catalog, '.', table_schema, '.', table_name) in"
+    ), f"Expected catalog/schema filters before the table concat filter: {sql}"
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_no_column_comment_query_when_no_targets(mock_fetch):
     """When column_comment_tables is None or empty set, no extra query is issued.
     Only the bulk securables query executes."""

@@ -1,7 +1,9 @@
 config_dir: ./configs
 tag_management_scopes: '*'
 privilege_management_scopes: '*'
+taggable_management_scopes: '*'
 policy_deletion_scopes: '*'
+governed_tag_deletion_scopes: 'uc_gov_*'
 use_workspace_scim: true
 profile: field-eng-east
 timezone: Australia/Melbourne

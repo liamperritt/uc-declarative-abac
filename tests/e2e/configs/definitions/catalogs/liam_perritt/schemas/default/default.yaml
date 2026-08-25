@@ -26,6 +26,7 @@ definitions:
           columns:
             - name: col1
               type: string
+              comment: Test comment 1
               tags:
                 uc_gov_team: platform
         - name: test_table

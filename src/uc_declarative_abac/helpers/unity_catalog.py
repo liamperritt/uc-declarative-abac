@@ -379,13 +379,27 @@ def _build_column_comments_query(
     each listed table — including columns with a NULL comment — so the differ has an
     actual-state baseline for every declared column. Sibling columns not under management
     are harmless: the diff is desired-driven and never looks them up.
+
+    **Pruning:** the ``concat(...)`` predicate is opaque to the query optimizer, so on its
+    own it forces a full scan of ``information_schema.columns`` across the entire metastore
+    (which times out on large estates). We therefore filter on the **raw** ``table_catalog``
+    and ``table_schema`` columns first (derived from the target tables) so Spark can prune
+    to just the relevant catalogs/schemas; the exact ``concat(...)`` filter then narrows the
+    pruned rows down to precisely the requested tables. Names are assumed dot-free (the same
+    assumption the rest of the engine makes for dot-joined full names).
     """
-    in_clause = _build_catalog_in_clause(table_full_names)
+    catalogs = sorted({name.split(".")[0] for name in table_full_names})
+    schemas = sorted({name.split(".")[1] for name in table_full_names})
+    catalog_in = _build_catalog_in_clause(catalogs)
+    schema_in = _build_catalog_in_clause(schemas)
+    table_in = _build_catalog_in_clause(table_full_names)
     return (
         "SELECT concat(table_catalog, '.', table_schema, '.', table_name, '.', column_name) "
         "AS full_name, comment "
         f"FROM {system_catalog}.information_schema.columns "
-        f"WHERE concat(table_catalog, '.', table_schema, '.', table_name) IN {in_clause} "
+        f"WHERE table_catalog IN {catalog_in} "
+        f"AND table_schema IN {schema_in} "
+        f"AND concat(table_catalog, '.', table_schema, '.', table_name) IN {table_in} "
         "AND table_schema != 'information_schema'"
         f"{_build_double_underscore_filter(['table_catalog', 'table_schema', 'table_name'])}"
     )
