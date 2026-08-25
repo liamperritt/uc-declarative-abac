@@ -1958,3 +1958,261 @@ def test_securable_executor_continues_after_attribute_error_in_earlier_phase():
     # The catalog failure was captured rather than re-raised.
     assert change_logger.has_errors
     assert len(change_logger.errors) == 1
+
+
+# ---------------------------------------------------------------------------
+# Column comments: batching, routing, and embedding
+# ---------------------------------------------------------------------------
+
+
+def test_securable_executor_batches_base_table_column_comments_into_one_alter():
+    """Two COLUMN comment updates on the same base table (table_type=MANAGED)
+    produce ONE statement with both columns. Assert sql.upper().count("ALTER COLUMN") == 1."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.tbl.c1",
+                attribute="comment",
+                old_value=frozenset(),
+                new_value=frozenset({"cmt1"}),
+            ),
+            AttributeUpdate(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.tbl.c2",
+                attribute="comment",
+                old_value=frozenset(),
+                new_value=frozenset({"cmt2"}),
+            ),
+        ],
+    )
+    # Provide actual_securables to indicate the parent table is a base table (MANAGED).
+    actual_securables = {
+        Table(
+            securable_type=SecurableType.TABLE,
+            full_name="cat.sch.tbl",
+            columns=(),
+            table_type="MANAGED",
+        )
+    }
+
+    stmts = execute_securable_diff(
+        uc_helper, diff, ChangeLogger(), actual_securables=actual_securables
+    )
+
+    # Exactly one statement for both columns.
+    assert len(stmts) == 1
+    sql = stmts[0]
+    _assert_sql_contains(sql, "ALTER TABLE", "cat.sch.tbl", "c1", "cmt1", "c2", "cmt2")
+    # ALTER COLUMN keyword appears exactly once (not repeated per column).
+    assert sql.upper().count("ALTER COLUMN") == 1
+    # Execute was called once.
+    uc_helper.execute_sql.assert_called_once()
+
+
+def test_securable_executor_uses_comment_on_column_for_view_columns():
+    """A COLUMN comment update whose parent table is table_type=VIEW (via actual_securables)
+    produces a COMMENT ON COLUMN ... IS "..." statement (not ALTER TABLE)."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.v.col1",
+                attribute="comment",
+                old_value=frozenset(),
+                new_value=frozenset({"view column comment"}),
+            ),
+        ],
+    )
+    # Parent table is a VIEW.
+    actual_securables = {
+        Table(
+            securable_type=SecurableType.TABLE,
+            full_name="cat.sch.v",
+            columns=(),
+            table_type="VIEW",
+        )
+    }
+
+    stmts = execute_securable_diff(
+        uc_helper, diff, ChangeLogger(), actual_securables=actual_securables
+    )
+
+    assert len(stmts) == 1
+    sql = stmts[0]
+    _assert_sql_contains(
+        sql, "COMMENT ON COLUMN", "cat.sch.v.col1", "IS", "view column comment"
+    )
+    # Must NOT use ALTER TABLE.
+    assert "ALTER TABLE" not in sql.upper()
+
+
+def test_securable_executor_uses_comment_on_column_for_streaming_table_columns():
+    """A COLUMN comment update whose parent table is table_type=STREAMING_TABLE
+    produces a COMMENT ON COLUMN ... IS "..." statement."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.st.col1",
+                attribute="comment",
+                old_value=frozenset(),
+                new_value=frozenset({"stream column comment"}),
+            ),
+        ],
+    )
+    # Parent table is a STREAMING_TABLE.
+    actual_securables = {
+        Table(
+            securable_type=SecurableType.TABLE,
+            full_name="cat.sch.st",
+            columns=(),
+            table_type="STREAMING_TABLE",
+        )
+    }
+
+    stmts = execute_securable_diff(
+        uc_helper, diff, ChangeLogger(), actual_securables=actual_securables
+    )
+
+    assert len(stmts) == 1
+    sql = stmts[0]
+    _assert_sql_contains(
+        sql, "COMMENT ON COLUMN", "cat.sch.st.col1", "IS", "stream column comment"
+    )
+    assert "ALTER TABLE" not in sql.upper()
+
+
+def test_securable_executor_escapes_single_quotes_in_column_comment():
+    """Single quotes in a column comment are escaped so the SQL doesn't break.
+    Tests both ALTER TABLE (base table) and COMMENT ON COLUMN (view) paths."""
+    uc_helper = MagicMock()
+    # Test base-table ALTER TABLE path.
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.tbl.col",
+                attribute="comment",
+                old_value=frozenset(),
+                new_value=frozenset({"It's a comment"}),
+            ),
+        ],
+    )
+    actual_securables = {
+        Table(
+            securable_type=SecurableType.TABLE,
+            full_name="cat.sch.tbl",
+            columns=(),
+            table_type="MANAGED",
+        )
+    }
+
+    stmts = execute_securable_diff(
+        uc_helper, diff, ChangeLogger(), actual_securables=actual_securables
+    )
+
+    assert len(stmts) == 1
+    sql = stmts[0]
+    # Single quote should be escaped as \'.
+    assert """It\\'s a comment""" in sql
+
+
+def test_securable_executor_embeds_column_comment_in_create_table():
+    """A Table in securables_to_create whose Column(s) have .comment produces
+    CREATE TABLE SQL with COMMENT "..." on the column def."""
+    uc_helper = MagicMock()
+    table = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sch.orders",
+        columns=(
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.orders.id",
+                data_type="BIGINT",
+                comment="Order ID",
+            ),
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.orders.email",
+                data_type="STRING",
+                comment="Customer email",
+            ),
+        ),
+    )
+    diff = SecurableDiff(securables_to_create=[table])
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    sql = stmts[0]
+    _assert_sql_contains(sql, "CREATE TABLE", "cat.sch.orders")
+    # Both columns should appear with their comments embedded.
+    assert '`id` BIGINT COMMENT "Order ID"' in sql
+    assert '`email` STRING COMMENT "Customer email"' in sql
+
+
+def test_securable_executor_embeds_column_comment_in_add_columns():
+    """A standalone Column in securables_to_create with .comment produces
+    ALTER TABLE ... ADD COLUMNS with COMMENT "..." on the column def."""
+    uc_helper = MagicMock()
+    column = Column(
+        securable_type=SecurableType.COLUMN,
+        full_name="cat.sch.orders.notes",
+        data_type="STRING",
+        comment="Order notes",
+    )
+    diff = SecurableDiff(securables_to_create=[column])
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+
+    assert len(stmts) == 1
+    sql = stmts[0]
+    _assert_sql_contains(sql, "ALTER TABLE", "ADD COLUMNS", "cat.sch.orders")
+    # Column def should include the comment.
+    assert '`notes` STRING COMMENT "Order notes"' in sql
+
+
+def test_securable_executor_logs_each_column_comment_when_batched():
+    """When a batched base-table ALTER groups 2 column comment updates,
+    both columns are logged via the change logger (one log per column)."""
+    uc_helper = MagicMock()
+    change_logger = ChangeLogger()
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.tbl.c1",
+                attribute="comment",
+                old_value=frozenset(),
+                new_value=frozenset({"cmt1"}),
+            ),
+            AttributeUpdate(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.tbl.c2",
+                attribute="comment",
+                old_value=frozenset(),
+                new_value=frozenset({"cmt2"}),
+            ),
+        ],
+    )
+    actual_securables = {
+        Table(
+            securable_type=SecurableType.TABLE,
+            full_name="cat.sch.tbl",
+            columns=(),
+            table_type="MANAGED",
+        )
+    }
+
+    execute_securable_diff(
+        uc_helper, diff, change_logger, actual_securables=actual_securables
+    )
+
+    # Only one ALTER was executed (batched).
+    assert uc_helper.execute_sql.call_count == 1
+    # But two attribute updates were logged (one per column).
+    assert change_logger._attributes_updated == 2

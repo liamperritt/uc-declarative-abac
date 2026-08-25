@@ -1552,6 +1552,67 @@ def test_column_config_data_type_defaults_to_none():
 
 
 # ---------------------------------------------------------------------------
+# ColumnConfig comment validation
+# ---------------------------------------------------------------------------
+
+
+def test_column_config_accepts_comment():
+    """A column with a 'comment' field (without double-quotes) validates successfully."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "columns": [
+                                        {"name": "email", "comment": "some description"}
+                                    ],
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        }
+    )
+    column = config.catalogs["my_catalog"].schemas[0].tables[0].columns[0]
+    assert column.comment == "some description"
+
+
+def test_column_config_rejects_double_quote_in_comment():
+    """A column comment containing a '\"' character raises ValidationError."""
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {
+                    "my_catalog": {
+                        "schemas": [
+                            {
+                                "name": "sales",
+                                "tables": [
+                                    {
+                                        "name": "orders",
+                                        "columns": [
+                                            {
+                                                "name": "email",
+                                                "comment": 'A "quoted" word',
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            }
+        )
+
+
+# ---------------------------------------------------------------------------
 # Catalog/Schema/Table/Volume comment + location fields
 # ---------------------------------------------------------------------------
 

@@ -120,9 +120,11 @@ def test_uc_helper_parses_multiple_tags_from_single_securable_row(mock_fetch):
         [
             "TABLE",
             "my_catalog.sales.orders",
-            ('[{"tag_name":"pii","tag_value":"true"},'
-            '{"tag_name":"classification","tag_value":"confidential"},'
-            '{"tag_name":"team","tag_value":"sales"}]'),
+            (
+                '[{"tag_name":"pii","tag_value":"true"},'
+                '{"tag_name":"classification","tag_value":"confidential"},'
+                '{"tag_name":"team","tag_value":"sales"}]'
+            ),
         ],
     ]
     mock_fetch.return_value = rows
@@ -1663,6 +1665,215 @@ def test_uc_helper_fetch_actual_securables_preserves_existing_owner_when_merging
     )
     assert attr.comment == "Prod catalog"
     assert attr.rfa_destinations == frozenset({"data-gov@example.com"})
+
+
+# ---------------------------------------------------------------------------
+# UnityCatalogHelper.fetch_actual_securables — column-comment fetch
+# ---------------------------------------------------------------------------
+
+
+def test_uc_helper_securables_query_excludes_column_comment():
+    """The bulk securables query does NOT project c.comment for columns (no-regression).
+    The column-comment fetch is a separate query. Verify the securables SQL contains
+    only c.ordinal_position and c.column_name in the TABLE arm, not c.comment."""
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.fetch_actual_securables(["my_catalog"])
+
+    sql = _get_executed_sql(client).lower()
+    # Extract the TABLE arm (between 'TABLE' and next UNION ALL or end)
+    table_arm_start = sql.find("'table' as securable_type")
+    assert table_arm_start != -1, "TABLE arm not found"
+    after_table_arm = sql[table_arm_start:]
+    next_union = after_table_arm.find("union all")
+    table_arm = after_table_arm[:next_union] if next_union != -1 else after_table_arm
+
+    # Verify c.comment is NOT in the TABLE arm
+    assert "c.comment" not in table_arm, (
+        f"TABLE arm should not project c.comment. Arm:\n{table_arm}"
+    )
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_fetches_column_comments_for_target_tables(mock_fetch):
+    """With column_comment_tables={'cat.sch.tbl'} and a securable row for that table,
+    plus a second _fetch_external_links_rows result with column comment rows,
+    assert the returned attributes include SecurableAttributes(securable_type=COLUMN,
+    full_name=<4-part>, comment=<value or None>) for each column."""
+    # First call returns securables rows; second call returns column comment rows
+    securables_rows = [
+        [
+            "TABLE",
+            "cat.sch.tbl",
+            "table_owner",
+            None,
+            None,
+            None,
+            '["col1","col2"]',
+            None,
+            "MANAGED",
+        ],
+    ]
+    column_comment_rows = [
+        ["cat.sch.tbl.col1", "hello"],
+        ["cat.sch.tbl.col2", None],
+    ]
+    mock_fetch.side_effect = [securables_rows, column_comment_rows]
+
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    _, attributes = helper.fetch_actual_securables(
+        ["cat"], column_comment_tables={"cat.sch.tbl"}
+    )
+
+    # Should have column comment attributes
+    col1_attr = next(
+        (
+            a
+            for a in attributes
+            if a.securable_type == SecurableType.COLUMN
+            and a.full_name == "cat.sch.tbl.col1"
+        ),
+        None,
+    )
+    assert col1_attr is not None, "Expected col1 attribute"
+    assert col1_attr.comment == "hello"
+
+    col2_attr = next(
+        (
+            a
+            for a in attributes
+            if a.securable_type == SecurableType.COLUMN
+            and a.full_name == "cat.sch.tbl.col2"
+        ),
+        None,
+    )
+    assert col2_attr is not None, "Expected col2 attribute"
+    assert col2_attr.comment is None
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_column_comments_query_filters_by_parent_table(mock_fetch):
+    """The second executed SQL (column-comment query) references information_schema.columns
+    and filters on parent table concat(table_catalog,'.',table_schema,'.',table_name),
+    not per-column full names."""
+    securables_rows = [
+        ["TABLE", "cat.sch.tbl", "owner", None, None, None, "[]", None, "MANAGED"],
+    ]
+    column_comment_rows = []
+    mock_fetch.side_effect = [securables_rows, column_comment_rows]
+
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.fetch_actual_securables(["cat"], column_comment_tables={"cat.sch.tbl"})
+
+    # Should have called execute_statement twice: securables + column comments
+    assert client.statement_execution.execute_statement.call_count == 2
+
+    # Get the second (column-comment) SQL
+    calls = client.statement_execution.execute_statement.call_args_list
+    second_call_sql = (
+        calls[1].kwargs.get("statement", "")
+        if calls[1].kwargs.get("statement")
+        else calls[1].args[0]
+    )
+    second_call_sql_lower = second_call_sql.lower()
+
+    # Should reference information_schema.columns
+    assert "information_schema.columns" in second_call_sql_lower, (
+        f"Expected 'information_schema.columns' in second query: {second_call_sql}"
+    )
+
+    # Should filter on parent table concat
+    assert (
+        "concat(" in second_call_sql_lower and "table_catalog" in second_call_sql_lower
+    ), f"Expected concat(...table_catalog...) in WHERE: {second_call_sql}"
+
+    # Should NOT filter on per-column full names IN pattern (no column_name in the filter)
+    # The WHERE should be on the table concat, not column full names
+    where_idx = second_call_sql_lower.find("where")
+    if where_idx != -1:
+        where_clause = second_call_sql_lower[where_idx:]
+        # Parent table concat should appear, but not a per-column IN that includes column names
+        assert "concat(" in where_clause, (
+            f"Expected parent table concat in WHERE clause: {where_clause}"
+        )
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_no_column_comment_query_when_no_targets(mock_fetch):
+    """When column_comment_tables is None or empty set, no extra query is issued.
+    Only the bulk securables query executes."""
+    securables_rows = [
+        ["TABLE", "cat.sch.tbl", "owner", None, None, None, "[]", None, "MANAGED"],
+    ]
+    mock_fetch.return_value = securables_rows
+
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    # Test with None
+    helper.fetch_actual_securables(["cat"], column_comment_tables=None)
+    assert client.statement_execution.execute_statement.call_count == 1
+
+    # Reset client and test with empty set
+    client.reset_mock()
+    helper2 = UnityCatalogHelper(client, WAREHOUSE_ID)
+    helper2.fetch_actual_securables(["cat"], column_comment_tables=set())
+    assert client.statement_execution.execute_statement.call_count == 1
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_batches_column_comment_tables(mock_fetch, monkeypatch):
+    """When column_comment_tables has more tables than _COLUMN_COMMENT_TABLE_BATCH,
+    the helper splits into multiple batches. With batch size=2 and 3 tables,
+    assert exactly 2 column-comment queries execute (one per batch) and all
+    results are merged into attributes."""
+    # Patch the batch size constant
+    monkeypatch.setattr(
+        "uc_declarative_abac.helpers.unity_catalog._COLUMN_COMMENT_TABLE_BATCH", 2
+    )
+
+    securables_rows = [
+        ["TABLE", "cat.sch.t1", "owner", None, None, None, "[]", None, "MANAGED"],
+        ["TABLE", "cat.sch.t2", "owner", None, None, None, "[]", None, "MANAGED"],
+        ["TABLE", "cat.sch.t3", "owner", None, None, None, "[]", None, "MANAGED"],
+    ]
+    # Batch 1: t1, t2
+    batch1_rows = [
+        ["cat.sch.t1.col1", "comment1"],
+        ["cat.sch.t2.col1", "comment2"],
+    ]
+    # Batch 2: t3
+    batch2_rows = [
+        ["cat.sch.t3.col1", "comment3"],
+    ]
+
+    mock_fetch.side_effect = [securables_rows, batch1_rows, batch2_rows]
+
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    _, attributes = helper.fetch_actual_securables(
+        ["cat"],
+        column_comment_tables={"cat.sch.t1", "cat.sch.t2", "cat.sch.t3"},
+    )
+
+    # Should have called execute_statement 3 times: securables + 2 column batches
+    assert client.statement_execution.execute_statement.call_count == 3
+
+    # All column comments should be merged
+    col_attrs = {a for a in attributes if a.securable_type == SecurableType.COLUMN}
+    assert len(col_attrs) == 3, f"Expected 3 column attributes, got {len(col_attrs)}"
+
+    # Verify all three comments are present
+    comments = {a.comment for a in col_attrs}
+    assert "comment1" in comments
+    assert "comment2" in comments
+    assert "comment3" in comments
 
 
 # ---------------------------------------------------------------------------
