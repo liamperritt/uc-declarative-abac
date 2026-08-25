@@ -25,7 +25,6 @@ definitions:
         - expression:
             get_tag_value:
               tag: uc_gov_pipeline
-
       function:
         parameters:
           - name: pii

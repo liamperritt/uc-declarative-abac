@@ -51,6 +51,9 @@ class PrivilegeType(str, Enum):
     WRITE_SKILL = "write_skill"
     READ_METADATA = "read_metadata"
     BROWSE = "browse"
+    INSERT = "insert"
+    UPDATE = "update"
+    DELETE = "delete"
 
 
 class AbstractedPrivilegeType(str, Enum):
@@ -78,7 +81,13 @@ class PrincipalType(str, Enum):
 
 # Privileges valid for each securable type. Higher-level securables inherit
 # all privileges from lower levels. Unknown privileges are allowed on all types.
-_TABLE_PRIVILEGES = {PrivilegeType.SELECT, PrivilegeType.MODIFY}
+_TABLE_PRIVILEGES = {
+    PrivilegeType.SELECT,
+    PrivilegeType.MODIFY,
+    PrivilegeType.INSERT,
+    PrivilegeType.UPDATE,
+    PrivilegeType.DELETE,
+}
 _VOLUME_PRIVILEGES = {
     PrivilegeType.READ_VOLUME,
     PrivilegeType.WRITE_VOLUME,
