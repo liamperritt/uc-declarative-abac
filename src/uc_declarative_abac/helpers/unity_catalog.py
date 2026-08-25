@@ -62,6 +62,14 @@ _MAX_POLICY_LIST_WORKERS = 16
 
 _MAX_RFA_WORKERS = 16
 
+_MAX_COLUMN_COMMENT_WORKERS = 16
+
+# Max parent tables per targeted column-comment query. The table set is chunked
+# into batches of this size, each run as a separate statement in parallel, to keep
+# the ``IN`` clause (and statement text) bounded regardless of how many tables
+# declare column comments.
+_COLUMN_COMMENT_TABLE_BATCH = 1000
+
 
 def _build_catalog_in_clause(catalog_names: list[str]) -> str:
     """Build a SQL IN clause from a list of catalog names."""
@@ -357,6 +365,68 @@ def _build_securables_query(
         f"GROUP BY r.specific_catalog, r.specific_schema, r.specific_name, r.routine_owner, r.routine_definition, r.comment"),
     ]
     return " UNION ALL ".join(parts)
+
+
+def _build_column_comments_query(
+    table_full_names: list[str], *, system_catalog: str = "system"
+) -> str:
+    """Build a targeted query for the comments on the columns of the given tables.
+
+    Keyed on the **parent table** (``concat(catalog, schema, table) IN (...)``) rather
+    than on individual column full names: this keeps the ``IN`` clause bounded by the
+    number of tables that declare a column comment (small) instead of exploding with one
+    entry per declared column. It returns one row ``(full_name, comment)`` per column of
+    each listed table — including columns with a NULL comment — so the differ has an
+    actual-state baseline for every declared column. Sibling columns not under management
+    are harmless: the diff is desired-driven and never looks them up.
+
+    **Pruning:** the ``concat(...)`` predicate is opaque to the query optimizer, so on its
+    own it forces a full scan of ``information_schema.columns`` across the entire metastore
+    (which times out on large estates). We therefore filter on the **raw** ``table_catalog``
+    and ``table_schema`` columns first (derived from the target tables) so Spark can prune
+    to just the relevant catalogs/schemas; the exact ``concat(...)`` filter then narrows the
+    pruned rows down to precisely the requested tables. Names are assumed dot-free (the same
+    assumption the rest of the engine makes for dot-joined full names).
+    """
+    catalogs = sorted({name.split(".")[0] for name in table_full_names})
+    schemas = sorted({name.split(".")[1] for name in table_full_names})
+    catalog_in = _build_catalog_in_clause(catalogs)
+    schema_in = _build_catalog_in_clause(schemas)
+    table_in = _build_catalog_in_clause(table_full_names)
+    return (
+        "SELECT concat(table_catalog, '.', table_schema, '.', table_name, '.', column_name) "
+        "AS full_name, comment "
+        f"FROM {system_catalog}.information_schema.columns "
+        f"WHERE table_catalog IN {catalog_in} "
+        f"AND table_schema IN {schema_in} "
+        f"AND concat(table_catalog, '.', table_schema, '.', table_name) IN {table_in} "
+        "AND table_schema != 'information_schema'"
+        f"{_build_double_underscore_filter(['table_catalog', 'table_schema', 'table_name'])}"
+    )
+
+
+def _merge_column_comments_into_attributes(
+    attributes: set[SecurableAttributes],
+    rows: list[list[str]],
+) -> set[SecurableAttributes]:
+    """Return a new attributes set with one COLUMN SecurableAttributes per fetched row.
+
+    Each row is ``[column_full_name, comment]``; a NULL/empty comment becomes ``None``.
+    No de-duplication or sibling-filtering is required — extra sibling-column rows never
+    match a desired attribute key, so they can't produce a diff.
+    """
+    result = set(attributes)
+    for row in rows:
+        full_name = row[0]
+        comment = row[1] if len(row) > 1 else None
+        result.add(
+            SecurableAttributes(
+                securable_type=SecurableType.COLUMN,
+                full_name=full_name,
+                comment=comment if comment else None,
+            )
+        )
+    return result
 
 
 def _parse_securable_rows(
@@ -776,6 +846,7 @@ class UnityCatalogHelper:
         self,
         catalog_names: list[str],
         rfa_targets: set[tuple[SecurableType, str]] | None = None,
+        column_comment_tables: set[str] | None = None,
     ) -> tuple[set[Securable], set[SecurableAttributes]]:
         """Query system tables for securable attributes and function definitions.
 
@@ -790,6 +861,15 @@ class UnityCatalogHelper:
         targets that don't yet exist in info_schema. When omitted or empty,
         no RFA fetch fires and ``SecurableAttributes.rfa_destinations``
         remains ``None`` on every row.
+
+        ``column_comment_tables`` is the optional set of **table** full names
+        whose columns declare a comment in config. When supplied, the helper
+        runs one targeted ``information_schema.columns`` query per batch of
+        tables (in parallel) and merges each column's comment into the returned
+        (and cached) ``SecurableAttributes`` set as a ``COLUMN`` row. The bulk
+        securables query is unaffected — it never fetches column comments — so
+        column-comment latency scales only with the tables that declare them.
+        When omitted or empty, no column-comment query fires.
         """
         if self._securables_cache is not None and self._attributes_cache is not None:
             return self._securables_cache, self._attributes_cache
@@ -809,9 +889,47 @@ class UnityCatalogHelper:
             rfa_map = self._fetch_rfa_destinations(rfa_targets)
             attributes = _merge_rfa_into_attributes(attributes, rfa_map)
 
+        if column_comment_tables:
+            column_rows = self._fetch_column_comments(column_comment_tables)
+            attributes = _merge_column_comments_into_attributes(attributes, column_rows)
+
         self._securables_cache = securables
         self._attributes_cache = attributes
         return self._securables_cache, self._attributes_cache
+
+    def _fetch_column_comments(self, table_full_names: set[str]) -> list[list[str]]:
+        """Fetch column comments for the given parent tables, batched and in parallel.
+
+        The table set is chunked into ``_COLUMN_COMMENT_TABLE_BATCH``-sized batches
+        (sorted for deterministic batching) and each batch runs as its own statement
+        over a thread pool; the batches' rows are concatenated. Order is irrelevant —
+        the merge is keyed by full name.
+        """
+        tables = sorted(table_full_names)
+        batches = [
+            tables[i : i + _COLUMN_COMMENT_TABLE_BATCH]
+            for i in range(0, len(tables), _COLUMN_COMMENT_TABLE_BATCH)
+        ]
+        rows: list[list[str]] = []
+        with ThreadPoolExecutor(max_workers=_MAX_COLUMN_COMMENT_WORKERS) as pool:
+            futures = [
+                pool.submit(self._fetch_column_comment_batch, batch)
+                for batch in batches
+            ]
+            for future in as_completed(futures):
+                rows.extend(future.result())
+        return rows
+
+    def _fetch_column_comment_batch(
+        self, table_full_names: list[str]
+    ) -> list[list[str]]:
+        """Run one batch's targeted column-comment query and return its rows."""
+        response = self._execute_and_poll(
+            _build_column_comments_query(
+                table_full_names, system_catalog=self._system_catalog
+            )
+        )
+        return _fetch_external_links_rows(response)
 
     def _fetch_rfa_destinations(
         self, targets: set[tuple[SecurableType, str]]

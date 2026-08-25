@@ -41,6 +41,13 @@ _SECURABLE_DEPTH: dict[SecurableType, int] = {
     SecurableType.COLUMN: 3,
 }
 
+# ``information_schema.tables.table_type`` values that don't support
+# ``ALTER TABLE … ALTER COLUMN … COMMENT``. Column comments on these are applied
+# one-per-column via ``COMMENT ON COLUMN`` instead of a single batched ALTER.
+_ALTER_COLUMN_UNSUPPORTED_TABLE_TYPES = frozenset(
+    {"VIEW", "METRIC_VIEW", "MATERIALIZED_VIEW", "STREAMING_TABLE"}
+)
+
 
 def _escape_sql_string_literal(value: str) -> str:
     """Escape single quotes for embedding in a SQL string literal."""
@@ -150,7 +157,8 @@ def _build_create_table_sql(info: Table) -> str:
     a Table reaches this builder, so it's safe to assume types are present.
     """
     column_defs = ", ".join(
-        f"`{c.full_name.rsplit('.', 1)[-1]}` {c.data_type}" for c in info.columns
+        f"`{c.full_name.rsplit('.', 1)[-1]}` {c.data_type}{_build_comment_clause(c.comment)}"
+        for c in info.columns
     )
     return (
         f"CREATE TABLE IF NOT EXISTS {quote_securable(info.full_name)} ({column_defs})"
@@ -183,7 +191,8 @@ def _build_alter_table_add_columns_sql(
     COLUMN operations on the same table. The differ has already validated that
     every column's ``data_type`` is set before they reach this builder."""
     column_defs = ", ".join(
-        f"`{c.full_name.rpartition('.')[-1]}` {c.data_type}" for c in columns
+        f"`{c.full_name.rpartition('.')[-1]}` {c.data_type}{_build_comment_clause(c.comment)}"
+        for c in columns
     )
     return (
         f"ALTER TABLE {quote_securable(parent_full_name)} ADD COLUMNS ({column_defs})"
@@ -240,19 +249,58 @@ def _build_replace_function_sql(info: Function) -> str:
 def _build_comment_update_sql(
     securable_type: SecurableType, full_name: str, comment: str
 ) -> str:
-    """Build an ALTER/COMMENT ON SQL statement to set the comment of an existing securable.
+    """Build a ``COMMENT ON <type> <name> IS "..."`` statement to set a securable's comment.
 
-    Catalog/schema use ``ALTER ... SET COMMENT '...'``; table/volume use
-    ``COMMENT ON ... IS '...'``. The differ has already guarded against
-    comment changes on views.
+    Covers catalog/schema/table/volume, and columns (``COMMENT ON COLUMN`` — used for
+    columns on views / materialized views / streaming tables, which don't support
+    ``ALTER TABLE … ALTER COLUMN``). Functions carry their comment in the replaceable
+    definition, so a comment update is never issued for them. The differ has already
+    guarded against comment changes on views (table-level).
     """
     quoted = quote_securable(full_name)
     escaped = _escape_sql_string_literal(comment)
-    if securable_type in (SecurableType.COLUMN, SecurableType.FUNCTION):
+    if securable_type == SecurableType.FUNCTION:
         raise OrchestratorError(
             f"Comment updates not supported for {securable_type.value}."
         )
     return f'COMMENT ON {securable_type.name} {quoted} IS "{escaped}"'
+
+
+def _column_comment_value(update: AttributeUpdate) -> str:
+    """Unwrap the single desired comment string from a column comment update."""
+    return str(next(iter(update.new_value)))
+
+
+def _column_parent_table(update: AttributeUpdate) -> str:
+    """Return the parent-table full name of a column-scoped update."""
+    return update.full_name.rpartition(".")[0]
+
+
+def _build_alter_table_column_comments_sql(
+    parent_full_name: str, updates: list[AttributeUpdate]
+) -> str:
+    """Build one batched ``ALTER TABLE … ALTER COLUMN`` for a table's column comments.
+
+    The ``ALTER COLUMN`` keyword appears once, followed by comma-separated
+    ``<col> COMMENT "<escaped>"`` pairs — one statement per table rather than one per
+    column. Used for base tables (types that support ``ALTER TABLE … ALTER COLUMN``).
+    """
+    clauses = ", ".join(
+        f"`{u.full_name.rpartition('.')[-1]}` "
+        f'COMMENT "{_escape_sql_string_literal(_column_comment_value(u))}"'
+        for u in updates
+    )
+    return f"ALTER TABLE {quote_securable(parent_full_name)} ALTER COLUMN {clauses}"
+
+
+def _group_comment_updates_by_parent(
+    updates: list[AttributeUpdate],
+) -> list[tuple[str, list[AttributeUpdate]]]:
+    """Group column comment updates by parent table, preserving input order."""
+    groups: dict[str, list[AttributeUpdate]] = {}
+    for update in updates:
+        groups.setdefault(_column_parent_table(update), []).append(update)
+    return list(groups.items())
 
 
 def _apply_owner_update(uc_helper: UnityCatalogHelper, update: AttributeUpdate) -> None:
@@ -371,6 +419,80 @@ def _run_column_create_batch(
     if dry_run:
         return []
     return [stmt for (_p, _c, stmt), _r, error in results if error is None]
+
+
+def _build_column_comment_work_items(
+    updates: list[AttributeUpdate], fallback_tables: frozenset[str]
+) -> list[tuple[list[AttributeUpdate], str]]:
+    """Build ``(updates, sql)`` work items covering every column comment update.
+
+    Base-table columns (types that support ``ALTER TABLE … ALTER COLUMN``) are grouped
+    into one batched ALTER per parent table; columns on ``fallback_tables`` (views,
+    metric/materialized views, streaming tables) get one ``COMMENT ON COLUMN`` each. Each
+    item carries the update(s) it covers so the executor logs every column, even for a
+    batched ALTER. Base items precede fallback items so the returned statement order is
+    stable.
+    """
+    base = [u for u in updates if _column_parent_table(u) not in fallback_tables]
+    fallback = [u for u in updates if _column_parent_table(u) in fallback_tables]
+
+    items: list[tuple[list[AttributeUpdate], str]] = [
+        (ups, _build_alter_table_column_comments_sql(parent, ups))
+        for parent, ups in _group_comment_updates_by_parent(base)
+    ]
+    items.extend(
+        (
+            [update],
+            _build_comment_update_sql(
+                update.securable_type,
+                update.full_name,
+                _column_comment_value(update),
+            ),
+        )
+        for update in fallback
+    )
+    return items
+
+
+def _run_column_comment_batch(
+    uc_helper: UnityCatalogHelper,
+    updates: list[AttributeUpdate],
+    fallback_tables: frozenset[str],
+    change_logger: ChangeLogger,
+    dry_run: bool,
+    max_workers: int,
+) -> list[str]:
+    """Apply all column comment updates in a single parallel batch (width ``max_workers``).
+
+    Base-table comments batch into one ``ALTER TABLE … ALTER COLUMN`` per table;
+    view-family comments use ``COMMENT ON COLUMN`` per column. Both kinds run together in
+    one thread pool — there is no sequential phase between them, so no statement waits on
+    a separate sub-batch. Per-column log granularity is preserved via ``on_complete``.
+    """
+    work_items = _build_column_comment_work_items(updates, fallback_tables)
+
+    def worker(item: tuple[list[AttributeUpdate], str]) -> None:
+        _ups, stmt = item
+        if not dry_run:
+            uc_helper.execute_sql(stmt)
+
+    def on_complete(item: tuple[list[AttributeUpdate], str], _result, error) -> None:
+        ups, stmt = item
+        if error is not None:
+            change_logger.log_error(ExecutionError(context=stmt, exception=error))
+            return
+        for update in ups:
+            change_logger.log_attribute_update(update)
+
+    results = parallel_for_each(
+        work_items,
+        worker,
+        max_workers=max_workers,
+        on_complete=on_complete,
+    )
+    if dry_run:
+        return []
+    return [stmt for (_ups, stmt), _r, error in results if error is None]
 
 
 def _run_create_batch(
@@ -540,12 +662,38 @@ def _run_attribute_update_sub_batch(
     ]
 
 
+def _is_column_comment_update(update: AttributeUpdate) -> bool:
+    """True for a comment update on a column (routed via the column-comment batch)."""
+    return (
+        update.securable_type == SecurableType.COLUMN and update.attribute == "comment"
+    )
+
+
+def _column_comment_fallback_tables(
+    actual_securables: set[Securable] | None,
+) -> frozenset[str]:
+    """Table full names whose ``table_type`` doesn't support ``ALTER TABLE … ALTER COLUMN``.
+
+    Derived from the actual-state ``Table`` securables (which carry ``table_type``);
+    columns on these tables get per-column ``COMMENT ON COLUMN`` instead of a batched
+    ``ALTER TABLE``. An empty/absent actual set means every column takes the batched
+    ALTER path (the common case).
+    """
+    return frozenset(
+        s.full_name
+        for s in (actual_securables or set())
+        if isinstance(s, Table)
+        and s.table_type in _ALTER_COLUMN_UNSUPPORTED_TABLE_TYPES
+    )
+
+
 def execute_securable_diff(
     uc_helper: UnityCatalogHelper,
     diff: SecurableDiff,
     change_logger: ChangeLogger,
     dry_run: bool = False,
     max_parallel_changes: int = 8,
+    actual_securables: set[Securable] | None = None,
 ) -> list[str]:
     """Execute securable creates, replaces, and attribute updates from a SecurableDiff.
 
@@ -562,6 +710,15 @@ def execute_securable_diff(
     attribute-update sub-batches, items run in parallel up to
     ``max_parallel_changes``. Dry-run forces sequential execution so log
     output is identical to non-parallel mode.
+
+    Column comment updates are handled in a dedicated final phase (after the
+    generic attribute updates): they are batched into one
+    ``ALTER TABLE … ALTER COLUMN`` per base table, except for columns whose
+    parent table type doesn't support that (views, metric/materialized views,
+    streaming tables), which fall back to one ``COMMENT ON COLUMN`` per column.
+    ``actual_securables`` supplies the ``Table.table_type`` values used to make
+    that routing decision; when omitted, every column takes the batched ALTER
+    path.
 
     Returns the list of SQL statements that were successfully executed
     (empty in dry-run mode).
@@ -592,7 +749,17 @@ def execute_securable_diff(
         )
     )
 
-    attribute_buckets = _bucket_attribute_updates(list(diff.attributes_to_update))
+    # Column comment updates are handled by a dedicated final phase (batched one ALTER
+    # per base table; COMMENT ON COLUMN for view-family tables); every other attribute
+    # update flows through the generic depth/owner-first bucketing.
+    column_comment_updates = [
+        u for u in diff.attributes_to_update if _is_column_comment_update(u)
+    ]
+    other_updates = [
+        u for u in diff.attributes_to_update if not _is_column_comment_update(u)
+    ]
+
+    attribute_buckets = _bucket_attribute_updates(other_updates)
     for sort_key in sorted(attribute_buckets):
         statements.extend(
             _run_attribute_update_sub_batch(
@@ -603,5 +770,16 @@ def execute_securable_diff(
                 workers,
             )
         )
+
+    statements.extend(
+        _run_column_comment_batch(
+            uc_helper,
+            column_comment_updates,
+            _column_comment_fallback_tables(actual_securables),
+            change_logger,
+            dry_run,
+            workers,
+        )
+    )
 
     return statements

@@ -2510,8 +2510,14 @@ def _capture_fetch_actual_securables_calls(monkeypatch) -> list[tuple]:
 
     calls: list[tuple] = []
 
-    def _spy(self, catalog_names, rfa_targets=None):
-        calls.append((tuple(catalog_names), frozenset(rfa_targets or ())))
+    def _spy(self, catalog_names, rfa_targets=None, column_comment_tables=None):
+        calls.append(
+            (
+                tuple(catalog_names),
+                frozenset(rfa_targets or ()),
+                frozenset(column_comment_tables or ()),
+            )
+        )
         # Return empty actual state so the rest of the orchestrator short-circuits cleanly.
         return set(), set()
 
@@ -2561,7 +2567,7 @@ def test_orchestrator_passes_rfa_targets_for_securables_with_destinations(
         )
 
     assert len(calls) == 1
-    _catalog_names, rfa_targets = calls[0]
+    _catalog_names, rfa_targets, _cct = calls[0]
     assert rfa_targets == frozenset(
         {
             (SecurableType.CATALOG, "my_catalog"),
@@ -2600,7 +2606,7 @@ def test_orchestrator_passes_empty_rfa_targets_when_taggable_management_off(
         )
 
     assert len(calls) == 1
-    _catalog_names, rfa_targets = calls[0]
+    _catalog_names, rfa_targets, _cct = calls[0]
     assert rfa_targets == frozenset()
 
 
@@ -2636,7 +2642,7 @@ def test_orchestrator_includes_securable_in_rfa_targets_when_rfa_destinations_is
         )
 
     assert len(calls) == 1
-    _catalog_names, rfa_targets = calls[0]
+    _catalog_names, rfa_targets, _cct = calls[0]
     assert (SecurableType.CATALOG, "my_catalog") in rfa_targets
 
 
@@ -2686,11 +2692,122 @@ def test_orchestrator_includes_function_in_rfa_targets_when_taggable_management_
         )
 
     assert len(calls) == 1
-    _catalog_names, rfa_targets = calls[0]
+    _catalog_names, rfa_targets, _cct = calls[0]
     # Function is always managed -> fetched even with the flag off.
     assert (SecurableType.FUNCTION, "my_catalog.sch.format_phone") in rfa_targets
     # Non-function securables stay gated by the flag.
     assert (SecurableType.CATALOG, "my_catalog") not in rfa_targets
+
+
+def test_orchestrator_passes_column_comment_tables_for_columns_with_comments(
+    tmp_yaml_dir,
+    mock_workspace_client,
+    monkeypatch,
+):
+    """When the config declares columns with comments and taggable management is on,
+    fetch_actual_securables is invoked with column_comment_tables containing exactly
+    the parent table full names.
+
+    The run raises ``ExecutionBatchError`` because the mock returns empty actual
+    state so every declared securable surfaces as nonexistent — that's fine for
+    this test, we only care about how ``fetch_actual_securables`` was invoked.
+    """
+    config = {
+        "resources": {
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "customers",
+                                    "columns": [
+                                        {
+                                            "name": "customer_id",
+                                            "type": "INT",
+                                            "comment": "Unique customer identifier",
+                                        },
+                                        {
+                                            "name": "email",
+                                            "type": "STRING",
+                                            "comment": "Customer email address",
+                                        },
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _setup_mock_empty_principals(mock_workspace_client)
+    calls = _capture_fetch_actual_securables_calls(monkeypatch)
+
+    with pytest.raises(ExecutionBatchError):
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            enable_taggable_management=True,
+        )
+
+    assert len(calls) == 1
+    _catalog_names, _rfa_targets, column_comment_tables = calls[0]
+    assert column_comment_tables == frozenset({"my_catalog.sales.customers"})
+
+
+def test_orchestrator_passes_empty_column_comment_tables_when_taggable_management_off(
+    tmp_yaml_dir,
+    mock_workspace_client,
+    monkeypatch,
+):
+    """Column comment updates are gated by enable_taggable_management — when it's
+    off, no column comment fetch fires (column_comment_tables is an empty set)."""
+    config = {
+        "resources": {
+            "catalogs": {
+                "my_catalog": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "customers",
+                                    "columns": [
+                                        {
+                                            "name": "customer_id",
+                                            "type": "INT",
+                                            "comment": "Unique customer identifier",
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _setup_mock_empty_principals(mock_workspace_client)
+    calls = _capture_fetch_actual_securables_calls(monkeypatch)
+
+    with pytest.raises(ExecutionBatchError):
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            enable_taggable_management=False,
+        )
+
+    assert len(calls) == 1
+    _catalog_names, _rfa_targets, column_comment_tables = calls[0]
+    assert column_comment_tables == frozenset()
 
 
 # ---------------------------------------------------------------------------

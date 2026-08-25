@@ -480,6 +480,18 @@ def run(
         if a.rfa_destinations is not None
         and (enable_taggable_management or a.securable_type == SecurableType.FUNCTION)
     }
+    # Parent tables of every in-scope column that declares a comment. Column comments
+    # are a managed (taggable) attribute, so — unlike rfa_targets, which has a FUNCTION
+    # exception — they are fetched only for tables in the taggable-management scope.
+    # When taggable management is off the scope matches nothing, this set is empty, and
+    # no column-comment query is ever issued (zero added state-fetch cost).
+    column_comment_tables: set[str] = {
+        a.full_name.rpartition(".")[0]
+        for a in desired_attributes
+        if a.securable_type == SecurableType.COLUMN
+        and a.comment is not None
+        and taggable_management_scope.matches(a.full_name)
+    }
 
     # 3. Parallel initial fetch (securables, tags, privileges, and principals concurrently)
     uc_helper = UnityCatalogHelper(
@@ -506,6 +518,7 @@ def run(
             uc_helper.fetch_actual_securables,
             catalog_names,
             rfa_targets,
+            column_comment_tables,
         )
         actual_policies_f = pool.submit(uc_helper.fetch_actual_policies, catalog_names)
         actual_governed_tags_f = pool.submit(
@@ -755,6 +768,7 @@ def run(
         change_logger,
         dry_run=dry_run,
         max_parallel_changes=max_parallel_changes,
+        actual_securables=actual_securables,
     )
 
     if tag_diff.to_add or tag_diff.to_update or tag_diff.to_remove:

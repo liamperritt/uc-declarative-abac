@@ -8,5 +8,6 @@ definitions:
       columns:
         - name: __$operation
           type: int
+          comment: Test comment 1
           tags:
             uc_gov_cdc_column: operation

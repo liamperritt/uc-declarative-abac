@@ -8,15 +8,19 @@ definitions:
         uc_gov_pipeline: lff
       columns:
         - name: __$operation
+          comment: Test comment 1
           tags:
             uc_gov_cdc_column: operation
         - name: data
           type: string
+          comment: Test comment 2
           tags:
             uc_gov_pii: name
         - name: new_column
           type: string
+          comment: Test comment 3
           tags:
             uc_gov_pii: address
         - name: another_column
           type: long
+          comment: Test comment 4 updated

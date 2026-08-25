@@ -1697,3 +1697,124 @@ def test_nonexistent_securable_error_uses_hint_when_provided_instead_of_flag_boi
     assert "Configure at least one column" in msg
     # The flag-boilerplate should NOT appear when a hint is present.
     assert "--taggable-creation-scopes" not in msg
+
+
+# ---------------------------------------------------------------------------
+# Column comment diffing
+# ---------------------------------------------------------------------------
+
+
+def test_securable_differ_detects_column_comment_change():
+    """A comment difference on an existing column produces an AttributeUpdate."""
+    desired = {_attrs(SecurableType.COLUMN, "cat.sch.tbl.col", comment="New")}
+    actual = {_attrs(SecurableType.COLUMN, "cat.sch.tbl.col", comment="Old")}
+
+    diff = compute_securable_diff(
+        desired, actual, set(), set(), _resolver(), _change_logger()
+    )
+
+    assert len(diff.attributes_to_update) == 1
+    update = diff.attributes_to_update[0]
+    assert update.attribute == "comment"
+    assert update.securable_type == SecurableType.COLUMN
+    assert update.full_name == "cat.sch.tbl.col"
+    assert update.old_value == frozenset({"Old"})
+    assert update.new_value == frozenset({"New"})
+
+
+def test_securable_differ_ignores_unchanged_column_comment():
+    """Identical comment on both sides produces no diff."""
+    desired = {_attrs(SecurableType.COLUMN, "cat.sch.tbl.col", comment="same")}
+    actual = {_attrs(SecurableType.COLUMN, "cat.sch.tbl.col", comment="same")}
+
+    diff = compute_securable_diff(
+        desired, actual, set(), set(), _resolver(), _change_logger()
+    )
+
+    assert diff.attributes_to_update == []
+
+
+def test_securable_differ_skips_column_comment_for_column_being_created():
+    """When a column is being created this run, its comment is embedded in CREATE
+    COLUMN and is NOT emitted as a separate AttributeUpdate."""
+    desired_table = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sch.tbl",
+        columns=(
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.tbl.col",
+                data_type="STRING",
+                comment="New column comment",
+            ),
+        ),
+    )
+    actual_table = _actual_table("cat.sch.tbl")  # exists but no columns yet
+
+    desired_attrs = {
+        _attrs(
+            SecurableType.COLUMN,
+            "cat.sch.tbl.col",
+            comment="New column comment",
+        )
+    }
+    actual_attrs: set[SecurableAttributes] = set()
+
+    diff = compute_securable_diff(
+        desired_attrs,
+        actual_attrs,
+        {desired_table},
+        {actual_table},
+        _resolver(),
+        _change_logger(),
+        creation_in_scope_namespaces=_ALL_TEST_CATALOGS,
+    )
+
+    # The column should be in securables_to_create.
+    column_entries = [s for s in diff.securables_to_create if isinstance(s, Column)]
+    assert len(column_entries) == 1
+    assert column_entries[0].full_name == "cat.sch.tbl.col"
+
+    # But the column comment should NOT appear in attributes_to_update because
+    # it's embedded in the CREATE COLUMN statement.
+    attribute_names = {u.attribute for u in diff.attributes_to_update}
+    assert "comment" not in attribute_names
+
+
+def test_securable_differ_emits_column_comment_update_on_view_column():
+    """Even when the parent table's actual table_type is VIEW, a COLUMN comment
+    change IS emitted as an AttributeUpdate (column-level comments are not subject
+    to the view guard, which only blocks table-level comment changes)."""
+    view_table = Table(
+        securable_type=SecurableType.TABLE,
+        full_name="cat.sch.view_tbl",
+        table_type="VIEW",
+        columns=(
+            Column(
+                securable_type=SecurableType.COLUMN,
+                full_name="cat.sch.view_tbl.col",
+                data_type=None,
+            ),
+        ),
+    )
+    desired_attrs = {
+        _attrs(SecurableType.COLUMN, "cat.sch.view_tbl.col", comment="New")
+    }
+    actual_attrs = {_attrs(SecurableType.COLUMN, "cat.sch.view_tbl.col", comment="Old")}
+
+    diff = compute_securable_diff(
+        desired_attrs,
+        actual_attrs,
+        set(),
+        {view_table},
+        _resolver(),
+        _change_logger(),
+    )
+
+    # Column comment update should be emitted even on a VIEW table.
+    assert len(diff.attributes_to_update) == 1
+    update = diff.attributes_to_update[0]
+    assert update.attribute == "comment"
+    assert update.securable_type == SecurableType.COLUMN
+    assert update.full_name == "cat.sch.view_tbl.col"
+    assert update.new_value == frozenset({"New"})

@@ -83,6 +83,12 @@ def compile_desired_attributes(config: ResourcesConfig) -> set[SecurableAttribut
                 if (attr := _emit_attributes(SecurableType.TABLE, table)) is not None:
                     attrs.add(attr)
 
+                for column in table.columns or []:
+                    if (
+                        attr := _emit_attributes(SecurableType.COLUMN, column)
+                    ) is not None:
+                        attrs.add(attr)
+
             for volume in schema.volumes or []:
                 if (attr := _emit_attributes(SecurableType.VOLUME, volume)) is not None:
                     attrs.add(attr)
@@ -111,11 +117,16 @@ def _compile_function(func: FunctionConfig) -> Function:
 
 
 def _compile_column(col: ColumnConfig) -> Column:
-    """Build a Column from a ColumnConfig, preserving the optional UC datatype."""
+    """Build a Column from a ColumnConfig, preserving the optional UC datatype and comment.
+
+    ``comment`` rides along so the executor can embed it in the CREATE TABLE /
+    ALTER TABLE ADD COLUMNS statement when the column is created this run.
+    """
     return Column(
         securable_type=SecurableType.COLUMN,
         full_name=col.full_name,
         data_type=col.data_type,
+        comment=col.comment,
     )
 
 

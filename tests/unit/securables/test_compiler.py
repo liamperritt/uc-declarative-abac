@@ -408,6 +408,79 @@ def test_securable_compiler_does_not_emit_function_comment_into_attributes():
     assert not any(a.securable_type == SecurableType.FUNCTION for a in result)
 
 
+def test_securable_compiler_emits_column_comment_in_attributes():
+    """A column with a comment produces a SecurableAttributes carrying it."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "columns": [
+                                        {
+                                            "name": "email",
+                                            "data_type": "STRING",
+                                            "comment": "Customer email",
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    result = compile_desired_attributes(config)
+
+    assert (
+        SecurableAttributes(
+            securable_type=SecurableType.COLUMN,
+            full_name="my_cat.sales.orders.email",
+            comment="Customer email",
+        )
+        in result
+    )
+
+
+def test_securable_compiler_omits_column_without_comment_from_attributes():
+    """A column without a comment produces no COLUMN-typed SecurableAttributes."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "columns": [
+                                        {
+                                            "name": "email",
+                                            "data_type": "STRING",
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    result = compile_desired_attributes(config)
+
+    # No COLUMN-typed attributes should be emitted
+    assert not any(a.securable_type == SecurableType.COLUMN for a in result)
+
+
 # ---------------------------------------------------------------------------
 # compile_desired_attributes — rfa_destinations
 # ---------------------------------------------------------------------------
@@ -1161,3 +1234,50 @@ def test_securables_compiler_plumbs_comment_and_location_onto_volume_securable()
     volume = next(s for s in result if s.full_name == "my_cat.landing.raw")
     assert volume.comment == "Raw"
     assert volume.location == "s3://ext/raw"
+
+
+def test_securable_compiler_populates_column_comment_on_table_columns():
+    """Column comment declared in config is propagated onto the Column inside the Table."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "my_cat": {
+                    "schemas": [
+                        {
+                            "name": "sales",
+                            "tables": [
+                                {
+                                    "name": "orders",
+                                    "columns": [
+                                        {
+                                            "name": "order_id",
+                                            "data_type": "LONG",
+                                            "comment": "Unique order identifier",
+                                        },
+                                        {
+                                            "name": "email",
+                                            "data_type": "STRING",
+                                            "comment": "Customer email address",
+                                        },
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    result = compile_desired_securables(config)
+
+    table = next(s for s in result if s.full_name == "my_cat.sales.orders")
+    assert isinstance(table, Table)
+    order_id_col = next(
+        c for c in table.columns if c.full_name == "my_cat.sales.orders.order_id"
+    )
+    assert order_id_col.comment == "Unique order identifier"
+    email_col = next(
+        c for c in table.columns if c.full_name == "my_cat.sales.orders.email"
+    )
+    assert email_col.comment == "Customer email address"

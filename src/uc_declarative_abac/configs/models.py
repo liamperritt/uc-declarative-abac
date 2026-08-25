@@ -670,11 +670,6 @@ class ColumnConfig(BaseTaggableConfig):
             "it is always inherited from the table"
         )
 
-    @field_validator("comment", mode="before")
-    @classmethod
-    def _reject_comment(cls, v):
-        raise ValueError("Column-level comments are not currently supported")
-
     @field_validator("rfa_destinations", mode="before")
     @classmethod
     def _reject_rfa_destinations(cls, v):
