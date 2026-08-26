@@ -370,15 +370,19 @@ def _build_securables_query(
 def _build_column_comments_query(
     table_full_names: list[str], *, system_catalog: str = "system"
 ) -> str:
-    """Build a targeted query for the comments on the columns of the given tables.
+    """Build a targeted query for the **non-empty** comments on the columns of the given tables.
 
     Keyed on the **parent table** (``concat(catalog, schema, table) IN (...)``) rather
     than on individual column full names: this keeps the ``IN`` clause bounded by the
     number of tables that declare a column comment (small) instead of exploding with one
-    entry per declared column. It returns one row ``(full_name, comment)`` per column of
-    each listed table — including columns with a NULL comment — so the differ has an
-    actual-state baseline for every declared column. Sibling columns not under management
-    are harmless: the diff is desired-driven and never looks them up.
+    entry per declared column. It returns one row ``(full_name, comment)`` only for columns
+    that actually carry a comment (``comment IS NOT NULL AND comment <> ''``) — uncommented
+    columns are not transferred; their ``comment=None`` baseline comes from the standard
+    securables fetch (see ``_build_column_comment_baselines``). Sibling columns not under
+    management are harmless: the diff is desired-driven and never looks them up.
+
+    Empty comments are treated as absent (symmetric with the desired side, which collapses
+    ``""`` to a no-op); we do not trim, so a whitespace-only comment counts as real.
 
     **Pruning:** the ``concat(...)`` predicate is opaque to the query optimizer, so on its
     own it forces a full scan of ``information_schema.columns`` across the entire metastore
@@ -400,33 +404,67 @@ def _build_column_comments_query(
         f"WHERE table_catalog IN {catalog_in} "
         f"AND table_schema IN {schema_in} "
         f"AND concat(table_catalog, '.', table_schema, '.', table_name) IN {table_in} "
+        "AND comment IS NOT NULL AND comment <> '' "
         "AND table_schema != 'information_schema'"
         f"{_build_double_underscore_filter(['table_catalog', 'table_schema', 'table_name'])}"
     )
+
+
+def _build_column_comment_baselines(
+    securables: set[Securable],
+    managed_tables: set[str],
+) -> set[SecurableAttributes]:
+    """Emit a ``comment=None`` COLUMN baseline for every column of each managed table.
+
+    Reuses the column enumeration the standard securables fetch already produced
+    (``_parse_securable_rows`` builds ``Table.columns``) — no extra query. Sourcing
+    baselines from **actual** ``Table.columns`` (not from config) means we baseline only
+    columns that genuinely exist, so a config-declared column absent from UC gets no
+    baseline (its absence is handled by the differ's column-creation path). The filtered
+    comments fetch then overlays real comments onto these baselines, so a column being
+    commented for the first time still has an actual-state row to diff against.
+    """
+    return {
+        SecurableAttributes(
+            securable_type=SecurableType.COLUMN,
+            full_name=column.full_name,
+            comment=None,
+        )
+        for securable in securables
+        if isinstance(securable, Table) and securable.full_name in managed_tables
+        for column in securable.columns
+    }
 
 
 def _merge_column_comments_into_attributes(
     attributes: set[SecurableAttributes],
     rows: list[list[str]],
 ) -> set[SecurableAttributes]:
-    """Return a new attributes set with one COLUMN SecurableAttributes per fetched row.
+    """Overlay fetched column comments onto the existing attributes, keyed by full name.
 
-    Each row is ``[column_full_name, comment]``; a NULL/empty comment becomes ``None``.
-    No de-duplication or sibling-filtering is required — extra sibling-column rows never
-    match a desired attribute key, so they can't produce a diff.
+    Each row is ``[column_full_name, comment]``. The COLUMN baseline (``comment=None``)
+    for the column is expected to already be present (from
+    ``_build_column_comment_baselines``); we **replace** it with the commented version so
+    the set never holds both the ``None`` baseline and the commented row for the same
+    column (which would make the differ's ``actual_by_key`` pick one arbitrarily). If no
+    baseline exists (shouldn't happen — every commented column is enumerated by the
+    standard fetch's ``Table.columns``), we insert the row defensively.
     """
-    result = set(attributes)
+    by_key = {(a.securable_type, a.full_name): a for a in attributes}
     for row in rows:
         full_name = row[0]
-        comment = row[1] if len(row) > 1 else None
-        result.add(
-            SecurableAttributes(
+        comment = (row[1] if len(row) > 1 else None) or None
+        key = (SecurableType.COLUMN, full_name)
+        existing = by_key.get(key)
+        if existing is not None:
+            by_key[key] = dataclasses.replace(existing, comment=comment)
+        else:
+            by_key[key] = SecurableAttributes(
                 securable_type=SecurableType.COLUMN,
                 full_name=full_name,
-                comment=comment if comment else None,
+                comment=comment,
             )
-        )
-    return result
+    return set(by_key.values())
 
 
 def _parse_securable_rows(
@@ -890,6 +928,13 @@ class UnityCatalogHelper:
             attributes = _merge_rfa_into_attributes(attributes, rfa_map)
 
         if column_comment_tables:
+            # Baseline every managed table's columns to comment=None (from the columns the
+            # standard fetch already enumerated), then overlay the non-empty comments the
+            # filtered query returns. Invariant: every commented column is present in the
+            # standard fetch's Table.columns, so each fetched comment overlays a baseline.
+            attributes = attributes | _build_column_comment_baselines(
+                securables, column_comment_tables
+            )
             column_rows = self._fetch_column_comments(column_comment_tables)
             attributes = _merge_column_comments_into_attributes(attributes, column_rows)
 

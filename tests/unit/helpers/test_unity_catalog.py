@@ -1697,11 +1697,12 @@ def test_uc_helper_securables_query_excludes_column_comment():
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
 def test_uc_helper_fetches_column_comments_for_target_tables(mock_fetch):
-    """With column_comment_tables={'cat.sch.tbl'} and a securable row for that table,
-    plus a second _fetch_external_links_rows result with column comment rows,
-    assert the returned attributes include SecurableAttributes(securable_type=COLUMN,
-    full_name=<4-part>, comment=<value or None>) for each column."""
-    # First call returns securables rows; second call returns column comment rows
+    """The filtered comments query returns only columns that HAVE a comment; uncommented
+    columns of the managed table are baselined (comment=None) from the standard fetch's
+    Table.columns. The merged attributes therefore have one COLUMN attribute per column —
+    col1 overlaid with its fetched comment, col2 carrying the None baseline."""
+    # First call returns securables rows (with both columns enumerated); the second
+    # (filtered) comments call returns ONLY the commented column.
     securables_rows = [
         [
             "TABLE",
@@ -1717,7 +1718,6 @@ def test_uc_helper_fetches_column_comments_for_target_tables(mock_fetch):
     ]
     column_comment_rows = [
         ["cat.sch.tbl.col1", "hello"],
-        ["cat.sch.tbl.col2", None],
     ]
     mock_fetch.side_effect = [securables_rows, column_comment_rows]
 
@@ -1728,30 +1728,80 @@ def test_uc_helper_fetches_column_comments_for_target_tables(mock_fetch):
         ["cat"], column_comment_tables={"cat.sch.tbl"}
     )
 
-    # Should have column comment attributes
-    col1_attr = next(
-        (
-            a
-            for a in attributes
-            if a.securable_type == SecurableType.COLUMN
-            and a.full_name == "cat.sch.tbl.col1"
-        ),
-        None,
-    )
-    assert col1_attr is not None, "Expected col1 attribute"
-    assert col1_attr.comment == "hello"
+    col1_attrs = [
+        a
+        for a in attributes
+        if a.securable_type == SecurableType.COLUMN
+        and a.full_name == "cat.sch.tbl.col1"
+    ]
+    col2_attrs = [
+        a
+        for a in attributes
+        if a.securable_type == SecurableType.COLUMN
+        and a.full_name == "cat.sch.tbl.col2"
+    ]
 
-    col2_attr = next(
+    # Exactly one attribute per column (no duplicate None + value for col1).
+    assert len(col1_attrs) == 1, f"Expected one attr for col1, got {col1_attrs}"
+    assert len(col2_attrs) == 1, f"Expected one attr for col2, got {col2_attrs}"
+    # col1 overlaid with its fetched comment; col2 carries the None baseline.
+    assert col1_attrs[0].comment == "hello"
+    assert col2_attrs[0].comment is None
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_column_comments_query_filters_to_non_empty_comments(mock_fetch):
+    """The comments query only fetches columns with a real comment
+    (``comment IS NOT NULL AND comment <> ''``) rather than every column."""
+    securables_rows = [
+        ["TABLE", "cat.sch.tbl", "owner", None, None, None, '["c1"]', None, "MANAGED"],
+    ]
+    mock_fetch.side_effect = [securables_rows, []]
+
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+    helper.fetch_actual_securables(["cat"], column_comment_tables={"cat.sch.tbl"})
+
+    calls = client.statement_execution.execute_statement.call_args_list
+    sql = (
+        calls[1].kwargs.get("statement")
+        if calls[1].kwargs.get("statement")
+        else calls[1].args[0]
+    )
+    lowered = sql.lower()
+    assert "comment is not null" in lowered, f"Expected non-null comment filter: {sql}"
+    assert "comment <> ''" in lowered, f"Expected non-empty comment filter: {sql}"
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_baselines_uncommented_columns_of_managed_tables(mock_fetch):
+    """A managed table's column with no comment (not returned by the filtered comments
+    query) still gets a comment=None baseline from the standard fetch — so a first-time
+    comment add is not skipped by the differ later."""
+    securables_rows = [
+        ["TABLE", "cat.sch.tbl", "owner", None, None, None, '["c1"]', None, "MANAGED"],
+    ]
+    mock_fetch.side_effect = [securables_rows, []]  # comments query returns nothing
+
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+    _, attributes = helper.fetch_actual_securables(
+        ["cat"], column_comment_tables={"cat.sch.tbl"}
+    )
+
+    baseline = next(
         (
             a
             for a in attributes
             if a.securable_type == SecurableType.COLUMN
-            and a.full_name == "cat.sch.tbl.col2"
+            and a.full_name == "cat.sch.tbl.c1"
         ),
         None,
     )
-    assert col2_attr is not None, "Expected col2 attribute"
-    assert col2_attr.comment is None
+    assert baseline is not None, (
+        "Expected a comment=None baseline for the uncommented column"
+    )
+    assert baseline.comment is None
 
 
 @patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
