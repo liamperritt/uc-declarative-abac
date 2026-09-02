@@ -15,7 +15,7 @@ definitions:
         comment: Visible when the amount is below the review threshold or the caller is a governor.
         parameters:
           - name: amount
-            type: decimal(18,2)
+            type: double
         return: "amount < 1000000 OR is_account_group_member('uc_abac_data_governors')"
       to:
         - account users

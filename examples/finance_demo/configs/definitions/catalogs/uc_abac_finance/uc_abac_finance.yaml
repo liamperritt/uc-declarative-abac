@@ -18,11 +18,11 @@ definitions:
         uc_abac_environment: '{{ env }}'
         uc_abac_managed_by: uc_declarative_abac
       policies:
+        - $ref: $defs/policies/managed_by|grant_admin_manage
+        - $ref: $defs/policies/domain|grant_engineer_create
         - $ref: $defs/policies/managed_by|grant_use_catalog
           $vars:
             env: '{{ env }}'
-        - $ref: $defs/policies/managed_by|grant_admin_manage
-        - $ref: $defs/policies/domain|grant_engineer_create
       schemas:
         # Region-partitioned raw layer: one bronze schema per region.
         - $ref: $defs/schemas/uc_abac_finance|transactions_bronze
