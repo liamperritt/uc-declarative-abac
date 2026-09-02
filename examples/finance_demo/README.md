@@ -161,7 +161,7 @@ and the `DATABRICKS_WAREHOUSE_ID` variable.
 
 ## Use it as a starting point
 
-Copy `finance_governance/` into a new repo, delete what you don't need, rename the
+Copy `finance_demo/` into a new repo, delete what you don't need, rename the
 `uc_abac_finance` catalog and the `uc_abac_` prefixes to your own, point `uc_abac.yml` at your
 warehouse, and iterate with `uc-abac validate`. Optional locations (managed catalog/schema,
 external tables/volumes) are shown commented — enable them once you have a storage location.

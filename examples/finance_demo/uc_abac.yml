@@ -1,4 +1,4 @@
-# uc-abac settings for the finance_governance example. Values here are defaults
+# uc-abac settings for the finance_demo example. Values here are defaults
 # for every `uc-abac` run from this directory; CLI flags and UC_ABAC_* env vars
 # override them. See the project README for the full flag reference.
 

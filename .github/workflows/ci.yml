@@ -33,4 +33,4 @@ jobs:
         run: pytest tests/unit -q
 
       - name: Validate example project
-        run: uc-abac validate --config-dir examples/finance_governance/configs
+        run: uc-abac validate --config-dir examples/finance_demo/configs

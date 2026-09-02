@@ -1,6 +1,6 @@
 # Examples
 
-- [**finance_governance**](./finance_governance/) — a complete, deployable-from-scratch
+- [**finance_demo**](./finance_demo/) — a complete, deployable-from-scratch
   governance project for a fictional financial-services organisation. One logical catalog
   deployed to `prod` and `uat`, a medallion layout (bronze → silver → gold) per business
   sub-domain, a nested group hierarchy, governed tags, and mask / filter / grant policies.
