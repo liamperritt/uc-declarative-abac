@@ -228,7 +228,12 @@ class WorkspaceHelper:
             sps_data = sps_f.result()
 
         self._users = {u["userName"] for u in users_data if "userName" in u}
-        self._groups = {g["displayName"] for g in groups_data if "displayName" in g}
+        # The account SCIM proxy lists real account groups but not the special
+        # system groups (e.g. `account admins`), so add them — they are valid
+        # grant/policy principals even though they aren't returned by the list call.
+        self._groups = {
+            g["displayName"] for g in groups_data if "displayName" in g
+        } | _ACCOUNT_SYSTEM_GROUPS
         self._build_sp_map(sps_data)
         if self._manage_groups:
             self._build_group_id_maps(users_data, groups_data, sps_data)
@@ -587,25 +592,45 @@ class WorkspaceHelper:
             f"/api/2.0/account/scim/v2/Groups/{group_id}",
         )
 
-    def create_group(self, display_name: str, members: Iterable[Principal]) -> None:
-        """Create a Databricks-managed account group with the given initial members.
+    def create_group(self, display_name: str) -> str:
+        """Create a Databricks-managed account group (initially empty) and return its
+        new account SCIM id.
 
-        TBD: verify in integration testing; the exact SCIM body shape for the
-        account SCIM proxy create endpoint is assumed here. If the API rejects it,
-        adjust the body (e.g. schemas / members shape) accordingly.
+        Members are added afterwards via ``add_group_members`` rather than at creation
+        time: a group whose members include other groups created in the same run can
+        only be linked once every group (and its SCIM id) exists. The caller must feed
+        the returned id to ``register_created_group`` on the main thread before adding
+        members.
+
+        TBD: verify in integration testing; the exact SCIM body shape for the account
+        SCIM proxy create endpoint is assumed here. If the API rejects it, adjust the
+        body (e.g. schemas shape) accordingly.
         """
-        member_dicts = [
-            _principal_to_member_dict(m, self._scim_id_by_identifier) for m in members
-        ]
-        self._client.api_client.do(
+        response = self._client.api_client.do(
             "POST",
             "/api/2.0/account/scim/v2/Groups",
             body={
                 "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"],
                 "displayName": display_name,
-                "members": member_dicts,
             },
         )
+        return (response or {}).get("id", "")
+
+    def register_created_group(self, display_name: str, scim_id: str) -> None:
+        """Register a just-created group's SCIM id into the principal caches so it
+        resolves as a GROUP principal and ``add_group_members`` can target it by id.
+
+        Called on the main thread after ``create_group`` returns (workers never touch
+        shared caches). Mirrors ``register_pending_groups``' cache-priming, but with
+        the real SCIM id now known — which is what lets a member that is itself a
+        group created this run resolve to a real id when its parent's membership is set.
+        """
+        self._groups = (self._groups or set()) | {display_name}
+        if scim_id:
+            self._group_id_by_name[display_name] = scim_id
+            self._group_name_by_id[scim_id] = display_name
+            self._scim_id_by_identifier[display_name] = scim_id
+            self._identifier_by_scim_id[scim_id] = display_name
 
     def add_group_members(
         self, display_name: str, members: Iterable[Principal]

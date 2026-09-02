@@ -9,6 +9,7 @@ from uc_declarative_abac.principals import (
     Principal,
     PrincipalResolver,
     compute_group_diff,
+    groups_pending_creation,
 )
 from uc_declarative_abac.types import PrincipalType
 from uc_declarative_abac.utils import PrincipalValidationError, parse_flat_scope
@@ -842,3 +843,51 @@ def test_group_differ_deletion_scope_filters_candidates():
     )
 
     assert diff.groups_to_delete == {legacy_a}
+
+
+# ---
+# groups_pending_creation
+# ---
+
+
+def test_group_differ_groups_pending_creation_returns_missing_in_scope_groups():
+    """Configured groups absent from the account are pending creation."""
+    desired = {_group("analysts"), _group("engineers")}
+    actual = {_group("engineers")}
+
+    pending = groups_pending_creation(desired, actual, enable_group_creation=True)
+
+    assert pending == {"analysts"}
+
+
+def test_group_differ_groups_pending_creation_is_empty_when_creation_disabled():
+    """With creation disabled, nothing is pending creation."""
+    pending = groups_pending_creation(
+        {_group("analysts")}, set(), enable_group_creation=False
+    )
+
+    assert pending == set()
+
+
+def test_group_differ_groups_pending_creation_excludes_out_of_scope_groups():
+    """A missing group outside the creation scope is not pending creation."""
+    desired = {_group("analysts"), _group("team_data")}
+
+    pending = groups_pending_creation(
+        desired,
+        set(),
+        enable_group_creation=True,
+        creation_scope=parse_flat_scope("team_*"),
+    )
+
+    assert pending == {"team_data"}
+
+
+def test_group_differ_groups_pending_creation_excludes_groups_declaring_an_id():
+    """A group declaring an id is an existing group matched for rename, never a
+    creation candidate — even when absent by that id."""
+    pending = groups_pending_creation(
+        {_group_with_id("analysts", "id-X")}, set(), enable_group_creation=True
+    )
+
+    assert pending == set()

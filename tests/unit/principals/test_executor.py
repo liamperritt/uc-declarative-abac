@@ -19,6 +19,10 @@ def _resolved_user(name: str) -> Principal:
     return Principal(PrincipalType.USER, identifier=name, name=name)
 
 
+def _resolved_group(name: str) -> Principal:
+    return Principal(PrincipalType.GROUP, identifier=name, name=name)
+
+
 def _summary_of(logger_mock: MagicMock) -> str:
     """Return the logged summary line emitted by ChangeLogger.log_summary()."""
     return next(
@@ -43,18 +47,58 @@ def change_logger() -> ChangeLogger:
 # ---------------------------------------------------------------------------
 
 
-def test_group_executor_creates_each_group_to_create(ws_helper, change_logger):
-    """Each entry in groups_to_create triggers one create_group call with its name and members."""
+def test_group_executor_creates_group_empty_then_registers_id_and_adds_members(
+    ws_helper, change_logger
+):
+    """A group to create is POSTed empty (create_group(name)), its returned id is
+    registered, and its members are then added in a second phase."""
     members = frozenset({_resolved_user("alice@co.com")})
+    ws_helper.create_group.return_value = "g-1"
     diff = GroupDiff(groups_to_create={"new_group": members})
 
     execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
 
-    assert ws_helper.create_group.call_count == 1
-    sent_name = ws_helper.create_group.call_args.args[0]
-    sent_members = ws_helper.create_group.call_args.args[1]
-    assert sent_name == "new_group"
-    assert set(sent_members) == set(members)
+    assert ws_helper.create_group.call_args.args == ("new_group",)
+    assert ws_helper.register_created_group.call_args.args == ("new_group", "g-1")
+    add_args = ws_helper.add_group_members.call_args.args
+    assert add_args[0] == "new_group"
+    assert set(add_args[1]) == set(members)
+
+
+def test_group_executor_creates_all_groups_before_adding_members(
+    ws_helper, change_logger
+):
+    """Every group is created before any membership is set, so a member that is
+    itself a group created this run exists (and has an id) when it is linked."""
+    ws_helper.create_group.return_value = "g"
+    diff = GroupDiff(
+        groups_to_create={
+            "parent": frozenset({_resolved_group("child")}),
+            "child": frozenset(),
+        }
+    )
+
+    execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
+
+    method_names = [c[0] for c in ws_helper.mock_calls]
+    last_create = max(
+        i for i, n in enumerate(method_names) if n == "create_group"
+    )
+    add_indices = [i for i, n in enumerate(method_names) if n == "add_group_members"]
+    assert add_indices  # the parent's member is added
+    assert all(i > last_create for i in add_indices)
+
+
+def test_group_executor_dry_run_makes_no_create_or_add_calls(ws_helper):
+    """A dry run neither creates groups nor mutates membership."""
+    members = frozenset({_resolved_user("alice@co.com")})
+    diff = GroupDiff(groups_to_create={"new_group": members})
+
+    execute_group_diff(ws_helper, diff, ChangeLogger(dry_run=True), dry_run=True)
+
+    ws_helper.create_group.assert_not_called()
+    ws_helper.add_group_members.assert_not_called()
+    ws_helper.register_created_group.assert_not_called()
 
 
 def test_group_executor_adds_members_for_each_group_to_add(ws_helper, change_logger):
