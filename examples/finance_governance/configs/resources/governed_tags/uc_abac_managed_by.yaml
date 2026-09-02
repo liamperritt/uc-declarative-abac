@@ -1,0 +1,9 @@
+resources:
+  governed_tags:
+    uc_abac_managed_by:
+      name: uc_abac_managed_by
+      description: Marks a securable as governed by this declarative ABAC project.
+      allowed_values:
+        - uc_declarative_abac
+      assigners:
+        - uc_abac_data_platform

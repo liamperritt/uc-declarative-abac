@@ -1,0 +1,17 @@
+# Grant the platform team read/write on transaction-domain volumes. Demonstrates a
+# grant scoped to a single securable type via `for: volume` with volume-specific
+# concrete privileges.
+definitions:
+  policies:
+    domain|grant_volume_access:
+      name: grant_volume_access
+      comment: Platform team may read and write transaction landing volumes.
+      type: grant
+      for: volume
+      has_tags:
+        uc_abac_domain: transaction
+      privileges:
+        - read_volume
+        - write_volume
+      to:
+        - uc_abac_data_platform

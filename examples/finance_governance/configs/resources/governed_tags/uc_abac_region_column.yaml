@@ -1,0 +1,11 @@
+# Key-only tag (no allowed_values) that marks the silver `region` column so the
+# region|filter_by_region row filter knows which column to read. The column holds
+# every region value, so the tag carries no value of its own — it is applied as
+# `uc_abac_region_column: ~` and matched with the '*' (presence) wildcard.
+resources:
+  governed_tags:
+    uc_abac_region_column:
+      name: uc_abac_region_column
+      description: Marks the column that carries the row's region, for row filtering.
+      assigners:
+        - uc_abac_data_platform

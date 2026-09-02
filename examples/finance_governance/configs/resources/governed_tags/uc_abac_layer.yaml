@@ -1,0 +1,14 @@
+# Medallion layer of a schema. A meaningful schema-level tag (distinct from the
+# catalog-level environment/managed_by tags, which Unity Catalog inherits downward).
+resources:
+  governed_tags:
+    uc_abac_layer:
+      name: uc_abac_layer
+      description: Medallion layer the schema belongs to.
+      allowed_values:
+        - bronze
+        - silver
+        - gold
+        - shared
+      assigners:
+        - uc_abac_data_platform

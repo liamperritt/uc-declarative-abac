@@ -1,0 +1,12 @@
+# Data governance. Nests the stewards and compliance leaf groups. This group is
+# the allowed assigner for the uc_abac_pii / uc_abac_classification governed tags.
+resources:
+  groups:
+    uc_abac_data_governors:
+      name: uc_abac_data_governors
+      # id: "1234567890123456"   # Set the account SCIM id to enable RENAMING: keep
+      #                          # `id` fixed and change `name`, and the engine renames
+      #                          # the existing group instead of creating a new one.
+      members:
+        - uc_abac_data_stewards
+        - uc_abac_compliance

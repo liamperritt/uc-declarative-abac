@@ -1,0 +1,44 @@
+# Curated, unioned transaction layer. Extends base_schema (root $ref) to inherit
+# the analyst read grant, reuses the same raw table defs as bronze, and overrides
+# each to APPEND a `region` column (marked for row filtering). The `transactions`
+# override also merges a sensitivity tag onto the existing `amount` column.
+definitions:
+  schemas:
+    uc_abac_finance|transactions_silver:
+      $ref: $defs/schemas/uc_abac_finance|base_schema
+      $vars:
+        env: ~
+      name: transactions_silver
+      comment: Curated, region-unioned transaction data.
+      owner: uc_abac_data_platform
+      tags:
+        uc_abac_domain: transaction
+        uc_abac_layer: silver
+      tables:
+        - $ref: $defs/tables/finance|transactions
+          columns:
+            - name: region
+              type: string
+              comment: Booking region (amer, emea or apac).
+              tags:
+                uc_abac_region_column: ~
+            - name: amount
+              tags:
+                uc_abac_sensitivity: high
+        - $ref: $defs/tables/finance|payments
+          columns:
+            - name: region
+              type: string
+              comment: Booking region (amer, emea or apac).
+              tags:
+                uc_abac_region_column: ~
+        - $ref: $defs/tables/finance|settlements
+          columns:
+            - name: region
+              type: string
+              comment: Booking region (amer, emea or apac).
+              tags:
+                uc_abac_region_column: ~
+      policies:
+        - $ref: $defs/policies/region|filter_by_region
+        - $ref: $defs/policies/sensitivity|filter_large_transactions

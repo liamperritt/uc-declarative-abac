@@ -1,0 +1,9 @@
+# A time-boxed group for external auditors. On or after expiry_date the engine
+# removes ALL members (the group itself is kept). Requires group-management-scopes.
+resources:
+  groups:
+    uc_abac_temp_auditors:
+      name: uc_abac_temp_auditors
+      expiry_date: 2026-12-31
+      members:
+        - uc_abac_compliance

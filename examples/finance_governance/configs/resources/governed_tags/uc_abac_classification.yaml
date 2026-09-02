@@ -1,0 +1,12 @@
+resources:
+  governed_tags:
+    uc_abac_classification:
+      name: uc_abac_classification
+      description: Data classification tier used to drive access and handling rules.
+      allowed_values:
+        - public
+        - internal
+        - confidential
+        - restricted
+      assigners:
+        - uc_abac_data_governors

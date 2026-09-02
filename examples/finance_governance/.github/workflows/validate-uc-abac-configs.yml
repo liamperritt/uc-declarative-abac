@@ -1,0 +1,17 @@
+# Offline validation: parse, resolve and validate the YAML on every push, with no
+# warehouse or credentials. Ideal as a fast feature-branch check before a PR.
+name: Validate UC ABAC configs
+
+on:
+  push:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: liamperritt/uc-declarative-abac/validate@v0.10.0
+        with:
+          config-dir: configs/

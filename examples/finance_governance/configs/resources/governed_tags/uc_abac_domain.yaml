@@ -1,0 +1,12 @@
+resources:
+  governed_tags:
+    uc_abac_domain:
+      name: uc_abac_domain
+      description: Business data domain the securable belongs to.
+      allowed_values:
+        - customer
+        - account
+        - transaction
+        - aggregate
+      assigners:
+        - uc_abac_data_platform

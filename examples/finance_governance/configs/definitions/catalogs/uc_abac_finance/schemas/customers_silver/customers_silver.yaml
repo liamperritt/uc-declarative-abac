@@ -1,0 +1,23 @@
+# Curated customer layer. Extends base_schema (analyst read grant) and REUSES the
+# same three customer table defs as bronze (no override needed here). The PII mask
+# policies attach here so masking applies to the curated, analyst-facing data.
+definitions:
+  schemas:
+    uc_abac_finance|customers_silver:
+      $ref: $defs/schemas/uc_abac_finance|base_schema
+      $vars:
+        env: ~
+      name: customers_silver
+      comment: Curated customer data with PII masking applied.
+      owner: uc_abac_data_platform
+      tags:
+        uc_abac_domain: customer
+        uc_abac_layer: silver
+      tables:
+        - $ref: $defs/tables/finance|customers
+        - $ref: $defs/tables/finance|customer_addresses
+        - $ref: $defs/tables/finance|customer_contacts
+      policies:
+        - $ref: $defs/policies/pii|mask_email
+        - $ref: $defs/policies/pii|mask_name
+        - $ref: $defs/policies/pii|mask_national_id

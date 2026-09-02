@@ -1,0 +1,9 @@
+# The platform team. Members is the platform-engineers leaf group (nested
+# membership), so people are managed once in uc_abac_platform_engineers and
+# inherited here. uc_abac_data_platform owns most securables in the catalog.
+resources:
+  groups:
+    uc_abac_data_platform:
+      name: uc_abac_data_platform
+      members:
+        - uc_abac_platform_engineers

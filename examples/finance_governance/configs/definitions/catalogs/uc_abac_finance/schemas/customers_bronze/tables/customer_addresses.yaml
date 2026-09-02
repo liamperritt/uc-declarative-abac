@@ -1,0 +1,27 @@
+# Customer postal addresses. Reused by customers_silver.
+definitions:
+  tables:
+    finance|customer_addresses:
+      name: customer_addresses
+      comment: Customer postal addresses as landed from the CRM.
+      owner: uc_abac_data_platform
+      tags:
+        uc_abac_domain: customer
+      columns:
+        - name: address_id
+          type: long
+          comment: Unique address identifier.
+        - name: customer_id
+          type: long
+          comment: Customer the address belongs to.
+        - name: address_line
+          type: string
+          comment: Street address.
+          tags:
+            uc_abac_pii: address
+        - name: city
+          type: string
+          comment: City.
+        - name: country
+          type: string
+          comment: ISO 3166 country code.

@@ -1,0 +1,16 @@
+# Valued region tag applied to the region-partitioned BRONZE SCHEMAS. Because a
+# schema holds exactly one region, a fixed value is correct here — and it lets the
+# grant_regional_bronze_read policy grant each regional group access to its schema.
+# (To mark the silver `region` COLUMN, which holds all regions, use the key-only
+# uc_abac_region_column tag instead.)
+resources:
+  governed_tags:
+    uc_abac_region:
+      name: uc_abac_region
+      description: Booking region of a regional (bronze) schema.
+      allowed_values:
+        - amer
+        - emea
+        - apac
+      assigners:
+        - uc_abac_data_platform

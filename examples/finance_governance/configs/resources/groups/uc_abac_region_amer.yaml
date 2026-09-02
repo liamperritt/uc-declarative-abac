@@ -1,0 +1,7 @@
+# Regional access group (Americas). Row filter region|filter_by_region gates rows
+# on is_account_group_member('uc_abac_region_amer'). Created empty; add your users.
+resources:
+  groups:
+    uc_abac_region_amer:
+      name: uc_abac_region_amer
+      members: []

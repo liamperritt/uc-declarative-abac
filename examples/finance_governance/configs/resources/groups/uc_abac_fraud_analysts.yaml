@@ -1,0 +1,6 @@
+# Leaf group nested inside uc_abac_pii_viewers. Created empty; add your users.
+resources:
+  groups:
+    uc_abac_fraud_analysts:
+      name: uc_abac_fraud_analysts
+      members: []

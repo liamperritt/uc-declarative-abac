@@ -1,0 +1,13 @@
+# Reusable masking UDF: keep only the last four characters, star out the rest.
+# Deployed into each catalog's `shared` schema and referenced by the PII mask
+# policies as the partially-qualified name `shared.mask_last4`.
+definitions:
+  functions:
+    finance|mask_last4:
+      name: mask_last4
+      comment: Mask all but the last four characters of a string value.
+      owner: uc_abac_data_platform
+      parameters:
+        - name: value
+          type: string
+      return: "CONCAT(REPEAT('*', GREATEST(LENGTH(value) - 4, 0)), RIGHT(value, 4))"

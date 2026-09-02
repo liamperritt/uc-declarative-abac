@@ -1,0 +1,16 @@
+# Reusable group template: one analyst group per environment. The `$ref`s in
+# resources/groups/uc_abac_finance_analysts.yaml instantiate it with env=prod / env=uat,
+# so a single definition produces the whole environment-based group family.
+#
+# Its members are the three regional access groups — a nested (group-in-group)
+# membership, so granting the analyst group access transitively covers every region.
+definitions:
+  groups:
+    finance_analysts:
+      $vars:
+        env: ~
+      name: uc_abac_finance_analysts_{{ env }}
+      members:
+        - uc_abac_region_amer
+        - uc_abac_region_emea
+        - uc_abac_region_apac

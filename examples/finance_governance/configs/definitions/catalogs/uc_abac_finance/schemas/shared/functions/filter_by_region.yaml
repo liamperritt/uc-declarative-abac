@@ -1,0 +1,16 @@
+# Reusable row-filter UDF: a row is visible only to members of the matching
+# regional access group. Referenced by region|filter_by_region as
+# `shared.filter_by_region`.
+definitions:
+  functions:
+    finance|filter_by_region:
+      name: filter_by_region
+      comment: Row is visible only to members of the matching regional access group.
+      owner: uc_abac_data_platform
+      parameters:
+        - name: region
+          type: string
+      return: |-
+        (region = 'amer' AND is_account_group_member('uc_abac_region_amer'))
+        OR (region = 'emea' AND is_account_group_member('uc_abac_region_emea'))
+        OR (region = 'apac' AND is_account_group_member('uc_abac_region_apac'))

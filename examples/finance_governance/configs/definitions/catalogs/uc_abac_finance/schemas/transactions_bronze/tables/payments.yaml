@@ -1,0 +1,28 @@
+# Raw outbound/inbound payments. Reused by the regional bronze schemas and silver.
+definitions:
+  tables:
+    finance|payments:
+      name: payments
+      comment: Raw payment instructions as landed from the payments gateway.
+      owner: uc_abac_data_platform
+      tags:
+        uc_abac_domain: transaction
+      columns:
+        - name: payment_id
+          type: long
+          comment: Unique payment identifier.
+        - name: account_id
+          type: long
+          comment: Account the payment debits or credits.
+        - name: amount
+          type: decimal(18,2)
+          comment: Payment amount in the account currency.
+        - name: method
+          type: string
+          comment: Payment rail (card, wire, ach, ...).
+        - name: status
+          type: string
+          comment: Lifecycle status of the payment.
+        - name: created_at
+          type: timestamp
+          comment: Time the payment was created.

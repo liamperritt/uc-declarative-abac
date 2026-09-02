@@ -1,0 +1,30 @@
+# Raw transaction ledger. Reused by all three regional bronze schemas and by
+# transactions_silver (which appends a region column). Columns declare a `type` so
+# the engine can CREATE the table when taggable-creation-scopes is enabled.
+definitions:
+  tables:
+    finance|transactions:
+      name: transactions
+      comment: Raw transaction ledger as landed from the source system.
+      owner: uc_abac_data_platform
+      tags:
+        uc_abac_domain: transaction
+      columns:
+        - name: transaction_id
+          type: long
+          comment: Unique transaction identifier.
+        - name: account_id
+          type: long
+          comment: Account the transaction belongs to.
+        - name: amount
+          type: decimal(18,2)
+          comment: Transaction amount in the account currency.
+        - name: currency
+          type: string
+          comment: ISO 4217 currency code.
+        - name: transaction_type
+          type: string
+          comment: Debit or credit classification.
+        - name: booked_at
+          type: timestamp
+          comment: Time the transaction was booked.

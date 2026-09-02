@@ -1,0 +1,22 @@
+# Grant the environment's analyst group read + traverse access to the domain-tagged
+# securables in the attached schema. Demonstrates: the `read` + `use` privilege
+# abstractions (SELECT on the tables, USE SCHEMA on the schema), a wildcard tag
+# match, a template variable in the principal, and an expiry_date (revoked on/after
+# it). `for` is omitted so the abstractions land on whichever matched securable each
+# applies to; use_catalog is granted separately by managed_by|grant_use_catalog.
+definitions:
+  policies:
+    domain|grant_domain_read:
+      $vars:
+        env: ~
+      name: grant_domain_read
+      comment: Analysts may read curated, domain-tagged data until the access review date.
+      type: grant
+      has_tags:
+        uc_abac_domain: '*'
+      privileges:
+        - read
+        - use
+      to:
+        - uc_abac_finance_analysts_{{ env }}
+      expiry_date: 2026-12-31

@@ -1,0 +1,20 @@
+# Redact national ids to the last four digits, except for approved PII viewers.
+# Demonstrates a per-column has_none_of_tags exclusion: columns explicitly marked
+# public classification are left untouched.
+definitions:
+  policies:
+    pii|mask_national_id:
+      name: mask_national_id
+      comment: Reveal only the last four digits of a national id.
+      type: mask
+      columns:
+        - alias: national_id
+          has_tags:
+            uc_abac_pii: national_id
+          has_none_of_tags:
+            uc_abac_classification: public
+      function: shared.redact_national_id
+      to:
+        - account users
+      except:
+        - uc_abac_pii_viewers

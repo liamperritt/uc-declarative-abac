@@ -40,25 +40,25 @@ Env-based auth (CI, GitHub Actions, Databricks Apps):
 ```bash
 export DATABRICKS_HOST=https://<workspace>.cloud.databricks.com
 export DATABRICKS_TOKEN=<personal-access-token>
-uc-abac deploy --config-dir tests/e2e/configs --warehouse-id <warehouse-id> --tag-management-scopes '*' --privilege-management-scopes '*' --dry-run
+uc-abac deploy --config-dir examples/finance_governance/configs --warehouse-id <warehouse-id> --tag-management-scopes '*' --privilege-management-scopes '*' --dry-run
 ```
 
 Local development via `~/.databrickscfg` profile:
 
 ```bash
-uc-abac deploy --config-dir tests/e2e/configs --warehouse-id <warehouse-id> --profile <profile-name> --tag-management-scopes '*' --privilege-management-scopes '*' --dry-run
+uc-abac deploy --config-dir examples/finance_governance/configs --warehouse-id <warehouse-id> --profile <profile-name> --tag-management-scopes '*' --privilege-management-scopes '*' --dry-run
 ```
 
 Validate configs locally (no warehouse or credentials required):
 
 ```bash
-uc-abac validate --config-dir tests/e2e/configs
+uc-abac validate --config-dir examples/finance_governance/configs
 ```
 
 Deploy changes to Unity Catalog:
 
 ```bash
-uc-abac deploy --config-dir tests/e2e/configs --warehouse-id <warehouse-id> --tag-management-scopes '*' --privilege-management-scopes '*'
+uc-abac deploy --config-dir examples/finance_governance/configs --warehouse-id <warehouse-id> --tag-management-scopes '*' --privilege-management-scopes '*'
 ```
 
 ### CLI

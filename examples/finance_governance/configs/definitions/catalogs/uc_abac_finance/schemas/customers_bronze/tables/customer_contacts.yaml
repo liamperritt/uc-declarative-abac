@@ -1,0 +1,26 @@
+# Customer contact details. Reused by customers_silver.
+definitions:
+  tables:
+    finance|customer_contacts:
+      name: customer_contacts
+      comment: Customer contact details as landed from the CRM.
+      owner: uc_abac_data_platform
+      tags:
+        uc_abac_domain: customer
+      columns:
+        - name: contact_id
+          type: long
+          comment: Unique contact identifier.
+        - name: customer_id
+          type: long
+          comment: Customer the contact belongs to.
+        - name: email
+          type: string
+          comment: Primary email address.
+          tags:
+            uc_abac_pii: email
+        - name: phone
+          type: string
+          comment: Primary phone number.
+          tags:
+            uc_abac_pii: phone

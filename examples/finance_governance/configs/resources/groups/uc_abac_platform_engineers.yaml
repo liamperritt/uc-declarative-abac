@@ -1,0 +1,6 @@
+# Leaf group nested inside uc_abac_data_platform. Created empty; add your users.
+resources:
+  groups:
+    uc_abac_platform_engineers:
+      name: uc_abac_platform_engineers
+      members: []

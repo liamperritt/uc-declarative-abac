@@ -1,0 +1,31 @@
+# Customer master record. Reused by customers_silver. PII columns are tagged so the
+# pii|* mask policies (attached at the silver layer) apply to them.
+definitions:
+  tables:
+    finance|customers:
+      name: customers
+      comment: Customer master record as landed from the CRM.
+      owner: uc_abac_data_platform
+      tags:
+        uc_abac_domain: customer
+      columns:
+        - name: customer_id
+          type: long
+          comment: Unique customer identifier.
+        - name: full_name
+          type: string
+          comment: Customer legal name.
+          tags:
+            uc_abac_pii: name
+        - name: date_of_birth
+          type: date
+          comment: Date of birth.
+        - name: national_id
+          type: string
+          comment: Government-issued identifier.
+          tags:
+            uc_abac_pii: national_id
+            uc_abac_classification: restricted
+        - name: status
+          type: string
+          comment: Customer lifecycle status.

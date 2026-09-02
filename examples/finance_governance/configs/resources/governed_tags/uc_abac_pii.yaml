@@ -1,0 +1,14 @@
+resources:
+  governed_tags:
+    uc_abac_pii:
+      name: uc_abac_pii
+      description: Personally identifiable information; drives column masking policies.
+      allowed_values:
+        - name
+        - email
+        - phone
+        - national_id
+        - address
+      assigners:
+        # Only the data-governance group may assign PII tags to governed objects.
+        - uc_abac_data_governors

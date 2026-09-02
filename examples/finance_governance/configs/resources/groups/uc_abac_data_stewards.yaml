@@ -1,0 +1,6 @@
+# Leaf group nested inside uc_abac_data_governors. Created empty; add your users.
+resources:
+  groups:
+    uc_abac_data_stewards:
+      name: uc_abac_data_stewards
+      members: []

@@ -1,0 +1,25 @@
+# Raw settlement records. Reused by the regional bronze schemas and silver.
+definitions:
+  tables:
+    finance|settlements:
+      name: settlements
+      comment: Raw settlement records as landed from the clearing system.
+      owner: uc_abac_data_platform
+      tags:
+        uc_abac_domain: transaction
+      columns:
+        - name: settlement_id
+          type: long
+          comment: Unique settlement identifier.
+        - name: transaction_id
+          type: long
+          comment: Transaction being settled.
+        - name: amount
+          type: decimal(18,2)
+          comment: Settled amount in the settlement currency.
+        - name: currency
+          type: string
+          comment: ISO 4217 currency code.
+        - name: settled_at
+          type: timestamp
+          comment: Time the settlement completed.

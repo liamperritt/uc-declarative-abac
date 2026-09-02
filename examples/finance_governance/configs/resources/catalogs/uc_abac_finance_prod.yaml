@@ -1,0 +1,9 @@
+# Production catalog: a thin $ref to the shared catalog definition, supplying
+# env=prod. The comment override shows a resource customising a definition field.
+resources:
+  catalogs:
+    uc_abac_finance_prod:
+      $ref: $defs/catalogs/uc_abac_finance
+      $vars:
+        env: prod
+      comment: Financial services governed catalog (production).

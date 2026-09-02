@@ -1,0 +1,18 @@
+# Row-level security: a row is visible only to members of its region's access
+# group. Matches the region column by the key-only uc_abac_region_column tag
+# (presence, '*') and passes its value to the reusable shared.filter_by_region UDF.
+definitions:
+  policies:
+    region|filter_by_region:
+      name: filter_by_region
+      comment: Restrict rows to members of the matching regional access group.
+      type: filter
+      columns:
+        - alias: region
+          has_tags:
+            uc_abac_region_column: '*'
+      function: shared.filter_by_region
+      to:
+        - account users
+      except:
+        - account admins

@@ -1,0 +1,15 @@
+# Raw customer landing layer (not region-partitioned). Reuses the three customer
+# table defs; no analyst access — raw PII stays with the platform team.
+definitions:
+  schemas:
+    uc_abac_finance|customers_bronze:
+      name: customers_bronze
+      comment: Raw customer landing zone.
+      owner: uc_abac_data_platform
+      tags:
+        uc_abac_domain: customer
+        uc_abac_layer: bronze
+      tables:
+        - $ref: $defs/tables/finance|customers
+        - $ref: $defs/tables/finance|customer_addresses
+        - $ref: $defs/tables/finance|customer_contacts
