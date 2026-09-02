@@ -1,0 +1,37 @@
+# Region-partitioned raw layer: this ONE definition is instantiated three times by
+# the catalog (region = amer / emea / apac), producing transactions_bronze_amer,
+# _emea and _apac. Each instance reuses the same three raw table defs and inlines
+# its own landing volumes.
+definitions:
+  schemas:
+    uc_abac_finance|transactions_bronze:
+      $vars:
+        region: ~
+      name: transactions_bronze_{{ region }}
+      comment: Raw transaction landing zone for the {{ region }} region.
+      tags:
+        uc_abac_domain: transaction
+        uc_abac_layer: bronze
+        uc_abac_region: '{{ region }}'
+      policies:
+        # Volume grants for the platform team, and read for this region's analysts.
+        - $ref: $defs/policies/domain|grant_volume_access
+        - $ref: $defs/policies/region|grant_regional_bronze_read
+          $vars:
+            region: '{{ region }}'
+      tables:
+        - $ref: $defs/tables/finance|transactions
+        - $ref: $defs/tables/finance|payments
+        - $ref: $defs/tables/finance|settlements
+      volumes:
+        # Inlined because these volumes are not reused by any other schema.
+        - name: raw_files
+          comment: Landing volume for raw {{ region }} extract files.
+          owner: uc_abac_data_platform
+          tags:
+            uc_abac_domain: transaction
+        - name: quarantine
+          comment: Quarantine volume for records that fail validation.
+          owner: uc_abac_data_platform
+          tags:
+            uc_abac_domain: transaction

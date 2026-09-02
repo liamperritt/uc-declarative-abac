@@ -1,0 +1,16 @@
+# Catalog-level grant that matches every domain-tagged schema in the catalog and
+# gives the platform engineers the `create` abstraction (create table / function /
+# volume / materialized view / model) on each. Demonstrates `for: schema`.
+definitions:
+  policies:
+    domain|grant_engineer_create:
+      name: grant_engineer_create
+      comment: Platform engineers may create objects in domain schemas.
+      type: grant
+      for: schema
+      has_tags:
+        uc_abac_domain: '*'
+      privileges:
+        - create
+      to:
+        - uc_abac_platform_engineers

@@ -1,0 +1,15 @@
+# Give the platform team ALL PRIVILEGES on any catalog governed by this project
+# (matched by the uc_abac_managed_by tag).
+definitions:
+  policies:
+    managed_by|grant_admin_manage:
+      name: grant_admin_manage
+      comment: Platform team fully administers governed catalogs.
+      type: grant
+      for: catalog
+      has_tags:
+        uc_abac_managed_by: uc_declarative_abac
+      privileges:
+        - all_privileges
+      to:
+        - uc_abac_data_platform

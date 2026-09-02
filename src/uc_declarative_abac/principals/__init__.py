@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from uc_declarative_abac.principals.compiler import compile_desired_groups
-from uc_declarative_abac.principals.differ import compute_group_diff
+from uc_declarative_abac.principals.differ import (
+    compute_group_diff,
+    groups_pending_creation,
+)
 from uc_declarative_abac.principals.executor import execute_group_diff
 from uc_declarative_abac.principals.resolver import (
     PrincipalResolver,
@@ -27,5 +30,6 @@ __all__ = [
     "ensure_all_resolved",
     "ensure_resolved",
     "execute_group_diff",
+    "groups_pending_creation",
     "log_principal_resolution_failure",
 ]

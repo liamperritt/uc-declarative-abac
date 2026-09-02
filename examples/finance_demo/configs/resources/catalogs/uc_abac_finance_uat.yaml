@@ -1,0 +1,8 @@
+# UAT catalog: the same definition, supplying env=uat, with a comment override.
+resources:
+  catalogs:
+    uc_abac_finance_uat:
+      $ref: $defs/catalogs/uc_abac_finance
+      $vars:
+        env: uat
+      comment: Financial services governed catalog (UAT).

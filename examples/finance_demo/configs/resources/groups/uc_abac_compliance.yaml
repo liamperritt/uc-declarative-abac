@@ -1,0 +1,7 @@
+# Leaf group nested inside uc_abac_data_governors, uc_abac_pii_viewers and
+# uc_abac_temp_auditors. Created empty; add your users.
+resources:
+  groups:
+    uc_abac_compliance:
+      name: uc_abac_compliance
+      members: []

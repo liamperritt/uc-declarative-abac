@@ -1,0 +1,40 @@
+# uc-abac settings for the finance_demo example. Values here are defaults
+# for every `uc-abac` run from this directory; CLI flags and UC_ABAC_* env vars
+# override them. See the project README for the full flag reference.
+
+config_dir: ./configs
+
+# Where actual-state system-table reads come from (the standard system catalog).
+system_catalog: system
+
+# IANA timezone used to compute "today" when evaluating expiry_date on grants and
+# groups. Set to your operational timezone.
+timezone: Australia/Sydney
+
+# --- Additive management, enabled by default --------------------------------
+# Each scope names which securables/principals the feature applies to. '*' = all
+# configured resources. These four create/reconcile everything this project needs
+# to deploy from scratch and are non-destructive.
+tag_management_scopes: '*'          # create/update/remove tag assignments
+privilege_management_scopes: '*'    # GRANT/REVOKE privileges from grant policies
+taggable_management_scopes: '*'     # owners, comments, RFA destinations
+taggable_creation_scopes: '*'       # create catalogs/schemas/tables/volumes that don't exist yet
+
+# Group creation + membership reconciliation. Scoped to this project's groups by
+# name prefix. Creation makes the nested group hierarchy exist (with members);
+# management keeps membership in sync. Both use the account SCIM proxy, so do NOT
+# enable use_workspace_scim alongside them.
+group_creation_scopes: 'uc_abac_*'
+group_management_scopes: 'uc_abac_*'
+
+# --- Destructive gates, disabled by default ---------------------------------
+# Uncomment to let config become authoritative (deletes/revokes). Each needs an
+# interactive confirmation, or --force / force: 'true' in non-interactive CI.
+# policy_deletion_scopes: '*'            # DROP mask/filter policies absent from config
+# governed_tag_deletion_scopes: 'uc_abac_*'  # DELETE governed tags absent from config
+# group_deletion_scopes: 'uc_abac_*'     # DELETE managed groups absent from config (needs group_creation_scopes)
+
+# --- Connection (fill in for your workspace) --------------------------------
+# Provide these on the CLI, via env vars, or uncomment here.
+# warehouse_id: <your-sql-warehouse-id>   # or UC_ABAC_WAREHOUSE_ID
+# profile: <your-databricks-cli-profile>  # omit to use env-based auth (DATABRICKS_HOST/TOKEN)

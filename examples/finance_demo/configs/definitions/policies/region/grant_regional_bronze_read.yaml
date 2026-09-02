@@ -1,0 +1,21 @@
+# Grant a region's access group read + use on its own bronze schema. Instantiated
+# once per region by the transactions_bronze schema template, forwarding {{ region }}
+# so the has_tags value and the target group both resolve to the same region. This
+# is the valued-tag counterpart to the row filter: here uc_abac_region carries a
+# concrete value because a bronze schema holds exactly one region.
+definitions:
+  policies:
+    region|grant_regional_bronze_read:
+      $vars:
+        region: ~
+      name: grant_regional_bronze_read
+      comment: A region's analysts may read that region's raw bronze schema.
+      type: grant
+      for: schema
+      has_tags:
+        uc_abac_region: '{{ region }}'
+      privileges:
+        - read
+        - use
+      to:
+        - uc_abac_region_{{ region }}

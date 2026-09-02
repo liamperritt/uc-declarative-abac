@@ -43,20 +43,26 @@ def _execute_creates(
     change_logger: ChangeLogger,
     dry_run: bool,
     max_workers: int,
-) -> None:
-    """Create each group in groups_to_create via the account SCIM proxy.
+) -> set[str]:
+    """Create each group in groups_to_create (empty) via the account SCIM proxy.
 
-    Per-group SDK creates run in parallel; logging and error capture run via
-    ``on_complete`` on the main thread so progress streams to the operator.
+    Per-group SDK creates run in parallel; logging, id registration and error
+    capture run via ``on_complete`` on the main thread so progress streams to the
+    operator. Returns the display names whose creation succeeded — only those get
+    their members added in the following phase (a failed create leaves no group to
+    add members to).
     """
     work_items = sorted(diff.groups_to_create.items(), key=lambda item: item[0])
 
-    def worker(item: tuple[str, frozenset]) -> None:
-        name, members = item
-        if not dry_run:
-            ws_helper.create_group(name, members)
+    def worker(item: tuple[str, frozenset]) -> str | None:
+        # Create the group empty and return its new SCIM id; members are added in a
+        # later phase (once every group created this run exists) so nested members
+        # can be linked. Workers must not touch shared caches — id registration
+        # happens on the main thread in on_complete.
+        name, _members = item
+        return ws_helper.create_group(name) if not dry_run else None
 
-    def on_complete(item: tuple[str, frozenset], _result, error) -> None:
+    def on_complete(item: tuple[str, frozenset], result, error) -> None:
         name, members = item
         if error is not None:
             change_logger.log_error(
@@ -66,14 +72,17 @@ def _execute_creates(
                 )
             )
             return
+        if not dry_run:
+            ws_helper.register_created_group(name, result)
         change_logger.log_group_create(name, members)
 
-    parallel_for_each(
+    results = parallel_for_each(
         work_items,
         worker,
         max_workers=max_workers,
         on_complete=on_complete,
     )
+    return {item[0] for item, _result, error in results if error is None}
 
 
 def _execute_renames(
@@ -249,6 +258,55 @@ def _execute_deletes(
     )
 
 
+def _execute_created_group_member_adds(
+    ws_helper: WorkspaceHelper,
+    diff: GroupDiff,
+    change_logger: ChangeLogger,
+    dry_run: bool,
+    max_workers: int,
+    created_names: set[str],
+) -> None:
+    """Add members to the groups created this run, after every group exists.
+
+    Newly-created groups are POSTed empty by ``_execute_creates``; their members —
+    which may include other groups created this run — are added here, once each new
+    group's SCIM id has been registered. Only groups in ``created_names`` (whose create
+    succeeded) are processed. No success log line: the create entry already reported the
+    intended members. Skipped entirely in dry-run (nothing was created).
+    """
+    if dry_run:
+        return
+    work_items = sorted(
+        (
+            item
+            for item in diff.groups_to_create.items()
+            if item[1] and item[0] in created_names
+        ),
+        key=lambda item: item[0],
+    )
+
+    def worker(item: tuple[str, frozenset]) -> None:
+        name, members = item
+        ws_helper.add_group_members(name, members)
+
+    def on_complete(item: tuple[str, frozenset], _result, error) -> None:
+        name, _members = item
+        if error is not None:
+            change_logger.log_error(
+                ExecutionError(
+                    context=f"add_group_members({name})",
+                    exception=_group_membership_error(name, error),
+                )
+            )
+
+    parallel_for_each(
+        work_items,
+        worker,
+        max_workers=max_workers,
+        on_complete=on_complete,
+    )
+
+
 def execute_group_diff(
     ws_helper: WorkspaceHelper,
     diff: GroupDiff,
@@ -259,19 +317,26 @@ def execute_group_diff(
 ) -> None:
     """Apply a GroupDiff against the account via the account SCIM proxy.
 
-    Creates groups first (``ws_helper.create_group``, with their members), then
-    renames existing groups (``ws_helper.rename_group``), then adds members to and
-    removes members from existing groups (``ws_helper.add_group_members`` /
-    ``remove_group_members``), then deletes undeclared groups (``ws_helper.delete_group``,
-    gated by interactive confirmation unless ``force``). Renames precede member ops so a
-    group carries its new display name before membership is reconciled; deletes run last
-    so no membership op targets a group being removed. Each phase forms one parallel
-    batch (up to ``max_parallel_changes`` workers); dry-run forces sequential
-    execution and skips the API calls. Each SDK exception is logged via
-    ``change_logger.log_error`` and the batch continues.
+    Group creation is two-phase: every group is created **empty** first
+    (``ws_helper.create_group``, whose returned SCIM id is registered), then the
+    created groups' members are added (``_execute_created_group_member_adds``). This
+    ordering lets a configured group whose members include other groups created this
+    run be linked once every group exists. Renames of existing groups
+    (``ws_helper.rename_group``) run next, then member adds/removes for existing groups
+    (``ws_helper.add_group_members`` / ``remove_group_members``), then deletion of
+    undeclared groups (``ws_helper.delete_group``, gated by interactive confirmation
+    unless ``force``). Renames precede existing-group member ops so a group carries its
+    new display name before membership is reconciled; deletes run last so no membership
+    op targets a group being removed. Each phase forms one parallel batch (up to
+    ``max_parallel_changes`` workers); dry-run forces sequential execution and skips the
+    API calls. Each SDK exception is logged via ``change_logger.log_error`` and the
+    batch continues.
     """
     workers = 1 if dry_run else max_parallel_changes
-    _execute_creates(ws_helper, diff, change_logger, dry_run, workers)
+    created_names = _execute_creates(ws_helper, diff, change_logger, dry_run, workers)
+    _execute_created_group_member_adds(
+        ws_helper, diff, change_logger, dry_run, workers, created_names
+    )
     _execute_renames(ws_helper, diff, change_logger, dry_run, workers)
     _execute_member_adds(ws_helper, diff, change_logger, dry_run, workers)
     _execute_member_removes(ws_helper, diff, change_logger, dry_run, workers)

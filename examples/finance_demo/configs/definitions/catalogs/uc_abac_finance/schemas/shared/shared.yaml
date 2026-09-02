@@ -1,0 +1,24 @@
+# Utility schema (no medallion suffix) that hosts the reusable governance UDFs.
+# Three functions are pulled in by $ref because policies across sub-domains reuse
+# them; `mask_redact` is written inline here because only the mask policies in
+# this project use it — reuse vs. inline, at the function level.
+definitions:
+  schemas:
+    uc_abac_finance|shared:
+      name: shared
+      comment: Shared governance functions.
+      tags:
+        uc_abac_layer: shared
+      functions:
+        - $ref: $defs/functions/finance|mask_last4
+        - $ref: $defs/functions/finance|redact_national_id
+        - $ref: $defs/functions/finance|filter_by_region
+        - name: mask_redact
+          comment: Replace a value with a caller-supplied constant.
+          owner: uc_abac_data_platform
+          parameters:
+            - name: value
+              type: string
+            - name: replacement
+              type: string
+          return: replacement

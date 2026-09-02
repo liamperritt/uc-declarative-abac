@@ -1,0 +1,21 @@
+# Secure-by-default mask: on tables that are high-sensitivity OR restricted, mask
+# EVERY column (the alias column has no tag block, so it renders MATCH COLUMNS TRUE)
+# for everyone except data governors. Demonstrates has_any_of_tags across two
+# distinct governed-tag keys at the table level.
+definitions:
+  policies:
+    sensitivity|mask_high_sensitivity:
+      name: mask_high_sensitivity
+      comment: Mask all columns of the most sensitive tables until a governor is querying.
+      type: mask
+      has_any_of_tags:
+        uc_abac_sensitivity: high
+        uc_abac_classification: restricted
+      columns:
+        - alias: masked
+        - constant: '********'
+      function: shared.mask_redact
+      to:
+        - account users
+      except:
+        - uc_abac_data_governors

@@ -1,0 +1,18 @@
+# Mask email addresses (uc_abac_pii: email) for everyone except approved PII
+# viewers. Uses the reusable shared.mask_last4 UDF (auto-qualified to the policy's
+# own catalog + shared schema).
+definitions:
+  policies:
+    pii|mask_email:
+      name: mask_email
+      comment: Reveal only the last four characters of an email address.
+      type: mask
+      columns:
+        - alias: email
+          has_tags:
+            uc_abac_pii: email
+      function: shared.mask_last4
+      to:
+        - account users
+      except:
+        - uc_abac_pii_viewers

@@ -16,6 +16,7 @@ from uc_declarative_abac.policies import (
 from uc_declarative_abac.privileges import PrivilegeDiff
 from uc_declarative_abac.tags import TagDiff
 from uc_declarative_abac.types import (
+    PrincipalType,
     SecurableType,
 )
 from uc_declarative_abac.utils import (
@@ -2841,6 +2842,10 @@ def _setup_mock_group_state(
     """
 
     def _scim_do(method, path, **kwargs):
+        # Creating a group returns the new group object (with a SCIM id), which the
+        # engine registers before adding the group's members.
+        if method == "POST" and path.endswith("/account/scim/v2/Groups"):
+            return {"id": "created-" + kwargs["body"]["displayName"]}
         if method in ("PATCH", "POST") and "/account/scim/v2/Groups" in path:
             return {}
         # Per-group GET: /api/2.0/account/scim/v2/Groups/{id} → full group object.
@@ -3951,3 +3956,96 @@ def test_orchestrator_keeps_members_when_timezone_run_date_is_before_expiry(
 
     assert result.group_diff.members_to_remove == {}
     assert result.group_diff.members_to_add == {}
+
+
+# ---------------------------------------------------------------------------
+# Nested group creation (a group's member is another group created this run)
+# ---------------------------------------------------------------------------
+
+
+def _config_with_nested_groups() -> dict:
+    """A config declaring a parent group whose member is a child group; neither
+    exists in the account, so both are created this run."""
+    return {
+        "resources": {
+            "catalogs": {"my_catalog": {}},
+            "groups": {
+                "parent_group": {"members": ["child_group"]},
+                "child_group": {"members": []},
+            },
+        }
+    }
+
+
+def test_orchestrator_creates_nested_group_hierarchy_without_resolution_errors(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    """A parent group whose member is a child group created the same run resolves
+    cleanly in a dry run: both are queued for creation and the parent's member
+    resolves to the pending child GROUP (regression for the seeding-before-diff fix)."""
+    config = _config_with_nested_groups()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_empty_principals(mock_workspace_client)  # nothing exists yet
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_group_creation=True,
+        enable_group_management=True,
+        dry_run=True,
+    )
+
+    assert "parent_group" in result.group_diff.groups_to_create
+    assert "child_group" in result.group_diff.groups_to_create
+    parent_members = result.group_diff.groups_to_create["parent_group"]
+    assert any(
+        m.name == "child_group" and m.principal_type == PrincipalType.GROUP
+        for m in parent_members
+    )
+
+
+def test_orchestrator_creates_nested_groups_before_linking_membership(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    """On a real run, every group is created (POST) before any membership is linked
+    (PATCH), so the child exists (with a SCIM id) when the parent references it."""
+    config = _config_with_nested_groups()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+
+    def _scim_do(method, path, **kwargs):
+        # Creating a group returns a per-name SCIM id so it can be registered and
+        # then targeted by the membership PATCH.
+        if method == "POST" and path.endswith("/account/scim/v2/Groups"):
+            return {"id": "id-" + kwargs["body"]["displayName"]}
+        if method in ("PATCH", "POST") and "/account/scim/v2/Groups" in path:
+            return {}
+        return {"totalResults": 0, "startIndex": 1, "itemsPerPage": 100, "Resources": []}
+
+    mock_workspace_client.api_client.do.side_effect = _scim_do
+
+    run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_group_creation=True,
+        enable_group_management=True,
+        dry_run=False,
+    )
+
+    group_calls = [
+        c.args[0]
+        for c in mock_workspace_client.api_client.do.call_args_list
+        if c.args
+        and c.args[0] in ("POST", "PATCH")
+        and "/account/scim/v2/Groups" in c.args[1]
+    ]
+    post_indices = [i for i, m in enumerate(group_calls) if m == "POST"]
+    patch_indices = [i for i, m in enumerate(group_calls) if m == "PATCH"]
+    assert len(post_indices) == 2  # both groups created empty
+    assert patch_indices  # the parent's membership is linked
+    assert max(post_indices) < min(patch_indices)  # all creates precede any linking

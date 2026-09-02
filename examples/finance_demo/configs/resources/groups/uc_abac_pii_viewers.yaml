@@ -1,0 +1,9 @@
+# Principals exempted from PII masking (they see unmasked values). Nests the
+# fraud-analyst and compliance leaf groups.
+resources:
+  groups:
+    uc_abac_pii_viewers:
+      name: uc_abac_pii_viewers
+      members:
+        - uc_abac_fraud_analysts
+        - uc_abac_compliance

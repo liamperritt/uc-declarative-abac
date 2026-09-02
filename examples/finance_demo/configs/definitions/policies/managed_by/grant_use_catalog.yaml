@@ -1,0 +1,19 @@
+# Give the environment's analyst group USE CATALOG on any catalog governed by this
+# project (matched by the uc_abac_managed_by tag the catalog carries). Pairs with
+# domain|grant_domain_read (SELECT + USE SCHEMA on curated tables) so analysts can
+# traverse to data.
+definitions:
+  policies:
+    managed_by|grant_use_catalog:
+      $vars:
+        env: ~
+      name: grant_use_catalog
+      comment: Analysts may use (traverse) the governed catalog.
+      type: grant
+      for: catalog
+      has_tags:
+        uc_abac_managed_by: uc_declarative_abac
+      privileges:
+        - use_catalog
+      to:
+        - uc_abac_finance_analysts_{{ env }}

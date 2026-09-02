@@ -28,6 +28,33 @@ def _in_scope(scope: Scope | None, name: str) -> bool:
     return scope is None or scope.matches(name)
 
 
+def groups_pending_creation(
+    desired: set[Group],
+    actual: set[Group],
+    enable_group_creation: bool,
+    creation_scope: Scope | None = None,
+) -> set[str]:
+    """Display names of configured groups that this run will create.
+
+    A group is pending creation when creation is enabled, its display name is in
+    the creation scope, it declares no ``id`` (a declared id means an existing group
+    matched for rename — never a creation candidate), and no account group shares its
+    name. Mirrors the set the differ places in ``GroupDiff.groups_to_create``, so the
+    orchestrator can seed these names into the principal cache **before** the diff —
+    letting a group's members that are themselves created this run resolve.
+    """
+    if not enable_group_creation:
+        return set()
+    actual_names = {g.display_name for g in actual}
+    return {
+        group.display_name
+        for group in desired
+        if not group.id
+        and group.display_name not in actual_names
+        and _in_scope(creation_scope, group.display_name)
+    }
+
+
 def _resolve_group_members(
     group: Group,
     resolver: PrincipalResolver,

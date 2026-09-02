@@ -1,0 +1,15 @@
+# A standalone schema resource (not composed via a catalog definition). The engine
+# consolidates it into its parent catalog by catalog_name, so this adds a UAT-only
+# `sandbox` schema to uc_abac_finance_uat without touching the shared definition.
+resources:
+  schemas:
+    uc_abac_finance_uat|sandbox:
+      catalog_name: uc_abac_finance_uat
+      name: sandbox
+      comment: Ad-hoc analyst sandbox (UAT only).
+      owner: uc_abac_data_platform
+      tags:
+        uc_abac_layer: shared
+      volumes:
+        - name: scratch
+          comment: Scratch space for experiments.

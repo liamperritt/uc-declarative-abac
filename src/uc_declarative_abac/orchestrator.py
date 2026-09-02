@@ -38,6 +38,7 @@ from uc_declarative_abac.principals import (
     compile_desired_groups,
     compute_group_diff,
     execute_group_diff,
+    groups_pending_creation,
 )
 from uc_declarative_abac.privileges import (
     PrivilegeDiff,
@@ -565,6 +566,20 @@ def run(
     # 3. Construct the shared PrincipalResolver now that ws_helper cache is populated.
     resolver = PrincipalResolver(ws_helper)
 
+    # Seed the display names of groups this run will create into the principal cache
+    # *before* the diff, so a configured group's members that are themselves created
+    # this run resolve during member resolution (they don't exist in the account yet).
+    # The set is computed the same way the differ decides what to create.
+    if group_domain_active:
+        ws_helper.register_pending_groups(
+            groups_pending_creation(
+                desired_groups,
+                actual_groups,
+                enable_group_creation,
+                group_creation_scope,
+            )
+        )
+
     # 3a. Group workflow (the first domain — runs before governed tags so that any
     # groups referenced as policy/grant principals exist first). Inert unless a
     # group flag is set.
@@ -586,11 +601,10 @@ def run(
         if group_domain_active
         else GroupDiff()
     )
-    # Groups slated for creation this run aren't in the principal cache yet (it was
-    # fetched before any group existed). Register them so downstream domains
-    # (governed-tag assigners, policies, privileges, securable owners) can resolve
-    # them — group creation runs first, so they exist before any grant applies.
-    ws_helper.register_pending_groups(group_diff.groups_to_create.keys())
+    # Groups slated for creation were already seeded into the principal cache before
+    # the diff (see above), so downstream domains (governed-tag assigners, policies,
+    # privileges, securable owners) can resolve them — group creation runs first, so
+    # they exist before any grant applies.
     # Renames are reflected in the principal cache before downstream domains resolve:
     # the new display name becomes resolvable and the old one becomes unknown, so
     # references to the new name succeed and references to the old name fail (even in

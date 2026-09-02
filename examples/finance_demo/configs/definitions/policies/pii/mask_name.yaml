@@ -1,0 +1,18 @@
+# Replace customer names (uc_abac_pii: name) with a fixed token. Demonstrates a
+# CONSTANT column: 'REDACTED' is passed to shared.mask_redact as the replacement.
+definitions:
+  policies:
+    pii|mask_name:
+      name: mask_name
+      comment: Replace personal names with a fixed token for unauthorised users.
+      type: mask
+      columns:
+        - alias: full_name
+          has_tags:
+            uc_abac_pii: name
+        - constant: REDACTED
+      function: shared.mask_redact
+      to:
+        - account users
+      except:
+        - uc_abac_pii_viewers

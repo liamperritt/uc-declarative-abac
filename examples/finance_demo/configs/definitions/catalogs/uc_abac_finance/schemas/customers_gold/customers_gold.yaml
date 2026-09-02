@@ -1,0 +1,47 @@
+# Aggregated customer layer. Extends base_schema for the analyst read grant and
+# attaches the secure-by-default high-sensitivity mask. Its tables are INLINE
+# aggregates. customer_360 is tagged high-sensitivity, so every one of its columns
+# is masked (MATCH COLUMNS TRUE) for anyone who is not a data governor.
+definitions:
+  schemas:
+    uc_abac_finance|customers_gold:
+      $ref: $defs/schemas/uc_abac_finance|base_schema
+      $vars:
+        env: ~
+      name: customers_gold
+      comment: Aggregated customer reporting tables.
+      tags:
+        uc_abac_domain: customer
+        uc_abac_layer: gold
+      policies:
+        - $ref: $defs/policies/sensitivity|mask_high_sensitivity
+      tables:
+        - name: customer_360
+          comment: Wide customer profile joining master, address and contact data.
+          tags:
+            uc_abac_domain: aggregate
+            uc_abac_sensitivity: high
+          columns:
+            - name: customer_id
+              type: long
+              comment: Unique customer identifier.
+            - name: full_name
+              type: string
+              comment: Customer legal name.
+            - name: country
+              type: string
+              comment: Country of primary address.
+            - name: lifetime_value
+              type: decimal(18,2)
+              comment: Modelled customer lifetime value.
+        - name: customer_segment_summary
+          comment: Customer counts by segment.
+          tags:
+            uc_abac_domain: aggregate
+          columns:
+            - name: segment
+              type: string
+              comment: Customer segment.
+            - name: customer_count
+              type: long
+              comment: Number of customers in the segment.

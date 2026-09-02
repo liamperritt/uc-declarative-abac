@@ -57,6 +57,9 @@ def _make_workspace_client(
     groups_by_id = {g["id"]: g for g in groups}
 
     def _do(method, path, **kwargs):
+        # Creating a group returns the new group object (with its SCIM id).
+        if method == "POST" and path.endswith("/Groups"):
+            return {"id": "created-group-id"}
         if method in ("POST", "PATCH"):
             return {}
         # Per-group GET: /api/2.0/account/scim/v2/Groups/{id} → full group object.
@@ -382,18 +385,17 @@ def test_workspace_helper_remove_group_members_issues_patch() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_workspace_helper_create_group_issues_post() -> None:
-    """create_group issues a POST to the Groups endpoint whose body references the
-    new group's displayName and the member's SCIM id."""
-    client = _make_workspace_client(
-        users=[_make_user("alice@example.com", "u-1")],
-    )
+def test_workspace_helper_create_group_posts_empty_and_returns_id() -> None:
+    """create_group POSTs the group with NO members and returns the new SCIM id.
+    Members are added in a later phase, so a group whose members are themselves
+    created this run can be linked once every group exists."""
+    client = _make_workspace_client()
     helper = WorkspaceHelper(client, manage_groups=True)
     helper.fetch_principals()
 
-    member = Principal(PrincipalType.USER, "alice@example.com", "alice@example.com")
-    helper.create_group("new_team", [member])
+    new_id = helper.create_group("new_team")
 
+    assert new_id == "created-group-id"
     post_calls = [
         call
         for call in client.api_client.do.call_args_list
@@ -401,11 +403,37 @@ def test_workspace_helper_create_group_issues_post() -> None:
     ]
     assert len(post_calls) == 1
     call = post_calls[0]
-    path = call.args[1]
-    assert "/api/2.0/account/scim/v2/Groups" in path
+    assert "/api/2.0/account/scim/v2/Groups" in call.args[1]
     captured = repr(call.kwargs)
     assert "new_team" in captured
-    assert "u-1" in captured
+    assert "members" not in captured
+
+
+def test_workspace_helper_register_created_group_makes_group_resolvable_and_manageable() -> (
+    None
+):
+    """After register_created_group, the new group resolves as a GROUP principal and
+    add_group_members targets it by its registered SCIM id (no KeyError)."""
+    client = _make_workspace_client()
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    helper.register_created_group("new_team", "g-new")
+
+    resolved = helper.resolve_by_name("new_team")
+    assert resolved.principal_type == PrincipalType.GROUP
+    assert resolved.name == "new_team"
+
+    member = Principal(PrincipalType.USER, "child@example.com", "child@example.com")
+    helper.add_group_members("new_team", [member])
+
+    patch_calls = [
+        call
+        for call in client.api_client.do.call_args_list
+        if call.args and call.args[0] == "PATCH"
+    ]
+    assert len(patch_calls) == 1
+    assert "g-new" in patch_calls[0].args[1]
 
 
 # ---------------------------------------------------------------------------

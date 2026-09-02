@@ -1,0 +1,14 @@
+# Reusable base schema (a mixin, never deployed on its own). The curated silver
+# and gold schemas make this their root $ref to "extend" it, inheriting the
+# analyst read grant. Because it declares `env`, an extending schema forwards its
+# own `env` into it by name (implicit forwarding for a root $ref).
+definitions:
+  schemas:
+    uc_abac_finance|base_schema:
+      $vars:
+        env: ~
+      policies:
+        - $ref: $defs/policies/domain|grant_engineer_create
+        - $ref: $defs/policies/domain|grant_domain_read
+          $vars:
+            env: '{{ env }}'

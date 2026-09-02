@@ -1,0 +1,57 @@
+# Aggregated transaction layer. Extends base_schema for the analyst read grant.
+# Its tables are aggregates used only here, so they are written INLINE (several
+# tables combined in this one schema file) rather than as separate reusable defs.
+definitions:
+  schemas:
+    uc_abac_finance|transactions_gold:
+      $ref: $defs/schemas/uc_abac_finance|base_schema
+      $vars:
+        env: ~
+      name: transactions_gold
+      comment: Aggregated transaction reporting tables.
+      tags:
+        uc_abac_domain: transaction
+        uc_abac_layer: gold
+      tables:
+        - name: revenue_by_region
+          comment: Daily revenue rolled up by region.
+          tags:
+            uc_abac_domain: aggregate
+          columns:
+            - name: business_date
+              type: date
+              comment: Reporting date.
+            - name: region
+              type: string
+              comment: Booking region.
+            - name: revenue
+              type: decimal(18,2)
+              comment: Total revenue for the region and date.
+        - name: daily_transaction_summary
+          comment: Daily transaction counts and totals.
+          tags:
+            uc_abac_domain: aggregate
+          columns:
+            - name: business_date
+              type: date
+              comment: Reporting date.
+            - name: transaction_count
+              type: long
+              comment: Number of transactions.
+            - name: total_amount
+              type: decimal(18,2)
+              comment: Total transacted amount.
+        - name: payment_method_breakdown
+          comment: Payment volume by method.
+          tags:
+            uc_abac_domain: aggregate
+          columns:
+            - name: business_date
+              type: date
+              comment: Reporting date.
+            - name: method
+              type: string
+              comment: Payment rail.
+            - name: payment_count
+              type: long
+              comment: Number of payments on the method.

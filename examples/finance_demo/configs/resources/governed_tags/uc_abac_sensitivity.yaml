@@ -1,0 +1,11 @@
+resources:
+  governed_tags:
+    uc_abac_sensitivity:
+      name: uc_abac_sensitivity
+      description: Relative sensitivity of the securable; high-sensitivity tables are masked by default.
+      allowed_values:
+        - low
+        - medium
+        - high
+      assigners:
+        - uc_abac_data_governors

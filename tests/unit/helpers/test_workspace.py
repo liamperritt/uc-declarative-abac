@@ -533,12 +533,11 @@ def test_workspace_helper_does_not_duplicate_account_system_group_in_workspace_s
     assert group_names.count("account users") == 1
 
 
-def test_workspace_helper_does_not_synthesize_account_system_groups_in_account_scim() -> (
-    None
-):
-    """In the default account-SCIM mode the helper does not synthesize the system
-    groups — the account SCIM proxy already returns every account group, so only
-    what the proxy returns is present."""
+def test_workspace_helper_appends_account_system_groups_in_account_scim() -> None:
+    """In account-SCIM mode the account-level system groups 'account users' and
+    'account admins' are always resolvable as GROUP principals, even when the proxy
+    list does not return them — 'account admins' in particular is not a listable
+    group but is a valid grant/policy principal."""
     client = _make_workspace_client(
         groups=[_make_group("data_engineers")],
     )
@@ -546,8 +545,11 @@ def test_workspace_helper_does_not_synthesize_account_system_groups_in_account_s
     helper.fetch_principals()
 
     assert helper.validate_principal("data_engineers") is True
-    assert helper.validate_principal("account users") is False
-    assert helper.validate_principal("account admins") is False
+    for group_name in ("account users", "account admins"):
+        resolved = helper.resolve_by_name(group_name)
+        assert resolved.principal_type == PrincipalType.GROUP
+        assert resolved.name == group_name
+        assert resolved.identifier == group_name
 
 
 # ---------------------------------------------------------------------------

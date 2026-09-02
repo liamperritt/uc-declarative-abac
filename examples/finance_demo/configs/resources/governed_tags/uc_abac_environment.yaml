@@ -1,0 +1,11 @@
+resources:
+  governed_tags:
+    uc_abac_environment:
+      name: uc_abac_environment
+      description: Deployment environment of the securable.
+      allowed_values:
+        - prod
+        - uat
+      assigners:
+        # Anyone may label environment on their own dev catalogs.
+        - account users

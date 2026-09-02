@@ -1,0 +1,52 @@
+# The single catalog definition, deployed to two environments (prod and uat) by the
+# thin resource catalogs. `env` names the catalog and flows into the env-specific
+# grant policies and schemas. The region-partitioned bronze schema is instantiated
+# once per region here.
+definitions:
+  catalogs:
+    uc_abac_finance:
+      $vars:
+        env: ~
+      name: uc_abac_finance_{{ env }}
+      comment: Financial services governed catalog.
+      # location: s3://REPLACE-ME-uc-abac-finance/{{ env }}   # optional managed location; CREATE-only, needs a real bucket
+      rfa_destinations:
+        - data-access@example.com                            # an email destination
+      tags:
+        # Catalog-level tags; Unity Catalog inherits these down to schemas/tables,
+        # so they are intentionally not repeated on child securables.
+        uc_abac_environment: '{{ env }}'
+        uc_abac_managed_by: uc_declarative_abac
+      policies:
+        - $ref: $defs/policies/managed_by|grant_admin_manage
+        - $ref: $defs/policies/domain|grant_engineer_create
+        - $ref: $defs/policies/managed_by|grant_use_catalog
+          $vars:
+            env: '{{ env }}'
+      schemas:
+        # Region-partitioned raw layer: one bronze schema per region.
+        - $ref: $defs/schemas/uc_abac_finance|transactions_bronze
+          $vars:
+            region: amer
+        - $ref: $defs/schemas/uc_abac_finance|transactions_bronze
+          $vars:
+            region: emea
+        - $ref: $defs/schemas/uc_abac_finance|transactions_bronze
+          $vars:
+            region: apac
+        # Curated + aggregated layers.
+        - $ref: $defs/schemas/uc_abac_finance|transactions_silver
+          $vars:
+            env: '{{ env }}'
+        - $ref: $defs/schemas/uc_abac_finance|transactions_gold
+          $vars:
+            env: '{{ env }}'
+        - $ref: $defs/schemas/uc_abac_finance|customers_bronze
+        - $ref: $defs/schemas/uc_abac_finance|customers_silver
+          $vars:
+            env: '{{ env }}'
+        - $ref: $defs/schemas/uc_abac_finance|customers_gold
+          $vars:
+            env: '{{ env }}'
+        # Utility schema hosting the shared governance functions.
+        - $ref: $defs/schemas/uc_abac_finance|shared

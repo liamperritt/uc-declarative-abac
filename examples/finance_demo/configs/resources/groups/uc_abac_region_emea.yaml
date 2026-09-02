@@ -1,0 +1,6 @@
+# Regional access group (Europe/Middle East/Africa). Created empty; add your users.
+resources:
+  groups:
+    uc_abac_region_emea:
+      name: uc_abac_region_emea
+      members: []

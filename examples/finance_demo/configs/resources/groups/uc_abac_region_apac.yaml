@@ -1,0 +1,6 @@
+# Regional access group (Asia-Pacific). Created empty; add your users.
+resources:
+  groups:
+    uc_abac_region_apac:
+      name: uc_abac_region_apac
+      members: []

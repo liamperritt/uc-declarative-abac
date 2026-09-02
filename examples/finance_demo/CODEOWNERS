@@ -1,0 +1,16 @@
+# Code ownership for governance changes (template — replace with your real teams).
+# Requiring review from the owning team on each area keeps governance changes
+# accountable. GitHub enforces this only when the file lives at the repo root.
+
+# Governance-wide default.
+*                                   @your-org/data-governance
+
+# Governed tags and groups are account-level: platform + governance sign-off.
+/configs/resources/governed_tags/   @your-org/data-governance
+/configs/resources/groups/          @your-org/data-platform @your-org/data-governance
+
+# ABAC policies: governance owns the rules.
+/configs/definitions/policies/      @your-org/data-governance
+
+# Catalog / schema / table structure: the platform team.
+/configs/definitions/catalogs/      @your-org/data-platform

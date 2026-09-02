@@ -1,0 +1,7 @@
+# Prod analyst group, instantiated from the finance_analysts template.
+resources:
+  groups:
+    uc_abac_finance_analysts_prod:
+      $ref: $defs/groups/finance_analysts
+      $vars:
+        env: prod
