@@ -10,7 +10,6 @@ definitions:
         env: ~
       name: customers_gold
       comment: Aggregated customer reporting tables.
-      owner: uc_abac_data_platform
       tags:
         uc_abac_domain: customer
         uc_abac_layer: gold

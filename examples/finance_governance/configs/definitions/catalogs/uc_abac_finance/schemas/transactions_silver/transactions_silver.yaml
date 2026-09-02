@@ -18,7 +18,6 @@ definitions:
         env: ~
       name: transactions_silver
       comment: Curated, region-unioned transaction data.
-      owner: uc_abac_data_platform
       tags:
         uc_abac_domain: transaction
         uc_abac_layer: silver
@@ -27,14 +26,8 @@ definitions:
         - $ref: $defs/policies/sensitivity|filter_large_transactions
       tables:
         - $ref: $defs/tables/finance|transactions
-          columns:
-            - $ref: $defs/columns/uc_abac_finance|transactions_silver|table|region
-            - name: amount
-              tags:
-                uc_abac_sensitivity: high
+          columns: [$defs/columns/uc_abac_finance|transactions_silver|table|region]
         - $ref: $defs/tables/finance|payments
-          columns:
-            - $ref: $defs/columns/uc_abac_finance|transactions_silver|table|region
+          columns: [$defs/columns/uc_abac_finance|transactions_silver|table|region]
         - $ref: $defs/tables/finance|settlements
-          columns:
-            - $ref: $defs/columns/uc_abac_finance|transactions_silver|table|region
+          columns: [$defs/columns/uc_abac_finance|transactions_silver|table|region]

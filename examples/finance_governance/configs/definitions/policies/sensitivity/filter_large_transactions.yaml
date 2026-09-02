@@ -20,4 +20,4 @@ definitions:
       to:
         - account users
       except:
-        - account admins
+        - uc_abac_data_governors

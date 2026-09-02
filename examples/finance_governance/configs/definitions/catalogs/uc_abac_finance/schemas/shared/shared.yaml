@@ -7,7 +7,6 @@ definitions:
     uc_abac_finance|shared:
       name: shared
       comment: Shared governance functions.
-      owner: uc_abac_data_platform
       tags:
         uc_abac_layer: shared
       functions:

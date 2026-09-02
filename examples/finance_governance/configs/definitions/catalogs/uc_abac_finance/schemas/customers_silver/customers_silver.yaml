@@ -9,7 +9,6 @@ definitions:
         env: ~
       name: customers_silver
       comment: Curated customer data with PII masking applied.
-      owner: uc_abac_data_platform
       tags:
         uc_abac_domain: customer
         uc_abac_layer: silver

@@ -9,12 +9,9 @@ definitions:
         env: ~
       name: uc_abac_finance_{{ env }}
       comment: Financial services governed catalog.
-      owner: uc_abac_data_platform
       # location: s3://REPLACE-ME-uc-abac-finance/{{ env }}   # optional managed location; CREATE-only, needs a real bucket
       rfa_destinations:
         - data-access@example.com                            # an email destination
-        - https://example.com/access-requests                # an HTTP(S) destination
-        # - 11111111-2222-3333-4444-555555555555             # a Databricks notification-destination UUID
       tags:
         # Catalog-level tags; Unity Catalog inherits these down to schemas/tables,
         # so they are intentionally not repeated on child securables.

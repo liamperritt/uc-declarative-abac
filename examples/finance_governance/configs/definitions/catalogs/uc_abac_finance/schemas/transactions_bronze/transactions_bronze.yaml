@@ -9,7 +9,6 @@ definitions:
         region: ~
       name: transactions_bronze_{{ region }}
       comment: Raw transaction landing zone for the {{ region }} region.
-      owner: uc_abac_data_platform
       tags:
         uc_abac_domain: transaction
         uc_abac_layer: bronze

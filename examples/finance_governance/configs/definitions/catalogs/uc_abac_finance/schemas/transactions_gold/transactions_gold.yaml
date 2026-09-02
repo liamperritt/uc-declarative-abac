@@ -9,7 +9,6 @@ definitions:
         env: ~
       name: transactions_gold
       comment: Aggregated transaction reporting tables.
-      owner: uc_abac_data_platform
       tags:
         uc_abac_domain: transaction
         uc_abac_layer: gold

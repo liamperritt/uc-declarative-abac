@@ -5,7 +5,6 @@ definitions:
     uc_abac_finance|customers_bronze:
       name: customers_bronze
       comment: Raw customer landing zone.
-      owner: uc_abac_data_platform
       tags:
         uc_abac_domain: customer
         uc_abac_layer: bronze
