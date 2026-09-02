@@ -13,11 +13,11 @@ definitions:
       tags:
         uc_abac_domain: customer
         uc_abac_layer: silver
-      tables:
-        - $ref: $defs/tables/finance|customers
-        - $ref: $defs/tables/finance|customer_addresses
-        - $ref: $defs/tables/finance|customer_contacts
       policies:
         - $ref: $defs/policies/pii|mask_email
         - $ref: $defs/policies/pii|mask_name
         - $ref: $defs/policies/pii|mask_national_id
+      tables:
+        - $ref: $defs/tables/finance|customers
+        - $ref: $defs/tables/finance|customer_addresses
+        - $ref: $defs/tables/finance|customer_contacts

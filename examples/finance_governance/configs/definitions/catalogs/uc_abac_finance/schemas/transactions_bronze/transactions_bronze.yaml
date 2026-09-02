@@ -14,6 +14,12 @@ definitions:
         uc_abac_domain: transaction
         uc_abac_layer: bronze
         uc_abac_region: '{{ region }}'
+      policies:
+        # Volume grants for the platform team, and read for this region's analysts.
+        - $ref: $defs/policies/domain|grant_volume_access
+        - $ref: $defs/policies/region|grant_regional_bronze_read
+          $vars:
+            region: '{{ region }}'
       tables:
         - $ref: $defs/tables/finance|transactions
         - $ref: $defs/tables/finance|payments
@@ -30,9 +36,3 @@ definitions:
           owner: uc_abac_data_platform
           tags:
             uc_abac_domain: transaction
-      policies:
-        # Volume grants for the platform team, and read for this region's analysts.
-        - $ref: $defs/policies/domain|grant_volume_access
-        - $ref: $defs/policies/region|grant_regional_bronze_read
-          $vars:
-            region: '{{ region }}'

@@ -14,6 +14,8 @@ definitions:
       tags:
         uc_abac_domain: customer
         uc_abac_layer: gold
+      policies:
+        - $ref: $defs/policies/sensitivity|mask_high_sensitivity
       tables:
         - name: customer_360
           comment: Wide customer profile joining master, address and contact data.
@@ -44,5 +46,3 @@ definitions:
             - name: customer_count
               type: long
               comment: Number of customers in the segment.
-      policies:
-        - $ref: $defs/policies/sensitivity|mask_high_sensitivity

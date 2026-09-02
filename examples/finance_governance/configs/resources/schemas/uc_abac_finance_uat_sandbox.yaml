@@ -10,13 +10,6 @@ resources:
       owner: uc_abac_data_platform
       tags:
         uc_abac_layer: shared
-      tables:
+      volumes:
         - name: scratch
           comment: Scratch space for experiments.
-          columns:
-            - name: id
-              type: long
-              comment: Row identifier.
-            - name: note
-              type: string
-              comment: Free-text note.

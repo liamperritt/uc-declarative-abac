@@ -12,7 +12,6 @@ definitions:
           has_tags:
             uc_abac_sensitivity: high
       function:
-        name: filter_large_transactions_fn
         comment: Visible when the amount is below the review threshold or the caller is a governor.
         parameters:
           - name: amount
