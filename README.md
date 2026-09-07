@@ -626,7 +626,7 @@ Policy fields:
   | Abstraction | Expands to |
   |---|---|
   | `read` | `select`, `read_volume`, `execute` |
-  | `edit` | `modify`, `write_volume`, `refresh` |
+  | `write` | `modify`, `write_volume`, `refresh` |
   | `use` | `use_catalog`, `use_schema` |
   | `create` | `create_table`, `create_schema`, `create_function`, `create_volume`, `create_materialized_view`, `create_model`, `create_model_version` |
 
@@ -1199,7 +1199,7 @@ Mask and filter policies are additive by default (create/update, never delete). 
 
 #### Privileges domain
 - **Privilege compilation** — matches grant policies against desired tags with AND semantics, scoped to the policy's attached securable and its children
-- **Abstract privilege names** — `read`, `edit`, `use`, and `create` are accepted in a policy's `privileges:` list as shorthands that expand to a fixed set of concrete UC privileges; the existing compatibility filter and `USE_CATALOG`/`USE_SCHEMA` cascade then apply per emitted privilege
+- **Abstract privilege names** — `read`, `write`, `use`, and `create` are accepted in a policy's `privileges:` list as shorthands that expand to a fixed set of concrete UC privileges; the existing compatibility filter and `USE_CATALOG`/`USE_SCHEMA` cascade then apply per emitted privilege
 - **Wildcard tag values** — `has_tags: {k: '*'}` matches any value for tag `k` (presence check); concrete values match exactly
 - **Privilege-securable compatibility** — filters incompatible privilege/securable combinations (e.g. `READ_VOLUME` only on volumes)
 - **USE_CATALOG / USE_SCHEMA cascade** — when a grant policy matches a child securable and lists a USE privilege, the privilege is emitted against the correct parent ancestor (catalog for `USE_CATALOG`, schema for `USE_SCHEMA`) rather than being silently dropped by the compatibility filter. Bounded by policy scope: a schema-attached policy cannot cascade `USE_CATALOG` up to the catalog, and a table-attached policy cannot cascade either USE privilege onto its ancestors
