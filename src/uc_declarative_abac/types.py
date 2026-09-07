@@ -50,6 +50,7 @@ class PrivilegeType(str, Enum):
     READ_SKILL = "read_skill"
     WRITE_SKILL = "write_skill"
     READ_METADATA = "read_metadata"
+    MANAGE_ACCESS_CONTROL = "manage_access_control"
     BROWSE = "browse"
     INSERT = "insert"
     UPDATE = "update"
@@ -61,9 +62,11 @@ class AbstractedPrivilegeType(str, Enum):
     ``PrivilegeType`` is accepted in a grant policy's ``privileges:`` list."""
 
     READ = "read"
-    EDIT = "edit"
+    WRITE = "write"
     USE = "use"
     CREATE = "create"
+    # EDIT is deprecated - use WRITE instead
+    EDIT = "edit"
 
 
 class PolicyType(str, Enum):
@@ -135,6 +138,7 @@ _UNIVERSAL_PRIVILEGES = {
     PrivilegeType.MANAGE,
     PrivilegeType.APPLY_TAG,
     PrivilegeType.READ_METADATA,
+    PrivilegeType.MANAGE_ACCESS_CONTROL,
 }
 
 SECURABLE_TYPE_PRIVILEGE_MAP: dict[SecurableType, set[PrivilegeType]] = {
@@ -158,6 +162,14 @@ ABSTRACT_PRIVILEGE_MAP: dict[AbstractedPrivilegeType, frozenset[PrivilegeType]] 
             PrivilegeType.EXECUTE,
         }
     ),
+    AbstractedPrivilegeType.WRITE: frozenset(
+        {
+            PrivilegeType.MODIFY,
+            PrivilegeType.WRITE_VOLUME,
+            PrivilegeType.REFRESH,
+        }
+    ),
+    # EDIT is deprecated - use WRITE instead
     AbstractedPrivilegeType.EDIT: frozenset(
         {
             PrivilegeType.MODIFY,

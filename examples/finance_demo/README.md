@@ -1,4 +1,4 @@
-# Finance governance — a worked `uc-abac` example
+# Finance Demo — a worked `uc-abac` example
 
 A complete, deployable-from-scratch governance project for a fictional financial-services
 organisation. It models one logical catalog deployed to two environments and exercises

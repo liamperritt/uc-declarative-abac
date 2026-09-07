@@ -2420,6 +2420,60 @@ def test_privilege_compiler_expands_read_abstraction_on_catalog_match():
     }
 
 
+def test_privilege_compiler_expands_write_abstraction_on_schema_match():
+    """A grant policy with privileges: ['write'] applied to a SCHEMA-tagged match
+    expands to {MODIFY, WRITE_VOLUME, REFRESH}, all of which are valid on SCHEMA."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "name": "g",
+                            "type": "grant",
+                            "privileges": ["write"],
+                            "to": ["team"],
+                            "has_tags": {"env": "prod"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    desired_tags = {
+        SecurableTag(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="cat.sales",
+            tag_name="env",
+            tag_value="prod",
+        ),
+    }
+
+    result = _compile(config, desired_tags)
+
+    assert result == {
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="cat.sales",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.MODIFY,
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="cat.sales",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.WRITE_VOLUME,
+        ),
+        SecurablePrivilege(
+            securable_type=SecurableType.SCHEMA,
+            securable_full_name="cat.sales",
+            principal=Principal(principal_type=PrincipalType.UNKNOWN, name="team"),
+            privilege_type=PrivilegeType.REFRESH,
+        ),
+    }
+
+
 def test_privilege_compiler_expands_edit_abstraction_on_schema_match():
     """A grant policy with privileges: ['edit'] applied to a SCHEMA-tagged match
     expands to {MODIFY, WRITE_VOLUME, REFRESH}, all of which are valid on SCHEMA."""
