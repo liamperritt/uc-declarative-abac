@@ -1933,6 +1933,24 @@ def test_parameter_config_rejects_data_type_that_only_shares_a_prefix():
         ParameterConfig.model_validate({"name": "col", "data_type": "STRINGISH"})
 
 
+def test_parameter_config_strips_default_collation():
+    """A data_type with default COLLATE UTF8_BINARY is normalized to remove
+    the collation clause."""
+    param = ParameterConfig.model_validate(
+        {"name": "col", "data_type": "string collate utf8_binary"}
+    )
+    assert param.data_type == "STRING"
+
+
+def test_parameter_config_normalises_whitespace():
+    """A data_type with excess whitespace around structural punctuation is
+    normalized to remove it."""
+    param = ParameterConfig.model_validate(
+        {"name": "col", "data_type": "decimal(18, 4)"}
+    )
+    assert param.data_type == "DECIMAL(18,4)"
+
+
 # ---------------------------------------------------------------------------
 # ColumnConfig.data_type validation
 # ---------------------------------------------------------------------------

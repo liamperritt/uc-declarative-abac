@@ -86,6 +86,54 @@ def quote_securable(full_name: str) -> str:
     return ".".join(f"`{seg}`" for seg in full_name.split("."))
 
 
+def _strip_default_collation(data_type: str) -> str:
+    return re.sub(r"\s+COLLATE\s+UTF8_BINARY\b", "", data_type, flags=re.IGNORECASE)
+
+
+def _strip_structural_whitespace(data_type: str) -> str:
+    return re.sub(r"\s*([<>(),:])\s*", r"\1", data_type)
+
+
+_DATA_TYPE_NORMALISERS = (
+    _strip_default_collation,
+    _strip_structural_whitespace,
+    str.upper,
+)
+
+
+def normalise_data_type(data_type: str) -> str:
+    """Canonicalise a Unity Catalog data-type string for idempotent comparison.
+
+    UC's ``information_schema`` renders types canonically (default collation
+    injected, no incidental whitespace, a fixed case), whereas config authors write
+    them by hand. Left as-is, equivalent types compare unequal and their securable
+    is re-created on every run. This runs both the desired (config) and actual
+    (fetched) side through one pipeline so equivalent renderings collapse to the
+    same string. The rules, applied in order, each target one class of incidental
+    difference:
+
+    1. **Default collation** — strip an injected ``COLLATE UTF8_BINARY`` clause
+       (anywhere, including nested types like ``array<string collate utf8_binary>``).
+       Only the *default* is stripped; an explicitly authored non-default collation
+       (e.g. ``COLLATE UTF8_LCASE``) is preserved so it stays governed and is emitted
+       in DDL.
+    2. **Structural whitespace** — drop whitespace adjacent to ``< > ( ) , :`` so
+       ``decimal(18, 4)`` / ``struct<a: int>`` canonicalise, while inter-word spaces
+       in multi-word types (e.g. ``interval day to second``) survive — keeping the
+       result valid SQL for the executor's ``CREATE FUNCTION`` emission.
+    3. **Case** — uppercase last, so stored/emitted values are upper case.
+
+    Add a rule here when a new class of incidental rendering surfaces. Not handled
+    (they need a real type parser, and none is the reported problem): semantic
+    aliases (``INT`` vs ``INTEGER``), colon-vs-space struct rendering
+    (``struct<a int>`` vs ``struct<a:int>``), and schema-level non-default default
+    collations.
+    """
+    for rule in _DATA_TYPE_NORMALISERS:
+        data_type = rule(data_type)
+    return data_type
+
+
 def catalog_of(full_name: str) -> str:
     """Return the catalog component of a UC ``full_name``.
 

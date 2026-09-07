@@ -52,6 +52,7 @@ from uc_declarative_abac.types import (
 from uc_declarative_abac.utils import (
     OrchestratorError,
     classify_rfa_destination,
+    normalise_data_type,
 )
 
 _logger = logging.getLogger("uc_declarative_abac")
@@ -294,6 +295,13 @@ def _build_securables_query(
     to keep the wire payload small. Column data types are only used on the desired
     side of the diff (for CREATE TABLE / ADD COLUMN SQL emission).
 
+    The FUNCTION arm, by contrast, *does* project each parameter's type — as
+    ``full_data_type`` (e.g. ``decimal(18,4)``), not the base ``data_type``
+    (``DECIMAL``) — because function parameters are diffed structurally and the
+    desired side declares the full, parameterized type. ``_parse_securable_rows``
+    passes it through ``normalise_data_type`` (the same canonicaliser the config
+    side uses) so parameterized/complex parameter types stay idempotent.
+
     Each arm projects 9 columns in this order:
     ``securable_type, full_name, owner, parameters, routine_definition,
     routine_comment, columns, comment, table_type``. ``comment`` is populated
@@ -351,7 +359,7 @@ def _build_securables_query(
         (f"SELECT 'FUNCTION' AS securable_type, "
         f"concat(r.specific_catalog, '.', r.specific_schema, '.', r.specific_name) AS full_name, "
         f"r.routine_owner AS owner, "
-        f"to_json(transform(sort_array(collect_list(struct(p.ordinal_position, p.parameter_name, p.data_type))), x -> struct(x.parameter_name, x.data_type))) AS parameters, "
+        f"to_json(transform(sort_array(collect_list(struct(p.ordinal_position, p.parameter_name, p.full_data_type))), x -> struct(x.parameter_name, x.full_data_type))) AS parameters, "
         f"r.routine_definition AS routine_definition, "
         f"r.comment AS routine_comment, "
         f"NULL AS columns, NULL AS comment, NULL AS table_type "
@@ -485,6 +493,14 @@ def _parse_securable_rows(
 
     ``location`` is intentionally not in the projection — it is a creation-only
     attribute, never diffed.
+
+    Function parameter types come from the projection's ``full_data_type``, which
+    carries the parameterized/complex type (e.g. ``decimal(18,4)``,
+    ``array<string>``, ``struct<...>``) rather than the base ``data_type``
+    (``DECIMAL``), so they round-trip against the desired side. Each is passed
+    through ``normalise_data_type`` — the same canonicaliser the config side uses —
+    so UC's canonical rendering (injected default collation, casing, incidental
+    whitespace) matches the hand-written config and stays idempotent.
     """
     securables: set[Securable] = set()
     attributes: set[SecurableAttributes] = set()
@@ -517,7 +533,8 @@ def _parse_securable_rows(
             if parameters_json:
                 parsed_params = json.loads(parameters_json)
                 params = tuple(
-                    (p["parameter_name"], p["data_type"]) for p in parsed_params
+                    (p["parameter_name"], normalise_data_type(p["full_data_type"]))
+                    for p in parsed_params
                 )
             else:
                 params = ()

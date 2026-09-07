@@ -33,6 +33,7 @@ from uc_declarative_abac.types import (
 from uc_declarative_abac.utils import (
     DuplicateResourceError,
     is_system_governed_tag,
+    normalise_data_type,
     validate_rfa_destinations,
 )
 
@@ -578,9 +579,15 @@ class ParameterConfig(BaseConfig):
 
     @field_validator("data_type", mode="before")
     @classmethod
-    def _coerce_data_type_to_uppercase(cls, v):
+    def _normalise_data_type(cls, v):
+        """Canonicalise the declared type so it matches the fetched actual state.
+
+        Shares ``normalise_data_type`` with the actual-state fetch side so both
+        renderings (hand-written config vs UC's canonical ``full_data_type``)
+        collapse to the same string and the function stays idempotent.
+        """
         if isinstance(v, str):
-            return v.upper()
+            return normalise_data_type(v)
         return v
 
     @field_validator("data_type", mode="after")

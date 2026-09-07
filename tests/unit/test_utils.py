@@ -12,6 +12,7 @@ from uc_declarative_abac.utils import (
     catalog_of,
     classify_rfa_destination,
     is_system_governed_tag,
+    normalise_data_type,
     parallel_for_each,
     parse_flat_scope,
     parse_hierarchical_scope,
@@ -540,3 +541,53 @@ def test_utils_parallel_for_each_on_complete_receives_exceptions():
         and isinstance(by_item[2][2], RuntimeError)
     )
     assert by_item[3] == (3, 30, None)
+
+
+# ---------------------------------------------------------------------------
+# normalise_data_type
+# ---------------------------------------------------------------------------
+
+
+def test_utils_normalise_data_type_strips_default_collation_at_top_level():
+    """Default COLLATE UTF8_BINARY clause is stripped from top-level types."""
+    assert normalise_data_type("string collate utf8_binary") == "STRING"
+    assert normalise_data_type("STRING COLLATE UTF8_BINARY") == "STRING"
+
+
+def test_utils_normalise_data_type_strips_default_collation_nested():
+    """Default COLLATE UTF8_BINARY is stripped from nested types within arrays, maps, structs."""
+    assert normalise_data_type("array<string collate utf8_binary>") == "ARRAY<STRING>"
+    assert (
+        normalise_data_type("map<string collate utf8_binary,int>") == "MAP<STRING,INT>"
+    )
+    assert (
+        normalise_data_type("struct<col: string collate utf8_binary>")
+        == "STRUCT<COL:STRING>"
+    )
+
+
+def test_utils_normalise_data_type_preserves_non_default_collation():
+    """Non-default collations are preserved and uppercased."""
+    assert (
+        normalise_data_type("string collate utf8_lcase") == "STRING COLLATE UTF8_LCASE"
+    )
+
+
+def test_utils_normalise_data_type_removes_structural_whitespace():
+    """Whitespace adjacent to structural punctuation is removed, inter-word spaces preserved."""
+    assert normalise_data_type("decimal(18, 4)") == "DECIMAL(18,4)"
+    assert normalise_data_type("struct<a: int>") == "STRUCT<A:INT>"
+    assert normalise_data_type("map<string, int>") == "MAP<STRING,INT>"
+
+
+def test_utils_normalise_data_type_uppercases_and_preserves_multi_word_types():
+    """Type names are uppercased; multi-word types preserve inter-word spaces."""
+    assert normalise_data_type("int") == "INT"
+    assert normalise_data_type("interval day to second") == "INTERVAL DAY TO SECOND"
+
+
+def test_utils_normalise_data_type_idempotent_on_canonical_input():
+    """Already-canonical (uppercase, no excess whitespace, no default collation) input returns unchanged."""
+    assert normalise_data_type("STRING") == "STRING"
+    assert normalise_data_type("DECIMAL(18,4)") == "DECIMAL(18,4)"
+    assert normalise_data_type("MAP<STRING,INT>") == "MAP<STRING,INT>"
