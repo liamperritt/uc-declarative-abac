@@ -876,7 +876,7 @@ def test_uc_helper_parses_securable_rows_for_functions(mock_fetch):
             "FUNCTION",
             "my_catalog.shared.mask_email",
             "func_owner",
-            '[{"parameter_name":"col","data_type":"STRING"}]',
+            '[{"parameter_name":"col","full_data_type":"STRING"}]',
             "CASE WHEN is_member('admins') THEN col ELSE '***' END",
             None,
         ],
@@ -929,7 +929,7 @@ def test_uc_helper_parses_securable_rows_emits_function_attributes(mock_fetch):
             "FUNCTION",
             "my_catalog.shared.mask_email",
             "func_owner",
-            '[{"parameter_name":"col","data_type":"STRING"}]',
+            '[{"parameter_name":"col","full_data_type":"STRING"}]',
             "CASE WHEN is_member('admins') THEN col ELSE '***' END",
         ],
     ]
@@ -949,6 +949,86 @@ def test_uc_helper_parses_securable_rows_emits_function_attributes(mock_fetch):
         ),
     }
     assert attributes == expected
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_parses_function_parameter_full_data_type(mock_fetch):
+    """Function parameters with full_data_type (e.g. 'decimal(18,4)') are parsed
+    with case normalization to uppercase, matching config-side format."""
+    rows = [
+        [
+            "FUNCTION",
+            "my_catalog.shared.amount_func",
+            "func_owner",
+            '[{"parameter_name":"amount","full_data_type":"decimal(18,4)"}]',
+            "SELECT amount",
+            None,
+        ],
+    ]
+    mock_fetch.return_value = rows
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    securables, _ = helper.fetch_actual_securables(["my_catalog"])
+
+    (func,) = securables
+    assert func.parameters == (("amount", "DECIMAL(18,4)"),)
+
+
+@patch("uc_declarative_abac.helpers.unity_catalog._fetch_external_links_rows")
+def test_uc_helper_parses_function_parameter_strips_default_collation(mock_fetch):
+    """Function parameters with full_data_type including default collation are
+    normalized to strip the collation, matching config-side format."""
+    rows = [
+        [
+            "FUNCTION",
+            "my_catalog.shared.col_func",
+            "func_owner",
+            '[{"parameter_name":"col","full_data_type":"string collate utf8_binary"}]',
+            "SELECT col",
+            None,
+        ],
+    ]
+    mock_fetch.return_value = rows
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    securables, _ = helper.fetch_actual_securables(["my_catalog"])
+
+    (func,) = securables
+    assert func.parameters == (("col", "STRING"),)
+
+
+def test_uc_helper_securables_query_fetches_parameter_full_data_type():
+    """The FUNCTION arm of the securables query projects p.full_data_type
+    (not p.data_type) for function parameters."""
+    client = _make_mock_workspace_client()
+    helper = UnityCatalogHelper(client, WAREHOUSE_ID)
+
+    helper.fetch_actual_securables(["my_catalog"])
+
+    sql = _get_executed_sql(client)
+    sql_lower = sql.lower()
+
+    # Find the FUNCTION arm by looking for 'function' as securable_type
+    function_arm_start = sql_lower.find("'function' as securable_type")
+    assert function_arm_start != -1, "FUNCTION arm not found in query"
+    after_function_arm = sql_lower[function_arm_start:]
+    # Find the next UNION ALL boundary (or end of string)
+    next_union = after_function_arm.find("union all")
+    function_arm = (
+        after_function_arm[:next_union] if next_union != -1 else after_function_arm
+    )
+
+    # Within the FUNCTION arm, there should be a reference to full_data_type
+    assert "full_data_type" in function_arm, (
+        f"FUNCTION arm should project full_data_type. Arm:\n{function_arm}"
+    )
+
+    # The old p.data_type should NOT appear in the FUNCTION arm
+    assert "p.data_type" not in function_arm, (
+        f"FUNCTION arm should not project p.data_type. Arm:\n{function_arm}"
+    )
 
 
 def test_uc_helper_securables_query_is_valid_sql():
