@@ -322,7 +322,7 @@ When specifying principals for `owner`, `to`, `except`, or grant targets, use th
 |----------|------|
 | **Column masking** | Policy definitions with `type: mask` → engine creates Unity Catalog ABAC masking policies that apply a function to tagged columns. |
 | **Row filtering** | Policy definitions with `type: filter` → engine creates Unity Catalog ABAC row-filter policies using the referenced function. |
-| **GRANTs** | Policy definitions with `type: grant` → engine computes grants from tag mappings and executes the corresponding `GRANT` statements. |
+| **GRANTs** | Policy definitions with `type: grant` → engine computes grants from tag mappings and executes the corresponding `GRANT` and `REVOKE` statements. |
 | **UC objects & tags** | Catalog resources compose schema, table, volume, and function definitions → engine creates/updates/tags them in each target catalog. |
 
 You maintain YAML as the source of truth; the engine turns it into UC objects and permissions.
