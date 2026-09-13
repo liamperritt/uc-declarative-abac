@@ -880,6 +880,41 @@ def test_group_differ_reconciles_assumers_for_external_group_with_members_none()
     assert diff.assumers_to_set["analysts"] == frozenset({_alice_resolved})
 
 
+def test_group_differ_keys_external_group_assumers_by_actual_name_when_matched_by_id():
+    """An external group matched by id whose config name differs from its account name
+    keys the assumer change by the ACTUAL name — external groups are never renamed, so
+    the id cache still holds the actual name and the executor must look it up by that."""
+    desired = {
+        _group_with_id(
+            "analysts_new",  # config name differs from the account's actual name
+            "id-X",
+            members=None,
+            assumers={Principal(PrincipalType.UNKNOWN, name="alice@example.com")},
+        )
+    }
+    actual = {
+        _group_with_id(
+            "analysts_actual",
+            "id-X",
+            external_id="ext-idp-123",
+            members=frozenset(),
+            assumers=frozenset(),
+        )
+    }
+    resolver = _resolver(name_to_principal={"alice@example.com": _alice_resolved})
+    change_logger = ChangeLogger()
+
+    diff = compute_group_diff(
+        desired, actual, resolver, change_logger, enable_group_management=True
+    )
+
+    assert change_logger.has_errors is False
+    # Keyed by the actual (un-renamed) name, not the config name.
+    assert "analysts_actual" in diff.assumers_to_set
+    assert "analysts_new" not in diff.assumers_to_set
+    assert diff.assumers_to_set["analysts_actual"] == frozenset({_alice_resolved})
+
+
 def test_group_differ_creates_and_manages_group_with_members_and_assumers():
     """A missing group created this run with both members and assumers (creation + management)
     has its name in groups_to_create (empty) and its members/assumers in the respective

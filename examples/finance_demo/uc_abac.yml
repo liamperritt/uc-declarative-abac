@@ -27,9 +27,9 @@ taggable_creation_scopes: '*'       # create catalogs/schemas/tables/volumes tha
 group_creation_scopes: 'uc_abac_*'
 group_management_scopes: 'uc_abac_*'
 
-# --- Destructive gates, disabled by default ---------------------------------
-# Uncomment to let config become authoritative (deletes/revokes). Each needs an
-# interactive confirmation, or --force / force: 'true' in non-interactive CI.
+# --- Destructive gates ------------------------------------------------------
+# Lets config become authoritative (deletes/revokes). Each needs an interactive
+# confirmation, or --force / force: 'true' in non-interactive CI.
 policy_deletion_scopes: 'uc_abac_*'        # DROP mask/filter policies absent from config
 governed_tag_deletion_scopes: 'uc_abac_*'  # DELETE governed tags absent from config
 group_deletion_scopes: 'uc_abac_*'         # DELETE managed groups absent from config (needs group_creation_scopes)

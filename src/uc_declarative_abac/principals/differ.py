@@ -135,10 +135,10 @@ def _reconcile_assumers(
     change_logger: ChangeLogger,
     ignore_unresolvable: frozenset[str],
     diff: GroupDiff,
+    key_name: str | None = None,
 ) -> None:
     """Compute the desired assumer set (the ``roles/group.assumer`` principals on the
-    group's account access-control ruleset), keyed by the desired (post-rename) display
-    name.
+    group's account access-control ruleset).
 
     No-op when ``desired_group.assumers is None`` — assumers are unmanaged and left
     untouched. Otherwise both sides are resolved and compared; when they match, nothing
@@ -147,10 +147,17 @@ def _reconcile_assumers(
     set, preserving other roles), and the add/remove deltas land in ``assumers_to_add``
     / ``assumers_to_remove`` for logging. Mirrors governed-tag assigner reconciliation.
     ``actual`` may carry ``None`` assumers for a group created this run; it is treated
-    as empty."""
+    as empty.
+
+    The diff is keyed by ``key_name`` when given, else the desired display name. The
+    executor targets the ruleset by looking this name up in the group-id cache, so the
+    key must be the name the group actually carries at execution time: the desired
+    (post-rename) name for a renamed group (the cache is remapped before execution), but
+    the **actual** name for an externally-managed group (never renamed, so its config
+    name may differ yet the cache still holds the actual name)."""
     if desired_group.assumers is None:
         return
-    name = desired_group.display_name
+    name = key_name or desired_group.display_name
     resolved_desired = _resolve_principals(
         desired_group.assumers,
         f"Resolve group assumer for GROUP {name}",
@@ -442,6 +449,9 @@ def compute_group_diff(
                     )
                 )
                 continue
+            # External groups are never renamed, so the id cache still holds their
+            # actual display name — key the assumer change by it (not the config name,
+            # which may differ) so the executor can resolve the group id.
             _reconcile_assumers(
                 desired_group,
                 actual_group,
@@ -449,6 +459,7 @@ def compute_group_diff(
                 change_logger,
                 ignore_unresolvable,
                 diff,
+                key_name=actual_group.display_name,
             )
             continue
 
