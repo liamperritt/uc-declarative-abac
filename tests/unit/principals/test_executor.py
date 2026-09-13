@@ -54,7 +54,10 @@ def test_group_executor_creates_group_empty_then_registers_id_and_adds_members(
     registered, and its members are then added in a second phase."""
     members = frozenset({_resolved_user("alice@co.com")})
     ws_helper.create_group.return_value = "g-1"
-    diff = GroupDiff(groups_to_create={"new_group": members})
+    diff = GroupDiff(
+        groups_to_create={"new_group"},
+        members_to_add={"new_group": members},
+    )
 
     execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
 
@@ -72,10 +75,10 @@ def test_group_executor_creates_all_groups_before_adding_members(
     itself a group created this run exists (and has an id) when it is linked."""
     ws_helper.create_group.return_value = "g"
     diff = GroupDiff(
-        groups_to_create={
+        groups_to_create={"parent", "child"},
+        members_to_add={
             "parent": frozenset({_resolved_group("child")}),
-            "child": frozenset(),
-        }
+        },
     )
 
     execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
@@ -92,7 +95,10 @@ def test_group_executor_creates_all_groups_before_adding_members(
 def test_group_executor_dry_run_makes_no_create_or_add_calls(ws_helper):
     """A dry run neither creates groups nor mutates membership."""
     members = frozenset({_resolved_user("alice@co.com")})
-    diff = GroupDiff(groups_to_create={"new_group": members})
+    diff = GroupDiff(
+        groups_to_create={"new_group"},
+        members_to_add={"new_group": members},
+    )
 
     execute_group_diff(ws_helper, diff, ChangeLogger(dry_run=True), dry_run=True)
 
@@ -118,8 +124,11 @@ def test_group_executor_adds_members_for_each_group_to_add(ws_helper, change_log
 def test_group_executor_creates_groups_before_adding_members(ws_helper, change_logger):
     """Groups are created before members are added to existing groups."""
     diff = GroupDiff(
-        groups_to_create={"new_group": frozenset({_resolved_user("alice@co.com")})},
-        members_to_add={"existing_group": frozenset({_resolved_user("bob@co.com")})},
+        groups_to_create={"new_group"},
+        members_to_add={
+            "new_group": frozenset({_resolved_user("alice@co.com")}),
+            "existing_group": frozenset({_resolved_user("bob@co.com")}),
+        },
     )
 
     execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
@@ -149,8 +158,11 @@ def test_group_executor_does_nothing_for_empty_diff(ws_helper, change_logger):
 def test_group_executor_skips_mutations_in_dry_run(ws_helper, change_logger):
     """In dry-run mode, no create/add/remove is invoked; the run succeeds."""
     diff = GroupDiff(
-        groups_to_create={"new_group": frozenset({_resolved_user("alice@co.com")})},
-        members_to_add={"existing_group": frozenset({_resolved_user("bob@co.com")})},
+        groups_to_create={"new_group"},
+        members_to_add={
+            "new_group": frozenset({_resolved_user("alice@co.com")}),
+            "existing_group": frozenset({_resolved_user("bob@co.com")}),
+        },
         members_to_remove={
             "existing_group": frozenset({_resolved_user("carol@co.com")})
         },
@@ -186,8 +198,11 @@ def test_group_executor_removes_members_for_each_group_to_remove(
 def test_group_executor_adds_before_removes_after_creates(ws_helper, change_logger):
     """Ordering is create -> add -> remove on the shared ws_helper."""
     diff = GroupDiff(
-        groups_to_create={"new_group": frozenset({_resolved_user("alice@co.com")})},
-        members_to_add={"existing_group": frozenset({_resolved_user("bob@co.com")})},
+        groups_to_create={"new_group"},
+        members_to_add={
+            "new_group": frozenset({_resolved_user("alice@co.com")}),
+            "existing_group": frozenset({_resolved_user("bob@co.com")}),
+        },
         members_to_remove={
             "existing_group": frozenset({_resolved_user("carol@co.com")})
         },
@@ -313,18 +328,23 @@ def test_group_executor_passes_through_non_permission_errors(ws_helper, change_l
 def test_group_executor_logs_error_and_continues_on_create_group_failure(
     ws_helper, change_logger
 ):
-    """A failing create_group is recorded; member-addition work still proceeds."""
+    """A failing create_group is recorded; member-addition work still proceeds.
+    Member ops for the failed group are skipped, but other groups proceed."""
     ws_helper.create_group.side_effect = RuntimeError("boom")
     diff = GroupDiff(
-        groups_to_create={"fail_group": frozenset({_resolved_user("alice@co.com")})},
-        members_to_add={"ok_group": frozenset({_resolved_user("bob@co.com")})},
+        groups_to_create={"fail_group", "ok_group"},
+        members_to_add={
+            "fail_group": frozenset({_resolved_user("alice@co.com")}),
+            "other_group": frozenset({_resolved_user("bob@co.com")}),
+        },
     )
 
     execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
 
     assert change_logger.has_errors
+    # Member ops for ok_group should proceed since it was created, but fail_group should be skipped
     ws_helper.add_group_members.assert_called_once()
-    assert ws_helper.add_group_members.call_args.args[0] == "ok_group"
+    assert ws_helper.add_group_members.call_args.args[0] == "other_group"
 
 
 # ---------------------------------------------------------------------------
@@ -503,7 +523,7 @@ def test_group_executor_deletes_run_after_member_ops(
     """Deletes run last, after creates/renames/member add/remove."""
     monkeypatch.setattr("builtins.input", lambda *_: "yes")
     diff = GroupDiff(
-        groups_to_create={"new_group": frozenset()},
+        groups_to_create={"new_group"},
         members_to_add={"existing": frozenset({_resolved_user("alice@co.com")})},
         groups_to_delete={Group(display_name="legacy", id="9")},
     )
@@ -526,3 +546,199 @@ def test_group_executor_collects_error_when_delete_fails(
     execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
 
     assert change_logger.has_errors
+
+
+# ---------------------------------------------------------------------------
+# Group assumer reconciliation
+# ---------------------------------------------------------------------------
+
+
+def test_group_executor_assumer_set_happy_path(ws_helper, change_logger):
+    """Assumer reconciliation: fetches the current rule set, builds new grant rules
+    with the desired assumers, and updates the rule set. Logs assumer adds."""
+    assumer = _resolved_user("assumer@co.com")
+    ws_helper.get_group_id.return_value = "g-1"
+    # Mock the current rule set (empty grant_rules)
+    current_ruleset = MagicMock()
+    current_ruleset.grant_rules = []
+    current_ruleset.etag = "e1"
+    ws_helper.get_group_rule_set.return_value = current_ruleset
+
+    diff = GroupDiff(
+        assumers_to_set={"my_group": frozenset({assumer})},
+        assumers_to_add={"my_group": frozenset({assumer})},
+    )
+
+    execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
+
+    # Assert update_group_rule_set was called with the group id, etag, and new rules
+    ws_helper.get_group_id.assert_called_once_with("my_group")
+    ws_helper.get_group_rule_set.assert_called_once_with("g-1")
+    ws_helper.update_group_rule_set.assert_called_once()
+    call_kwargs = ws_helper.update_group_rule_set.call_args.kwargs
+    assert call_kwargs["group_id"] == "g-1"
+    assert call_kwargs["etag"] == "e1"
+    # The grant_rules should contain a rule for the assumer role with the principal
+    grant_rules = call_kwargs["grant_rules"]
+    assumer_rule = next(
+        (r for r in grant_rules if r.role == "roles/group.assumer"), None
+    )
+    assert assumer_rule is not None
+    assert "users/assumer@co.com" in assumer_rule.principals
+
+
+def test_group_executor_assumer_set_preserves_other_roles(ws_helper, change_logger):
+    """Assumer reconciliation preserves non-assumer grant rules (e.g., MANAGER role)."""
+    from databricks.sdk.service.iam import GrantRule
+
+    assumer = _resolved_user("assumer@co.com")
+    manager_rule = GrantRule(role="roles/group.manager", principals=["users/manager@co.com"])
+
+    ws_helper.get_group_id.return_value = "g-1"
+    current_ruleset = MagicMock()
+    current_ruleset.grant_rules = [manager_rule]
+    current_ruleset.etag = "e1"
+    ws_helper.get_group_rule_set.return_value = current_ruleset
+
+    diff = GroupDiff(
+        assumers_to_set={"my_group": frozenset({assumer})},
+        assumers_to_add={"my_group": frozenset({assumer})},
+    )
+
+    execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
+
+    call_kwargs = ws_helper.update_group_rule_set.call_args.kwargs
+    grant_rules = call_kwargs["grant_rules"]
+    # Assert both the manager role and assumer role are present
+    roles = {rule.role for rule in grant_rules}
+    assert "roles/group.manager" in roles
+    assert "roles/group.assumer" in roles
+    # Assert the manager rule's principals are preserved
+    manager_in_result = next(
+        rule for rule in grant_rules if rule.role == "roles/group.manager"
+    )
+    assert "users/manager@co.com" in manager_in_result.principals
+    # Assert the assumer rule has the expected principal
+    assumer_in_result = next(
+        rule for rule in grant_rules if rule.role == "roles/group.assumer"
+    )
+    assert "users/assumer@co.com" in assumer_in_result.principals
+
+
+def test_group_executor_assumer_ordering_after_member_ops_before_deletes(
+    ws_helper, change_logger, monkeypatch
+):
+    """Assumer sets happen after member adds/removes and before deletes."""
+    monkeypatch.setattr("builtins.input", lambda *_: "yes")
+    assumer = _resolved_user("assumer@co.com")
+    ws_helper.create_group.return_value = "g-1"
+    ws_helper.get_group_id.return_value = "g-1"
+    current_ruleset = MagicMock()
+    current_ruleset.grant_rules = []
+    current_ruleset.etag = "e1"
+    ws_helper.get_group_rule_set.return_value = current_ruleset
+
+    diff = GroupDiff(
+        groups_to_create={"new_group"},
+        members_to_add={"new_group": frozenset({_resolved_user("alice@co.com")})},
+        assumers_to_set={"new_group": frozenset({assumer})},
+        assumers_to_add={"new_group": frozenset({assumer})},
+        groups_to_delete={Group(display_name="legacy", id="9")},
+    )
+
+    execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
+
+    method_names = [c[0] for c in ws_helper.mock_calls]
+    assert "create_group" in method_names
+    assert "add_group_members" in method_names
+    assert "update_group_rule_set" in method_names
+    assert "delete_group" in method_names
+    # Verify ordering: create -> add -> update_group_rule_set -> delete
+    assert method_names.index("create_group") < method_names.index("add_group_members")
+    assert (
+        method_names.index("add_group_members")
+        < method_names.index("update_group_rule_set")
+    )
+    assert (
+        method_names.index("update_group_rule_set") < method_names.index("delete_group")
+    )
+
+
+def test_group_executor_assumer_dry_run_skips_ruleset_calls_but_logs(
+    ws_helper, change_logger
+):
+    """In dry-run mode, no update_group_rule_set is called, but assumer add/remove
+    log lines still emit."""
+    assumer = _resolved_user("assumer@co.com")
+    logger_mock = MagicMock()
+    dry_run_logger = ChangeLogger(dry_run=True, logger=logger_mock)
+
+    diff = GroupDiff(
+        assumers_to_set={"my_group": frozenset({assumer})},
+        assumers_to_add={"my_group": frozenset({assumer})},
+    )
+
+    execute_group_diff(ws_helper, diff, dry_run_logger, dry_run=True)
+
+    # In dry-run, these should NOT be called
+    ws_helper.get_group_id.assert_not_called()
+    ws_helper.get_group_rule_set.assert_not_called()
+    ws_helper.update_group_rule_set.assert_not_called()
+
+    # But the add log line should still emit (check that it was logged)
+    dry_run_logger.log_summary()
+    summary = _summary_of(logger_mock)
+    assert "assumer" in summary.lower()
+
+
+def test_group_executor_assumer_set_skipped_for_failed_create(
+    ws_helper, change_logger
+):
+    """When a group's create fails, its assumer set is skipped (group doesn't exist)."""
+    assumer = _resolved_user("assumer@co.com")
+    ws_helper.create_group.side_effect = RuntimeError("boom")
+
+    diff = GroupDiff(
+        groups_to_create={"fail_group"},
+        assumers_to_set={"fail_group": frozenset({assumer})},
+        assumers_to_add={"fail_group": frozenset({assumer})},
+    )
+
+    execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
+
+    assert change_logger.has_errors
+    # update_group_rule_set should NOT be called for the failed group
+    ws_helper.update_group_rule_set.assert_not_called()
+    ws_helper.get_group_id.assert_not_called()
+
+
+def test_group_executor_assumer_add_and_remove_logged_separately(
+    ws_helper, change_logger
+):
+    """When both adds and removes are present, both log lines are emitted."""
+    added_assumer = _resolved_user("added@co.com")
+    removed_assumer = _resolved_user("removed@co.com")
+    logger_mock = MagicMock()
+    change_logger_with_logger = ChangeLogger(dry_run=False, logger=logger_mock)
+
+    ws_helper.get_group_id.return_value = "g-1"
+    current_ruleset = MagicMock()
+    current_ruleset.grant_rules = []
+    current_ruleset.etag = "e1"
+    ws_helper.get_group_rule_set.return_value = current_ruleset
+
+    diff = GroupDiff(
+        assumers_to_set={"my_group": frozenset({added_assumer})},
+        assumers_to_add={"my_group": frozenset({added_assumer})},
+        assumers_to_remove={"my_group": frozenset({removed_assumer})},
+    )
+
+    execute_group_diff(ws_helper, diff, change_logger_with_logger, dry_run=False)
+
+    # Check that both add and remove log calls were made
+    add_calls = [
+        c for c in logger_mock.info.call_args_list if c.args and "assumers" in c.args[0].lower()
+    ]
+    # Should have at least 2 lines mentioning assumers (add and remove)
+    assert any("Added" in c.args[0] for c in add_calls)
+    assert any("Removed" in c.args[0] for c in add_calls)

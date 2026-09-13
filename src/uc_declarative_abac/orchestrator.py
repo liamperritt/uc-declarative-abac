@@ -548,11 +548,44 @@ def run(
         )
     _logger.info("  Successfully fetched current state")
 
-    # Fetch membership for the configured groups only — one GET /Groups/{id} per
-    # group (the account SCIM proxy list call doesn't return members inline),
-    # dispatched concurrently. Empty when the group domain is inert.
+    # Fetch actual state for the configured groups. Membership and assumers are
+    # authoritative only when supplied, so each is fetched only for the groups whose
+    # field is non-None AND in the management scope (the only scope that reconciles
+    # them) — a group with members/assumers omitted is never fetched. Identity comes
+    # from the principal-fetch caches (no extra call). Empty when the domain is inert.
+    members_fetch_names = {
+        g.display_name
+        for g in desired_groups
+        if g.members is not None and group_management_scope.matches(g.display_name)
+    }
+    members_fetch_ids = {
+        g.id
+        for g in desired_groups
+        if g.id
+        and g.members is not None
+        and group_management_scope.matches(g.display_name)
+    }
+    assumers_fetch_names = {
+        g.display_name
+        for g in desired_groups
+        if g.assumers is not None and group_management_scope.matches(g.display_name)
+    }
+    assumers_fetch_ids = {
+        g.id
+        for g in desired_groups
+        if g.id
+        and g.assumers is not None
+        and group_management_scope.matches(g.display_name)
+    }
     actual_groups = (
-        ws_helper.fetch_actual_groups(desired_group_names, desired_group_ids)
+        ws_helper.fetch_actual_groups(
+            desired_group_names,
+            desired_group_ids,
+            member_fetch_names=members_fetch_names,
+            member_fetch_ids=members_fetch_ids,
+            assumer_fetch_names=assumers_fetch_names,
+            assumer_fetch_ids=assumers_fetch_ids,
+        )
         if group_domain_active
         else set()
     )
@@ -742,6 +775,7 @@ def run(
         group_diff.groups_to_create
         or group_diff.members_to_add
         or group_diff.members_to_remove
+        or group_diff.assumers_to_set
         or group_diff.groups_to_rename
         or group_diff.groups_to_delete
     ):

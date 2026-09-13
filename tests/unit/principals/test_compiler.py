@@ -78,8 +78,8 @@ def test_groups_compiler_emits_unresolved_principal_per_member_entry():
     )
 
 
-def test_groups_compiler_emits_empty_members_when_field_missing():
-    """A group without members compiles to a Group with an empty members frozenset."""
+def test_groups_compiler_emits_none_members_when_field_missing():
+    """A group without members compiles to a Group with members=None (unmanaged)."""
     config = ResourcesConfig.model_validate(
         {
             "catalogs": {"cat": {"name": "cat"}},
@@ -90,7 +90,7 @@ def test_groups_compiler_emits_empty_members_when_field_missing():
     result = compile_desired_groups(config)
 
     grp = next(g for g in result if g.display_name == "data_engineers")
-    assert grp.members == frozenset()
+    assert grp.members is None
 
 
 def test_groups_compiler_deduplicates_members():
@@ -288,3 +288,128 @@ def test_groups_compiler_keeps_id_and_name_on_expired_group():
     grp = next(g for g in result if g.display_name == "temp_access")
     assert grp.id == "g-99"
     assert grp.members == frozenset()
+
+
+# ---------------------------------------------------------------------------
+# assumers: field handling (unmanaged, supplied list, empty list)
+# ---------------------------------------------------------------------------
+
+
+def test_groups_compiler_emits_none_assumers_when_field_missing():
+    """A group without assumers compiles to a Group with assumers=None (unmanaged)."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {"cat": {"name": "cat"}},
+            "groups": {"data_engineers": {"name": "data_engineers"}},
+        }
+    )
+
+    result = compile_desired_groups(config)
+
+    grp = next(g for g in result if g.display_name == "data_engineers")
+    assert grp.assumers is None
+
+
+def test_groups_compiler_emits_unresolved_principal_per_assumer_entry():
+    """Each assumer name becomes an unresolved Principal carrying that name."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {"cat": {"name": "cat"}},
+            "groups": {
+                "data_engineers": {
+                    "name": "data_engineers",
+                    "assumers": ["alice@example.com", "bob@example.com"],
+                },
+            },
+        }
+    )
+
+    result = compile_desired_groups(config)
+
+    grp = next(g for g in result if g.display_name == "data_engineers")
+    assert grp.assumers == frozenset(
+        {
+            Principal(PrincipalType.UNKNOWN, name="alice@example.com"),
+            Principal(PrincipalType.UNKNOWN, name="bob@example.com"),
+        }
+    )
+
+
+def test_groups_compiler_emits_empty_frozenset_when_members_supplied_empty():
+    """A group with an explicit empty members list compiles to an authoritative
+    empty frozenset (removes all members)."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {"cat": {"name": "cat"}},
+            "groups": {"data_engineers": {"name": "data_engineers", "members": []}},
+        }
+    )
+
+    result = compile_desired_groups(config)
+
+    grp = next(g for g in result if g.display_name == "data_engineers")
+    assert grp.members == frozenset()
+
+
+def test_groups_compiler_emits_empty_frozenset_when_assumers_supplied_empty():
+    """A group with an explicit empty assumers list compiles to an authoritative
+    empty frozenset (removes all assumers)."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {"cat": {"name": "cat"}},
+            "groups": {"data_engineers": {"name": "data_engineers", "assumers": []}},
+        }
+    )
+
+    result = compile_desired_groups(config)
+
+    grp = next(g for g in result if g.display_name == "data_engineers")
+    assert grp.assumers == frozenset()
+
+
+def test_groups_compiler_emits_empty_members_and_assumers_when_expired():
+    """An expired group is emitted with BOTH members and assumers as empty frozensets
+    (both authoritative, so both are removed)."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {"cat": {"name": "cat"}},
+            "groups": {
+                "temp_access": {
+                    "name": "temp_access",
+                    "members": ["alice@example.com"],
+                    "assumers": ["bob@example.com"],
+                    "expiry_date": "2025-01-01",
+                },
+            },
+        }
+    )
+
+    result = compile_desired_groups(config, run_date=date(2025, 6, 1))
+
+    grp = next(g for g in result if g.display_name == "temp_access")
+    assert grp.members == frozenset()
+    assert grp.assumers == frozenset()
+
+
+def test_groups_compiler_keeps_members_none_with_assumers_supplied():
+    """A group with assumers supplied but members omitted has members=None
+    (unmanaged) and assumers=frozenset(...)."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {"cat": {"name": "cat"}},
+            "groups": {
+                "data_engineers": {
+                    "name": "data_engineers",
+                    "assumers": ["alice@example.com"],
+                },
+            },
+        }
+    )
+
+    result = compile_desired_groups(config)
+
+    grp = next(g for g in result if g.display_name == "data_engineers")
+    assert grp.members is None
+    assert grp.assumers == frozenset(
+        {Principal(PrincipalType.UNKNOWN, name="alice@example.com")}
+    )

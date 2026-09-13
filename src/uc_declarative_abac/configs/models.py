@@ -32,6 +32,7 @@ from uc_declarative_abac.types import (
 )
 from uc_declarative_abac.utils import (
     DuplicateResourceError,
+    is_system_account_group,
     is_system_governed_tag,
     normalise_data_type,
     validate_rfa_destinations,
@@ -867,7 +868,7 @@ class GovernedTagConfig(BaseConfig):
 
 
 class GroupConfig(BaseConfig):
-    """Represents a Databricks-managed group with optional members.
+    """Represents a Databricks account group with optional members and assumers.
 
     ``id`` is the account-level SCIM / internal group id. When set, the engine
     matches the group by ``id`` rather than by ``name``, which lets a group be
@@ -875,16 +876,34 @@ class GroupConfig(BaseConfig):
     group's display name instead of treating it as a new group. It is accepted as
     either a string or an integer (a numeric id in YAML) and stored as a string.
 
-    ``expiry_date`` makes the group time-bound: when a deployment runs on or past
-    this date, all of the group's members are removed (the group itself is not
-    deleted). It takes effect only under ``--enable-group-management`` — the flag
-    that reconciles membership — and is a no-op without it. Omitted (``None``) means
-    the group never expires. Mirrors ``GrantPolicyConfig.expiry_date``.
+    ``members`` and ``assumers`` are **authoritative only when supplied**. ``None``
+    (the default, i.e. the key omitted) means the field is unmanaged: the engine does
+    not fetch or reconcile it, leaving the group's current members/assumers untouched.
+    A supplied list — **including an empty list** — is authoritative: an empty list
+    removes all, a populated list reconciles to exactly those principals. ``assumers``
+    are the principals granted the ``roles/group.assumer`` role on the group's account
+    access-control ruleset (see the Databricks RBAC docs); reconciled under
+    ``--group-management-scopes``, like members.
+
+    Externally-managed groups (SCIM-provisioned from an IdP) may be declared, but only
+    without ``members`` (their membership is owned by the IdP) — a non-``None``
+    ``members`` on such a group is a fatal error (enforced in the differ, which knows
+    the group's external provenance); their ``assumers`` may still be managed.
+    Databricks system-managed groups (``account users`` / ``account admins``) may not
+    be declared at all (rejected here): the engine can manage neither their members nor
+    their assumers.
+
+    ``expiry_date`` makes the group time-bound: when a deployment runs on or past this
+    date, all of the group's members **and** assumers are removed (the group itself is
+    not deleted). It takes effect only under ``--group-management-scopes`` — the arg
+    that reconciles membership and assumers — and is a no-op without it. Omitted
+    (``None``) means the group never expires. Mirrors ``GrantPolicyConfig.expiry_date``.
     """
 
     name: str
     id: str | None = None
-    members: list[str] = Field(default_factory=list)
+    members: list[str] | None = None
+    assumers: list[str] | None = None
     expiry_date: date | None = None
 
     @field_validator("id", mode="before")
@@ -894,6 +913,21 @@ class GroupConfig(BaseConfig):
         written without quotes in YAML matches the string ids used everywhere
         else (config, SCIM, the principal cache)."""
         return str(v) if isinstance(v, int) else v
+
+    @model_validator(mode="after")
+    def _reject_system_managed_group(self) -> GroupConfig:
+        """A Databricks system-managed account group (``account users`` /
+        ``account admins``) cannot be declared: its membership and assumers are owned
+        by Databricks and cannot be reconciled by this engine, and its SCIM id is not
+        even returned by the account group list. Fail fast at config load rather than
+        later in the pipeline."""
+        if is_system_account_group(self.name):
+            raise ValueError(
+                f"Group '{self.name}' is a Databricks system-managed group and cannot "
+                "be declared in config; its members and assumers are managed by "
+                "Databricks."
+            )
+        return self
 
 
 class ResourcesConfig(BaseConfig):

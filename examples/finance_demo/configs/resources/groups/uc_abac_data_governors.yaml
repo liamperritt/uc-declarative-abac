@@ -8,5 +8,7 @@ resources:
       #                          # `id` fixed and change `name`, and the engine renames
       #                          # the existing group instead of creating a new one.
       members:
-        - uc_abac_data_stewards
         - uc_abac_compliance
+      assumers:
+        - uc_abac_data_platform
+        - uc_abac_data_stewards

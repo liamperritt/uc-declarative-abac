@@ -3,6 +3,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from databricks.sdk.service.iam import GrantRule, RuleSetResponse, RuleSetUpdateRequest
 
 from uc_declarative_abac.helpers import WorkspaceHelper
 from uc_declarative_abac.principals import GroupRename, Principal
@@ -72,9 +73,14 @@ def _make_workspace_client(
             resources = service_principals or []
         elif path.endswith("/Groups"):
             # The LIST endpoint does not return members inline — emulate by
-            # returning only id + displayName.
+            # returning only id + displayName + externalId.
             resources = [
-                {"id": g["id"], "displayName": g["displayName"]} for g in groups
+                {
+                    "id": g["id"],
+                    "displayName": g["displayName"],
+                    "externalId": g.get("externalId", ""),
+                }
+                for g in groups
             ]
         else:
             resources = []
@@ -123,7 +129,9 @@ def test_workspace_helper_fetches_members_per_managed_group() -> None:
 
     assert client.api_client.do.call_count == 3
 
-    helper.fetch_actual_groups(desired_names={"data_engineers"})
+    helper.fetch_actual_groups(
+        desired_names={"data_engineers"}, member_fetch_names={"data_engineers"}
+    )
 
     # +1 GET for the single configured group (analysts is not fetched).
     assert client.api_client.do.call_count == 4
@@ -150,7 +158,10 @@ def test_workspace_helper_actual_group_includes_existing_members() -> None:
     helper = WorkspaceHelper(client, manage_groups=True)
     helper.fetch_principals()
 
-    result = helper.fetch_actual_groups(desired_names={"uc_governor_test_team"})
+    result = helper.fetch_actual_groups(
+        desired_names={"uc_governor_test_team"},
+        member_fetch_names={"uc_governor_test_team"},
+    )
 
     group = next(g for g in result if g.display_name == "uc_governor_test_team")
     identifiers = {member.identifier for member in group.members}
@@ -196,7 +207,7 @@ def test_workspace_helper_translates_user_member_to_username_identifier() -> Non
     helper = WorkspaceHelper(client, manage_groups=True)
     helper.fetch_principals()
 
-    result = helper.fetch_actual_groups()
+    result = helper.fetch_actual_groups(member_fetch_names={"data_engineers"})
 
     group = next(g for g in result if g.display_name == "data_engineers")
     assert (
@@ -221,7 +232,7 @@ def test_workspace_helper_translates_sp_member_to_application_id_identifier() ->
     helper = WorkspaceHelper(client, manage_groups=True)
     helper.fetch_principals()
 
-    result = helper.fetch_actual_groups()
+    result = helper.fetch_actual_groups(member_fetch_names={"automation"})
 
     group = next(g for g in result if g.display_name == "automation")
     assert Principal(PrincipalType.UNKNOWN, identifier="abc-123-uuid") in group.members
@@ -229,7 +240,8 @@ def test_workspace_helper_translates_sp_member_to_application_id_identifier() ->
 
 def test_workspace_helper_populates_external_id_for_idp_managed_group() -> None:
     """external_id is populated for an IdP-managed group (non-empty externalId)
-    and empty for a normal group."""
+    and empty for a normal group. external_id is read from the LIST response cache,
+    not per-group GETs."""
     client = _make_workspace_client(
         groups=[
             _make_group("idp_group", "g-1", external_id="ext-999"),
@@ -284,7 +296,7 @@ def test_workspace_helper_drops_untranslatable_members() -> None:
     helper = WorkspaceHelper(client, manage_groups=True)
     helper.fetch_principals()
 
-    result = helper.fetch_actual_groups()
+    result = helper.fetch_actual_groups(member_fetch_names={"data_engineers"})
 
     group = next(g for g in result if g.display_name == "data_engineers")
     identifiers = {member.identifier for member in group.members}
@@ -637,3 +649,216 @@ def test_workspace_helper_rename_group_issues_replace_displayname_patch() -> Non
         and op.get("value") == "new"
         for op in operations
     )
+
+
+# ---------------------------------------------------------------------------
+# fetch_actual_groups — member_fetch gating
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_helper_members_not_fetched_when_absent_from_member_fetch() -> (
+    None
+):
+    """When a group is not in member_fetch_names or member_fetch_ids,
+    fetch_actual_groups does not fetch its members (no per-group GET).
+    The returned group has members=None."""
+    client = _make_workspace_client(
+        users=[_make_user("alice@example.com", "u-1")],
+        groups=[
+            _make_group(
+                "data_engineers",
+                "g-1",
+                members=[_make_member("u-1", "User")],
+            ),
+        ],
+    )
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    assert client.api_client.do.call_count == 3
+
+    # fetch_actual_groups with no member_fetch_names — members not fetched
+    result = helper.fetch_actual_groups(desired_names={"data_engineers"})
+
+    group = next(g for g in result if g.display_name == "data_engineers")
+    assert group.members is None
+    # No per-group GET was issued; call_count stays at 3
+    assert client.api_client.do.call_count == 3
+
+
+# ---------------------------------------------------------------------------
+# fetch_actual_groups — assumer_fetch gating
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_helper_assumers_fetched_only_for_assumer_fetch() -> None:
+    """Assumers are fetched via get_rule_set only when the group is in
+    assumer_fetch_names or assumer_fetch_ids. Groups outside the fetch set
+    have assumers=None."""
+    client = _make_workspace_client(
+        groups=[
+            _make_group("data_engineers", "g-1"),
+            _make_group("analysts", "g-2"),
+        ],
+    )
+    # Mock get_rule_set for account access control
+    client.config.account_id = "acc-123"
+    client.account_access_control_proxy.get_rule_set.return_value = RuleSetResponse(
+        name="accounts/acc-123/groups/g-1/ruleSets/default",
+        etag="e1",
+        grant_rules=[
+            GrantRule(
+                role="roles/group.assumer",
+                principals=["users/alice@co.com", "groups/data-admins"],
+            ),
+        ],
+    )
+
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    # Fetch assumers only for data_engineers
+    result = helper.fetch_actual_groups(
+        desired_names={"data_engineers", "analysts"},
+        assumer_fetch_names={"data_engineers"},
+    )
+
+    de_group = next(g for g in result if g.display_name == "data_engineers")
+    analysts_group = next(g for g in result if g.display_name == "analysts")
+
+    # data_engineers had assumers fetched
+    assert de_group.assumers is not None
+    assert len(de_group.assumers) == 2
+    identifiers = {p.identifier for p in de_group.assumers}
+    assert "alice@co.com" in identifiers
+    assert "data-admins" in identifiers
+
+    # analysts was not in assumer_fetch, so assumers not fetched
+    assert analysts_group.assumers is None
+
+
+def test_workspace_helper_assumers_fetched_by_id() -> None:
+    """Assumers are fetched when the group id is in assumer_fetch_ids."""
+    client = _make_workspace_client(
+        groups=[_make_group("data_engineers", "g-1")],
+    )
+    client.config.account_id = "acc-123"
+    client.account_access_control_proxy.get_rule_set.return_value = RuleSetResponse(
+        name="accounts/acc-123/groups/g-1/ruleSets/default",
+        etag="e2",
+        grant_rules=[
+            GrantRule(
+                role="roles/group.assumer", principals=["servicePrincipals/sp-uuid"]
+            ),
+        ],
+    )
+
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    result = helper.fetch_actual_groups(
+        desired_names={"data_engineers"},
+        assumer_fetch_ids={"g-1"},
+    )
+
+    group = next(g for g in result if g.display_name == "data_engineers")
+    assert group.assumers is not None
+    assert len(group.assumers) == 1
+    assert "sp-uuid" in {p.identifier for p in group.assumers}
+
+
+# ---------------------------------------------------------------------------
+# get_group_rule_set
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_helper_get_group_rule_set_builds_resource_name() -> None:
+    """get_group_rule_set builds the correct ruleset resource name and calls
+    account_access_control_proxy.get_rule_set."""
+    client = _make_workspace_client()
+    client.config.account_id = "acc-123"
+    client.account_access_control_proxy.get_rule_set.return_value = RuleSetResponse(
+        name="accounts/acc-123/groups/g-99/ruleSets/default",
+        etag="e-test",
+        grant_rules=[],
+    )
+
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    result = helper.get_group_rule_set("g-99")
+
+    # Verify the resource name was built correctly
+    call_kwargs = client.account_access_control_proxy.get_rule_set.call_args.kwargs
+    assert call_kwargs["name"] == "accounts/acc-123/groups/g-99/ruleSets/default"
+    assert call_kwargs["etag"] == ""
+    assert result.etag == "e-test"
+
+
+# ---------------------------------------------------------------------------
+# update_group_rule_set
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_helper_update_group_rule_set_calls_with_request() -> None:
+    """update_group_rule_set builds the correct ruleset resource name and calls
+    account_access_control_proxy.update_rule_set with a RuleSetUpdateRequest."""
+    client = _make_workspace_client()
+    client.config.account_id = "acc-456"
+    client.account_access_control_proxy.update_rule_set.return_value = (
+        RuleSetResponse(
+            name="accounts/acc-456/groups/g-42/ruleSets/default",
+            etag="e-updated",
+            grant_rules=[],
+        )
+    )
+
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    grant_rules = [
+        GrantRule(role="roles/group.assumer", principals=["users/bob@co.com"]),
+    ]
+    result = helper.update_group_rule_set("g-42", "e-old", grant_rules)
+
+    # Verify update_rule_set was called with the correct arguments
+    call_kwargs = client.account_access_control_proxy.update_rule_set.call_args.kwargs
+    assert call_kwargs["name"] == "accounts/acc-456/groups/g-42/ruleSets/default"
+    request = call_kwargs["rule_set"]
+    assert isinstance(request, RuleSetUpdateRequest)
+    assert request.name == "accounts/acc-456/groups/g-42/ruleSets/default"
+    assert request.etag == "e-old"
+    assert len(request.grant_rules) == 1
+    assert request.grant_rules[0].role == "roles/group.assumer"
+    assert result.etag == "e-updated"
+
+
+# ---------------------------------------------------------------------------
+# get_group_id
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_helper_get_group_id_returns_cached_id() -> None:
+    """get_group_id returns the cached SCIM id for a known group display name."""
+    client = _make_workspace_client(
+        groups=[_make_group("data_engineers", "g-1")],
+    )
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    result = helper.get_group_id("data_engineers")
+
+    assert result == "g-1"
+
+
+def test_workspace_helper_get_group_id_returns_none_for_unknown_group() -> None:
+    """get_group_id returns None for an unknown group display name."""
+    client = _make_workspace_client(
+        groups=[_make_group("data_engineers", "g-1")],
+    )
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    result = helper.get_group_id("unknown_group")
+
+    assert result is None
