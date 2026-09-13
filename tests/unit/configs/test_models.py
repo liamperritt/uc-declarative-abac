@@ -1119,8 +1119,8 @@ def test_resources_config_derives_group_name_from_dict_key():
     assert config.groups["data_engineers"].members == ["alice@example.com"]
 
 
-def test_resources_config_defaults_group_members_to_empty():
-    """A groups entry without a ``members`` field defaults to an empty member list."""
+def test_resources_config_defaults_group_members_to_none():
+    """A groups entry without a ``members`` field defaults to None (unmanaged)."""
     config = ResourcesConfig.model_validate(
         {
             "catalogs": {"cat": {}},
@@ -1129,7 +1129,7 @@ def test_resources_config_defaults_group_members_to_empty():
     )
 
     assert config.groups is not None
-    assert config.groups["data_engineers"].members == []
+    assert config.groups["data_engineers"].members is None
 
 
 def test_resources_config_rejects_duplicate_group_names():
@@ -1257,6 +1257,116 @@ def test_group_config_rejects_duplicate_ids_across_int_and_string_forms():
                 },
             }
         )
+
+
+# ---------------------------------------------------------------------------
+# GroupConfig: system-managed group rejection
+# ---------------------------------------------------------------------------
+
+
+def test_group_config_rejects_account_users_lowercase():
+    """A group named 'account users' (lowercase) is rejected as a system-managed group."""
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {"cat": {}},
+                "groups": {"sys": {"name": "account users"}},
+            }
+        )
+    assert "system-managed" in str(exc_info.value).lower()
+
+
+def test_group_config_rejects_account_admins_lowercase():
+    """A group named 'account admins' (lowercase) is rejected as a system-managed group."""
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {"cat": {}},
+                "groups": {"sys": {"name": "account admins"}},
+            }
+        )
+    assert "system-managed" in str(exc_info.value).lower()
+
+
+def test_group_config_rejects_account_users_mixed_case():
+    """A group named 'Account Users' (mixed case) is rejected (case-insensitive check)."""
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {"cat": {}},
+                "groups": {"sys": {"name": "Account Users"}},
+            }
+        )
+    assert "system-managed" in str(exc_info.value).lower()
+
+
+def test_group_config_rejects_account_admins_uppercase():
+    """A group named 'ACCOUNT ADMINS' (uppercase) is rejected (case-insensitive check)."""
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {"cat": {}},
+                "groups": {"sys": {"name": "ACCOUNT ADMINS"}},
+            }
+        )
+    assert "system-managed" in str(exc_info.value).lower()
+
+
+# ---------------------------------------------------------------------------
+# GroupConfig: assumers field handling
+# ---------------------------------------------------------------------------
+
+
+def test_group_config_accepts_assumers_list():
+    """A group declaring an ``assumers`` list parses it onto GroupConfig.assumers."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {"cat": {}},
+            "groups": {
+                "data_engineers": {
+                    "assumers": ["alice@example.com", "bob@example.com"],
+                },
+            },
+        }
+    )
+
+    assert config.groups is not None
+    assert config.groups["data_engineers"].assumers == [
+        "alice@example.com",
+        "bob@example.com",
+    ]
+
+
+def test_group_config_defaults_assumers_to_none():
+    """A group without ``assumers`` defaults to None (unmanaged)."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {"cat": {}},
+            "groups": {"data_engineers": {"members": ["alice@example.com"]}},
+        }
+    )
+
+    assert config.groups is not None
+    assert config.groups["data_engineers"].assumers is None
+
+
+def test_group_config_accepts_members_and_assumers():
+    """A non-system group with both ``members`` and ``assumers`` validates successfully."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {"cat": {}},
+            "groups": {
+                "data_engineers": {
+                    "members": ["alice@example.com"],
+                    "assumers": ["bob@example.com"],
+                },
+            },
+        }
+    )
+
+    assert config.groups is not None
+    assert config.groups["data_engineers"].members == ["alice@example.com"]
+    assert config.groups["data_engineers"].assumers == ["bob@example.com"]
 
 
 def test_catalog_config_rejects_duplicate_schema_names():

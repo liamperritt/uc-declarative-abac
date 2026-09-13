@@ -11,6 +11,7 @@ from uc_declarative_abac.principals.resolver import (
     ensure_all_resolved,
     ensure_resolved,
     log_principal_resolution_failure,
+    principal_to_ruleset_string,
 )
 from uc_declarative_abac.principals.state import (
     Group,
@@ -32,4 +33,5 @@ __all__ = [
     "execute_group_diff",
     "groups_pending_creation",
     "log_principal_resolution_failure",
+    "principal_to_ruleset_string",
 ]

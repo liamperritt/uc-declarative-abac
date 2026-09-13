@@ -8,7 +8,15 @@ if TYPE_CHECKING:
     from uc_declarative_abac.helpers import WorkspaceHelper
     from uc_declarative_abac.logger import ChangeLogger
 
-from uc_declarative_abac.principals.state import Group, GroupDiff, GroupRename
+from databricks.sdk.service.iam import GrantRule
+
+from uc_declarative_abac.principals.resolver import principal_to_ruleset_string
+from uc_declarative_abac.principals.state import (
+    Group,
+    GroupDiff,
+    GroupRename,
+    Principal,
+)
 from uc_declarative_abac.utils import (
     ExecutionError,
     OrchestratorError,
@@ -17,6 +25,37 @@ from uc_declarative_abac.utils import (
 )
 
 _logger = logging.getLogger("uc_declarative_abac")
+
+# Account Access Control Proxy assumer role on account groups. Mirrors the constant in
+# helpers/workspace.py — kept independently so the executor can build grant rules
+# without importing private helpers.
+_GROUP_ASSUMER_ROLE = "roles/group.assumer"
+
+
+def _build_assumer_grant_rules(
+    desired_assumers: frozenset[Principal],
+    existing_grant_rules: list,
+) -> list[GrantRule]:
+    """Combine the desired assumers with any non-assumer grant rules already present on
+    the rule set so that other roles are preserved. Mirrors the governed-tag assigner
+    builder."""
+    new_rules: list[GrantRule] = []
+    for rule in existing_grant_rules or []:
+        if rule.role == _GROUP_ASSUMER_ROLE:
+            continue
+        new_rules.append(
+            GrantRule(role=rule.role, principals=list(rule.principals or []))
+        )
+    if desired_assumers:
+        new_rules.append(
+            GrantRule(
+                role=_GROUP_ASSUMER_ROLE,
+                principals=sorted(
+                    principal_to_ruleset_string(p) for p in desired_assumers
+                ),
+            )
+        )
+    return new_rules
 
 
 def _group_membership_error(group_name: str, error: Exception) -> Exception:
@@ -46,24 +85,22 @@ def _execute_creates(
 ) -> set[str]:
     """Create each group in groups_to_create (empty) via the account SCIM proxy.
 
-    Per-group SDK creates run in parallel; logging, id registration and error
-    capture run via ``on_complete`` on the main thread so progress streams to the
-    operator. Returns the display names whose creation succeeded — only those get
-    their members added in the following phase (a failed create leaves no group to
-    add members to).
+    Groups are always created empty; their configured members and assumers are applied
+    by the later management phases (member adds and assumer sets), which run after every
+    group created this run exists and its SCIM id is registered — so a group whose
+    members/assumers reference another group created this run can be linked. Per-group
+    SDK creates run in parallel; logging, id registration and error capture run via
+    ``on_complete`` on the main thread so progress streams to the operator. Returns the
+    display names whose creation succeeded.
     """
-    work_items = sorted(diff.groups_to_create.items(), key=lambda item: item[0])
+    work_items = sorted(diff.groups_to_create)
 
-    def worker(item: tuple[str, frozenset]) -> str | None:
-        # Create the group empty and return its new SCIM id; members are added in a
-        # later phase (once every group created this run exists) so nested members
-        # can be linked. Workers must not touch shared caches — id registration
-        # happens on the main thread in on_complete.
-        name, _members = item
+    def worker(name: str) -> str | None:
+        # Workers must not touch shared caches — id registration happens on the main
+        # thread in on_complete.
         return ws_helper.create_group(name) if not dry_run else None
 
-    def on_complete(item: tuple[str, frozenset], result, error) -> None:
-        name, members = item
+    def on_complete(name: str, result, error) -> None:
         if error is not None:
             change_logger.log_error(
                 ExecutionError(
@@ -74,7 +111,7 @@ def _execute_creates(
             return
         if not dry_run:
             ws_helper.register_created_group(name, result)
-        change_logger.log_group_create(name, members)
+        change_logger.log_group_create(name)
 
     results = parallel_for_each(
         work_items,
@@ -82,7 +119,7 @@ def _execute_creates(
         max_workers=max_workers,
         on_complete=on_complete,
     )
-    return {item[0] for item, _result, error in results if error is None}
+    return {name for name, _result, error in results if error is None}
 
 
 def _execute_renames(
@@ -133,13 +170,19 @@ def _execute_member_adds(
     change_logger: ChangeLogger,
     dry_run: bool,
     max_workers: int,
+    skip_names: set[str],
 ) -> None:
     """Add members to each group in members_to_add via the account SCIM proxy.
 
-    Per-group SDK calls run in parallel; logging and error capture run via
-    ``on_complete`` on the main thread.
+    Covers existing groups and groups created this run (whose actual membership was
+    treated as empty). Groups in ``skip_names`` — those whose create failed this run —
+    are skipped, since they don't exist to add members to. Per-group SDK calls run in
+    parallel; logging and error capture run via ``on_complete`` on the main thread.
     """
-    work_items = sorted(diff.members_to_add.items(), key=lambda item: item[0])
+    work_items = sorted(
+        (item for item in diff.members_to_add.items() if item[0] not in skip_names),
+        key=lambda item: item[0],
+    )
 
     def worker(item: tuple[str, frozenset]) -> None:
         name, members = item
@@ -172,14 +215,19 @@ def _execute_member_removes(
     change_logger: ChangeLogger,
     dry_run: bool,
     max_workers: int,
+    skip_names: set[str],
 ) -> None:
     """Remove members from each group in members_to_remove via the account SCIM
     proxy.
 
-    Per-group SDK calls run in parallel; logging and error capture run via
-    ``on_complete`` on the main thread.
+    Groups in ``skip_names`` (failed creates this run) are skipped. Per-group SDK calls
+    run in parallel; logging and error capture run via ``on_complete`` on the main
+    thread.
     """
-    work_items = sorted(diff.members_to_remove.items(), key=lambda item: item[0])
+    work_items = sorted(
+        (item for item in diff.members_to_remove.items() if item[0] not in skip_names),
+        key=lambda item: item[0],
+    )
 
     def worker(item: tuple[str, frozenset]) -> None:
         name, members = item
@@ -258,46 +306,61 @@ def _execute_deletes(
     )
 
 
-def _execute_created_group_member_adds(
+def _execute_assumer_sets(
     ws_helper: WorkspaceHelper,
     diff: GroupDiff,
     change_logger: ChangeLogger,
     dry_run: bool,
     max_workers: int,
-    created_names: set[str],
+    skip_names: set[str],
 ) -> None:
-    """Add members to the groups created this run, after every group exists.
+    """Reconcile each group's assumers by read-modify-writing its account access-control
+    rule set to exactly ``assumers_to_set[name]``.
 
-    Newly-created groups are POSTed empty by ``_execute_creates``; their members —
-    which may include other groups created this run — are added here, once each new
-    group's SCIM id has been registered. Only groups in ``created_names`` (whose create
-    succeeded) are processed. No success log line: the create entry already reported the
-    intended members. Skipped entirely in dry-run (nothing was created).
+    The current rule set is fetched (for its etag and to preserve non-assumer roles),
+    then rewritten with the desired assumer principals — mirroring governed-tag assigner
+    reconciliation. Covers existing groups and groups created this run (whose id was
+    registered in the creates phase). Groups in ``skip_names`` (failed creates) are
+    skipped. The add/remove deltas computed by the differ drive the log lines, so dry-run
+    and real-run print the same output. Per-group calls run in parallel; logging and
+    error capture run via ``on_complete`` on the main thread.
     """
-    if dry_run:
-        return
     work_items = sorted(
-        (
-            item
-            for item in diff.groups_to_create.items()
-            if item[1] and item[0] in created_names
-        ),
+        (item for item in diff.assumers_to_set.items() if item[0] not in skip_names),
         key=lambda item: item[0],
     )
 
     def worker(item: tuple[str, frozenset]) -> None:
-        name, members = item
-        ws_helper.add_group_members(name, members)
+        name, desired = item
+        if dry_run:
+            return
+        group_id = ws_helper.get_group_id(name)
+        if not group_id:
+            raise OrchestratorError(f"Group id not cached for {name!r}")
+        current = ws_helper.get_group_rule_set(group_id)
+        new_rules = _build_assumer_grant_rules(desired, current.grant_rules or [])
+        ws_helper.update_group_rule_set(
+            group_id=group_id,
+            etag=current.etag,
+            grant_rules=new_rules,
+        )
 
     def on_complete(item: tuple[str, frozenset], _result, error) -> None:
-        name, _members = item
+        name, _desired = item
         if error is not None:
             change_logger.log_error(
                 ExecutionError(
-                    context=f"add_group_members({name})",
-                    exception=_group_membership_error(name, error),
+                    context=f"update_group_rule_set({name})",
+                    exception=error,
                 )
             )
+            return
+        added = diff.assumers_to_add.get(name, frozenset())
+        removed = diff.assumers_to_remove.get(name, frozenset())
+        if added:
+            change_logger.log_group_assumer_add(name, added)
+        if removed:
+            change_logger.log_group_assumer_remove(name, removed)
 
     parallel_for_each(
         work_items,
@@ -317,27 +380,31 @@ def execute_group_diff(
 ) -> None:
     """Apply a GroupDiff against the account via the account SCIM proxy.
 
-    Group creation is two-phase: every group is created **empty** first
-    (``ws_helper.create_group``, whose returned SCIM id is registered), then the
-    created groups' members are added (``_execute_created_group_member_adds``). This
-    ordering lets a configured group whose members include other groups created this
-    run be linked once every group exists. Renames of existing groups
-    (``ws_helper.rename_group``) run next, then member adds/removes for existing groups
-    (``ws_helper.add_group_members`` / ``remove_group_members``), then deletion of
-    undeclared groups (``ws_helper.delete_group``, gated by interactive confirmation
-    unless ``force``). Renames precede existing-group member ops so a group carries its
-    new display name before membership is reconciled; deletes run last so no membership
-    op targets a group being removed. Each phase forms one parallel batch (up to
+    Groups are always created **empty** first (``ws_helper.create_group``, whose returned
+    SCIM id is registered); their configured members and assumers are then applied by the
+    management phases below — never at creation. This lets a group whose members/assumers
+    reference other groups created this run be linked once every group exists. Renames of
+    existing groups (``ws_helper.rename_group``) run next, then member adds/removes
+    (``ws_helper.add_group_members`` / ``remove_group_members``) for existing groups and
+    groups created this run, then assumer reconciliation (``ws_helper.update_group_rule_set``),
+    then deletion of undeclared groups (``ws_helper.delete_group``, gated by interactive
+    confirmation unless ``force``). Renames precede member/assumer ops so a group carries
+    its new display name first; member/assumer ops follow creates so a group created this
+    run has a registered id (a group whose create failed is skipped); deletes run last so
+    no op targets a group being removed. Each phase forms one parallel batch (up to
     ``max_parallel_changes`` workers); dry-run forces sequential execution and skips the
-    API calls. Each SDK exception is logged via ``change_logger.log_error`` and the
-    batch continues.
+    API calls. Each SDK exception is logged via ``change_logger.log_error`` and the batch
+    continues.
     """
     workers = 1 if dry_run else max_parallel_changes
     created_names = _execute_creates(ws_helper, diff, change_logger, dry_run, workers)
-    _execute_created_group_member_adds(
-        ws_helper, diff, change_logger, dry_run, workers, created_names
-    )
+    # Groups whose create was attempted this run but failed — skip their member/assumer
+    # ops (they don't exist to target); the create failure is already logged.
+    skip_names = diff.groups_to_create - created_names
     _execute_renames(ws_helper, diff, change_logger, dry_run, workers)
-    _execute_member_adds(ws_helper, diff, change_logger, dry_run, workers)
-    _execute_member_removes(ws_helper, diff, change_logger, dry_run, workers)
+    _execute_member_adds(ws_helper, diff, change_logger, dry_run, workers, skip_names)
+    _execute_member_removes(
+        ws_helper, diff, change_logger, dry_run, workers, skip_names
+    )
+    _execute_assumer_sets(ws_helper, diff, change_logger, dry_run, workers, skip_names)
     _execute_deletes(ws_helper, diff, change_logger, dry_run, force, workers)

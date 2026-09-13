@@ -2988,6 +2988,88 @@ def test_orchestrator_group_membership_is_idempotent(
     assert patch_calls == [], "Expected no PATCH when membership is already in sync"
 
 
+def test_orchestrator_leaves_membership_untouched_when_members_omitted(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    """A configured group that omits ``members`` is unmanaged for membership: its
+    current members are neither fetched (no per-group GET) nor reconciled, so an
+    existing member is not removed even under group management."""
+    config = {
+        "resources": {
+            "catalogs": {"my_catalog": {}},
+            "groups": {"data_engineers": {}},  # no members / assumers field
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_group_state(
+        mock_workspace_client,
+        group_name="data_engineers",
+        group_id="g-1",
+        member_ids=["u-1"],  # alice is currently a member
+        users=[("u-1", "alice@example.com")],
+    )
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_group_management=True,
+    )
+
+    assert result.group_diff.members_to_add == {}
+    assert result.group_diff.members_to_remove == {}
+    # Membership is unmanaged, so the per-group members GET is never issued.
+    member_gets = [
+        c
+        for c in mock_workspace_client.api_client.do.call_args_list
+        if c.args and c.args[0] == "GET" and "/account/scim/v2/Groups/g-1" in c.args[1]
+    ]
+    assert member_gets == [], "Expected no per-group member GET when members omitted"
+
+
+def test_orchestrator_reconciles_group_assumers_end_to_end(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    """A configured group's ``assumers`` flow into group_diff.assumers_to_set and the
+    group's account access-control rule set is updated (roles/group.assumer), even
+    when ``members`` is omitted (membership left untouched)."""
+    from databricks.sdk.service.iam import RuleSetResponse
+
+    config = {
+        "resources": {
+            "catalogs": {"my_catalog": {}},
+            "groups": {"data_engineers": {"assumers": ["alice@example.com"]}},
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_group_state(
+        mock_workspace_client,
+        group_name="data_engineers",
+        group_id="g-1",
+        member_ids=[],
+        users=[("u-1", "alice@example.com")],
+    )
+    mock_workspace_client.config.account_id = "acc-1"
+    mock_workspace_client.account_access_control_proxy.get_rule_set.return_value = (
+        RuleSetResponse(name="rs", etag="e1", grant_rules=[])
+    )
+
+    result = run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        enable_group_management=True,
+    )
+
+    assert "data_engineers" in result.group_diff.assumers_to_set
+    assert result.group_diff.members_to_add == {}
+    mock_workspace_client.account_access_control_proxy.update_rule_set.assert_called()
+
+
 def test_orchestrator_fails_for_missing_group_without_creation_flag(
     tmp_yaml_dir, mock_workspace_client, monkeypatch
 ):
@@ -4000,7 +4082,9 @@ def test_orchestrator_creates_nested_group_hierarchy_without_resolution_errors(
 
     assert "parent_group" in result.group_diff.groups_to_create
     assert "child_group" in result.group_diff.groups_to_create
-    parent_members = result.group_diff.groups_to_create["parent_group"]
+    # Groups are created empty; the parent's members are applied via the management
+    # path, so the pending child GROUP resolves as a member add on the parent.
+    parent_members = result.group_diff.members_to_add["parent_group"]
     assert any(
         m.name == "child_group" and m.principal_type == PrincipalType.GROUP
         for m in parent_members

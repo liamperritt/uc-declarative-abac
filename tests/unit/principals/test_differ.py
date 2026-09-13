@@ -14,16 +14,37 @@ from uc_declarative_abac.principals import (
 from uc_declarative_abac.types import PrincipalType
 from uc_declarative_abac.utils import PrincipalValidationError, parse_flat_scope
 
+# Sentinel for distinguishing "not provided" from "explicitly None" in _group().
+_NOT_PROVIDED = object()
+
 
 def _group(
     display_name: str,
     external_id: str = "",
-    members: set[Principal] | None = None,
+    members: set[Principal] | frozenset[Principal] | None | object = _NOT_PROVIDED,
+    assumers: set[Principal] | frozenset[Principal] | None | object = _NOT_PROVIDED,
 ) -> Group:
+    """Build a test Group with optional members and assumers.
+
+    - When members/assumers is not passed, defaults to frozenset() (managed, empty).
+    - When members/assumers is explicitly None, uses None (unmanaged).
+    - When members/assumers is a set or frozenset, converts to frozenset.
+    """
+    # Helper to convert input to frozenset or None, respecting the sentinel.
+    def _to_frozenset_or_none(value):
+        if value is _NOT_PROVIDED:
+            return frozenset()  # Default: managed, empty
+        if value is None:
+            return None  # Explicitly unmanaged
+        if isinstance(value, frozenset):
+            return value
+        return frozenset(value)
+
     return Group(
         display_name=display_name,
         external_id=external_id,
-        members=frozenset(members or set()),
+        members=_to_frozenset_or_none(members),
+        assumers=_to_frozenset_or_none(assumers),
     )
 
 
@@ -31,12 +52,24 @@ def _group_with_id(
     display_name: str,
     group_id: str,
     external_id: str = "",
-    members: set[Principal] | None = None,
+    members: set[Principal] | frozenset[Principal] | None | object = _NOT_PROVIDED,
+    assumers: set[Principal] | frozenset[Principal] | None | object = _NOT_PROVIDED,
 ) -> Group:
+    # Reuse the conversion logic from _group.
+    def _to_frozenset_or_none(value):
+        if value is _NOT_PROVIDED:
+            return frozenset()
+        if value is None:
+            return None
+        if isinstance(value, frozenset):
+            return value
+        return frozenset(value)
+
     return Group(
         display_name=display_name,
         external_id=external_id,
-        members=frozenset(members or set()),
+        members=_to_frozenset_or_none(members),
+        assumers=_to_frozenset_or_none(assumers),
         id=group_id,
     )
 
@@ -302,8 +335,8 @@ def test_group_differ_errors_when_group_missing_and_creation_disabled_under_mana
 
 
 def test_group_differ_creates_group_with_members_when_creation_enabled():
-    """A missing group flows into groups_to_create (with resolved members) when creation
-    is enabled — management does not separately process the new group."""
+    """A missing group flows into groups_to_create (empty set) when creation is enabled
+    with management on — the group's configured members land in members_to_add."""
     desired = {
         _group(
             "analysts",
@@ -323,8 +356,9 @@ def test_group_differ_creates_group_with_members_when_creation_enabled():
         enable_group_management=True,
     )
 
-    assert _alice_resolved in diff.groups_to_create["analysts"]
-    assert "analysts" not in diff.members_to_add
+    # Group name is in groups_to_create (created empty), members flow through members_to_add.
+    assert "analysts" in diff.groups_to_create
+    assert _alice_resolved in diff.members_to_add["analysts"]
     assert change_logger.has_errors is False
 
 
@@ -599,7 +633,7 @@ def test_group_differ_errors_when_id_has_no_matching_actual_group():
     assert change_logger.has_errors
     assert change_logger.errors
     assert diff.groups_to_rename == []
-    assert diff.groups_to_create == {}
+    assert diff.groups_to_create == set()
 
 
 def test_group_differ_errors_when_rename_target_name_already_taken():
@@ -671,6 +705,250 @@ def test_group_differ_falls_back_to_name_match_when_id_absent():
 
     assert _alice_resolved in diff.members_to_add["analysts"]
     assert diff.groups_to_rename == []
+    assert change_logger.has_errors is False
+
+
+# ---------------------------------------------------------------------------
+# assumers reconciliation
+# ---------------------------------------------------------------------------
+
+
+def test_group_differ_reconciles_assumers_when_desired_differs_from_actual():
+    """A group with desired assumers differing from actual has the full resolved
+    desired set in assumers_to_set, with add/remove deltas for logging."""
+    desired = {
+        _group(
+            "analysts",
+            members=set(),
+            assumers={Principal(PrincipalType.UNKNOWN, name="alice@example.com")},
+        )
+    }
+    actual = {_group("analysts", members=set(), assumers=frozenset())}
+    resolver = _resolver(name_to_principal={"alice@example.com": _alice_resolved})
+    change_logger = ChangeLogger()
+
+    diff = compute_group_diff(
+        desired, actual, resolver, change_logger, enable_group_management=True
+    )
+
+    # Full desired set in assumers_to_set.
+    assert diff.assumers_to_set["analysts"] == frozenset({_alice_resolved})
+    # Delta for logging: alice was added.
+    assert _alice_resolved in diff.assumers_to_add["analysts"]
+    assert "analysts" not in diff.assumers_to_remove
+
+
+def test_group_differ_omits_assumers_when_desired_and_actual_are_identical():
+    """When actual assumers match desired assumers, the group is omitted from
+    assumers_to_set (idempotent)."""
+    desired = {
+        _group(
+            "analysts",
+            members=set(),
+            assumers={Principal(PrincipalType.UNKNOWN, name="alice@example.com")},
+        )
+    }
+    actual = {
+        _group(
+            "analysts",
+            members=set(),
+            assumers=frozenset({Principal(PrincipalType.UNKNOWN, identifier="alice@example.com")}),
+        )
+    }
+    resolver = _resolver(
+        name_to_principal={"alice@example.com": _alice_resolved},
+        identifier_to_principal={"alice@example.com": _alice_resolved},
+    )
+    change_logger = ChangeLogger()
+
+    diff = compute_group_diff(
+        desired, actual, resolver, change_logger, enable_group_management=True
+    )
+
+    # Identical, so not in assumers_to_set (idempotent).
+    assert "analysts" not in diff.assumers_to_set
+
+
+def test_group_differ_skips_assumers_when_desired_assumers_is_none():
+    """When desired.assumers is None, the group's assumers are unmanaged and left untouched."""
+    desired = {_group("analysts", members=set(), assumers=None)}
+    actual = {
+        _group(
+            "analysts",
+            members=set(),
+            assumers=frozenset({Principal(PrincipalType.UNKNOWN, identifier="alice@example.com")}),
+        )
+    }
+    resolver = _resolver(identifier_to_principal={"alice@example.com": _alice_resolved})
+    change_logger = ChangeLogger()
+
+    diff = compute_group_diff(
+        desired, actual, resolver, change_logger, enable_group_management=True
+    )
+
+    # Unmanaged (None), so not reconciled.
+    assert "analysts" not in diff.assumers_to_set
+    assert "analysts" not in diff.assumers_to_add
+    assert "analysts" not in diff.assumers_to_remove
+
+
+def test_group_differ_skips_members_when_desired_members_is_none():
+    """When desired.members is None, the group's membership is unmanaged and left untouched."""
+    desired = {_group("analysts", members=None)}
+    actual = {
+        _group(
+            "analysts",
+            members=frozenset({Principal(PrincipalType.UNKNOWN, identifier="alice@example.com")}),
+        )
+    }
+    resolver = _resolver(identifier_to_principal={"alice@example.com": _alice_resolved})
+    change_logger = ChangeLogger()
+
+    diff = compute_group_diff(
+        desired, actual, resolver, change_logger, enable_group_management=True
+    )
+
+    # Unmanaged (None), so membership not touched.
+    assert "analysts" not in diff.members_to_add
+    assert "analysts" not in diff.members_to_remove
+
+
+def test_group_differ_removes_all_members_when_desired_is_empty_frozenset():
+    """When desired.members is an empty frozenset (not None), all actual members are removed."""
+    desired = {_group("analysts", members=frozenset())}
+    actual = {
+        _group(
+            "analysts",
+            members=frozenset({Principal(PrincipalType.UNKNOWN, identifier="alice@example.com")}),
+        )
+    }
+    resolver = _resolver(identifier_to_principal={"alice@example.com": _alice_resolved})
+    change_logger = ChangeLogger()
+
+    diff = compute_group_diff(
+        desired, actual, resolver, change_logger, enable_group_management=True
+    )
+
+    # Empty desired is authoritative, so all members removed.
+    assert _alice_resolved in diff.members_to_remove["analysts"]
+    assert "analysts" not in diff.members_to_add
+
+
+def test_group_differ_errors_when_external_group_has_members_supplied():
+    """An existing external (IdP-provisioned) group with supplied members is a fatal error."""
+    desired = {
+        _group(
+            "analysts",
+            members={Principal(PrincipalType.UNKNOWN, name="alice@example.com")},
+        )
+    }
+    actual = {_group("analysts", external_id="ext-idp-123", members=frozenset())}
+    resolver = _resolver(name_to_principal={"alice@example.com": _alice_resolved})
+    change_logger = ChangeLogger()
+
+    diff = compute_group_diff(
+        desired, actual, resolver, change_logger, enable_group_management=True
+    )
+
+    # Error logged, group dropped from membership reconciliation.
+    assert change_logger.has_errors
+    assert "analysts" not in diff.members_to_add
+    assert "analysts" not in diff.members_to_remove
+
+
+def test_group_differ_reconciles_assumers_for_external_group_with_members_none():
+    """An existing external group with members=None (unmanaged) can have its assumers managed."""
+    desired = {
+        _group(
+            "analysts",
+            members=None,
+            assumers={Principal(PrincipalType.UNKNOWN, name="alice@example.com")},
+        )
+    }
+    actual = {_group("analysts", external_id="ext-idp-123", members=frozenset(), assumers=frozenset())}
+    resolver = _resolver(name_to_principal={"alice@example.com": _alice_resolved})
+    change_logger = ChangeLogger()
+
+    diff = compute_group_diff(
+        desired, actual, resolver, change_logger, enable_group_management=True
+    )
+
+    # No error, no membership changes, but assumers are reconciled.
+    assert change_logger.has_errors is False
+    assert "analysts" not in diff.members_to_add
+    assert "analysts" not in diff.members_to_remove
+    assert diff.assumers_to_set["analysts"] == frozenset({_alice_resolved})
+
+
+def test_group_differ_keys_external_group_assumers_by_actual_name_when_matched_by_id():
+    """An external group matched by id whose config name differs from its account name
+    keys the assumer change by the ACTUAL name — external groups are never renamed, so
+    the id cache still holds the actual name and the executor must look it up by that."""
+    desired = {
+        _group_with_id(
+            "analysts_new",  # config name differs from the account's actual name
+            "id-X",
+            members=None,
+            assumers={Principal(PrincipalType.UNKNOWN, name="alice@example.com")},
+        )
+    }
+    actual = {
+        _group_with_id(
+            "analysts_actual",
+            "id-X",
+            external_id="ext-idp-123",
+            members=frozenset(),
+            assumers=frozenset(),
+        )
+    }
+    resolver = _resolver(name_to_principal={"alice@example.com": _alice_resolved})
+    change_logger = ChangeLogger()
+
+    diff = compute_group_diff(
+        desired, actual, resolver, change_logger, enable_group_management=True
+    )
+
+    assert change_logger.has_errors is False
+    # Keyed by the actual (un-renamed) name, not the config name.
+    assert "analysts_actual" in diff.assumers_to_set
+    assert "analysts_new" not in diff.assumers_to_set
+    assert diff.assumers_to_set["analysts_actual"] == frozenset({_alice_resolved})
+
+
+def test_group_differ_creates_and_manages_group_with_members_and_assumers():
+    """A missing group created this run with both members and assumers (creation + management)
+    has its name in groups_to_create (empty) and its members/assumers in the respective
+    management maps."""
+    desired = {
+        _group(
+            "analysts",
+            members={Principal(PrincipalType.UNKNOWN, name="alice@example.com")},
+            assumers={Principal(PrincipalType.UNKNOWN, name="bob@example.com")},
+        )
+    }
+    actual: set[Group] = set()
+    resolver = _resolver(
+        name_to_principal={
+            "alice@example.com": _alice_resolved,
+            "bob@example.com": _bob_resolved,
+        }
+    )
+    change_logger = ChangeLogger()
+
+    diff = compute_group_diff(
+        desired,
+        actual,
+        resolver,
+        change_logger,
+        enable_group_creation=True,
+        enable_group_management=True,
+    )
+
+    # Group queued for creation (empty).
+    assert "analysts" in diff.groups_to_create
+    # Members and assumers flow through management.
+    assert _alice_resolved in diff.members_to_add["analysts"]
+    assert diff.assumers_to_set["analysts"] == frozenset({_bob_resolved})
     assert change_logger.has_errors is False
 
 

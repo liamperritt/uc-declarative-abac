@@ -18,9 +18,8 @@ from uc_declarative_abac.governed_tags.state import (
 )
 from uc_declarative_abac.principals import (
     Principal,
-    ensure_resolved,
+    principal_to_ruleset_string,
 )
-from uc_declarative_abac.types import PrincipalType
 from uc_declarative_abac.utils import (
     ExecutionError,
     OrchestratorError,
@@ -57,18 +56,6 @@ def _compute_tag_policy_update_mask(new: GovernedTag, old: GovernedTag | None) -
     return ",".join(fields)
 
 
-def _principal_to_ruleset_string(principal: Principal) -> str:
-    """Encode a resolved Principal as the SCIM-prefixed string the rule-set API expects."""
-    ensure_resolved(principal)
-    if principal.principal_type == PrincipalType.USER:
-        return f"users/{principal.name}"
-    if principal.principal_type == PrincipalType.GROUP:
-        return f"groups/{principal.name}"
-    if principal.principal_type == PrincipalType.SERVICE_PRINCIPAL:
-        return f"servicePrincipals/{principal.identifier}"
-    raise OrchestratorError(f"Unsupported principal type for rule set: {principal!r}")
-
-
 def _build_grant_rules(
     desired_assigners: frozenset[Principal],
     existing_grant_rules: list,
@@ -90,7 +77,7 @@ def _build_grant_rules(
             GrantRule(
                 role=_TAG_POLICY_ASSIGN_ROLE,
                 principals=sorted(
-                    _principal_to_ruleset_string(p) for p in desired_assigners
+                    principal_to_ruleset_string(p) for p in desired_assigners
                 ),
             )
         )

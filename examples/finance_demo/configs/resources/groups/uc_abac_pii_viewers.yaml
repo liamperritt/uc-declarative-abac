@@ -5,5 +5,7 @@ resources:
     uc_abac_pii_viewers:
       name: uc_abac_pii_viewers
       members:
-        - uc_abac_fraud_analysts
         - uc_abac_compliance
+      assumers:
+        - uc_abac_fraud_analysts
+        - uc_abac_data_platform

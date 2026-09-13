@@ -43,6 +43,13 @@ _ACCOUNT_SYSTEM_GROUPS = SYSTEM_ACCOUNT_GROUPS
 # update this constant accordingly.
 _TAG_POLICY_ASSIGN_ROLE = "roles/tagPolicy.assigner"
 
+# Account Access Control Proxy assumer role on account groups (the RBAC
+# `roles/group.assumer` grant that lets its principals manage the group's role
+# assignments). TBD: verify in integration testing; the SDK does not export a constant
+# for this role name. If the API rejects it, call
+# `account_access_control_proxy.get_assignable_roles_for_resource` once and update this.
+_GROUP_ASSUMER_ROLE = "roles/group.assumer"
+
 # Bounded concurrency for per-tag get_rule_set calls during the actual-state fetch.
 _ASSIGN_FETCH_WORKERS = 8
 
@@ -53,6 +60,11 @@ _GROUP_FETCH_WORKERS = 8
 def _ruleset_name(account_id: str, tag_id: str) -> str:
     """Build the AccessControl proxy ruleset resource name for a tag policy."""
     return f"accounts/{account_id}/tagPolicies/{tag_id}/ruleSets/default"
+
+
+def _group_ruleset_name(account_id: str, group_id: str) -> str:
+    """Build the AccessControl proxy ruleset resource name for an account group."""
+    return f"accounts/{account_id}/groups/{group_id}/ruleSets/default"
 
 
 def _encode_path_segment(value: str) -> str:
@@ -437,12 +449,11 @@ class WorkspaceHelper:
             f"/api/2.0/account/scim/v2/Groups/{group_id}",
         )
 
-    def _build_group_from_response(self, resp: dict) -> Group:
-        """Translate a single-group GET response into Group state.
-
-        Member SCIM ids are mapped back to canonical identifiers via the cache
-        built during fetch_principals; untranslatable members are dropped."""
-        members = frozenset(
+    def _members_from_response(self, resp: dict) -> frozenset[Principal]:
+        """Extract a single-group GET response's members as canonical-identifier
+        Principals. Member SCIM ids are mapped back via the cache built during
+        fetch_principals; untranslatable members are dropped."""
+        return frozenset(
             p
             for p in (
                 _member_dict_to_principal(m, self._identifier_by_scim_id)
@@ -450,33 +461,90 @@ class WorkspaceHelper:
             )
             if p is not None
         )
-        return Group(
-            display_name=resp.get("displayName") or "",
-            external_id=resp.get("externalId") or "",
-            id=resp.get("id") or "",
-            members=members,
-        )
+
+    def _fetch_group_members_for(
+        self, group_ids: set[str]
+    ) -> dict[str, frozenset[Principal]]:
+        """Fetch membership (as canonical-identifier Principals) for each group id via
+        ``GET /Groups/{id}``, dispatched concurrently up to ``_GROUP_FETCH_WORKERS``.
+        Only groups whose desired ``members`` are authoritative are passed in — the rest
+        keep ``members=None`` (unmanaged, never fetched)."""
+        if not group_ids:
+            return {}
+        worker_count = min(_GROUP_FETCH_WORKERS, len(group_ids))
+        results: dict[str, frozenset[Principal]] = {}
+        with ThreadPoolExecutor(max_workers=worker_count) as pool:
+            future_to_id = {
+                pool.submit(self._fetch_group_by_id, gid): gid for gid in group_ids
+            }
+            for future, gid in future_to_id.items():
+                results[gid] = self._members_from_response(future.result())
+        return results
+
+    def _fetch_group_assumers_for(
+        self, group_ids: set[str]
+    ) -> dict[str, frozenset[Principal]]:
+        """Fetch the assumer principals (``roles/group.assumer``) for each group id via
+        its account access-control rule set, dispatched concurrently up to
+        ``_ASSIGN_FETCH_WORKERS``. Only groups whose desired ``assumers`` are
+        authoritative are passed in — the rest keep ``assumers=None`` (unmanaged)."""
+        if not group_ids:
+            return {}
+        worker_count = min(_ASSIGN_FETCH_WORKERS, len(group_ids))
+        results: dict[str, frozenset[Principal]] = {}
+        with ThreadPoolExecutor(max_workers=worker_count) as pool:
+            future_to_id = {
+                pool.submit(self.get_group_rule_set, gid): gid for gid in group_ids
+            }
+            for future, gid in future_to_id.items():
+                results[gid] = self._extract_group_assumers(future.result())
+        return results
+
+    @staticmethod
+    def _extract_group_assumers(resp: RuleSetResponse) -> frozenset[Principal]:
+        """Read the assumer grant_rule from a rule-set response and return its
+        principals as unresolved Principal objects. Non-assumer rules are ignored."""
+        assumers: set[Principal] = set()
+        for rule in resp.grant_rules or []:
+            if rule.role != _GROUP_ASSUMER_ROLE:
+                continue
+            for raw in rule.principals or []:
+                assumers.add(
+                    Principal(
+                        PrincipalType.UNKNOWN,
+                        identifier=_parse_ruleset_principal(raw),
+                    )
+                )
+        return frozenset(assumers)
 
     def fetch_actual_groups(
         self,
         desired_names: set[str] | None = None,
         desired_ids: set[str] | None = None,
+        member_fetch_names: set[str] | None = None,
+        member_fetch_ids: set[str] | None = None,
+        assumer_fetch_names: set[str] | None = None,
+        assumer_fetch_ids: set[str] | None = None,
     ) -> set[Group]:
-        """Fetch actual-state Groups (with membership) for the configured groups.
+        """Fetch actual-state Groups (identity, membership, assumers) for configured groups.
 
-        Scoped to ``desired_names`` (the groups declared in config) intersected with
-        the account groups discovered during ``fetch_principals()`` — groups absent
-        from config are never fetched, since their membership is irrelevant. Any
-        account group whose SCIM id is in ``desired_ids`` is additionally fetched
-        under its *current* (actual) display name even when that name isn't in
-        ``desired_names`` — this is how a renamed group (config holds the new name,
-        the account still holds the old one) is located by id. A desired id with no
-        matching account group is left for the differ to flag. Issues one ``GET
-        /Groups/{id}`` per managed group (the account SCIM proxy list call does not
-        reliably return members inline), deduplicated by SCIM id and dispatched
-        concurrently up to ``_GROUP_FETCH_WORKERS``. Must be called after
-        ``fetch_principals()``. Returns an empty set when group management is
-        disabled.
+        Identity (display name, SCIM id, ``external_id``) is built from the caches
+        populated during ``fetch_principals()`` — no per-group call. The candidate set is
+        ``desired_names`` (the groups declared in config) intersected with the account
+        groups, plus any account group whose SCIM id is in ``desired_ids`` (matched under
+        its *current* display name — this is how a renamed group, whose config holds the
+        new name but whose account still holds the old one, is located by id). A desired
+        id with no matching account group is left for the differ to flag.
+
+        Membership and assumers are **authoritative only when supplied**, so each is
+        fetched only for its own subset: a group's members are read (one ``GET
+        /Groups/{id}`` — the account SCIM proxy list call doesn't return members inline)
+        only when its display name is in ``member_fetch_names`` or its id in
+        ``member_fetch_ids``; its assumers are read (one rule-set GET) only when in
+        ``assumer_fetch_names`` / ``assumer_fetch_ids``. Groups outside a subset keep that
+        field ``None`` (unmanaged — never fetched). Both fetches are dispatched
+        concurrently. Must be called after ``fetch_principals()``. Returns an empty set
+        when group management is disabled.
         """
         if not self._manage_groups or not self._group_id_by_name:
             return set()
@@ -489,11 +557,36 @@ class WorkspaceHelper:
                 names.add(actual_name)
         if not names:
             return set()
-        targets = {self._group_id_by_name[name] for name in names}
-        worker_count = min(_GROUP_FETCH_WORKERS, len(targets))
-        with ThreadPoolExecutor(max_workers=worker_count) as pool:
-            responses = pool.map(self._fetch_group_by_id, targets)
-            return {self._build_group_from_response(resp) for resp in responses}
+        member_fetch_names = member_fetch_names or set()
+        member_fetch_ids = member_fetch_ids or set()
+        assumer_fetch_names = assumer_fetch_names or set()
+        assumer_fetch_ids = assumer_fetch_ids or set()
+        # display_name -> SCIM id, deduped by name (id is unique per name in the cache).
+        candidates = {name: self._group_id_by_name[name] for name in names}
+        members_by_id = self._fetch_group_members_for(
+            {
+                gid
+                for name, gid in candidates.items()
+                if name in member_fetch_names or gid in member_fetch_ids
+            }
+        )
+        assumers_by_id = self._fetch_group_assumers_for(
+            {
+                gid
+                for name, gid in candidates.items()
+                if name in assumer_fetch_names or gid in assumer_fetch_ids
+            }
+        )
+        return {
+            Group(
+                display_name=name,
+                id=gid,
+                external_id=self._external_id_by_group_name.get(name, ""),
+                members=members_by_id.get(gid),
+                assumers=assumers_by_id.get(gid),
+            )
+            for name, gid in candidates.items()
+        }
 
     def list_account_groups(self) -> set[Group]:
         """Return every account group as membership-less Group state (display name, SCIM
@@ -801,6 +894,35 @@ class WorkspaceHelper:
             name=name,
             rule_set=request,
         )
+
+    def get_group_rule_set(self, group_id: str) -> RuleSetResponse:
+        """Fetch the default account access-control rule set for a group. Uses an empty
+        etag (fresh state) — callers performing read-modify-write should pass the
+        returned etag back into ``update_group_rule_set``."""
+        name = _group_ruleset_name(self._account_id(), group_id)
+        return self._client.account_access_control_proxy.get_rule_set(
+            name=name, etag=""
+        )
+
+    def update_group_rule_set(
+        self,
+        group_id: str,
+        etag: str,
+        grant_rules: list[GrantRule],
+    ) -> RuleSetResponse:
+        """Replace the account access-control rule set for a group. ``etag`` must come
+        from a prior ``get_group_rule_set`` call (read-modify-write for optimistic
+        concurrency)."""
+        name = _group_ruleset_name(self._account_id(), group_id)
+        request = RuleSetUpdateRequest(name=name, etag=etag, grant_rules=grant_rules)
+        return self._client.account_access_control_proxy.update_rule_set(
+            name=name,
+            rule_set=request,
+        )
+
+    def get_group_id(self, display_name: str) -> str | None:
+        """Return the cached account SCIM id for a group display name, or None."""
+        return self._group_id_by_name.get(display_name)
 
     def register_created_tag_policy(self, tag_policy: TagPolicy) -> None:
         """Update the name→id cache after a successful create_tag_policy call so

@@ -109,6 +109,24 @@ def ensure_all_resolved(principals: Iterable[Principal]) -> list[Principal]:
     return [ensure_resolved(p) for p in principals]
 
 
+def principal_to_ruleset_string(principal: Principal) -> str:
+    """Encode a resolved Principal as the SCIM-prefixed string the Account Access
+    Control Proxy rule-set API expects.
+
+    Users and groups are keyed by their name (username / display name); service
+    principals by their application_id (their ``identifier``). Shared by every rule-set
+    writer — governed-tag assigners and group assumers — so a principal is encoded the
+    same way everywhere."""
+    ensure_resolved(principal)
+    if principal.principal_type == PrincipalType.USER:
+        return f"users/{principal.name}"
+    if principal.principal_type == PrincipalType.GROUP:
+        return f"groups/{principal.name}"
+    if principal.principal_type == PrincipalType.SERVICE_PRINCIPAL:
+        return f"servicePrincipals/{principal.identifier}"
+    raise OrchestratorError(f"Unsupported principal type for rule set: {principal!r}")
+
+
 def _format_batch_failure(
     failures: list[tuple[Principal, PrincipalValidationError]],
 ) -> str:

@@ -7,3 +7,5 @@ resources:
       expiry_date: 2026-12-31
       members:
         - uc_abac_compliance
+      assumers:
+        - uc_abac_data_platform

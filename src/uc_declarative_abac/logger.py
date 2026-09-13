@@ -168,6 +168,8 @@ class ChangeLogger:
         self._groups_renamed = 0
         self._group_members_added = 0
         self._group_members_removed = 0
+        self._group_assumers_added = 0
+        self._group_assumers_removed = 0
         self._groups_deleted = 0
         self._errors: list[ExecutionError] = []
         self._warnings: list[ExecutionError] = []
@@ -545,21 +547,17 @@ class ChangeLogger:
     # Group management logging
     # ------------------------------------------------------------------
 
-    def log_group_create(self, group_name: str, members: frozenset[Principal]) -> None:
-        """Log an account group being created with its initial members. Members
-        are also counted as additions for the summary."""
+    def log_group_create(self, group_name: str) -> None:
+        """Log an account group being created (always created empty — its configured
+        members and assumers are applied by the management phases and logged there)."""
         self._groups_created += 1
-        self._group_members_added += len(members)
         action_verb = "Create" if self._dry_run else "Created"
-        suffix = (
-            f" (members={','.join(sorted(p.name for p in members))})" if members else ""
-        )
         self._log_info(
             _format_change_line(
                 "+",
                 "GROUP",
                 group_name,
-                f"{action_verb} group{suffix}",
+                f"{action_verb} group",
             )
         )
 
@@ -606,6 +604,42 @@ class ChangeLogger:
                 "GROUP",
                 group_name,
                 f"{action_verb} members ({removed})",
+            )
+        )
+
+    def log_group_assumer_add(
+        self, group_name: str, assumers: frozenset[Principal]
+    ) -> None:
+        """Log assumers being added to an account group's access-control ruleset (the
+        ``roles/group.assumer`` grant), as part of reconciling it to the configured set."""
+        self._group_assumers_added += len(assumers)
+        action_verb = "Add" if self._dry_run else "Added"
+        added = ", ".join(f"+{p.name}" for p in sorted(assumers, key=lambda p: p.name))
+        self._log_info(
+            _format_change_line(
+                "~",
+                "GROUP",
+                group_name,
+                f"{action_verb} assumers ({added})",
+            )
+        )
+
+    def log_group_assumer_remove(
+        self, group_name: str, assumers: frozenset[Principal]
+    ) -> None:
+        """Log assumers being removed from an account group's access-control ruleset
+        (full reconciliation — assumers absent from config are removed)."""
+        self._group_assumers_removed += len(assumers)
+        action_verb = "Remove" if self._dry_run else "Removed"
+        removed = ", ".join(
+            f"-{p.name}" for p in sorted(assumers, key=lambda p: p.name)
+        )
+        self._log_info(
+            _format_change_line(
+                "~",
+                "GROUP",
+                group_name,
+                f"{action_verb} assumers ({removed})",
             )
         )
 
@@ -707,6 +741,10 @@ class ChangeLogger:
             group_parts.append(f"{self._group_members_added} members added")
         if self._group_members_removed:
             group_parts.append(f"{self._group_members_removed} members removed")
+        if self._group_assumers_added:
+            group_parts.append(f"{self._group_assumers_added} assumers added")
+        if self._group_assumers_removed:
+            group_parts.append(f"{self._group_assumers_removed} assumers removed")
         if self._groups_deleted:
             group_parts.append(f"{self._groups_deleted} deleted")
 
@@ -788,6 +826,10 @@ class ChangeLogger:
             group_parts.append(f"{self._group_members_added} members to add")
         if self._group_members_removed:
             group_parts.append(f"{self._group_members_removed} members to remove")
+        if self._group_assumers_added:
+            group_parts.append(f"{self._group_assumers_added} assumers to add")
+        if self._group_assumers_removed:
+            group_parts.append(f"{self._group_assumers_removed} assumers to remove")
         if self._groups_deleted:
             group_parts.append(f"{self._groups_deleted} to delete")
 
