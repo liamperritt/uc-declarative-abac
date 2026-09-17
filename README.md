@@ -176,7 +176,7 @@ The engine delegates authentication to the Databricks SDK's [unified authenticat
 Resolution precedence matches the SDK's unified-auth chain: explicit `--profile` takes precedence, followed by env vars, `~/.databrickscfg`, and finally the metadata service. Omit `--profile` entirely to let the SDK pick whichever source is configured in the current environment.
 
 > **Required permissions.** Whichever identity the engine authenticates as (typically a service principal for automation) must hold:
-> - **Workspace admin** on the target workspace — needed to fetch users, service principals and groups from the account SCIM proxy API.
+> - **Workspace admin** on the target workspace — needed to fetch users, service principals and groups from the account identity API.
 > - **Metastore admin** on the target metastore — needed to create/alter catalogs, schemas, tables, volumes, functions, tags, grants, masks, and filters.
 > - **Governed tag `creator`/`manager`** on the account — needed to create and update account-level governed tags (tag policies) under `resources.governed_tags`.
 > - **Group `manager` on each managed group** — needed to add/remove members of the account groups under `resources.groups` when `--group-management-scopes` is active. The engine automatically receives the `manager` role on any group it creates via `--group-creation-scopes`, so groups created by the engine are manageable without further grants; for pre-existing groups, the role must be granted to the engine principal out of band.
@@ -195,7 +195,7 @@ The repo ships a composite GitHub Action at `deploy/action.yml` so any other rep
 | `timezone` | no | `''` (UTC) | IANA timezone used to compute the run date for evaluating `expiry_date` on groups and grant policies (e.g. `Australia/Melbourne`); omit to use UTC. An unknown timezone fails the run at config load |
 | `profile` | no | `''` | Databricks CLI profile name from `~/.databrickscfg`; omit to use env-based auth (see the [Authentication](#authentication) table) |
 | `dry-run` | no | `'false'` | Print planned changes without executing when `'true'` |
-| `use-workspace-scim` | no | `'false'` | Fetch principals from the workspace SCIM API instead of the account SCIM proxy when `'true'`. The account-level system groups `account users` and `account admins` are automatically included, since the workspace SCIM API does not surface them. **Incompatible with configuring `resources.groups`** — group management requires the account SCIM proxy, so combining the two errors out |
+| `use-workspace-scim` | no | `'false'` | Fetch principals from the workspace SCIM API instead of the account identity API when `'true'`. The account-level system groups `account users` and `account admins` are automatically included, since the workspace SCIM API does not surface them. **Incompatible with configuring `resources.groups`** — group management requires account-level access, so combining the two errors out |
 | `skip-users-fetch` | no | `'false'` | Skip listing users and treat the user set as empty when `'true'`. For organisations that govern access only via groups and service principals, this avoids the slowest SCIM list call and speeds up the initial fetch significantly in accounts with many users. It is useful when running interactively for a faster fetch time, but **it is not intended for production use.** |
 | `tag-management-scopes` | no | `''` | Scope tag-assignment management to matching securables. Empty (default) disables it; `*` covers all; a trailing `*` is a raw name prefix (`main.*`, `main.sales*`); an entry without `*` covers that node and its subtree (`main`). See [Feature scopes](#feature-scopes) |
 | `privilege-management-scopes` | no | `''` | Scope `GRANT`/`REVOKE` privilege management to matching securables (same grammar as `tag-management-scopes`). Empty (default) disables it |
@@ -233,7 +233,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: liamperritt/uc-declarative-abac/deploy@v0.11.0
+      - uses: liamperritt/uc-declarative-abac/deploy@v0.11.1
         with:
           config-dir: configs/
           warehouse-id: ${{ vars.DATABRICKS_WAREHOUSE_ID }}
@@ -274,7 +274,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: liamperritt/uc-declarative-abac/validate@v0.11.0
+      - uses: liamperritt/uc-declarative-abac/validate@v0.11.1
         with:
           config-dir: configs/
 ```
@@ -772,7 +772,7 @@ Resource configs are concrete, deployable instances (e.g., catalogs and their co
 Account groups and their membership are deployed under `resources: groups:` — they are account-level singletons, so a group resource is what actually gets reconciled. The dictionary key is used as the group's display name if `name` is not provided. (Groups can also be captured as reusable `definitions: groups:` templates and pulled in with `$ref: $defs/groups/<key>` — useful with template variables for environment-based group families; see [Template variables](#template-variables).)
 
 - **`name`** — the group's display name.
-- **`id`** — *(optional)* the group's account-level SCIM / internal id. When set, the engine matches the group by `id` instead of by `name`, which enables **renaming**: keep the `id` fixed and change `name`, and the engine updates the group's display name rather than treating it as a new group. Omit it for groups you never intend to rename.
+- **`id`** — *(optional)* the group's account-level internal id. When set, the engine matches the group by `id` instead of by `name`, which enables **renaming**: keep the `id` fixed and change `name`, and the engine updates the group's display name rather than treating it as a new group. Omit it for groups you never intend to rename.
 - **`members`** — *(optional)* the list of principals (users, groups, or service principals by display name) that must belong to the group. **Authoritative only when supplied**: omit it (or set it to `null`) to leave the group's current membership untouched — the engine won't even read it. A supplied list — **including an empty list `[]`** — is enforced: `[]` removes all members, a populated list reconciles the group to exactly those principals.
 - **`assumers`** — *(optional)* the list of principals granted the **assumer** role (`roles/group.assumer`) on the group's account [access-control ruleset](https://docs.databricks.com/aws/en/security/auth/rbac) — the RBAC grant that lets non-account-admins manage the group's role assignments. Same authoritative-only-when-supplied semantics as `members` (omit to leave alone; `[]` removes all assumers). Reconciled under `--group-management-scopes`.
 - **`expiry_date`** — *(optional)* an ISO date (`YYYY-MM-DD`). When a deployment runs **on or after** this date, all of the group's members **and** assumers are removed (the group itself is **not** deleted). Takes effect only under `--group-management-scopes` and is a no-op without it. Omit it for groups that never expire. The date it is compared against is computed in the configured `timezone` setting (UTC by default). Mirrors the `expiry_date` on grant policies.
@@ -786,7 +786,7 @@ Behaviour (governed by orthogonal, off-by-default scopes):
 - **Gating.** With neither scope the group domain is inert (configured groups are ignored). Under management, an in-scope configured group that doesn't exist is a fatal error unless creation also covers it.
 - **Externally-managed groups.** A group provisioned from an external IdP (it carries an `external_id`) may be declared **only without `members`** — its membership is owned by the IdP, so supplying `members` is a fatal error, and it is never renamed. Its **assumers** can still be managed.
 - **System-managed groups not declarable.** Databricks account system groups (`account users`, `account admins`) cannot be declared in `resources.groups` — the engine can manage neither their members nor their assumers, so declaring one is a config error.
-- **Account SCIM proxy required.** Group creation/management use the account SCIM proxy reachable from the workspace; an active group scope is incompatible with `use-workspace-scim` (combining them errors out).
+- **Account proxy access required.** Group creation/management use the account-level principal APIs reachable from the workspace; an active group scope is incompatible with `use-workspace-scim` (combining them errors out).
 - **Runs first.** The group domain is reconciled first (before governed tags), so groups referenced as policy/grant principals exist (and renames are reflected) before they're used.
 
 ```yaml
@@ -1159,11 +1159,11 @@ Mask and filter policies are additive by default (create/update, never delete). 
 #### Group management domain
 - **Two orthogonal gates** — `--group-creation-scopes` creates missing configured groups **empty** (the engine auto-gets MANAGER on them); `--group-management-scopes` reconciles the members and assumers of existing groups and of groups created the same run. With neither scope the domain is inert.
 - **Group compilation** — walks `resources.groups`, emitting `Group` state with members/assumers as unresolved principals; a supplied field (incl. `[]`) becomes a frozenset, an omitted field stays `None` (unmanaged); an expired group compiles to empty members **and** assumers (both removed). Dict key is the default display name. System-managed group names (`account users`/`account admins`) are rejected at config load
-- **Group fetch** — account group existence, SCIM ids and `external_id` come from the principal fetch (cached, no extra call). Membership is read via a per-group `GET /Groups/{id}` and assumers via a per-group access-control rule-set GET, **each scoped to only the groups whose respective field is supplied and in the management scope** (an omitted field is never fetched), dispatched concurrently. Member/assumer SCIM ids are translated back to canonical identifiers so both sides of the diff speak the same dialect
+- **Group fetch** — account group existence, ids and `external_id` come from the principal fetch (cached, no extra call). Membership is read via a per-group direct-members list and assumers via a per-group access-control rule-set GET, **each scoped to only the groups whose respective field is supplied and in the management scope** (an omitted field is never fetched), dispatched concurrently. Member/assumer ids are translated back to canonical identifiers so both sides of the diff speak the same dialect
 - **Group diffing** — for a supplied `members`, computes the members to add (desired − actual) and remove (actual − desired); for a supplied `assumers`, writes the full desired set to the ruleset when it differs from actual. An omitted field is skipped; an empty supplied field removes all. Idempotent — a fully-synced group produces no change. Unresolvable actual principals are dropped (never removed)
-- **Group execution** — creates missing groups **empty** via SCIM POST, then (management) adds/removes members via SCIM PatchOps and read-modify-writes the assumer rule set (`roles/group.assumer`) via the account access-control proxy — for existing groups and groups created this run (a group whose create failed is skipped). Externally-managed (IdP-provisioned) groups may set assumers but not `members` (a supplied `members` is a fatal error, and they are never renamed); under management a missing group without the creation flag is a fatal error
+- **Group execution** — writes go through the account SCIM proxy (its `POST /Groups` grants the creating principal MANAGER on the new group, which the identity-V2 create does not): creates missing groups **empty** via SCIM POST, then (management) adds/removes members via SCIM PatchOps and read-modify-writes the assumer rule set (`roles/group.assumer`) via the account access-control proxy — for existing groups and groups created this run (a group whose create failed is skipped). Externally-managed (IdP-provisioned) groups may set assumers but not `members` (a supplied `members` is a fatal error, and they are never renamed); under management a missing group without the creation flag is a fatal error
 - **Ordering** — the group domain is reconciled *first* (before governed tags), and groups slated for creation are seeded into the principal cache so they resolve as principals in the governed-tag/policy/privilege/owner domains the same run
-- **Account SCIM proxy required** — enabling a group flag is incompatible with `--use-workspace-scim` (the run errors out), since the workspace SCIM API does not manage account groups
+- **Account proxy access required** — enabling a group flag is incompatible with `--use-workspace-scim` (the run errors out), since the workspace SCIM API does not manage account groups
 
 #### Governed tags domain
 - **Governed tag compilation** — walks `resources.governed_tags`, emitting `GovernedTag` state with `description` and `allowed_values` per entry; dict key is used as the default tag name
@@ -1213,7 +1213,7 @@ Mask and filter policies are additive by default (create/update, never delete). 
 - **Privilege execution** — generates and executes `GRANT`/`REVOKE` SQL
 
 #### Principal management
-- **Account SCIM proxy** (default) — fetches all account-level principals via `/api/2.0/account/scim/v2/` endpoints with pagination
+- **Account identity API** (default) — fetches all account-level principals via the Workspace Identity V2 API (`workspace_iam_v2`)
 - **Workspace SCIM** (optional `--use-workspace-scim`) — fetches workspace-level principals via SDK, automatically including the account-level system groups `account users` and `account admins` (which the workspace SCIM API does not surface)
 - **Centralised resolution** — `PrincipalResolver` (in `uc_declarative_abac.principals`) bridges YAML display names with UC identifiers. Service principals appear in config by display name but in UC system tables / SDK responses as `application_id`; the resolver normalises both sides to the same `Principal` object so diffs compare correctly across all domains
 - **Per-domain integration** — each domain's `compute_*_diff` accepts the shared `PrincipalResolver` and `ChangeLogger` and resolves principals internally on both desired and actual state before diffing

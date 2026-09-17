@@ -8,6 +8,7 @@ from urllib.parse import quote
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.iam import GrantRule, RuleSetResponse, RuleSetUpdateRequest
+from databricks.sdk.service.iamv2 import DirectGroupMember
 from databricks.sdk.service.tags import TagPolicy
 
 from uc_declarative_abac.governed_tags import GovernedTag
@@ -28,12 +29,10 @@ from uc_declarative_abac.utils import (
 _logger = logging.getLogger("uc_declarative_abac")
 
 
-_SCIM_PAGE_SIZE = 100
-
-# Account-level system groups that the workspace SCIM API does not surface (they
-# exist only at the account level) but are near-universally useful as policy
-# targets. Appended to the fetched groups in workspace-SCIM mode. Sourced from utils
-# (single source of truth, shared with the group-deletion candidate filter).
+# Account-level system groups that neither identity API surfaces (they exist only at
+# the account level) but are near-universally useful as policy targets. Appended to
+# the fetched groups in both modes. Sourced from utils (single source of truth,
+# shared with the group-deletion candidate filter).
 _ACCOUNT_SYSTEM_GROUPS = SYSTEM_ACCOUNT_GROUPS
 
 # Account Access Control Proxy ASSIGN role on tag policies.
@@ -53,7 +52,7 @@ _GROUP_ASSUMER_ROLE = "roles/group.assumer"
 # Bounded concurrency for per-tag get_rule_set calls during the actual-state fetch.
 _ASSIGN_FETCH_WORKERS = 8
 
-# Bounded concurrency for per-group GET /Groups/{id} member fetches.
+# Bounded concurrency for per-group member-list fetches.
 _GROUP_FETCH_WORKERS = 8
 
 
@@ -80,17 +79,17 @@ def _parse_ruleset_principal(s: str) -> str:
     return identifier or s
 
 
-def _member_dict_to_principal(
-    member: dict,
-    identifier_by_scim_id: dict[str, str],
+def _direct_member_to_principal(
+    member: DirectGroupMember,
+    identifier_by_id: dict[str, str],
 ) -> Principal | None:
-    """Convert a raw SCIM group-member dict to an unresolved Principal.
+    """Convert a V2 DirectGroupMember (read path) to an unresolved Principal.
 
-    The member's ``value`` is a SCIM id; it is mapped to the principal's canonical
-    identifier (username / display name / application_id). Returns None when the
-    member's SCIM id has no known identifier (the member is then dropped)."""
-    scim_id = member.get("value")
-    identifier = identifier_by_scim_id.get(scim_id) if scim_id else None
+    ``member.principal_id`` is the member's numeric internal id (an ``int``); it is
+    mapped to the principal's canonical identifier (username / display name /
+    application_id). Returns None when the id has no known identifier (the member is
+    then dropped)."""
+    identifier = identifier_by_id.get(str(member.principal_id))
     if not identifier:
         return None
     return Principal(PrincipalType.UNKNOWN, identifier=identifier)
@@ -100,10 +99,12 @@ def _principal_to_member_dict(
     principal: Principal,
     scim_id_by_identifier: dict[str, str],
 ) -> dict:
-    """Convert a resolved Principal to a SCIM group-member dict ({"value": <scim id>}).
+    """Convert a resolved Principal to a SCIM group-member dict ({"value": <id>}) for
+    the account SCIM proxy write path.
 
-    The Principal must be resolved (its canonical identifier is looked up in the
-    SCIM-id map)."""
+    The Principal must be resolved; its canonical identifier is looked up in the id
+    map (populated from the V2 read path — the V2 internal id doubles as the SCIM
+    member value)."""
     ensure_resolved(principal)
     return {
         "value": scim_id_by_identifier.get(principal.identifier, principal.identifier)
@@ -114,8 +115,14 @@ class WorkspaceHelper:
     """Wraps WorkspaceClient for fetching and validating principals.
 
     Supports two modes controlled by use_workspace_scim:
-    - use_workspace_scim=False (default): uses the workspace account SCIM proxy endpoints to
-      list all users, groups, and service principals in the account.
+    - use_workspace_scim=False (default): the account path. **Reads** (listing users,
+      groups, and service principals; reading group membership) use the Workspace
+      Identity V2 API (``workspace_iam_v2``). **Writes** (create / rename / delete a
+      group, add / remove members) use the account SCIM proxy — the SCIM
+      ``POST /Groups`` grants the creating principal the MANAGER role on the new group,
+      which the V2 create does not, so keeping writes on SCIM lets the engine manage
+      what it creates. The V2 internal id and the SCIM id are the same value, so ids
+      read via V2 are used directly in the SCIM write path.
     - use_workspace_scim=True: uses the SDK's SCIM API to list only workspace-level principals.
 
     Caches results after initial fetch.
@@ -140,47 +147,25 @@ class WorkspaceHelper:
         self._duplicate_sps: set[str] = set()
         # Group-management caches, populated by _fetch_account_principals when
         # manage_groups is enabled (otherwise left empty). Membership is NOT cached
-        # here — it is fetched per-group on demand in fetch_actual_groups.
-        self._group_id_by_name: dict[str, str] = {}  # display_name -> group SCIM id
-        self._group_name_by_id: dict[str, str] = {}  # group SCIM id -> display_name
+        # here — it is fetched per-group on demand in fetch_actual_groups. Ids are the
+        # numeric internal principal ids the V2 API exposes as strings (str(int)).
+        self._group_id_by_name: dict[str, str] = {}  # display_name -> group id
+        self._group_name_by_id: dict[str, str] = {}  # group id -> display_name
         self._external_id_by_group_name: dict[
             str, str
-        ] = {}  # display_name -> externalId ("" for Databricks-managed)
+        ] = {}  # display_name -> external_id ("" for Databricks-managed)
         self._renamed_group_new_by_old: dict[
             str, str
         ] = {}  # old display_name -> new display_name
         self._scim_id_by_identifier: dict[
             str, str
-        ] = {}  # canonical identifier -> SCIM id
+        ] = {}  # canonical identifier -> internal id
         self._identifier_by_scim_id: dict[
             str, str
-        ] = {}  # SCIM id -> canonical identifier
+        ] = {}  # internal id -> canonical identifier
         self._tag_policies_lock = threading.Lock()
         self._tag_policies: list[TagPolicy] | None = None
         self._tag_policy_id_by_name: dict[str, str] = {}
-
-    def _scim_list_all(self, endpoint: str, attributes: str) -> list[dict]:
-        """Paginate through an account SCIM proxy endpoint, returning all resources."""
-        results: list[dict] = []
-        start_index = 1
-        while True:
-            resp = self._client.api_client.do(
-                "GET",
-                endpoint,
-                query={
-                    "startIndex": start_index,
-                    "count": _SCIM_PAGE_SIZE,
-                    "attributes": attributes,
-                },
-            )
-            resources = resp.get("Resources", [])
-            results.extend(resources)
-            total = resp.get("totalResults", 0)
-            items_per_page = len(resources)
-            if not resources or start_index + items_per_page > total:
-                break
-            start_index += items_per_page
-        return results
 
     def fetch_principals(self) -> None:
         """Fetch and cache all principals. Dispatches based on use_workspace_scim."""
@@ -192,98 +177,82 @@ class WorkspaceHelper:
             self._fetch_account_principals()
 
     def _fetch_account_principals(self) -> None:
-        """Fetch principals via the workspace account SCIM proxy (all account principals).
+        """Fetch principals via the Workspace Identity V2 API (all account principals).
 
-        Users, groups, and service principals are fetched concurrently.
+        Users, groups, and service principals are fetched concurrently via the
+        ``workspace_iam_v2`` list proxies (the SDK owns pagination). Every list object
+        carries its numeric internal id, so — unlike the old SCIM proxy — no attribute
+        selection is needed. Group *membership* is not read here (the V2 list has no
+        inline members); it is fetched per-group in fetch_actual_groups, scoped to
+        configured groups. Principal ``account_*_status`` is intentionally not filtered
+        on: every listed principal is a valid grant/policy target, matching prior
+        behaviour.
         """
-        # When managing groups, the SAME three list calls request each principal's
-        # SCIM id so member SCIM ids can be translated to canonical identifiers.
-        # Group membership itself is NOT read from the list response — the account
-        # SCIM proxy does not reliably return `members` inline; it is fetched
-        # per-group via GET /Groups/{id} in fetch_actual_groups (scoped to config).
-        if self._manage_groups:
-            users_attrs = "id,userName"
-            # externalId lets the deletion path exclude IdP-provisioned groups from the
-            # list call directly, without a per-group GET for every account group.
-            groups_attrs = "id,displayName,externalId"
-            sps_attrs = "id,displayName,applicationId"
-        else:
-            users_attrs = "userName"
-            groups_attrs = "displayName"
-            sps_attrs = "displayName,applicationId"
-
+        iam = self._client.workspace_iam_v2
         with ThreadPoolExecutor(max_workers=3) as pool:
-            # When skipping the user fetch, don't submit the /Users call at all — it
-            # is the slowest SCIM list for large accounts and pure overhead for orgs
-            # that govern only groups and service principals.
+            # When skipping the user fetch, don't submit the users list at all — it is
+            # the slowest list for large accounts and pure overhead for orgs that
+            # govern only groups and service principals.
             users_f = (
                 None
                 if self._skip_users_fetch
-                else pool.submit(
-                    self._scim_list_all,
-                    "/api/2.0/account/scim/v2/Users",
-                    users_attrs,
-                )
+                else pool.submit(lambda: list(iam.list_users_proxy()))
             )
-            groups_f = pool.submit(
-                self._scim_list_all,
-                "/api/2.0/account/scim/v2/Groups",
-                groups_attrs,
-            )
-            sps_f = pool.submit(
-                self._scim_list_all,
-                "/api/2.0/account/scim/v2/ServicePrincipals",
-                sps_attrs,
-            )
+            groups_f = pool.submit(lambda: list(iam.list_groups_proxy()))
+            sps_f = pool.submit(lambda: list(iam.list_service_principals_proxy()))
             users_data = users_f.result() if users_f is not None else []
             groups_data = groups_f.result()
             sps_data = sps_f.result()
 
-        self._users = {u["userName"] for u in users_data if "userName" in u}
-        # The account SCIM proxy lists real account groups but not the special
-        # system groups (e.g. `account admins`), so add them — they are valid
-        # grant/policy principals even though they aren't returned by the list call.
+        self._users = {u.username for u in users_data if u.username}
+        # The list proxy returns real account groups but not the special system
+        # groups (e.g. `account admins`), so add them — they are valid grant/policy
+        # principals even though they aren't returned by the list call.
         self._groups = {
-            g["displayName"] for g in groups_data if "displayName" in g
+            g.group_name for g in groups_data if g.group_name
         } | _ACCOUNT_SYSTEM_GROUPS
-        self._build_sp_map(sps_data)
+        # _build_sp_map takes SCIM-format dicts (shared with the workspace-SCIM path).
+        self._build_sp_map(
+            [
+                {"displayName": sp.display_name, "applicationId": sp.application_id}
+                for sp in sps_data
+            ]
+        )
         if self._manage_groups:
             self._build_group_id_maps(users_data, groups_data, sps_data)
 
     def _build_group_id_maps(
         self,
-        users_data: list[dict],
-        groups_data: list[dict],
-        sps_data: list[dict],
+        users_data: list,
+        groups_data: list,
+        sps_data: list,
     ) -> None:
-        """Build the SCIM-id ↔ canonical-identifier maps and the group-name → id
-        index from the principal list responses.
+        """Build the id ↔ canonical-identifier maps and the group-name → id index from
+        the V2 list responses.
 
-        Group *membership* is not read here — the account SCIM proxy list endpoint
-        does not reliably return members inline. Membership is fetched per-group in
-        fetch_actual_groups via GET /Groups/{id} (scoped to configured groups). The
-        maps built here translate member SCIM ids back to canonical identifiers
-        (username / display name / application_id) once those GETs return."""
+        Group *membership* is not read here — the V2 group list has no inline members.
+        Membership is fetched per-group in fetch_actual_groups (scoped to configured
+        groups). The maps built here translate a member's numeric principal id back to
+        its canonical identifier (username / display name / application_id) once those
+        fetches return; ids are stored as strings (the V2 ``*_id`` field type)."""
         for user in users_data:
-            scim_id, identifier = user.get("id"), user.get("userName")
-            if scim_id and identifier:
-                self._identifier_by_scim_id[scim_id] = identifier
-                self._scim_id_by_identifier[identifier] = scim_id
+            id_, identifier = user.user_id, user.username
+            if id_ and identifier:
+                self._identifier_by_scim_id[id_] = identifier
+                self._scim_id_by_identifier[identifier] = id_
         for sp in sps_data:
-            scim_id, identifier = sp.get("id"), sp.get("applicationId")
-            if scim_id and identifier:
-                self._identifier_by_scim_id[scim_id] = identifier
-                self._scim_id_by_identifier[identifier] = scim_id
+            id_, identifier = sp.service_principal_id, sp.application_id
+            if id_ and identifier:
+                self._identifier_by_scim_id[id_] = identifier
+                self._scim_id_by_identifier[identifier] = id_
         for group in groups_data:
-            scim_id, display_name = group.get("id"), group.get("displayName")
-            if scim_id and display_name:
-                self._identifier_by_scim_id[scim_id] = display_name
-                self._scim_id_by_identifier[display_name] = scim_id
-                self._group_id_by_name[display_name] = scim_id
-                self._group_name_by_id[scim_id] = display_name
-                self._external_id_by_group_name[display_name] = (
-                    group.get("externalId") or ""
-                )
+            id_, display_name = group.group_id, group.group_name
+            if id_ and display_name:
+                self._identifier_by_scim_id[id_] = display_name
+                self._scim_id_by_identifier[display_name] = id_
+                self._group_id_by_name[display_name] = id_
+                self._group_name_by_id[id_] = display_name
+                self._external_id_by_group_name[display_name] = group.external_id or ""
 
     def _fetch_workspace_principals(self) -> None:
         """Fetch principals via the SDK's workspace SCIM API (workspace principals only).
@@ -437,27 +406,22 @@ class WorkspaceHelper:
             f"Principal not found by identifier: {identifier}"
         )
 
-    def _fetch_group_by_id(self, group_id: str) -> dict:
-        """GET a single account group (with its members) via the SCIM proxy.
+    def _fetch_group_members(self, group_id: str) -> frozenset[Principal]:
+        """List a single group's direct members via the V2 identity API and return them
+        as canonical-identifier Principals.
 
-        TBD: verify in integration testing; the account SCIM proxy list endpoint
-        does not reliably return `members` inline, so membership is read here from
-        the individual-group endpoint (members carry `value`; the group carries
-        `externalId`)."""
-        return self._client.api_client.do(
-            "GET",
-            f"/api/2.0/account/scim/v2/Groups/{group_id}",
+        ``list_direct_group_members_proxy`` takes the group's numeric id as an ``int``;
+        each member's numeric ``principal_id`` is mapped back to a canonical identifier
+        via the cache built during fetch_principals. Untranslatable members are
+        dropped."""
+        members = self._client.workspace_iam_v2.list_direct_group_members_proxy(
+            int(group_id)
         )
-
-    def _members_from_response(self, resp: dict) -> frozenset[Principal]:
-        """Extract a single-group GET response's members as canonical-identifier
-        Principals. Member SCIM ids are mapped back via the cache built during
-        fetch_principals; untranslatable members are dropped."""
         return frozenset(
             p
             for p in (
-                _member_dict_to_principal(m, self._identifier_by_scim_id)
-                for m in (resp.get("members") or [])
+                _direct_member_to_principal(m, self._identifier_by_scim_id)
+                for m in members
             )
             if p is not None
         )
@@ -466,19 +430,19 @@ class WorkspaceHelper:
         self, group_ids: set[str]
     ) -> dict[str, frozenset[Principal]]:
         """Fetch membership (as canonical-identifier Principals) for each group id via
-        ``GET /Groups/{id}``, dispatched concurrently up to ``_GROUP_FETCH_WORKERS``.
-        Only groups whose desired ``members`` are authoritative are passed in — the rest
-        keep ``members=None`` (unmanaged, never fetched)."""
+        one ``list_direct_group_members_proxy`` call each, dispatched concurrently up to
+        ``_GROUP_FETCH_WORKERS``. Only groups whose desired ``members`` are authoritative
+        are passed in — the rest keep ``members=None`` (unmanaged, never fetched)."""
         if not group_ids:
             return {}
         worker_count = min(_GROUP_FETCH_WORKERS, len(group_ids))
         results: dict[str, frozenset[Principal]] = {}
         with ThreadPoolExecutor(max_workers=worker_count) as pool:
             future_to_id = {
-                pool.submit(self._fetch_group_by_id, gid): gid for gid in group_ids
+                pool.submit(self._fetch_group_members, gid): gid for gid in group_ids
             }
             for future, gid in future_to_id.items():
-                results[gid] = self._members_from_response(future.result())
+                results[gid] = future.result()
         return results
 
     def _fetch_group_assumers_for(
@@ -528,19 +492,19 @@ class WorkspaceHelper:
     ) -> set[Group]:
         """Fetch actual-state Groups (identity, membership, assumers) for configured groups.
 
-        Identity (display name, SCIM id, ``external_id``) is built from the caches
-        populated during ``fetch_principals()`` — no per-group call. The candidate set is
+        Identity (display name, id, ``external_id``) is built from the caches populated
+        during ``fetch_principals()`` — no per-group call. The candidate set is
         ``desired_names`` (the groups declared in config) intersected with the account
-        groups, plus any account group whose SCIM id is in ``desired_ids`` (matched under
-        its *current* display name — this is how a renamed group, whose config holds the
-        new name but whose account still holds the old one, is located by id). A desired
-        id with no matching account group is left for the differ to flag.
+        groups, plus any account group whose id is in ``desired_ids`` (matched under its
+        *current* display name — this is how a renamed group, whose config holds the new
+        name but whose account still holds the old one, is located by id). A desired id
+        with no matching account group is left for the differ to flag.
 
         Membership and assumers are **authoritative only when supplied**, so each is
-        fetched only for its own subset: a group's members are read (one ``GET
-        /Groups/{id}`` — the account SCIM proxy list call doesn't return members inline)
-        only when its display name is in ``member_fetch_names`` or its id in
-        ``member_fetch_ids``; its assumers are read (one rule-set GET) only when in
+        fetched only for its own subset: a group's members are read (one
+        ``list_direct_group_members_proxy`` call — the V2 group list doesn't return
+        members inline) only when its display name is in ``member_fetch_names`` or its id
+        in ``member_fetch_ids``; its assumers are read (one rule-set GET) only when in
         ``assumer_fetch_names`` / ``assumer_fetch_ids``. Groups outside a subset keep that
         field ``None`` (unmanaged — never fetched). Both fetches are dispatched
         concurrently. Must be called after ``fetch_principals()``. Returns an empty set
@@ -561,7 +525,7 @@ class WorkspaceHelper:
         member_fetch_ids = member_fetch_ids or set()
         assumer_fetch_names = assumer_fetch_names or set()
         assumer_fetch_ids = assumer_fetch_ids or set()
-        # display_name -> SCIM id, deduped by name (id is unique per name in the cache).
+        # display_name -> id, deduped by name (id is unique per name in the cache).
         candidates = {name: self._group_id_by_name[name] for name in names}
         members_by_id = self._fetch_group_members_for(
             {
@@ -589,8 +553,8 @@ class WorkspaceHelper:
         }
 
     def list_account_groups(self) -> set[Group]:
-        """Return every account group as membership-less Group state (display name, SCIM
-        id, external_id).
+        """Return every account group as membership-less Group state (display name, id,
+        external_id).
 
         Built from the group id/external-id maps populated during ``fetch_principals()``
         — no additional API calls and no membership fetch, since the group-deletion
@@ -634,10 +598,10 @@ class WorkspaceHelper:
         they never are), so ``resolve_by_identifier`` canonicalizes the old name to
         the new group principal via ``_renamed_group_new_by_old``; that way an actual
         grant to the old name compares equal to a desired grant to the new name and
-        produces no spurious diff. Applied even in dry-run — the SCIM PATCH is
+        produces no spurious diff. Applied even in dry-run — the rename call is
         skipped, but the cache must reflect the rename for resolution. Also remaps
         ``_group_id_by_name`` so the executor's member add/remove (keyed by the new
-        display name) finds the SCIM id."""
+        display name) finds the group id."""
         for rename in renames:
             scim_id = self._group_id_by_name.pop(rename.old_display_name, rename.id)
             self._group_id_by_name[rename.new_display_name] = scim_id
@@ -658,9 +622,9 @@ class WorkspaceHelper:
         displayName). Requires the engine principal to hold the MANAGER role on the
         group.
 
-        TBD: verify in integration testing; the exact SCIM PatchOp body shape for
-        the account SCIM proxy patch endpoint is assumed here. If the API rejects
-        it, adjust the body accordingly.
+        Writes go through the account SCIM proxy (not the V2 identity API): the SCIM
+        proxy is the mutation path that keeps the engine principal MANAGER on groups it
+        creates, so all group writes stay on it for consistency.
         """
         self._client.api_client.do(
             "PATCH",
@@ -674,30 +638,26 @@ class WorkspaceHelper:
         )
 
     def delete_group(self, group_id: str) -> None:
-        """Delete a Databricks-managed account group via the account SCIM proxy.
-
-        TBD: verify in integration testing; the DELETE endpoint shape for the account
-        SCIM proxy is assumed here, consistent with create_group / rename_group. If the
-        API rejects it, adjust accordingly.
-        """
+        """Delete a Databricks-managed account group via the account SCIM proxy."""
         self._client.api_client.do(
             "DELETE",
             f"/api/2.0/account/scim/v2/Groups/{group_id}",
         )
 
     def create_group(self, display_name: str) -> str:
-        """Create a Databricks-managed account group (initially empty) and return its
-        new account SCIM id.
+        """Create a Databricks-managed account group (initially empty) via the account
+        SCIM proxy and return its new id.
+
+        Writes use the SCIM proxy rather than the V2 identity API deliberately: the
+        SCIM ``POST /Groups`` grants the creating principal the MANAGER role on the new
+        group (so the engine can manage it going forward), whereas V2
+        ``create_group_proxy`` does not.
 
         Members are added afterwards via ``add_group_members`` rather than at creation
         time: a group whose members include other groups created in the same run can
-        only be linked once every group (and its SCIM id) exists. The caller must feed
-        the returned id to ``register_created_group`` on the main thread before adding
+        only be linked once every group (and its id) exists. The caller must feed the
+        returned id to ``register_created_group`` on the main thread before adding
         members.
-
-        TBD: verify in integration testing; the exact SCIM body shape for the account
-        SCIM proxy create endpoint is assumed here. If the API rejects it, adjust the
-        body (e.g. schemas shape) accordingly.
         """
         response = self._client.api_client.do(
             "POST",
@@ -709,31 +669,28 @@ class WorkspaceHelper:
         )
         return (response or {}).get("id", "")
 
-    def register_created_group(self, display_name: str, scim_id: str) -> None:
-        """Register a just-created group's SCIM id into the principal caches so it
-        resolves as a GROUP principal and ``add_group_members`` can target it by id.
+    def register_created_group(self, display_name: str, group_id: str) -> None:
+        """Register a just-created group's id into the principal caches so it resolves
+        as a GROUP principal and ``add_group_members`` can target it by id.
 
         Called on the main thread after ``create_group`` returns (workers never touch
         shared caches). Mirrors ``register_pending_groups``' cache-priming, but with
-        the real SCIM id now known — which is what lets a member that is itself a
-        group created this run resolve to a real id when its parent's membership is set.
+        the real id now known — which is what lets a member that is itself a group
+        created this run resolve to a real id when its parent's membership is set.
         """
         self._groups = (self._groups or set()) | {display_name}
-        if scim_id:
-            self._group_id_by_name[display_name] = scim_id
-            self._group_name_by_id[scim_id] = display_name
-            self._scim_id_by_identifier[display_name] = scim_id
-            self._identifier_by_scim_id[scim_id] = display_name
+        if group_id:
+            self._group_id_by_name[display_name] = group_id
+            self._group_name_by_id[group_id] = display_name
+            self._scim_id_by_identifier[display_name] = group_id
+            self._identifier_by_scim_id[group_id] = display_name
 
     def add_group_members(
         self, display_name: str, members: Iterable[Principal]
     ) -> None:
-        """Add members to an existing Databricks-managed account group via SCIM PatchOp.
-
-        TBD: verify in integration testing; the exact SCIM PatchOp body shape for
-        the account SCIM proxy patch endpoint is assumed here. If the API rejects
-        it, adjust the body accordingly.
-        """
+        """Add members to an existing Databricks-managed account group via a SCIM
+        PatchOp (batch add). The member ids come from the V2 read path (the internal id
+        doubles as the SCIM member value)."""
         group_id = self._group_id_by_name[display_name]
         member_dicts = [
             _principal_to_member_dict(m, self._scim_id_by_identifier) for m in members
@@ -752,14 +709,9 @@ class WorkspaceHelper:
     def remove_group_members(
         self, display_name: str, members: Iterable[Principal]
     ) -> None:
-        """Remove members from an existing Databricks-managed account group via a
-        SCIM PatchOp. Requires the engine principal to hold the MANAGER role on the
-        group.
-
-        TBD: verify in integration testing; the exact SCIM PatchOp body shape for
-        the account SCIM proxy patch endpoint is assumed here. If the API rejects
-        it, adjust the body accordingly.
-        """
+        """Remove members from an existing Databricks-managed account group via a SCIM
+        PatchOp (batch remove). Requires the engine principal to hold the MANAGER role
+        on the group."""
         group_id = self._group_id_by_name[display_name]
         operations = [
             {
@@ -921,7 +873,7 @@ class WorkspaceHelper:
         )
 
     def get_group_id(self, display_name: str) -> str | None:
-        """Return the cached account SCIM id for a group display name, or None."""
+        """Return the cached id for a group display name, or None."""
         return self._group_id_by_name.get(display_name)
 
     def register_created_tag_policy(self, tag_policy: TagPolicy) -> None:

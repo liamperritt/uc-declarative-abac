@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -16,42 +17,44 @@ from uc_declarative_abac.utils import (
 # ---------------------------------------------------------------------------
 
 
-def _make_user(user_name: str) -> dict:
-    return {"userName": user_name}
+def _make_user(user_name: str, user_id: str = "1") -> SimpleNamespace:
+    """A stand-in for a databricks.sdk.service.iamv2.User (only the fields the
+    helper reads: username / user_id)."""
+    return SimpleNamespace(username=user_name, user_id=user_id)
 
 
-def _make_group(display_name: str) -> dict:
-    return {"displayName": display_name}
+def _make_group(display_name: str, group_id: str = "10") -> SimpleNamespace:
+    """A stand-in for a databricks.sdk.service.iamv2.Group."""
+    return SimpleNamespace(group_name=display_name, group_id=group_id, external_id="")
 
 
-def _make_sp(display_name: str, application_id: str) -> dict:
-    return {"displayName": display_name, "applicationId": application_id}
+def _make_sp(
+    display_name: str, application_id: str, sp_id: str = "100"
+) -> SimpleNamespace:
+    """A stand-in for a databricks.sdk.service.iamv2.ServicePrincipal."""
+    return SimpleNamespace(
+        display_name=display_name,
+        application_id=application_id,
+        service_principal_id=sp_id,
+    )
 
 
 def _make_workspace_client(
-    users: list[dict] | None = None,
-    groups: list[dict] | None = None,
-    service_principals: list[dict] | None = None,
+    users: list[SimpleNamespace] | None = None,
+    groups: list[SimpleNamespace] | None = None,
+    service_principals: list[SimpleNamespace] | None = None,
 ) -> MagicMock:
+    """Build a MagicMock WorkspaceClient whose workspace_iam_v2 list proxies serve
+    typed identity objects (the account identity path now runs on Workspace Identity
+    V2, not the raw account SCIM proxy). Each proxy returns a fresh iterator per call.
+    """
     client = MagicMock()
-
-    def _do(method, path, **kwargs):
-        if "/Users" in path:
-            resources = users or []
-        elif "/Groups" in path:
-            resources = groups or []
-        elif "/ServicePrincipals" in path:
-            resources = service_principals or []
-        else:
-            resources = []
-        return {
-            "totalResults": len(resources),
-            "startIndex": 1,
-            "itemsPerPage": 100,
-            "Resources": resources,
-        }
-
-    client.api_client.do.side_effect = _do
+    iam = client.workspace_iam_v2
+    iam.list_users_proxy.side_effect = lambda **kwargs: iter(users or [])
+    iam.list_groups_proxy.side_effect = lambda **kwargs: iter(groups or [])
+    iam.list_service_principals_proxy.side_effect = lambda **kwargs: iter(
+        service_principals or []
+    )
     return client
 
 
@@ -71,9 +74,8 @@ def test_workspace_helper_fetches_and_caches_users() -> None:
 
     assert helper.validate_principal("alice@example.com") is True
     assert helper.validate_principal("bob@example.com") is True
-    # SCIM endpoint should only be called once per principal type (3 types, 1 call each)
-    # but the second fetch_principals should be cached so total = 3
-    assert client.api_client.do.call_count == 3
+    # The list proxy is only called once — the second fetch_principals is cached.
+    assert client.workspace_iam_v2.list_users_proxy.call_count == 1
 
 
 def test_workspace_helper_fetches_and_caches_groups() -> None:
@@ -87,7 +89,7 @@ def test_workspace_helper_fetches_and_caches_groups() -> None:
 
     assert helper.validate_principal("data_engineers") is True
     assert helper.validate_principal("analysts") is True
-    assert client.api_client.do.call_count == 3
+    assert client.workspace_iam_v2.list_groups_proxy.call_count == 1
 
 
 def test_workspace_helper_fetches_and_caches_service_principals() -> None:
@@ -100,7 +102,7 @@ def test_workspace_helper_fetches_and_caches_service_principals() -> None:
     helper.fetch_principals()  # second call should use cache
 
     assert helper.validate_principal("my-sp") is True
-    assert client.api_client.do.call_count == 3
+    assert client.workspace_iam_v2.list_service_principals_proxy.call_count == 1
 
 
 def test_workspace_helper_skips_user_fetch_when_skip_users_fetch() -> None:
@@ -117,8 +119,10 @@ def test_workspace_helper_skips_user_fetch_when_skip_users_fetch() -> None:
     assert helper.validate_principal("data_engineers") is True
     assert helper.validate_principal("my-sp") is True
     assert helper.validate_principal("alice@example.com") is False
-    # Only Groups + ServicePrincipals are listed — the Users call is skipped.
-    assert client.api_client.do.call_count == 2
+    # Only Groups + ServicePrincipals are listed — the Users proxy is skipped.
+    assert client.workspace_iam_v2.list_users_proxy.call_count == 0
+    assert client.workspace_iam_v2.list_groups_proxy.call_count == 1
+    assert client.workspace_iam_v2.list_service_principals_proxy.call_count == 1
 
 
 def test_workspace_helper_fetches_users_by_default() -> None:
@@ -132,7 +136,7 @@ def test_workspace_helper_fetches_users_by_default() -> None:
     helper.fetch_principals()
 
     assert helper.validate_principal("alice@example.com") is True
-    assert client.api_client.do.call_count == 3
+    assert client.workspace_iam_v2.list_users_proxy.call_count == 1
 
 
 def test_workspace_helper_warns_on_duplicate_sp_display_names() -> None:
@@ -392,46 +396,20 @@ def test_workspace_helper_returns_principals_dict() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Account SCIM proxy
+# Account identity (Workspace Identity V2)
 # ---------------------------------------------------------------------------
 
 
-def test_workspace_helper_paginates_scim_results() -> None:
-    """fetch_principals paginates through SCIM results when totalResults > itemsPerPage."""
-    client = MagicMock()
-
-    call_count = {"n": 0}
-
-    def _paginated_do(method, path, **kwargs):
-        call_count["n"] += 1
-        query = kwargs.get("query", {})
-        start = query.get("startIndex", 1)
-        if "/Users" in path:
-            if start == 1:
-                return {
-                    "totalResults": 3,
-                    "startIndex": 1,
-                    "itemsPerPage": 2,
-                    "Resources": [
-                        {"userName": "a@co.com"},
-                        {"userName": "b@co.com"},
-                    ],
-                }
-            else:
-                return {
-                    "totalResults": 3,
-                    "startIndex": 3,
-                    "itemsPerPage": 2,
-                    "Resources": [{"userName": "c@co.com"}],
-                }
-        return {
-            "totalResults": 0,
-            "startIndex": 1,
-            "itemsPerPage": 100,
-            "Resources": [],
-        }
-
-    client.api_client.do.side_effect = _paginated_do
+def test_workspace_helper_lists_all_principals_from_iterator() -> None:
+    """fetch_principals consumes the full paginated iterator the V2 list proxy
+    returns (the SDK owns pagination), caching every principal it yields."""
+    client = _make_workspace_client(
+        users=[
+            _make_user("a@co.com"),
+            _make_user("b@co.com"),
+            _make_user("c@co.com"),
+        ],
+    )
 
     helper = WorkspaceHelper(client)
     helper.fetch_principals()
@@ -446,18 +424,20 @@ def test_workspace_helper_paginates_scim_results() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_workspace_helper_uses_account_scim_by_default() -> None:
-    """Default scope uses account SCIM proxy (api_client.do)."""
-    client = _make_workspace_client(users=[{"userName": "jane@co.com"}])
+def test_workspace_helper_uses_account_iam_v2_by_default() -> None:
+    """Default scope uses the account identity proxy (workspace_iam_v2), not the
+    workspace SCIM SDK list methods."""
+    client = _make_workspace_client(users=[_make_user("jane@co.com")])
     helper = WorkspaceHelper(client)
     helper.fetch_principals()
 
-    assert client.api_client.do.called
+    assert client.workspace_iam_v2.list_users_proxy.called
+    assert not client.users.list.called
     assert helper.validate_principal("jane@co.com")
 
 
 def test_workspace_helper_uses_sdk_list_when_scope_is_workspace() -> None:
-    """use_workspace_scim=True uses SDK .list() instead of account SCIM proxy."""
+    """use_workspace_scim=True uses SDK .list() instead of the account identity proxy."""
     client = MagicMock()
 
     user = MagicMock()
@@ -477,8 +457,8 @@ def test_workspace_helper_uses_sdk_list_when_scope_is_workspace() -> None:
     assert client.users.list.called
     assert client.groups.list.called
     assert client.service_principals.list.called
-    # Account SCIM proxy should NOT be called
-    assert not client.api_client.do.called
+    # The account identity proxy should NOT be called in workspace-SCIM mode.
+    assert not client.workspace_iam_v2.list_users_proxy.called
     # Principals should be found
     assert helper.validate_principal("jane@co.com")
     assert helper.validate_principal("data_engineers")
@@ -541,7 +521,7 @@ def test_workspace_helper_appends_account_system_groups_in_account_scim() -> Non
     client = _make_workspace_client(
         groups=[_make_group("data_engineers")],
     )
-    helper = WorkspaceHelper(client)  # account SCIM (default)
+    helper = WorkspaceHelper(client)  # account identity (default)
     helper.fetch_principals()
 
     assert helper.validate_principal("data_engineers") is True
@@ -566,16 +546,13 @@ def test_workspace_helper_fetches_account_principal_types_in_parallel() -> None:
 
     delay_seconds = 0.3
 
-    def _slow_do(method, path, **kwargs):
+    def _slow_list(*args, **kwargs):
         time.sleep(delay_seconds)
-        return {
-            "totalResults": 0,
-            "startIndex": 1,
-            "itemsPerPage": 100,
-            "Resources": [],
-        }
+        return iter([])
 
-    client.api_client.do.side_effect = _slow_do
+    client.workspace_iam_v2.list_users_proxy.side_effect = _slow_list
+    client.workspace_iam_v2.list_groups_proxy.side_effect = _slow_list
+    client.workspace_iam_v2.list_service_principals_proxy.side_effect = _slow_list
 
     helper = WorkspaceHelper(client)
     start = time.monotonic()
