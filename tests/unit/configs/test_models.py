@@ -2663,6 +2663,25 @@ def test_mask_policy_config_allows_missing_except():
 
 
 # ---------------------------------------------------------------------------
+# DomainConfig
+# ---------------------------------------------------------------------------
+
+
+def test_domain_config_parses_governed_tag_reference():
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {},
+            "domains": {
+                "finance-domain": {"governed_tag": "finance"},
+            },
+        }
+    )
+
+    assert config.domains is not None
+    assert config.domains["finance-domain"].governed_tag == "finance"
+
+
+# ---------------------------------------------------------------------------
 # GovernedTagConfig
 # ---------------------------------------------------------------------------
 

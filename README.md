@@ -90,6 +90,8 @@ of patterns.** A feature is on exactly when its scope is non-empty.
 | `--group-management-scopes` | reconcile membership of existing account groups |
 | `--group-deletion-scopes` | delete Databricks-managed account groups absent from config |
 | `--governed-tag-deletion-scopes` | delete governed tags absent from config |
+| `--domain-management-scopes` | create/update Discovery domains declared under `resources.domains` |
+| `--domain-deletion-scopes` | delete Discovery domains absent from `resources.domains` |
 
 **Securable scopes** (the first five) match a dotted `full_name` with downward
 inheritance:
@@ -115,9 +117,10 @@ are always engine-managed and flow through regardless of scope.
 > naming a catalog absent from config matches nothing (and logs a zero-match
 > warning). To bring a new catalog under management, add it to your config.
 
-**Flat scopes** (groups by display name, governed tags by name) have no
-hierarchy: an entry with no `*` matches that one name exactly, a trailing `*` is
-a name prefix (`team_*`), and `*` matches all.
+**Flat scopes** (groups by display name, governed tags by name, Discovery
+domains by governed-tag key) have no hierarchy: an entry with no `*` matches
+that one name exactly, a trailing `*` is a name prefix (`team_*`), and `*`
+matches all.
 
 A scope entry that matches no configured resource logs a warning (a likely typo)
 but never fails the run. Examples:
@@ -179,6 +182,7 @@ Resolution precedence matches the SDK's unified-auth chain: explicit `--profile`
 > - **Workspace admin** on the target workspace — needed to fetch users, service principals and groups from the account SCIM proxy API.
 > - **Metastore admin** on the target metastore — needed to create/alter catalogs, schemas, tables, volumes, functions, tags, grants, masks, and filters.
 > - **Governed tag `creator`/`manager`** on the account — needed to create and update account-level governed tags (tag policies) under `resources.governed_tags`.
+> - **`MANAGE DISCOVERY`** — needed when creating, updating, or deleting Unity Catalog Discovery domains.
 > - **Group `manager` on each managed group** — needed to add/remove members of the account groups under `resources.groups` when `--group-management-scopes` is active. The engine automatically receives the `manager` role on any group it creates via `--group-creation-scopes`, so groups created by the engine are manageable without further grants; for pre-existing groups, the role must be granted to the engine principal out of band.
 
 ### GitHub Action
@@ -206,6 +210,8 @@ The repo ships a composite GitHub Action at `deploy/action.yml` so any other rep
 | `group-management-scopes` | no | `''` | Scope reconciliation of the **members and assumers** of matching account groups (by display name) — for existing groups and groups created the same run. Each field is authoritative only when supplied in config: an omitted `members`/`assumers` is left untouched (not even fetched), while a supplied list — including an empty one — is enforced (empty removes all). Member reconciliation requires the `MANAGER` role on each managed group. Empty (default) disables it |
 | `group-deletion-scopes` | no | `''` | Scope deletion of Databricks-managed account groups absent from `resources.groups` to those matching by display name. External (IdP-provisioned) groups and account system groups (`account users`, `account admins`) are never deleted. Requires `group-creation-scopes` to be active and at least one group declared under `resources.groups`. Requires interactive confirmation unless `force: 'true'` — in CI you must set `force` or the run errors out |
 | `governed-tag-deletion-scopes` | no | `''` | Scope deletion of governed tags absent from config to those matching by name. System-managed tags are never deleted. Empty (default) disables it. Requires interactive confirmation unless `force: 'true'` — in CI you must set `force` or the run errors out |
+| `domain-management-scopes` | no | `''` | Scope creation and update of Discovery domains declared under `resources.domains`, matching by governed-tag key. Flat grammar: `*` all, `finance*` prefix, or an exact key. Domain descriptions follow their referenced governed tags. Empty (default) disables it |
+| `domain-deletion-scopes` | no | `''` | Scope deletion of Discovery domains absent from `resources.domains`, matching by governed-tag key. Flat grammar: `*` all, `finance*` prefix, or an exact key. Empty (default) disables deletion independently of domain create/update management. Children are deleted before parents. Requires interactive confirmation unless `force: 'true'` — in CI you must set `force` or the run errors out |
 | `retain-tag-prefixes` | no | `'class.'` | Comma-separated tag-key prefixes the engine must never remove from securables, even when absent from config (it may still add/update them). Defaults to `'class.'` to protect UC auto data classification tags. Set to an empty string to allow removing any unconfigured tag |
 | `ignore-unresolvable-principals` | no | `''` | Comma-separated actual-state principal identifiers — usernames for users, application_ids for service principals, display names for groups — whose resolution-failure warning is suppressed across the privileges, securables (owner), and governed-tags (assigners) domains. Primarily for Databricks-managed system service principals that show up in system tables but aren't resolvable via SCIM (otherwise a warning every run) |
 | `force` | no | `'false'` | Skip every interactive confirmation prompt and auto-confirm destructive actions. Required in CI when any destructive gate is set |
@@ -848,6 +854,48 @@ resources:
 
 Once a tag policy is created, you can apply it to tables, columns, schemas, and other UC objects via the `tags:` field on any definition or resource. ABAC policies then match against these tag key-value pairs (e.g. `pii: email`, `classification: confidential`) to enforce masking, filtering, or grants.
 
+#### Unity Catalog Discovery Domains
+
+Discovery domains are declared explicitly under `resources.domains`. Each one
+references a governed tag, whose key determines the domain hierarchy and whose
+description becomes the domain description. A key such as `finance` creates a
+top-level domain; `finance/orders` creates an `orders` subdomain beneath it. The
+referenced governed tag may be declared in the same config or already exist in
+the account.
+
+Only the `domain` or `domain/subdomain` form is accepted. A subdomain's root
+must be another governed tag or an existing Discovery domain:
+
+```yaml
+resources:
+  governed_tags:
+    finance:
+      description: Finance data domain
+    finance/orders:
+      description: Order processing subdomain
+  domains:
+    finance:
+      governed_tag: finance
+    finance-orders:
+      governed_tag: finance/orders
+```
+
+```bash
+uc-abac deploy --config-dir ./configs --warehouse-id <id> \
+  --domain-management-scopes '*'
+```
+
+Missing domains are created parent-first. Existing domain descriptions are
+updated to match their governed tags.
+
+`--domain-deletion-scopes` independently makes matching domain existence
+authoritative over `resources.domains`. A matching actual domain absent from
+that block is deleted; a declared domain is preserved even when it falls outside
+`--domain-management-scopes`. Deletions run child-first, require confirmation
+unless `--force` is set, and are reported in dry-run output. `--force` skips the
+confirmation only; it never authorizes deleting Glossary pages, so a non-empty
+domain is rejected safely.
+
 #### Catalogs
 
 Catalogs are deployed by placing an entry under `resources: catalogs:`. The recommended form is a thin `$ref` to a matching catalog definition — this keeps all the interesting composition (schemas, policies, tags) in the definition, and leaves the resource side as a one-line pointer. Overrides can be applied on the `$ref` entry when a resource needs to differ from its definition (for example, a test catalog that reuses a prod definition but changes `name`, a couple of tags, or a function reference).
@@ -1136,6 +1184,7 @@ Not all object types are managed the same way:
 |----------|-----------|----------|
 | **Group members & assumers** | Additive + removals (gated) | With `--group-management-scopes`, each of a group's `members` and `assumers` is reconciled **only if supplied** in config (omitted = left untouched, not fetched; empty list = remove all) — for existing groups and groups created the same run. Missing groups are created (empty) only with `--group-creation-scopes`. With neither scope, configured groups are ignored. |
 | **Governed tags** | Additive + deletes | Unconfigured governed tags are deleted from the account only if they fall in `--governed-tag-deletion-scopes`. |
+| **Discovery domains** | Additive + deletes | Explicit `resources.domains` entries create/update within `--domain-management-scopes`; domains absent from config are deleted only within `--domain-deletion-scopes`. |
 | **UC objects & attributes** | Additive only (create/update, never deletes) | Catalogs, schemas, tables, volumes, functions, comments |
 | **Tags & grant policies** | Additive + removals/revokes | Tag assignments on objects, `GRANT` statements |
 | **Mask & filter policies** | Additive by default; deletes when authoritative (gated) | Column masking policies, row filter policies |
@@ -1235,18 +1284,20 @@ Mask and filter policies are additive by default (create/update, never delete). 
 - **Structured logging** — `Securables` / `Governed tags` / `Tags` / `Policies` / `Privileges` section headers, ordered by securable type then name, with dry-run prefix support and summary counts
 
 #### Infrastructure
-- **CLI** (`uc-abac` / `uc-declarative-abac`) — subcommands: `validate` (local YAML check), `deploy` (execute; add `--dry-run` to preview). Required for `deploy`: `--config-dir`, `--warehouse-id`. Optional: `--profile` (CLI profile name from `~/.databrickscfg`; omit to use unified auth via env vars / default profile / metadata service — see the [Authentication](#authentication) section), `--timezone` (IANA timezone for the expiry run date; UTC by default), `--use-workspace-scim`, `--skip-users-fetch`, the per-feature scope flags (`--tag-management-scopes`, `--privilege-management-scopes`, `--taggable-management-scopes`, `--taggable-creation-scopes`, `--policy-deletion-scopes`, `--group-creation-scopes`, `--group-management-scopes`, `--group-deletion-scopes`, `--governed-tag-deletion-scopes` — each empty by default, disabling that feature; see [Feature scopes](#feature-scopes)), and `--force` (skip interactive confirmations) — all described below. Settings can also be supplied via `uc_abac.yml` or `UC_ABAC_*` environment variables.
+- **CLI** (`uc-abac` / `uc-declarative-abac`) — subcommands: `validate` (local YAML check), `deploy` (execute; add `--dry-run` to preview). Required for `deploy`: `--config-dir`, `--warehouse-id`. Optional: `--profile` (CLI profile name from `~/.databrickscfg`; omit to use unified auth via env vars / default profile / metadata service — see the [Authentication](#authentication) section), `--timezone` (IANA timezone for the expiry run date; UTC by default), `--use-workspace-scim`, `--skip-users-fetch`, the per-feature scope flags (`--tag-management-scopes`, `--privilege-management-scopes`, `--taggable-management-scopes`, `--taggable-creation-scopes`, `--policy-deletion-scopes`, `--group-creation-scopes`, `--group-management-scopes`, `--group-deletion-scopes`, `--governed-tag-deletion-scopes`, `--domain-management-scopes`, `--domain-deletion-scopes` — each empty by default, disabling that feature; see [Feature scopes](#feature-scopes)), and `--force` (skip interactive confirmations) — all described below. Settings can also be supplied via `uc_abac.yml` or `UC_ABAC_*` environment variables.
 - **GitHub Actions** — two reusable composite actions: `deploy/action.yml` (invoked as `liamperritt/uc-declarative-abac/deploy@<ref>`) to reconcile YAML configs against UC on push / PR / schedule, and `validate/action.yml` (invoked as `liamperritt/uc-declarative-abac/validate@<ref>`) for offline config validation with no warehouse or credentials (see the [GitHub Action](#github-action) section)
 - **Hybrid SQL polling** — `wait_timeout=50s` with `on_wait_timeout=CONTINUE` and 10s polling for long-running queries
 - **External links** — fetches SQL results via external link URLs for large result sets
 - **Parallel state fetch** — securables, tags, privileges, policies, governed tags, and principals are fetched concurrently
 - **`information_schema` filtering** — all state queries exclude the `information_schema` schema and its child objects
-- **Per-feature scope flags** — each mutating feature is gated by a single `--<feature>-scopes` flag naming *which resources* it applies to. **Empty (the default) disables the feature — no fetch, no diff, no log section, no SQL, in both dry runs and real runs; `*` covers everything; otherwise a comma-separated list of patterns.** Securable-domain flags match a dotted `full_name` with downward inheritance (a bare `main` covers the catalog and its whole subtree but not `maintenance`; `main.*` covers everything under `main` excluding the catalog node; a trailing `*` such as `main.sales*` is a raw name prefix; leading/middle wildcards are rejected). Flat-domain flags (groups, governed tags) match a name exactly, or by trailing-`*` prefix, or `*` for all. A scope entry matching no configured resource logs a warning but never fails. Functions are always engine-managed and flow through every securable scope. See [Feature scopes](#feature-scopes) for the full grammar.
+- **Per-feature scope flags** — each mutating feature is gated by a single `--<feature>-scopes` flag naming *which resources* it applies to. **Empty (the default) disables the feature — no fetch, no diff, no log section, no SQL, in both dry runs and real runs; `*` covers everything; otherwise a comma-separated list of patterns.** Securable-domain flags match a dotted `full_name` with downward inheritance (a bare `main` covers the catalog and its whole subtree but not `maintenance`; `main.*` covers everything under `main` excluding the catalog node; a trailing `*` such as `main.sales*` is a raw name prefix; leading/middle wildcards are rejected). Flat-domain flags (groups, governed tags, Discovery domains) match a name or governed-tag key exactly, or by trailing-`*` prefix, or `*` for all. A scope entry matching no configured resource logs a warning but never fails. Functions are always engine-managed and flow through every securable scope. See [Feature scopes](#feature-scopes) for the full grammar.
   - `--tag-management-scopes` — create/update/remove tag assignments on in-scope securables. When empty, the privileges compiler still honours grant-policy matches, but it matches against the *actual* on-disk UC tag state rather than the config's desired tags (since the engine is not going to apply the config's tags this run). Out-of-scope namespace tag state is left untouched; for grant matching, the privileges compiler uses the UC actual tag state for out-of-scope namespaces.
   - `--taggable-management-scopes` — update attributes (`owner`, `comment`, and `rfa_destinations`) on existing in-scope taggable securables (catalogs, schemas, tables, volumes), plus **column comments** on in-scope columns (batched one `ALTER TABLE … ALTER COLUMN` per base table; `COMMENT ON COLUMN` for view/materialized-view/metric-view/streaming-table columns). Table-level comment updates on a view's underlying table fail with a logged error (only view owners can update comment). Owner updates on tables whose `table_type` is `MATERIALIZED_VIEW` or `STREAMING_TABLE` fail with a logged error (change ownership on the pipeline instead). Function attributes are always engine-managed independently of this scope.
   - `--taggable-creation-scopes` — create in-scope catalogs, schemas, tables, and volumes declared in config but absent from UC. Tables must declare ≥1 column with a `type` string on each (e.g. `type: STRING`); otherwise table creation fails with a `NonexistentSecurableError` explaining the requirement. `comment` and `location` declared on these objects are embedded directly in the `CREATE` statement: `MANAGED LOCATION '…'` for catalogs and schemas, `LOCATION '…'` on `CREATE TABLE` to make it external, and `CREATE EXTERNAL VOLUME … LOCATION '…'` for external volumes. Columns declared in config but missing from a pre-existing table are added via `ALTER TABLE … ADD COLUMN` as long as the column declares a `type`; columns without a `type` fail validation with a hint, just like the table case. A column's `comment` is embedded directly in the `CREATE TABLE` / `ADD COLUMNS` statement when the column is created. Out-of-scope missing securables surface as `NonexistentSecurableError` at dry-run, so drift is caught before any SQL runs. Scoping to a qualified schema creates that schema and everything below it, but not the parent catalog — if the catalog is absent from UC, schema creation fails; include the catalog in scope (e.g. bare `main`) to create it too.
   - `--privilege-management-scopes` — grant/revoke privileges via `GRANT`/`REVOKE` SQL for in-scope securables.
   - `--governed-tag-deletion-scopes` — delete in-scope governed tags (account-level tag policies) that exist in UC but are absent from config. **High blast radius — deleting a tag policy orphans every object assigned that tag key across the account.** The engine logs the list of tags slated for deletion and requires an interactive `y`/`yes` confirmation at the terminal before issuing any `delete_tag_policy` call. UC itself decides what happens to objects that reference the deleted tag (typically: orphans them); the engine does not scan for references. Pair with `--force` in non-interactive contexts (see below). **Databricks system-managed governed tags (any tag key containing a `.`, e.g. `class.email_address`, `system.certification_status`) are never deleted** — they can't be, so they're excluded from deletion regardless of this scope. System tags are likewise never created or definition-updated: only their assigners are managed. Declaring a `.`-named governed tag with `allowed_values` is a config error, and declaring one that doesn't exist in the account fails the run (system tags can't be created).
+  - `--domain-management-scopes` — create or update matching Discovery domains declared under `resources.domains`, keyed by their governed-tag references.
+  - `--domain-deletion-scopes` — delete matching Discovery domains absent from `resources.domains`. The scope is independent of `--domain-management-scopes`; it activates domain state discovery and deletion without enabling creates or updates. The engine deletes children before parents, logs the plan, and prompts unless `--force` is set. `--force` skips that prompt only; domains containing Glossary pages fail safely instead of cascading deletion to those pages.
   - `--policy-deletion-scopes` — make config authoritative over mask/filter policies and `DROP` any actual policy discovered on an in-scope securable but not declared in config. **This applies to *every* mask/filter policy on an in-scope securable, regardless of whether it declares a `policies` list** — an out-of-config policy on an undeclared table is deleted just the same. Actual policies are discovered via the `system.information_schema.abac_policy_definitions` system table (catalog-scoped) and read in full via the policies SDK (`list_policies`). The engine logs the policies slated for deletion and requires an interactive `y`/`yes` confirmation before issuing any `DROP POLICY`; pair with `--force` in non-interactive contexts. Grant policies are unaffected — they stay managed (with revokes) by the privileges domain.
   - `--group-creation-scopes`, `--group-management-scopes`, `--group-deletion-scopes` — flat-domain scopes over account-group display names, described in detail in the groups section above.
   - `--retain-tag-prefixes <prefix_a,prefix_b>` — comma-separated tag-key prefixes the engine must never remove from securables, even when those tags are absent from config (it may still add/update them). Defaults to `class.`, so tags applied by UC's auto data classification (e.g. `class.phone_number`) are preserved across runs. Pass an empty string (`--retain-tag-prefixes ""`) to override the default and allow the engine to remove any unconfigured tag. No effect unless `--tag-management-scopes` is active.

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from unittest.mock import MagicMock
 
+from uc_declarative_abac.discovery_domains import DiscoveryDomain
 from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.policies import Policy
 from uc_declarative_abac.principals import Principal
@@ -281,6 +282,49 @@ def test_change_logger_logs_dry_run_summary() -> None:
     assert "1 to update" in summary
     assert "1 to grant" in summary
     assert "dry run" in summary.lower()
+
+
+def test_logger_includes_discovery_domain_changes_in_summary() -> None:
+    """Discovery domain creations and updates appear in output and the summary."""
+    cl, mock_logger = _make_change_logger(dry_run=True)
+    cl.log_discovery_domain_create(
+        DiscoveryDomain(tag_key="finance/orders", parent_tag_key="finance")
+    )
+    cl.log_discovery_domain_update(
+        DiscoveryDomain(tag_key="finance", description="Financial data"),
+        DiscoveryDomain(tag_key="finance", description="Finance data"),
+    )
+
+    cl.log_summary()
+
+    messages = _info_messages(mock_logger)
+    assert any(
+        "create discovery domain" in message.lower() and "finance/orders" in message
+        for message in messages
+    )
+    assert any(
+        "update discovery domain" in message.lower()
+        and "finance" in message
+        and "Finance data" in message
+        and "Financial data" in message
+        for message in messages
+    )
+    assert "Discovery domains: 1 to create, 1 to update" in messages[-1]
+
+
+def test_logger_includes_discovery_domain_delete_in_summary() -> None:
+    """Discovery domain deletions appear in output and the summary."""
+    cl, mock_logger = _make_change_logger(dry_run=True)
+    cl.log_discovery_domain_delete(DiscoveryDomain(tag_key="finance/legacy"))
+
+    cl.log_summary()
+
+    messages = _info_messages(mock_logger)
+    assert any(
+        "delete discovery domain" in message.lower() and "finance/legacy" in message
+        for message in messages
+    )
+    assert "Discovery domains: 1 to delete" in messages[-1]
 
 
 # ---------------------------------------------------------------------------

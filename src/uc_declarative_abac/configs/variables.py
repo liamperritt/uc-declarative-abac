@@ -65,7 +65,7 @@ _VARS_KEY = "$vars"
 
 # Fields whose child-dict KEYS are user data, so a ``{{ placeholder }}`` may appear in those keys
 # and is bound like any value placeholder. Every other key — config field names, ``$ref``/``$defs``
-# targets, and resource identity keys (catalogs/governed_tags/groups) — stays literal. Mirrors the
+# targets, and resource identity keys (catalogs/domains/governed_tags/groups) — stays literal. Mirrors the
 # user-data maps in ``configs/models.py``: ``tags`` on taggables,
 # ``has_tags``/``has_any_of_tags``/``has_none_of_tags`` on policies and column aliases, the
 # context-attribute maps (``has_*_context_attributes``, whose keys are context-attribute names)
@@ -113,9 +113,7 @@ def find_malformed_placeholders(text: str) -> set[str]:
     ``{{{{ ... }}}}`` sequences and legitimate literal braces (``{{"a":1}}``, ``{{ SELECT 1 }}``)
     are not reported. See ``_MALFORMED_RE``.
     """
-    return {
-        m.group(1) for m in _MALFORMED_RE.finditer(text) if m.group(1) is not None
-    }
+    return {m.group(1) for m in _MALFORMED_RE.finditer(text) if m.group(1) is not None}
 
 
 def substitute(text: str, variables: dict[str, str]) -> str:
@@ -199,7 +197,9 @@ def substitute_in_body(body: Any, variables: dict[str, str]) -> Any:
     return _substitute(copy.deepcopy(body), variables)
 
 
-def _substitute(node: Any, variables: dict[str, str], keys_templatable: bool = False) -> Any:
+def _substitute(
+    node: Any, variables: dict[str, str], keys_templatable: bool = False
+) -> Any:
     if isinstance(node, dict):
         ref_site = _REF_KEY in node
         result: dict = {}
@@ -210,13 +210,17 @@ def _substitute(node: Any, variables: dict[str, str], keys_templatable: bool = F
             # templatable iff its field is a tag map.
             new_key = (
                 substitute(key, variables)
-                if keys_templatable and isinstance(key, str) and key not in (_REF_KEY, _VARS_KEY)
+                if keys_templatable
+                and isinstance(key, str)
+                and key not in (_REF_KEY, _VARS_KEY)
                 else key
             )
             if ref_site and key == _REF_KEY:
                 result[new_key] = value
             else:
-                result[new_key] = _substitute(value, variables, key in TEMPLATABLE_KEY_FIELDS)
+                result[new_key] = _substitute(
+                    value, variables, key in TEMPLATABLE_KEY_FIELDS
+                )
         return result
     if isinstance(node, list):
         return [_substitute(item, variables, keys_templatable) for item in node]

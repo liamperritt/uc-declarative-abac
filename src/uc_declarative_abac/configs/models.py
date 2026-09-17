@@ -844,6 +844,17 @@ TaggableConfig = (
 SecurableConfig = TaggableConfig | FunctionConfig
 
 
+class DomainConfig(BaseConfig):
+    """Unity Catalog Discovery domain backed by one governed tag."""
+
+    governed_tag: str
+
+    @field_validator("governed_tag", mode="after")
+    @classmethod
+    def _validate_governed_tag(cls, value: str) -> str:
+        return _reject_blank_str(value, "governed_tag")
+
+
 class GovernedTagConfig(BaseConfig):
     """Account-level governed tag declaration. Serialised under `resources.governed_tags`."""
 
@@ -932,6 +943,7 @@ class GroupConfig(BaseConfig):
 
 class ResourcesConfig(BaseConfig):
     catalogs: dict[str, CatalogConfig]
+    domains: dict[str, DomainConfig] | None = None
     governed_tags: dict[str, GovernedTagConfig] | None = None
     groups: dict[str, GroupConfig] | None = None
 
@@ -962,6 +974,14 @@ class ResourcesConfig(BaseConfig):
                 list(governed_tags.values()),
                 "governed tag",
                 "resources",
+            )
+        domains = data.get("domains")
+        if isinstance(domains, dict):
+            _check_duplicate_names(
+                list(domains.values()),
+                "domain governed tag",
+                "resources",
+                key="governed_tag",
             )
         groups = data.get("groups")
         if isinstance(groups, dict):

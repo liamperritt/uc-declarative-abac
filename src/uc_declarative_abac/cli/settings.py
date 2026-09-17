@@ -57,6 +57,8 @@ _ENV_FIELD_MAP: dict[str, str] = {
     "group_management_scopes": "GROUP_MANAGEMENT_SCOPES",
     "group_deletion_scopes": "GROUP_DELETION_SCOPES",
     "governed_tag_deletion_scopes": "GOVERNED_TAG_DELETION_SCOPES",
+    "domain_management_scopes": "DOMAIN_MANAGEMENT_SCOPES",
+    "domain_deletion_scopes": "DOMAIN_DELETION_SCOPES",
     "force": "FORCE",
     "ref_override_strategy": "REF_OVERRIDE_STRATEGY",
     "max_parallel_changes": "MAX_PARALLEL_CHANGES",
@@ -103,6 +105,8 @@ class RunSettings(BaseModel):
     group_management_scopes: str | None = None
     group_deletion_scopes: str | None = None
     governed_tag_deletion_scopes: str | None = None
+    domain_management_scopes: str | None = None
+    domain_deletion_scopes: str | None = None
     force: bool = False
     ref_override_strategy: Literal["merge", "replace"] = "merge"
     max_parallel_changes: int = Field(default=8, ge=1)
