@@ -95,3 +95,16 @@ def test_workspace_helper_update_discovery_domain_uses_sdk_resource_name_and_upd
         domain=Domain(tag_key="finance", description="Financial data"),
         update_mask=FieldMask("description"),
     )
+
+
+def test_workspace_helper_delete_discovery_domain_uses_sdk_resource_name() -> None:
+    client = MagicMock(spec=WorkspaceClient)
+    helper = WorkspaceHelper(client)
+    domain = DiscoveryDomain(
+        tag_key="finance",
+        resource_name="domains/domain-id",
+    )
+
+    helper.delete_discovery_domain(domain)
+
+    client.domains.delete_domain.assert_called_once_with(name="domains/domain-id")

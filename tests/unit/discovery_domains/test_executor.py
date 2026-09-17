@@ -149,3 +149,99 @@ def test_discovery_domain_executor_logs_fatal_error_without_success_when_descrip
     assert change_logger.has_errors
     assert change_logger.errors[0].context == "Update Discovery domain 'finance'"
     log_update.assert_not_called()
+
+
+def test_discovery_domain_executor_prompts_before_delete_when_not_forced(
+    monkeypatch,
+    capsys,
+) -> None:
+    domain = DiscoveryDomain(
+        tag_key="finance/legacy",
+        domain_id="domain-id",
+        resource_name="domains/domain-id",
+    )
+    diff = DiscoveryDomainDiff(to_delete={domain})
+    ws_helper = MagicMock(spec=WorkspaceHelper)
+    change_logger = MagicMock(spec=ChangeLogger)
+    prompts: list[str] = []
+
+    def _confirm(prompt: str) -> str:
+        prompts.append(prompt)
+        return "yes"
+
+    monkeypatch.setattr("builtins.input", _confirm)
+
+    execute_discovery_domain_diff(ws_helper, diff, change_logger, dry_run=False)
+
+    output = capsys.readouterr().out
+    assert domain.tag_key in output
+    assert len(prompts) == 1
+    prompt = prompts[0].lower()
+    assert "irreversible" in prompt
+    assert "delete" in prompt
+    ws_helper.delete_discovery_domain.assert_called_once_with(domain)
+
+
+def test_discovery_domain_executor_force_deletes_children_before_parents_without_prompt(
+    monkeypatch,
+) -> None:
+    parent = DiscoveryDomain(
+        tag_key="finance",
+        domain_id="parent-id",
+        resource_name="domains/parent-id",
+    )
+    child = DiscoveryDomain(
+        tag_key="finance/orders",
+        domain_id="child-id",
+        resource_name="domains/child-id",
+        parent_domain_id="parent-id",
+        parent_tag_key="finance",
+    )
+    diff = DiscoveryDomainDiff(to_delete={parent, child})
+    ws_helper = MagicMock(spec=WorkspaceHelper)
+    change_logger = MagicMock(spec=ChangeLogger)
+
+    def _should_not_be_called(*_):
+        raise AssertionError("input() was called even though force=True")
+
+    monkeypatch.setattr("builtins.input", _should_not_be_called)
+
+    execute_discovery_domain_diff(
+        ws_helper,
+        diff,
+        change_logger,
+        dry_run=False,
+        force=True,
+    )
+
+    assert ws_helper.delete_discovery_domain.call_args_list == [
+        call(child),
+        call(parent),
+    ]
+    assert change_logger.log_discovery_domain_delete.call_args_list == [
+        call(child),
+        call(parent),
+    ]
+
+
+def test_discovery_domain_executor_dry_run_logs_delete_without_prompt_or_sdk_call(
+    monkeypatch,
+) -> None:
+    domain = DiscoveryDomain(
+        tag_key="finance",
+        domain_id="domain-id",
+        resource_name="domains/domain-id",
+    )
+    diff = DiscoveryDomainDiff(to_delete={domain})
+    ws_helper = MagicMock(spec=WorkspaceHelper)
+    change_logger = MagicMock(spec=ChangeLogger)
+
+    def _should_not_be_called(*_):
+        raise AssertionError("input() was called during a dry run")
+
+    monkeypatch.setattr("builtins.input", _should_not_be_called)
+
+    execute_discovery_domain_diff(ws_helper, diff, change_logger, dry_run=True)
+
+    ws_helper.delete_discovery_domain.assert_not_called()
+    change_logger.log_discovery_domain_delete.assert_called_once_with(domain)

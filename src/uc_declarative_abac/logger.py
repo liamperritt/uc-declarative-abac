@@ -162,6 +162,7 @@ class ChangeLogger:
         self._policies_deleted = 0
         self._discovery_domains_created = 0
         self._discovery_domains_updated = 0
+        self._discovery_domains_deleted = 0
         self._governed_tags_created = 0
         self._governed_tags_updated = 0
         self._governed_tags_deleted = 0
@@ -480,6 +481,19 @@ class ChangeLogger:
             )
         )
 
+    def log_discovery_domain_delete(self, domain: DiscoveryDomain) -> None:
+        """Log a scoped Unity Catalog Discovery domain deletion."""
+        self._discovery_domains_deleted += 1
+        action_verb = "Delete" if self._dry_run else "Deleted"
+        self._log_info(
+            _format_change_line(
+                "-",
+                "DISCOVERY_DOMAIN",
+                domain.tag_key,
+                f"{action_verb} discovery domain",
+            )
+        )
+
     def log_governed_tag_create(self, gt: GovernedTag) -> None:
         """Log a governed tag (account-level tag policy) being created — enumerates
         the description, allowed values, and assigners being deployed. Empty
@@ -766,6 +780,8 @@ class ChangeLogger:
             discovery_domain_parts.append(f"{self._discovery_domains_created} created")
         if self._discovery_domains_updated:
             discovery_domain_parts.append(f"{self._discovery_domains_updated} updated")
+        if self._discovery_domains_deleted:
+            discovery_domain_parts.append(f"{self._discovery_domains_deleted} deleted")
 
         gt_assigner_parts: list[str] = []
         if self._governed_tag_assigners_granted:
@@ -860,6 +876,10 @@ class ChangeLogger:
         if self._discovery_domains_updated:
             discovery_domain_parts.append(
                 f"{self._discovery_domains_updated} to update"
+            )
+        if self._discovery_domains_deleted:
+            discovery_domain_parts.append(
+                f"{self._discovery_domains_deleted} to delete"
             )
 
         gt_assigner_parts: list[str] = []

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import sys
 from typing import TYPE_CHECKING
 
 from databricks.sdk.errors.base import DatabricksError
@@ -12,7 +14,13 @@ from uc_declarative_abac.discovery_domains.state import (
     DiscoveryDomain,
     DiscoveryDomainDiff,
 )
-from uc_declarative_abac.utils import ExecutionError, OrchestratorError
+from uc_declarative_abac.utils import (
+    ExecutionError,
+    OrchestratorError,
+    prompt_delete_confirmation,
+)
+
+_logger = logging.getLogger("uc_declarative_abac")
 
 
 def _get_parent_domain_id(
@@ -77,13 +85,59 @@ def _execute_updates(
         change_logger.log_discovery_domain_update(domain, old)
 
 
+def _execute_deletes(
+    ws_helper: WorkspaceHelper,
+    diff: DiscoveryDomainDiff,
+    change_logger: ChangeLogger,
+    dry_run: bool,
+    force: bool,
+) -> None:
+    """Delete scoped domains deepest-first after interactive confirmation.
+
+    ``force`` bypasses the application prompt only. The helper deliberately
+    leaves the Domains API's separate destructive force option disabled, so a
+    domain containing Glossary pages fails instead of cascading to those pages.
+    """
+    if not diff.to_delete:
+        return
+    domains = sorted(
+        diff.to_delete,
+        key=lambda domain: (-domain.tag_key.count("/"), domain.tag_key),
+    )
+    if dry_run:
+        for domain in domains:
+            change_logger.log_discovery_domain_delete(domain)
+        return
+    if not force and not prompt_delete_confirmation(
+        [domain.tag_key for domain in domains],
+        "discovery domain",
+        "This is irreversible and will delete these Discovery domains.",
+    ):
+        _logger.info("Discovery domain deletion cancelled — aborting run.")
+        sys.exit(1)
+
+    for domain in domains:
+        try:
+            ws_helper.delete_discovery_domain(domain)
+        except (DatabricksError, OrchestratorError) as error:
+            change_logger.log_error(
+                ExecutionError(
+                    context=f"Delete Discovery domain '{domain.tag_key}'",
+                    exception=error,
+                )
+            )
+            continue
+        change_logger.log_discovery_domain_delete(domain)
+
+
 def execute_discovery_domain_diff(
     ws_helper: WorkspaceHelper,
     diff: DiscoveryDomainDiff,
     change_logger: ChangeLogger,
     dry_run: bool = False,
+    force: bool = False,
 ) -> None:
-    """Create missing domains in hierarchy order, then update descriptions.
+    """Create and update domains, then delete scoped domains deepest-first.
 
     Failures are isolated per domain. A failed or unresolved parent makes its
     descendants unavailable so they can never be created as top-level domains.
@@ -116,3 +170,4 @@ def execute_discovery_domain_diff(
             continue
         change_logger.log_discovery_domain_create(domain)
     _execute_updates(ws_helper, diff, change_logger, dry_run)
+    _execute_deletes(ws_helper, diff, change_logger, dry_run, force)

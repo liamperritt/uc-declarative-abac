@@ -17,8 +17,9 @@ class DiscoveryDomain:
 
 @dataclass
 class DiscoveryDomainDiff:
-    """Additive creations and metadata updates for Discovery domains."""
+    """Creations, metadata updates, and scoped deletions for Discovery domains."""
 
     to_create: set[DiscoveryDomain] = field(default_factory=set)
     to_update: set[DiscoveryDomain] = field(default_factory=set)
+    to_delete: set[DiscoveryDomain] = field(default_factory=set)
     old_values: dict[str, DiscoveryDomain] = field(default_factory=dict)

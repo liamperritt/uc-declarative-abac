@@ -273,14 +273,26 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
-        "--enable-domain-management",
-        action="store_true",
+        "--domain-deletion-scopes",
+        type=str,
+        metavar="SCOPES",
         default=argparse.SUPPRESS,
         help=(
-            "Permit the engine to create/update all UC Discovery domains derived from "
-            "governed tags: missing domains are created and existing domain descriptions "
-            "are updated. Governed-tag keys use domain for roots or domain/subdomain for "
-            "children. Off by default."
+            "Scope Discovery domain deletion to matching domains (by governed-tag key). "
+            f"{_FLAT_SCOPE_GRAMMAR} Only matching domains absent from "
+            "resources.domains are deleted. Requires interactive confirmation unless "
+            "--force is set."
+        ),
+    )
+    parser.add_argument(
+        "--domain-management-scopes",
+        type=str,
+        metavar="SCOPES",
+        default=argparse.SUPPRESS,
+        help=(
+            "Scope Discovery domain create/update for explicitly declared "
+            "resources.domains by governed-tag key. "
+            f"{_FLAT_SCOPE_GRAMMAR}"
         ),
     )
     parser.add_argument(

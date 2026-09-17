@@ -213,6 +213,36 @@ def _warn_unmatched_scopes(
             )
 
 
+def _scope_discovery_domain_management(
+    diff: DiscoveryDomainDiff,
+    management_scope: Scope,
+) -> DiscoveryDomainDiff:
+    """Limit domain creates and updates while preserving scoped deletions.
+
+    Deletion authority is evaluated against the full declared domain set before
+    this helper runs. This ensures a declared domain outside the management scope
+    remains protected from deletion while its metadata stays untouched.
+    """
+    return DiscoveryDomainDiff(
+        to_create={
+            domain
+            for domain in diff.to_create
+            if management_scope.matches(domain.tag_key)
+        },
+        to_update={
+            domain
+            for domain in diff.to_update
+            if management_scope.matches(domain.tag_key)
+        },
+        to_delete=set(diff.to_delete),
+        old_values={
+            tag_key: domain
+            for tag_key, domain in diff.old_values.items()
+            if management_scope.matches(tag_key)
+        },
+    )
+
+
 def load_config(
     config_dir: Path,
     ref_override_strategy: Literal["merge", "replace"] = "merge",
@@ -245,7 +275,6 @@ def run(
     enable_group_creation: bool = False,
     enable_group_management: bool = False,
     enable_group_deletion: bool = False,
-    enable_domain_management: bool = False,
     ignore_unresolvable_principals: str = "",
     manage_tags_for_namespaces: str = "*",
     manage_privileges_for_namespaces: str = "*",
@@ -261,6 +290,8 @@ def run(
     group_management_scopes: str | None = None,
     group_deletion_scopes: str | None = None,
     governed_tag_deletion_scopes: str | None = None,
+    domain_management_scopes: str | None = None,
+    domain_deletion_scopes: str | None = None,
     retain_tag_prefixes: str = "class.",
     force: bool = False,
     ref_override_strategy: Literal["merge", "replace"] = "merge",
@@ -287,11 +318,12 @@ def run(
     desired tags. A new-style scope entry that matches no applicable resource
     logs a warning (likely typo) but never fails the run.
 
-    ``enable_domain_management`` is deliberately all-or-none rather than scoped.
-    When enabled, every retained governed tag is compiled into a Discovery domain;
-    missing domains are created and existing descriptions are updated. Configured
-    tag state wins over fetched state so same-run description changes propagate.
-    When disabled, domain state is not fetched and the workflow is inert.
+    ``domain_management_scopes`` selects explicitly declared ``resources.domains``
+    for creation and description updates using flat governed-tag-key patterns.
+    ``domain_deletion_scopes`` independently selects actual-only Discovery domains
+    for deletion with the same scope grammar. Either active scope fetches and diffs
+    domain state; when management is inactive, creates and updates remain disabled.
+    Deletions prompt for confirmation unless ``force`` is set.
 
     The deprecated ``*_for_namespaces`` strings scope each enabled domain to a
     subset of the configured namespaces. Each comma-separated entry is either a
@@ -386,6 +418,12 @@ def run(
     governed_tag_deletion_scope = _build_flat_scope(
         governed_tag_deletion_scopes, legacy_enabled=enable_governed_tag_deletion
     )
+    domain_management_scope = _build_flat_scope(
+        domain_management_scopes, legacy_enabled=False
+    )
+    domain_deletion_scope = _build_flat_scope(
+        domain_deletion_scopes, legacy_enabled=False
+    )
     # Effective enablement: a feature is on iff its scope has any entry.
     enable_tag_management = tag_scope.is_active()
     enable_privilege_management = privilege_scope.is_active()
@@ -396,6 +434,10 @@ def run(
     enable_group_management = group_management_scope.is_active()
     enable_group_deletion = group_deletion_scope.is_active()
     enable_governed_tag_deletion = governed_tag_deletion_scope.is_active()
+    domain_management_active = domain_management_scope.is_active()
+    domain_workflow_active = (
+        domain_management_active or domain_deletion_scope.is_active()
+    )
 
     # Warn (never fail) about new-style hierarchical scope entries that match no
     # configured securable — a likely typo that would silently govern nothing.
@@ -540,7 +582,7 @@ def run(
         )
         actual_domains_f = (
             pool.submit(ws_helper.fetch_actual_discovery_domains)
-            if enable_domain_management
+            if domain_workflow_active
             else None
         )
         principals_f = pool.submit(ws_helper.fetch_principals)
@@ -690,14 +732,24 @@ def run(
     domain_source_governed_tags = {
         tag for tag in governed_tags if tag.name not in deleted_governed_tag_names
     }
-    domain_diff = (
+    desired_domains = (
+        compile_desired_discovery_domains(config, domain_source_governed_tags)
+        if domain_workflow_active
+        else set()
+    )
+    computed_domain_diff = (
         compute_discovery_domain_diff(
-            compile_desired_discovery_domains(domain_source_governed_tags),
+            desired_domains,
             actual_domains,
             change_logger,
+            deletion_scope=domain_deletion_scope,
         )
-        if enable_domain_management
+        if domain_workflow_active
         else DiscoveryDomainDiff()
+    )
+    domain_diff = _scope_discovery_domain_management(
+        computed_domain_diff,
+        domain_management_scope,
     )
 
     # 5. Securables workflow (before tags and privileges) — desired sides were
@@ -833,13 +885,14 @@ def run(
         # max_parallel_changes not currently supported for governed tags
     )
 
-    if domain_diff.to_create or domain_diff.to_update:
+    if domain_diff.to_create or domain_diff.to_update or domain_diff.to_delete:
         change_logger.log_section_header("Discovery domains")
     execute_discovery_domain_diff(
         ws_helper,
         domain_diff,
         change_logger,
         dry_run=dry_run,
+        force=force,
     )
 
     if (

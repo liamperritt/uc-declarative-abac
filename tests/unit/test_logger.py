@@ -312,6 +312,21 @@ def test_logger_includes_discovery_domain_changes_in_summary() -> None:
     assert "Discovery domains: 1 to create, 1 to update" in messages[-1]
 
 
+def test_logger_includes_discovery_domain_delete_in_summary() -> None:
+    """Discovery domain deletions appear in output and the summary."""
+    cl, mock_logger = _make_change_logger(dry_run=True)
+    cl.log_discovery_domain_delete(DiscoveryDomain(tag_key="finance/legacy"))
+
+    cl.log_summary()
+
+    messages = _info_messages(mock_logger)
+    assert any(
+        "delete discovery domain" in message.lower() and "finance/legacy" in message
+        for message in messages
+    )
+    assert "Discovery domains: 1 to delete" in messages[-1]
+
+
 # ---------------------------------------------------------------------------
 # Error tracking
 # ---------------------------------------------------------------------------

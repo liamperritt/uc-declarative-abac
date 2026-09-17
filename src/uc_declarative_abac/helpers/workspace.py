@@ -1039,3 +1039,16 @@ class WorkspaceHelper:
             ),
             update_mask=DomainFieldMask(update_mask),
         )
+
+    def delete_discovery_domain(self, domain: DiscoveryDomain) -> None:
+        """Delete one Discovery domain using its SDK resource name.
+
+        The Domains API's optional ``force`` argument is intentionally omitted:
+        it would also delete any Glossary pages contained by the domain.
+        """
+        if not domain.resource_name:
+            raise OrchestratorError(
+                f"Discovery domain {domain.tag_key!r} has no resource name; "
+                "it cannot be deleted."
+            )
+        self._client.domains.delete_domain(name=domain.resource_name)

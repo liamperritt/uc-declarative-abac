@@ -5,6 +5,7 @@ from uc_declarative_abac.discovery_domains import (
     compute_discovery_domain_diff,
 )
 from uc_declarative_abac.logger import ChangeLogger
+from uc_declarative_abac.utils import parse_flat_scope
 
 
 def test_discovery_domain_differ_creates_only_missing_domains_when_parent_is_available():
@@ -79,3 +80,27 @@ def test_discovery_domain_differ_updates_existing_domain_when_description_differ
         )
     }
     assert diff.old_values == {"finance": actual_domain}
+
+
+def test_discovery_domain_differ_does_not_delete_actual_only_domain_without_scope():
+    actual = {DiscoveryDomain(tag_key="finance/legacy", domain_id="legacy-id")}
+
+    diff = compute_discovery_domain_diff(set(), actual, ChangeLogger())
+
+    assert diff.to_delete == set()
+
+
+def test_discovery_domain_differ_deletes_only_actual_domains_matching_deletion_scope():
+    desired = {DiscoveryDomain(tag_key="finance/current")}
+    current = DiscoveryDomain(tag_key="finance/current", domain_id="current-id")
+    legacy = DiscoveryDomain(tag_key="finance/legacy", domain_id="legacy-id")
+    marketing = DiscoveryDomain(tag_key="marketing", domain_id="marketing-id")
+
+    diff = compute_discovery_domain_diff(
+        desired,
+        {current, legacy, marketing},
+        ChangeLogger(),
+        deletion_scope=parse_flat_scope("finance*"),
+    )
+
+    assert diff.to_delete == {legacy}

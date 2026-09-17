@@ -47,7 +47,6 @@ _ENV_FIELD_MAP: dict[str, str] = {
     "enable_group_deletion": "ENABLE_GROUP_DELETION",
     "enable_governed_tag_deletion": "ENABLE_GOVERNED_TAG_DELETION",
     "enable_policy_deletion": "ENABLE_POLICY_DELETION",
-    "enable_domain_management": "ENABLE_DOMAIN_MANAGEMENT",
     # New unified scope flags (supersede the enable_* + *_for_namespaces pairs).
     "tag_management_scopes": "TAG_MANAGEMENT_SCOPES",
     "privilege_management_scopes": "PRIVILEGE_MANAGEMENT_SCOPES",
@@ -58,6 +57,8 @@ _ENV_FIELD_MAP: dict[str, str] = {
     "group_management_scopes": "GROUP_MANAGEMENT_SCOPES",
     "group_deletion_scopes": "GROUP_DELETION_SCOPES",
     "governed_tag_deletion_scopes": "GOVERNED_TAG_DELETION_SCOPES",
+    "domain_management_scopes": "DOMAIN_MANAGEMENT_SCOPES",
+    "domain_deletion_scopes": "DOMAIN_DELETION_SCOPES",
     "force": "FORCE",
     "ref_override_strategy": "REF_OVERRIDE_STRATEGY",
     "max_parallel_changes": "MAX_PARALLEL_CHANGES",
@@ -92,7 +93,6 @@ class RunSettings(BaseModel):
     enable_group_deletion: bool = False
     enable_governed_tag_deletion: bool = False
     enable_policy_deletion: bool = False
-    enable_domain_management: bool = False
     # New unified per-feature scope flags. None ⇒ not set (fall back to the
     # legacy enable_* + *_for_namespaces machinery); any string value (including
     # "") ⇒ new-style scope, where "" disables and "*" covers everything.
@@ -105,6 +105,8 @@ class RunSettings(BaseModel):
     group_management_scopes: str | None = None
     group_deletion_scopes: str | None = None
     governed_tag_deletion_scopes: str | None = None
+    domain_management_scopes: str | None = None
+    domain_deletion_scopes: str | None = None
     force: bool = False
     ref_override_strategy: Literal["merge", "replace"] = "merge"
     max_parallel_changes: int = Field(default=8, ge=1)

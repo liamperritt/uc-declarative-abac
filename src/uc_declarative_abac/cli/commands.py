@@ -47,14 +47,14 @@ _DEPRECATED_CATALOG_FLAGS = frozenset(
 class _ScopeFeature:
     """Maps a new ``--*-scopes`` flag to the deprecated flags it supersedes.
 
-    ``namespace_*`` / ``catalog_*`` are ``None`` for the flat domains (groups,
-    governed tags), which only ever had an enable gate.
+    ``namespace_*`` / ``catalog_*`` are ``None`` for flat domains. The
+    ``enable_*`` fields are also ``None`` when a scope has no deprecated gate.
     """
 
     new_field: str
     new_flag: str
-    enable_field: str
-    enable_flag: str
+    enable_field: str | None = None
+    enable_flag: str | None = None
     namespace_field: str | None = None
     namespace_flag: str | None = None
     catalog_attr: str | None = None
@@ -142,6 +142,16 @@ _SCOPE_FEATURES: tuple[_ScopeFeature, ...] = (
         "--enable-governed-tag-deletion",
         hierarchical=False,
     ),
+    _ScopeFeature(
+        "domain_management_scopes",
+        "--domain-management-scopes",
+        hierarchical=False,
+    ),
+    _ScopeFeature(
+        "domain_deletion_scopes",
+        "--domain-deletion-scopes",
+        hierarchical=False,
+    ),
 )
 
 EXIT_SUCCESS = 0
@@ -219,7 +229,11 @@ def _deprecated_flags_for_warning(
     namespace non-None). Excludes the ``*-for-catalogs`` flags, whose own
     deprecation warning is owned by ``_resolve_namespace_flag``."""
     used: list[str] = []
-    if getattr(settings, feature.enable_field):
+    if (
+        feature.enable_field
+        and feature.enable_flag
+        and getattr(settings, feature.enable_field)
+    ):
         used.append(feature.enable_flag)
     if (
         feature.namespace_field
@@ -317,7 +331,6 @@ def _run_kwargs(
         "enable_group_creation": settings.enable_group_creation,
         "enable_group_management": settings.enable_group_management,
         "enable_group_deletion": settings.enable_group_deletion,
-        "enable_domain_management": settings.enable_domain_management,
         "ignore_unresolvable_principals": settings.ignore_unresolvable_principals,
         "manage_tags_for_namespaces": namespaces["manage_tags_for_namespaces"],
         "manage_privileges_for_namespaces": namespaces[
@@ -339,6 +352,8 @@ def _run_kwargs(
         "group_management_scopes": settings.group_management_scopes,
         "group_deletion_scopes": settings.group_deletion_scopes,
         "governed_tag_deletion_scopes": settings.governed_tag_deletion_scopes,
+        "domain_management_scopes": settings.domain_management_scopes,
+        "domain_deletion_scopes": settings.domain_deletion_scopes,
         "retain_tag_prefixes": settings.retain_tag_prefixes,
         "force": settings.force,
         "ref_override_strategy": settings.ref_override_strategy,

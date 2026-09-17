@@ -393,9 +393,29 @@ def test_main_passes_group_creation_scope_through_to_run(monkeypatch):
     assert captured["group_creation_scopes"] == "team_*"
 
 
-def test_main_passes_enable_domain_management_through_to_run(monkeypatch):
-    captured = _run_legacy(monkeypatch, ["--enable-domain-management"])
-    assert captured["enable_domain_management"] is True
+def test_main_passes_domain_management_scopes_through_to_run(monkeypatch):
+    captured = _run_legacy(monkeypatch, ["--domain-management-scopes", "finance*"])
+    assert captured["domain_management_scopes"] == "finance*"
+
+
+def test_main_passes_domain_deletion_scopes_through_to_run(monkeypatch):
+    captured = _run_legacy(monkeypatch, ["--domain-deletion-scopes", "finance*"])
+    assert captured["domain_deletion_scopes"] == "finance*"
+
+
+def test_main_fails_on_malformed_domain_deletion_scope():
+    exit_code = cli.run_cli(
+        [
+            "deploy",
+            "--config-dir",
+            "cfg",
+            "--warehouse-id",
+            "wh",
+            "--domain-deletion-scopes",
+            "finance*legacy",
+        ],
+    )
+    assert exit_code == 2
 
 
 def test_main_exits_with_usage_error_when_domain_creation_scopes_option_is_removed(

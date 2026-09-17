@@ -102,12 +102,16 @@ def test_settings_loads_namespace_scope_from_env(monkeypatch):
     assert settings.manage_tags_for_namespaces == "cat_env.sch1"
 
 
-def test_settings_enables_domain_management_when_environment_variable_is_true(
-    monkeypatch,
-):
-    monkeypatch.setenv("UC_ABAC_ENABLE_DOMAIN_MANAGEMENT", "true")
+def test_settings_loads_domain_management_scopes_from_env(monkeypatch):
+    monkeypatch.setenv("UC_ABAC_DOMAIN_MANAGEMENT_SCOPES", "finance*")
     settings = resolve_settings({}, settings_file=None)
-    assert settings.enable_domain_management is True
+    assert settings.domain_management_scopes == "finance*"
+
+
+def test_settings_loads_domain_deletion_scopes_from_env(monkeypatch):
+    monkeypatch.setenv("UC_ABAC_DOMAIN_DELETION_SCOPES", "finance*")
+    settings = resolve_settings({}, settings_file=None)
+    assert settings.domain_deletion_scopes == "finance*"
 
 
 def test_settings_empty_retain_prefixes_env_clears_default(monkeypatch):

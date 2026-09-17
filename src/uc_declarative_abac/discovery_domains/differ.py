@@ -10,7 +10,7 @@ from uc_declarative_abac.discovery_domains.state import (
     DiscoveryDomain,
     DiscoveryDomainDiff,
 )
-from uc_declarative_abac.utils import ExecutionError, OrchestratorError
+from uc_declarative_abac.utils import ExecutionError, OrchestratorError, Scope
 
 
 def _log_unavailable_parent(
@@ -77,16 +77,40 @@ def _get_domain_updates(
     return to_update, old_values
 
 
+def _get_domain_deletes(
+    desired: set[DiscoveryDomain],
+    actual: set[DiscoveryDomain],
+    deletion_scope: Scope | None,
+) -> set[DiscoveryDomain]:
+    """Return actual-only domains whose tag keys match the deletion scope."""
+    if deletion_scope is None:
+        return set()
+    desired_tag_keys = {domain.tag_key for domain in desired}
+    return {
+        domain
+        for domain in actual
+        if domain.tag_key not in desired_tag_keys
+        and deletion_scope.matches(domain.tag_key)
+    }
+
+
 def compute_discovery_domain_diff(
     desired: set[DiscoveryDomain],
     actual: set[DiscoveryDomain],
     change_logger: ChangeLogger,
+    deletion_scope: Scope | None = None,
 ) -> DiscoveryDomainDiff:
-    """Compute additive Discovery domain creations and metadata updates."""
+    """Compute Discovery domain creations, metadata updates, and scoped deletions.
+
+    Deletion is disabled when ``deletion_scope`` is omitted. When supplied, only
+    actual domains absent from the explicitly declared desired state and matching the
+    flat scope become deletion candidates.
+    """
     actual_by_tag_key = {domain.tag_key: domain for domain in actual}
     to_update, old_values = _get_domain_updates(desired, actual_by_tag_key)
     return DiscoveryDomainDiff(
         to_create=_get_creatable_domains(desired, actual_by_tag_key, change_logger),
         to_update=to_update,
+        to_delete=_get_domain_deletes(desired, actual, deletion_scope),
         old_values=old_values,
     )
