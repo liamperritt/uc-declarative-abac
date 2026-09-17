@@ -233,7 +233,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: liamperritt/uc-declarative-abac/deploy@v0.11.1
+      - uses: liamperritt/uc-declarative-abac/deploy@v0.11.2
         with:
           config-dir: configs/
           warehouse-id: ${{ vars.DATABRICKS_WAREHOUSE_ID }}
@@ -257,7 +257,7 @@ The repo also ships a lightweight companion action at `validate/action.yml` that
 | Input | Required | Default | Description |
 |---|---|---|---|
 | `config-dir` | yes | — | Path to the YAML config directory, relative to the caller's repo root |
-| `ref-override-strategy` | no | `'merge'` | How sibling fields on a `$ref` entry combine with the referenced definition: `merge` (recursive deep-merge) or `replace` (shallow top-level replace) |
+| `ref-override-strategy` | no | `'merge'` | **Deprecated — omit it; slated for removal.** How sibling fields on a `$ref` entry combine with the referenced definition: `merge` (recursive deep-merge) or `replace` (shallow top-level replace). `merge` is the go-forward behaviour; the engine logs a deprecation warning when `replace` is set |
 
 **Example** (`.github/workflows/validate-uc-abac-configs.yml`):
 
@@ -274,7 +274,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: liamperritt/uc-declarative-abac/validate@v0.11.1
+      - uses: liamperritt/uc-declarative-abac/validate@v0.11.2
         with:
           config-dir: configs/
 ```
@@ -932,7 +932,7 @@ By default, overrides **recursively deep-merge** into the definition:
 - **Lists of primitives are unioned with dedupe.** Useful for `privileges`, where you want to add `MODIFY` to a definition's `[SELECT]` without dropping `SELECT`.
 - **Other shapes (mixed items, type mismatch, items without identifiers) fall back to replace.** The override wins entirely — there's no sensible way to align items.
 
-If you need the legacy shallow-replacement behaviour (where any override of a list or map replaces it in its entirety), pass `--ref-override-strategy replace` on the CLI. The default is `merge`.
+The legacy shallow-replacement behaviour (where any override of a list or map replaces it in its entirety) is available via `--ref-override-strategy replace`, but that flag is **deprecated and slated for removal** — using `replace` logs a deprecation warning. Migrate configs to rely on the default `merge` behaviour and omit the flag.
 
 ```yaml
 # Definition
