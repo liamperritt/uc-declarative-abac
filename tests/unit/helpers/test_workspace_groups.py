@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -13,85 +14,95 @@ from uc_declarative_abac.utils import PrincipalValidationError
 # ---------------------------------------------------------------------------
 # Mock helpers
 # ---------------------------------------------------------------------------
+#
+# The account identity path now runs on Workspace Identity V2. Principal ids are
+# numeric internal ids: the V2 list objects expose them as strings (``user_id`` /
+# ``group_id`` / ``service_principal_id``) while ``DirectGroupMember.principal_id``
+# is an ``int``. Tests therefore use numeric-string ids so the helper's ``int(...)``
+# casts at the membership-call boundary line up (a member's ``principal_id`` int
+# equals ``int`` of the owning principal's id string).
 
 
-def _make_user(user_name: str, id: str) -> dict:
-    return {"id": id, "userName": user_name}
+def _make_user(user_name: str, user_id: str) -> SimpleNamespace:
+    """Stand-in for a databricks.sdk.service.iamv2.User."""
+    return SimpleNamespace(username=user_name, user_id=user_id)
 
 
 def _make_group(
     display_name: str,
-    id: str,
+    group_id: str,
     external_id: str = "",
-    members: list[dict] | None = None,
-) -> dict:
-    return {
-        "id": id,
-        "displayName": display_name,
-        "externalId": external_id,
-        "members": members or [],
-    }
+    members: list[SimpleNamespace] | None = None,
+) -> SimpleNamespace:
+    """Stand-in for a databricks.sdk.service.iamv2.Group.
+
+    ``members`` is not a real V2 Group field — the V2 list proxy never returns
+    membership inline. It is carried here only so the mock client can serve it via
+    ``list_direct_group_members_proxy``; the helper never reads it off the group.
+    """
+    return SimpleNamespace(
+        group_name=display_name,
+        group_id=group_id,
+        external_id=external_id,
+        members=members or [],
+    )
 
 
-def _make_sp(display_name: str, application_id: str, id: str) -> dict:
-    return {"id": id, "displayName": display_name, "applicationId": application_id}
+def _make_sp(display_name: str, application_id: str, sp_id: str) -> SimpleNamespace:
+    """Stand-in for a databricks.sdk.service.iamv2.ServicePrincipal."""
+    return SimpleNamespace(
+        display_name=display_name,
+        application_id=application_id,
+        service_principal_id=sp_id,
+    )
 
 
-def _make_member(value: str, type: str = "User", display: str = "") -> dict:
-    return {"value": value, "type": type, "display": display}
+def _make_member(principal_id: int) -> SimpleNamespace:
+    """Stand-in for a databricks.sdk.service.iamv2.DirectGroupMember."""
+    return SimpleNamespace(principal_id=principal_id)
 
 
 def _make_workspace_client(
-    users: list[dict] | None = None,
-    groups: list[dict] | None = None,
-    service_principals: list[dict] | None = None,
+    users: list[SimpleNamespace] | None = None,
+    groups: list[SimpleNamespace] | None = None,
+    service_principals: list[SimpleNamespace] | None = None,
 ) -> MagicMock:
-    """Build a MagicMock WorkspaceClient whose api_client.do serves SCIM responses.
+    """Build a MagicMock WorkspaceClient for the hybrid account path: reads on the
+    ``workspace_iam_v2`` proxies, writes on the account SCIM proxy (``api_client.do``).
 
-    Emulates the real account SCIM proxy: the ``GET /Groups`` LIST returns only
-    ``id`` + ``displayName`` (NOT members — the proxy doesn't return them inline),
-    while ``GET /Groups/{id}`` returns the full group object (members, externalId).
-    POST/PATCH mutations return a benign dict and are inspected via call_args_list.
+    Reads — ``list_groups_proxy`` yields groups WITHOUT members (V2 has no inline
+    membership), and ``list_direct_group_members_proxy`` serves each group's members
+    keyed by group id. Writes — ``api_client.do`` handles the SCIM mutations: a
+    ``POST /Groups`` returns the new group's id; PATCH (rename / member add/remove) and
+    DELETE return a benign dict and are inspected via ``call_args_list``.
     """
     client = MagicMock()
     groups = groups or []
-    groups_by_id = {g["id"]: g for g in groups}
+    members_by_id = {str(g.group_id): g.members for g in groups}
 
-    def _do(method, path, **kwargs):
-        # Creating a group returns the new group object (with its SCIM id).
+    iam = client.workspace_iam_v2
+    iam.list_users_proxy.side_effect = lambda **kwargs: iter(users or [])
+    iam.list_service_principals_proxy.side_effect = lambda **kwargs: iter(
+        service_principals or []
+    )
+    iam.list_groups_proxy.side_effect = lambda **kwargs: iter(
+        SimpleNamespace(
+            group_name=g.group_name,
+            group_id=g.group_id,
+            external_id=g.external_id,
+        )
+        for g in groups
+    )
+    iam.list_direct_group_members_proxy.side_effect = lambda group_id, **kwargs: iter(
+        members_by_id.get(str(group_id), [])
+    )
+
+    def _scim_write(method, path, **kwargs):
         if method == "POST" and path.endswith("/Groups"):
             return {"id": "created-group-id"}
-        if method in ("POST", "PATCH"):
-            return {}
-        # Per-group GET: /api/2.0/account/scim/v2/Groups/{id} → full group object.
-        if "/Groups/" in path:
-            group_id = path.rsplit("/", 1)[-1]
-            return groups_by_id.get(group_id, {})
-        if path.endswith("/Users"):
-            resources = users or []
-        elif path.endswith("/ServicePrincipals"):
-            resources = service_principals or []
-        elif path.endswith("/Groups"):
-            # The LIST endpoint does not return members inline — emulate by
-            # returning only id + displayName + externalId.
-            resources = [
-                {
-                    "id": g["id"],
-                    "displayName": g["displayName"],
-                    "externalId": g.get("externalId", ""),
-                }
-                for g in groups
-            ]
-        else:
-            resources = []
-        return {
-            "totalResults": len(resources),
-            "startIndex": 1,
-            "itemsPerPage": 100,
-            "Resources": resources,
-        }
+        return {}
 
-    client.api_client.do.side_effect = _do
+    client.api_client.do.side_effect = _scim_write
     return client
 
 
@@ -113,44 +124,44 @@ def test_workspace_helper_returns_no_groups_when_manage_groups_disabled() -> Non
 
 
 def test_workspace_helper_fetches_members_per_managed_group() -> None:
-    """fetch_principals issues the three list calls; fetch_actual_groups then issues
-    one additional GET /Groups/{id} per managed (configured) group — membership is
-    not available from the list response."""
+    """fetch_actual_groups issues one list_direct_group_members_proxy call per managed
+    (configured) group — membership is not available from the group list response."""
     client = _make_workspace_client(
-        users=[_make_user("alice@example.com", "u-1")],
+        users=[_make_user("alice@example.com", "1")],
         groups=[
-            _make_group("data_engineers", "g-1"),
-            _make_group("analysts", "g-2"),
+            _make_group("data_engineers", "10"),
+            _make_group("analysts", "20"),
         ],
-        service_principals=[_make_sp("etl-sp", "abc-123", "sp-1")],
+        service_principals=[_make_sp("etl-sp", "abc-123", "100")],
     )
     helper = WorkspaceHelper(client, manage_groups=True)
     helper.fetch_principals()
 
-    assert client.api_client.do.call_count == 3
+    assert client.workspace_iam_v2.list_direct_group_members_proxy.call_count == 0
 
     helper.fetch_actual_groups(
         desired_names={"data_engineers"}, member_fetch_names={"data_engineers"}
     )
 
-    # +1 GET for the single configured group (analysts is not fetched).
-    assert client.api_client.do.call_count == 4
+    # One member fetch for the single configured group (analysts is not fetched).
+    assert client.workspace_iam_v2.list_direct_group_members_proxy.call_count == 1
 
 
 def test_workspace_helper_actual_group_includes_existing_members() -> None:
     """Regression for the always-re-adds bug: an existing group's members are read
-    from the per-group GET, so the actual Group carries the members it already has
-    (the differ can then compute an empty additions set on a synced group)."""
+    from the per-group member fetch, so the actual Group carries the members it
+    already has (the differ can then compute an empty additions set on a synced
+    group)."""
     client = _make_workspace_client(
-        users=[_make_user("liam.perritt@databricks.com", "u-1")],
-        service_principals=[_make_sp("sp_uc_governor_test", "app-uuid", "sp-1")],
+        users=[_make_user("liam.perritt@databricks.com", "1")],
+        service_principals=[_make_sp("sp_uc_governor_test", "app-uuid", "100")],
         groups=[
             _make_group(
                 "uc_governor_test_team",
-                "g-1",
+                "10",
                 members=[
-                    _make_member("u-1", "User"),
-                    _make_member("sp-1", "ServicePrincipal"),
+                    _make_member(1),
+                    _make_member(100),
                 ],
             ),
         ],
@@ -178,8 +189,8 @@ def test_workspace_helper_returns_a_group_per_fetched_group() -> None:
     group, with display_name matching."""
     client = _make_workspace_client(
         groups=[
-            _make_group("data_engineers", "g-1"),
-            _make_group("analysts", "g-2"),
+            _make_group("data_engineers", "10"),
+            _make_group("analysts", "20"),
         ],
     )
     helper = WorkspaceHelper(client, manage_groups=True)
@@ -192,15 +203,15 @@ def test_workspace_helper_returns_a_group_per_fetched_group() -> None:
 
 
 def test_workspace_helper_translates_user_member_to_username_identifier() -> None:
-    """A group with a user member is translated from the SCIM `value` id to the
-    user's userName as the member identifier."""
+    """A group with a user member is translated from the member's numeric principal
+    id to the user's userName as the member identifier."""
     client = _make_workspace_client(
-        users=[_make_user("alice@example.com", "u-1")],
+        users=[_make_user("alice@example.com", "1")],
         groups=[
             _make_group(
                 "data_engineers",
-                "g-1",
-                members=[_make_member("u-1", "User")],
+                "10",
+                members=[_make_member(1)],
             ),
         ],
     )
@@ -220,12 +231,12 @@ def test_workspace_helper_translates_sp_member_to_application_id_identifier() ->
     """A group member matching a service principal is translated to the SP's
     applicationId as the member identifier."""
     client = _make_workspace_client(
-        service_principals=[_make_sp("etl-sp", "abc-123-uuid", "sp-1")],
+        service_principals=[_make_sp("etl-sp", "abc-123-uuid", "100")],
         groups=[
             _make_group(
                 "automation",
-                "g-1",
-                members=[_make_member("sp-1", "ServicePrincipal")],
+                "10",
+                members=[_make_member(100)],
             ),
         ],
     )
@@ -244,8 +255,8 @@ def test_workspace_helper_populates_external_id_for_idp_managed_group() -> None:
     not per-group GETs."""
     client = _make_workspace_client(
         groups=[
-            _make_group("idp_group", "g-1", external_id="ext-999"),
-            _make_group("native_group", "g-2", external_id=""),
+            _make_group("idp_group", "10", external_id="ext-999"),
+            _make_group("native_group", "20", external_id=""),
         ],
     )
     helper = WorkspaceHelper(client, manage_groups=True)
@@ -264,8 +275,8 @@ def test_workspace_helper_filters_groups_to_desired_names() -> None:
     display_name is in the desired set."""
     client = _make_workspace_client(
         groups=[
-            _make_group("data_engineers", "g-1"),
-            _make_group("analysts", "g-2"),
+            _make_group("data_engineers", "10"),
+            _make_group("analysts", "20"),
         ],
     )
     helper = WorkspaceHelper(client, manage_groups=True)
@@ -278,17 +289,17 @@ def test_workspace_helper_filters_groups_to_desired_names() -> None:
 
 
 def test_workspace_helper_drops_untranslatable_members() -> None:
-    """A member whose SCIM value matches no fetched principal is dropped from the
-    resulting group's members."""
+    """A member whose numeric principal id matches no fetched principal is dropped
+    from the resulting group's members."""
     client = _make_workspace_client(
-        users=[_make_user("alice@example.com", "u-1")],
+        users=[_make_user("alice@example.com", "1")],
         groups=[
             _make_group(
                 "data_engineers",
-                "g-1",
+                "10",
                 members=[
-                    _make_member("u-1", "User"),
-                    _make_member("u-ghost", "User"),
+                    _make_member(1),
+                    _make_member(999),
                 ],
             ),
         ],
@@ -311,7 +322,7 @@ def test_workspace_helper_drops_untranslatable_members() -> None:
 def test_workspace_helper_register_pending_groups_resolves_as_group() -> None:
     """A group registered as pending (to be created this run) resolves as a GROUP
     principal by both name and identifier, even though it wasn't in the fetch."""
-    client = _make_workspace_client(users=[_make_user("alice@example.com", "u-1")])
+    client = _make_workspace_client(users=[_make_user("alice@example.com", "1")])
     helper = WorkspaceHelper(client, manage_groups=True)
     helper.fetch_principals()
 
@@ -335,11 +346,11 @@ def test_workspace_helper_register_pending_groups_resolves_as_group() -> None:
 
 
 def test_workspace_helper_add_group_members_issues_patch() -> None:
-    """add_group_members issues a PATCH whose path contains the target group's
-    SCIM id and whose request references the member's SCIM id."""
+    """add_group_members issues a SCIM PATCH whose path contains the target group's id
+    and whose request references the member's id."""
     client = _make_workspace_client(
-        users=[_make_user("alice@example.com", "u-1")],
-        groups=[_make_group("data_engineers", "g-1")],
+        users=[_make_user("alice@example.com", "1")],
+        groups=[_make_group("data_engineers", "10")],
     )
     helper = WorkspaceHelper(client, manage_groups=True)
     helper.fetch_principals()
@@ -354,10 +365,9 @@ def test_workspace_helper_add_group_members_issues_patch() -> None:
     ]
     assert len(patch_calls) == 1
     call = patch_calls[0]
-    path = call.args[1]
-    assert "g-1" in path
-    # The member's SCIM id should appear somewhere in the captured request body.
-    assert "u-1" in repr(call.kwargs)
+    assert "/Groups/10" in call.args[1]
+    # The member's id should appear somewhere in the captured request body.
+    assert "'1'" in repr(call.kwargs) or '"1"' in repr(call.kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -366,11 +376,11 @@ def test_workspace_helper_add_group_members_issues_patch() -> None:
 
 
 def test_workspace_helper_remove_group_members_issues_patch() -> None:
-    """remove_group_members issues a PATCH whose path contains the target group's
-    SCIM id and whose request references the member's SCIM id."""
+    """remove_group_members issues a SCIM PATCH whose path contains the target group's
+    id and whose request references the member's id in a remove op."""
     client = _make_workspace_client(
-        users=[_make_user("alice@example.com", "u-1")],
-        groups=[_make_group("data_engineers", "g-1")],
+        users=[_make_user("alice@example.com", "1")],
+        groups=[_make_group("data_engineers", "10")],
     )
     helper = WorkspaceHelper(client, manage_groups=True)
     helper.fetch_principals()
@@ -385,10 +395,9 @@ def test_workspace_helper_remove_group_members_issues_patch() -> None:
     ]
     assert len(patch_calls) == 1
     call = patch_calls[0]
-    assert "g-1" in call.args[1]
+    assert "/Groups/10" in call.args[1]
     captured = repr(call.kwargs)
-    # The member's SCIM id appears in the remove op and "remove" is the op.
-    assert "u-1" in captured
+    assert "1" in captured
     assert "remove" in captured
 
 
@@ -398,8 +407,8 @@ def test_workspace_helper_remove_group_members_issues_patch() -> None:
 
 
 def test_workspace_helper_create_group_posts_empty_and_returns_id() -> None:
-    """create_group POSTs the group with NO members and returns the new SCIM id.
-    Members are added in a later phase, so a group whose members are themselves
+    """create_group POSTs the group with NO members via the SCIM proxy and returns the
+    new id. Members are added in a later phase, so a group whose members are themselves
     created this run can be linked once every group exists."""
     client = _make_workspace_client()
     helper = WorkspaceHelper(client, manage_groups=True)
@@ -425,12 +434,14 @@ def test_workspace_helper_register_created_group_makes_group_resolvable_and_mana
     None
 ):
     """After register_created_group, the new group resolves as a GROUP principal and
-    add_group_members targets it by its registered SCIM id (no KeyError)."""
-    client = _make_workspace_client()
+    add_group_members targets it by its registered id (no KeyError)."""
+    client = _make_workspace_client(
+        users=[_make_user("child@example.com", "5")],
+    )
     helper = WorkspaceHelper(client, manage_groups=True)
     helper.fetch_principals()
 
-    helper.register_created_group("new_team", "g-new")
+    helper.register_created_group("new_team", "500")
 
     resolved = helper.resolve_by_name("new_team")
     assert resolved.principal_type == PrincipalType.GROUP
@@ -445,7 +456,7 @@ def test_workspace_helper_register_created_group_makes_group_resolvable_and_mana
         if call.args and call.args[0] == "PATCH"
     ]
     assert len(patch_calls) == 1
-    assert "g-new" in patch_calls[0].args[1]
+    assert "/Groups/500" in patch_calls[0].args[1]
 
 
 # ---------------------------------------------------------------------------
@@ -456,18 +467,18 @@ def test_workspace_helper_register_created_group_makes_group_resolvable_and_mana
 def test_workspace_helper_fetches_renamed_group_by_id_when_name_not_in_desired_names() -> (
     None
 ):
-    """A group whose SCIM id is in desired_ids is fetched under its CURRENT (actual)
+    """A group whose id is in desired_ids is fetched under its CURRENT (actual)
     display name even when that name is not in desired_names — config wants the new
     name, but the account still returns the old name with the matching id."""
     client = _make_workspace_client(
-        groups=[_make_group("old_name", "g-1")],
+        groups=[_make_group("old_name", "10")],
     )
     helper = WorkspaceHelper(client, manage_groups=True)
     helper.fetch_principals()
 
     result = helper.fetch_actual_groups(
         desired_names={"new_name"},
-        desired_ids={"g-1"},
+        desired_ids={"10"},
     )
 
     # Located by id and returned under its current (old) display name.
@@ -476,17 +487,17 @@ def test_workspace_helper_fetches_renamed_group_by_id_when_name_not_in_desired_n
 
 
 def test_workspace_helper_sets_id_on_actual_group_from_response() -> None:
-    """The returned Group carries the SCIM id from the per-group GET response."""
+    """The returned Group carries the id from the group identity cache."""
     client = _make_workspace_client(
-        groups=[_make_group("old_name", "g-1")],
+        groups=[_make_group("old_name", "10")],
     )
     helper = WorkspaceHelper(client, manage_groups=True)
     helper.fetch_principals()
 
-    result = helper.fetch_actual_groups(desired_ids={"g-1"})
+    result = helper.fetch_actual_groups(desired_ids={"10"})
 
     group = next(g for g in result if g.display_name == "old_name")
-    assert group.id == "g-1"
+    assert group.id == "10"
 
 
 # ---------------------------------------------------------------------------
@@ -500,7 +511,7 @@ def test_workspace_helper_register_pending_renames_adds_new_name_and_removes_old
     """After register_pending_renames, the NEW display name resolves as a GROUP
     principal and the OLD name no longer resolves."""
     client = _make_workspace_client(
-        groups=[_make_group("old_name", "g-1")],
+        groups=[_make_group("old_name", "10")],
     )
     helper = WorkspaceHelper(client, manage_groups=True)
     helper.fetch_principals()
@@ -508,7 +519,7 @@ def test_workspace_helper_register_pending_renames_adds_new_name_and_removes_old
     helper.register_pending_renames(
         [
             GroupRename(
-                id="g-1", old_display_name="old_name", new_display_name="new_name"
+                id="10", old_display_name="old_name", new_display_name="new_name"
             )
         ],
     )
@@ -523,11 +534,11 @@ def test_workspace_helper_register_pending_renames_adds_new_name_and_removes_old
 def test_workspace_helper_register_pending_renames_remaps_group_id_to_new_name() -> (
     None
 ):
-    """After the rename, a member add against the NEW name resolves the group's SCIM
-    id — the PATCH targets the same id that previously belonged to the old name."""
+    """After the rename, a member add against the NEW name resolves the group's id —
+    the SCIM PATCH targets the same id that previously belonged to the old name."""
     client = _make_workspace_client(
-        users=[_make_user("alice@example.com", "u-1")],
-        groups=[_make_group("old_name", "g-1")],
+        users=[_make_user("alice@example.com", "1")],
+        groups=[_make_group("old_name", "10")],
     )
     helper = WorkspaceHelper(client, manage_groups=True)
     helper.fetch_principals()
@@ -535,7 +546,7 @@ def test_workspace_helper_register_pending_renames_remaps_group_id_to_new_name()
     helper.register_pending_renames(
         [
             GroupRename(
-                id="g-1", old_display_name="old_name", new_display_name="new_name"
+                id="10", old_display_name="old_name", new_display_name="new_name"
             )
         ],
     )
@@ -549,13 +560,13 @@ def test_workspace_helper_register_pending_renames_remaps_group_id_to_new_name()
         if call.args and call.args[0] == "PATCH"
     ]
     assert len(patch_calls) == 1
-    assert "g-1" in patch_calls[0].args[1]
+    assert "/Groups/10" in patch_calls[0].args[1]
 
 
 def test_workspace_helper_resolves_new_name_after_pending_rename() -> None:
     """resolve_by_name(new_name) returns a GROUP principal after a pending rename."""
     client = _make_workspace_client(
-        groups=[_make_group("old_name", "g-1")],
+        groups=[_make_group("old_name", "10")],
     )
     helper = WorkspaceHelper(client, manage_groups=True)
     helper.fetch_principals()
@@ -563,7 +574,7 @@ def test_workspace_helper_resolves_new_name_after_pending_rename() -> None:
     helper.register_pending_renames(
         [
             GroupRename(
-                id="g-1", old_display_name="old_name", new_display_name="new_name"
+                id="10", old_display_name="old_name", new_display_name="new_name"
             )
         ],
     )
@@ -574,7 +585,7 @@ def test_workspace_helper_resolves_new_name_after_pending_rename() -> None:
 def test_workspace_helper_rejects_old_name_after_pending_rename() -> None:
     """resolve_by_name(old_name) raises after a pending rename retires the old name."""
     client = _make_workspace_client(
-        groups=[_make_group("old_name", "g-1")],
+        groups=[_make_group("old_name", "10")],
     )
     helper = WorkspaceHelper(client, manage_groups=True)
     helper.fetch_principals()
@@ -582,7 +593,7 @@ def test_workspace_helper_rejects_old_name_after_pending_rename() -> None:
     helper.register_pending_renames(
         [
             GroupRename(
-                id="g-1", old_display_name="old_name", new_display_name="new_name"
+                id="10", old_display_name="old_name", new_display_name="new_name"
             )
         ],
     )
@@ -598,7 +609,7 @@ def test_workspace_helper_resolves_old_name_by_identifier_to_new_group_after_pen
     pending rename — deployed actual-state references to the old display name must
     map onto the renamed group rather than failing or showing a spurious diff."""
     client = _make_workspace_client(
-        groups=[_make_group("old_name", "g-1")],
+        groups=[_make_group("old_name", "10")],
     )
     helper = WorkspaceHelper(client, manage_groups=True)
     helper.fetch_principals()
@@ -606,7 +617,7 @@ def test_workspace_helper_resolves_old_name_by_identifier_to_new_group_after_pen
     helper.register_pending_renames(
         [
             GroupRename(
-                id="g-1", old_display_name="old_name", new_display_name="new_name"
+                id="10", old_display_name="old_name", new_display_name="new_name"
             )
         ],
     )
@@ -623,15 +634,15 @@ def test_workspace_helper_resolves_old_name_by_identifier_to_new_group_after_pen
 
 
 def test_workspace_helper_rename_group_issues_replace_displayname_patch() -> None:
-    """rename_group issues a PATCH to /Groups/{scim_id} whose Operations contain a
+    """rename_group issues a SCIM PATCH to /Groups/{id} whose Operations contain a
     replace op on the displayName path with the new value."""
     client = _make_workspace_client(
-        groups=[_make_group("old_name", "g-1")],
+        groups=[_make_group("old_name", "10")],
     )
     helper = WorkspaceHelper(client, manage_groups=True)
     helper.fetch_principals()
 
-    helper.rename_group("g-1", "new")
+    helper.rename_group("10", "new")
 
     patch_calls = [
         call
@@ -640,7 +651,7 @@ def test_workspace_helper_rename_group_issues_replace_displayname_patch() -> Non
     ]
     assert len(patch_calls) == 1
     call = patch_calls[0]
-    assert call.args[1] == "/api/2.0/account/scim/v2/Groups/g-1"
+    assert call.args[1] == "/api/2.0/account/scim/v2/Groups/10"
     body = call.kwargs["body"]
     operations = body["Operations"]
     assert any(
@@ -660,30 +671,28 @@ def test_workspace_helper_members_not_fetched_when_absent_from_member_fetch() ->
     None
 ):
     """When a group is not in member_fetch_names or member_fetch_ids,
-    fetch_actual_groups does not fetch its members (no per-group GET).
+    fetch_actual_groups does not fetch its members (no per-group member fetch).
     The returned group has members=None."""
     client = _make_workspace_client(
-        users=[_make_user("alice@example.com", "u-1")],
+        users=[_make_user("alice@example.com", "1")],
         groups=[
             _make_group(
                 "data_engineers",
-                "g-1",
-                members=[_make_member("u-1", "User")],
+                "10",
+                members=[_make_member(1)],
             ),
         ],
     )
     helper = WorkspaceHelper(client, manage_groups=True)
     helper.fetch_principals()
 
-    assert client.api_client.do.call_count == 3
-
     # fetch_actual_groups with no member_fetch_names — members not fetched
     result = helper.fetch_actual_groups(desired_names={"data_engineers"})
 
     group = next(g for g in result if g.display_name == "data_engineers")
     assert group.members is None
-    # No per-group GET was issued; call_count stays at 3
-    assert client.api_client.do.call_count == 3
+    # No per-group member fetch was issued.
+    assert client.workspace_iam_v2.list_direct_group_members_proxy.call_count == 0
 
 
 # ---------------------------------------------------------------------------
@@ -839,22 +848,22 @@ def test_workspace_helper_update_group_rule_set_calls_with_request() -> None:
 
 
 def test_workspace_helper_get_group_id_returns_cached_id() -> None:
-    """get_group_id returns the cached SCIM id for a known group display name."""
+    """get_group_id returns the cached id for a known group display name."""
     client = _make_workspace_client(
-        groups=[_make_group("data_engineers", "g-1")],
+        groups=[_make_group("data_engineers", "10")],
     )
     helper = WorkspaceHelper(client, manage_groups=True)
     helper.fetch_principals()
 
     result = helper.get_group_id("data_engineers")
 
-    assert result == "g-1"
+    assert result == "10"
 
 
 def test_workspace_helper_get_group_id_returns_none_for_unknown_group() -> None:
     """get_group_id returns None for an unknown group display name."""
     client = _make_workspace_client(
-        groups=[_make_group("data_engineers", "g-1")],
+        groups=[_make_group("data_engineers", "10")],
     )
     helper = WorkspaceHelper(client, manage_groups=True)
     helper.fetch_principals()

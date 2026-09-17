@@ -4,6 +4,7 @@ import logging
 import pathlib
 import time
 from datetime import date
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -37,6 +38,73 @@ def _make_mock_group(display_name: str) -> MagicMock:
     group = MagicMock()
     group.display_name = display_name
     return group
+
+
+# ---------------------------------------------------------------------------
+# Workspace Identity V2 mock helpers
+#
+# The account identity path runs on Workspace Identity V2 (workspace_iam_v2), not the
+# raw account SCIM proxy. List proxies return typed objects; ids are numeric strings
+# (DirectGroupMember.principal_id is an int), and the helper casts to int at the
+# membership-call boundary — so all ids here are numeric strings.
+# ---------------------------------------------------------------------------
+
+
+def _iam_user(user_name: str, user_id: str = "1") -> SimpleNamespace:
+    """Stand-in for a databricks.sdk.service.iamv2.User."""
+    return SimpleNamespace(username=user_name, user_id=user_id)
+
+
+def _iam_group(
+    display_name: str, group_id: str = "10", external_id: str = ""
+) -> SimpleNamespace:
+    """Stand-in for a databricks.sdk.service.iamv2.Group (never carries members)."""
+    return SimpleNamespace(
+        group_name=display_name, group_id=group_id, external_id=external_id
+    )
+
+
+def _iam_sp(
+    display_name: str, application_id: str, sp_id: str = "100"
+) -> SimpleNamespace:
+    """Stand-in for a databricks.sdk.service.iamv2.ServicePrincipal."""
+    return SimpleNamespace(
+        display_name=display_name,
+        application_id=application_id,
+        service_principal_id=sp_id,
+    )
+
+
+def _iam_member(principal_id: str | int) -> SimpleNamespace:
+    """Stand-in for a databricks.sdk.service.iamv2.DirectGroupMember."""
+    return SimpleNamespace(principal_id=int(principal_id))
+
+
+def _configure_iam(
+    mock_workspace_client: MagicMock,
+    *,
+    users: list[SimpleNamespace] | None = None,
+    groups: list[SimpleNamespace] | None = None,
+    service_principals: list[SimpleNamespace] | None = None,
+    members_by_group_id: dict[str, list[SimpleNamespace]] | None = None,
+) -> MagicMock:
+    """Configure the ``workspace_iam_v2`` list/member proxies on a mock client.
+
+    Returns the ``workspace_iam_v2`` mock so tests can set create/update/delete
+    behaviours or inspect mutation calls. Each list proxy returns a fresh iterator per
+    call; ``list_direct_group_members_proxy`` serves members keyed by group id.
+    """
+    iam = mock_workspace_client.workspace_iam_v2
+    iam.list_users_proxy.side_effect = lambda **kwargs: iter(list(users or []))
+    iam.list_groups_proxy.side_effect = lambda **kwargs: iter(list(groups or []))
+    iam.list_service_principals_proxy.side_effect = lambda **kwargs: iter(
+        list(service_principals or [])
+    )
+    members = {str(k): v for k, v in (members_by_group_id or {}).items()}
+    iam.list_direct_group_members_proxy.side_effect = lambda group_id, **kwargs: iter(
+        members.get(str(group_id), [])
+    )
+    return iam
 
 
 def _catalog_with_tags_config() -> dict:
@@ -261,71 +329,26 @@ def _install_fetch_router(
 
 
 def _setup_mock_principals(mock_workspace_client: MagicMock, group_name: str) -> None:
-    """Configure the mock workspace client's account SCIM proxy to return a single group."""
-
-    def _scim_do(method, path, **kwargs):
-        if "/account/scim/v2/Groups" in path:
-            return {
-                "totalResults": 1,
-                "startIndex": 1,
-                "itemsPerPage": 100,
-                "Resources": [{"displayName": group_name}],
-            }
-        if "/account/scim/v2/Users" in path:
-            return {
-                "totalResults": 0,
-                "startIndex": 1,
-                "itemsPerPage": 100,
-                "Resources": [],
-            }
-        if "/account/scim/v2/ServicePrincipals" in path:
-            return {
-                "totalResults": 0,
-                "startIndex": 1,
-                "itemsPerPage": 100,
-                "Resources": [],
-            }
-        return {}
-
-    mock_workspace_client.api_client.do.side_effect = _scim_do
+    """Configure the account identity proxy to return a single group."""
+    _configure_iam(mock_workspace_client, groups=[_iam_group(group_name)])
 
 
 def _setup_mock_empty_principals(mock_workspace_client: MagicMock) -> None:
-    """Configure the mock workspace client's account SCIM proxy to return no principals."""
-
-    def _scim_do(method, path, **kwargs):
-        return {
-            "totalResults": 0,
-            "startIndex": 1,
-            "itemsPerPage": 100,
-            "Resources": [],
-        }
-
-    mock_workspace_client.api_client.do.side_effect = _scim_do
+    """Configure the account identity proxy to return no principals."""
+    _configure_iam(mock_workspace_client)
 
 
 def _setup_mock_principals_with_groups(
     mock_workspace_client: MagicMock, group_names: list[str]
 ) -> None:
-    """Configure the mock account SCIM proxy to return specific groups and no users/SPs."""
-
-    def _scim_do(method, path, **kwargs):
-        if "/account/scim/v2/Groups" in path:
-            resources = [{"displayName": name} for name in group_names]
-            return {
-                "totalResults": len(resources),
-                "startIndex": 1,
-                "itemsPerPage": 100,
-                "Resources": resources,
-            }
-        return {
-            "totalResults": 0,
-            "startIndex": 1,
-            "itemsPerPage": 100,
-            "Resources": [],
-        }
-
-    mock_workspace_client.api_client.do.side_effect = _scim_do
+    """Configure the account identity proxy to return specific groups and no users/SPs."""
+    _configure_iam(
+        mock_workspace_client,
+        groups=[
+            _iam_group(name, group_id=str(10 + i))
+            for i, name in enumerate(group_names)
+        ],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -655,23 +678,12 @@ def test_orchestrator_fetches_tags_privileges_and_principals_in_parallel(
     )
     _install_fetch_router(monkeypatch, config)
 
-    def _slow_scim_do(method, path, **kwargs):
-        if "/account/scim/v2/Groups" in path:
-            time.sleep(delay_seconds)
-            return {
-                "totalResults": 1,
-                "startIndex": 1,
-                "itemsPerPage": 100,
-                "Resources": [{"displayName": "data_engineers"}],
-            }
-        return {
-            "totalResults": 0,
-            "startIndex": 1,
-            "itemsPerPage": 100,
-            "Resources": [],
-        }
+    def _slow_list_groups(**kwargs):
+        time.sleep(delay_seconds)
+        return iter([_iam_group("data_engineers")])
 
-    mock_workspace_client.api_client.do.side_effect = _slow_scim_do
+    iam = _configure_iam(mock_workspace_client)
+    iam.list_groups_proxy.side_effect = _slow_list_groups
 
     start = time.monotonic()
     _run_all_enabled(
@@ -988,29 +1000,11 @@ def _setup_mock_principals_with_sp(
     sp_display_name: str,
     sp_application_id: str,
 ) -> None:
-    """Configure the mock account SCIM proxy to return a single service principal."""
-
-    def _scim_do(method, path, **kwargs):
-        if "/account/scim/v2/ServicePrincipals" in path:
-            return {
-                "totalResults": 1,
-                "startIndex": 1,
-                "itemsPerPage": 100,
-                "Resources": [
-                    {
-                        "displayName": sp_display_name,
-                        "applicationId": sp_application_id,
-                    }
-                ],
-            }
-        return {
-            "totalResults": 0,
-            "startIndex": 1,
-            "itemsPerPage": 100,
-            "Resources": [],
-        }
-
-    mock_workspace_client.api_client.do.side_effect = _scim_do
+    """Configure the account identity proxy to return a single service principal."""
+    _configure_iam(
+        mock_workspace_client,
+        service_principals=[_iam_sp(sp_display_name, sp_application_id)],
+    )
 
 
 def test_orchestrator_is_idempotent_for_service_principal_across_display_name_and_app_id():
@@ -2826,6 +2820,44 @@ def _config_with_group(members: list[str]) -> dict:
     }
 
 
+def _numeric_id_mapper():
+    """Return a function that maps arbitrary string ids (``"g-1"``, ``"u-1"``) to stable
+    numeric-string ids. V2 principal ids are numeric and the helper ``int()``-casts them
+    at the membership-call boundary, so mocks must return numeric ids; callers keep their
+    readable labels and this translates them consistently across users/groups/members."""
+    numeric: dict[str, str] = {}
+
+    def _num(raw: str) -> str:
+        if raw not in numeric:
+            numeric[raw] = str(1000 + len(numeric))
+        return numeric[raw]
+
+    return _num
+
+
+def _route_scim_group_writes(mock_workspace_client: MagicMock, num) -> None:
+    """Route account SCIM proxy group writes through ``api_client.do`` (the hybrid
+    write path — reads on workspace_iam_v2, writes on the SCIM proxy so the creator
+    keeps MANAGER). ``POST /Groups`` returns a fresh id (via ``num``); rename/member
+    PATCH and DELETE return a benign dict and are inspected via ``call_args_list``."""
+
+    def _do(method, path, **kwargs):
+        if method == "POST" and path.endswith("/Groups"):
+            return {"id": num("created-" + kwargs["body"]["displayName"])}
+        return {}
+
+    mock_workspace_client.api_client.do.side_effect = _do
+
+
+def _scim_write_calls(mock_workspace_client: MagicMock, method: str) -> list:
+    """The account SCIM proxy write calls issued with the given HTTP method."""
+    return [
+        c
+        for c in mock_workspace_client.api_client.do.call_args_list
+        if c.args and c.args[0] == method
+    ]
+
+
 def _setup_mock_group_state(
     mock_workspace_client: MagicMock,
     *,
@@ -2835,54 +2867,23 @@ def _setup_mock_group_state(
     users: list[tuple[str, str]],
     external_id: str = "",
 ) -> None:
-    """Configure the account SCIM proxy mock. The Groups LIST returns only
-    id + displayName (no members inline — matching the real proxy); the per-group
-    GET /Groups/{id} returns the full group with members + externalId. PATCH/POST
-    return {}. ``users`` is a list of (scim_id, userName).
+    """Configure the hybrid account path for a single managed group.
+
+    Reads (workspace_iam_v2): ``list_groups_proxy`` returns the group WITHOUT members
+    (V2 has no inline membership); ``list_direct_group_members_proxy`` serves the
+    members. Writes (account SCIM proxy via ``api_client.do``): create/rename/member
+    mutations, with ``POST /Groups`` returning a fresh id. ``member_ids`` reference user
+    scim-ids; ``users`` is a list of (scim_id, userName). Ids are translated to numeric
+    strings internally.
     """
-
-    def _scim_do(method, path, **kwargs):
-        # Creating a group returns the new group object (with a SCIM id), which the
-        # engine registers before adding the group's members.
-        if method == "POST" and path.endswith("/account/scim/v2/Groups"):
-            return {"id": "created-" + kwargs["body"]["displayName"]}
-        if method in ("PATCH", "POST") and "/account/scim/v2/Groups" in path:
-            return {}
-        # Per-group GET: /api/2.0/account/scim/v2/Groups/{id} → full group object.
-        if "/account/scim/v2/Groups/" in path:
-            group_id_arg = path.rsplit("/", 1)[-1]
-            if group_id_arg != group_id:
-                return {}
-            return {
-                "id": group_id,
-                "displayName": group_name,
-                "externalId": external_id,
-                "members": [{"value": mid} for mid in member_ids],
-            }
-        if path.endswith("/account/scim/v2/Groups"):
-            group = {"id": group_id, "displayName": group_name}
-            return {
-                "totalResults": 1,
-                "startIndex": 1,
-                "itemsPerPage": 100,
-                "Resources": [group],
-            }
-        if "/account/scim/v2/Users" in path:
-            resources = [{"id": sid, "userName": un} for sid, un in users]
-            return {
-                "totalResults": len(resources),
-                "startIndex": 1,
-                "itemsPerPage": 100,
-                "Resources": resources,
-            }
-        return {
-            "totalResults": 0,
-            "startIndex": 1,
-            "itemsPerPage": 100,
-            "Resources": [],
-        }
-
-    mock_workspace_client.api_client.do.side_effect = _scim_do
+    num = _numeric_id_mapper()
+    _configure_iam(
+        mock_workspace_client,
+        users=[_iam_user(un, num(sid)) for sid, un in users],
+        groups=[_iam_group(group_name, group_id=num(group_id), external_id=external_id)],
+        members_by_group_id={num(group_id): [_iam_member(num(mid)) for mid in member_ids]},
+    )
+    _route_scim_group_writes(mock_workspace_client, num)
 
 
 def test_orchestrator_raises_when_groups_configured_with_workspace_scim(
@@ -2921,11 +2922,69 @@ def test_orchestrator_raises_when_groups_configured_with_skip_users_fetch(
         )
 
 
+def test_orchestrator_warns_when_use_workspace_scim_used(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch, caplog
+):
+    """use_workspace_scim is deprecated: using it logs a warning telling the user to
+    omit it, while the run still completes (deprecated, not removed)."""
+    config = _catalog_with_tags_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    # use_workspace_scim=True uses the workspace SCIM SDK list methods, not the
+    # account identity proxy — return empty principal lists.
+    mock_workspace_client.users.list.return_value = []
+    mock_workspace_client.groups.list.return_value = []
+    mock_workspace_client.service_principals.list.return_value = []
+
+    with caplog.at_level(logging.WARNING, logger="uc_declarative_abac"):
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            use_workspace_scim=True,
+        )
+
+    assert any(
+        "use-workspace-scim" in r.getMessage()
+        and "deprecated" in r.getMessage().lower()
+        and "omit" in r.getMessage().lower()
+        for r in caplog.records
+    ), "Expected a deprecation warning instructing the user to omit --use-workspace-scim"
+
+
+def test_orchestrator_warns_when_skip_users_fetch_used(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch, caplog
+):
+    """skip_users_fetch is deprecated: using it logs a warning telling the user to
+    omit it, while the run still completes (deprecated, not removed)."""
+    config = _catalog_with_tags_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_empty_principals(mock_workspace_client)
+
+    with caplog.at_level(logging.WARNING, logger="uc_declarative_abac"):
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            skip_users_fetch=True,
+        )
+
+    assert any(
+        "skip-users-fetch" in r.getMessage()
+        and "deprecated" in r.getMessage().lower()
+        and "omit" in r.getMessage().lower()
+        for r in caplog.records
+    ), "Expected a deprecation warning instructing the user to omit --skip-users-fetch"
+
+
 def test_orchestrator_adds_group_members_end_to_end(
     tmp_yaml_dir, mock_workspace_client, monkeypatch
 ):
     """A configured member absent from an existing group flows into
-    group_diff.members_to_add and a PATCH is issued against the group's SCIM id."""
+    group_diff.members_to_add and a SCIM PATCH is issued for the group."""
     config = _config_with_group(["alice@example.com"])
     root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
@@ -2946,12 +3005,9 @@ def test_orchestrator_adds_group_members_end_to_end(
     )
 
     assert "data_engineers" in result.group_diff.members_to_add
-    patch_calls = [
-        c
-        for c in mock_workspace_client.api_client.do.call_args_list
-        if c.args and c.args[0] == "PATCH" and "/Groups/g-1" in c.args[1]
-    ]
-    assert patch_calls, "Expected a PATCH against the group's SCIM id"
+    assert _scim_write_calls(mock_workspace_client, "PATCH"), (
+        "Expected a SCIM PATCH adding the member to the group"
+    )
 
 
 def test_orchestrator_group_membership_is_idempotent(
@@ -2980,12 +3036,9 @@ def test_orchestrator_group_membership_is_idempotent(
 
     assert result.group_diff.members_to_add == {}
     assert result.group_diff.members_to_remove == {}
-    patch_calls = [
-        c
-        for c in mock_workspace_client.api_client.do.call_args_list
-        if c.args and c.args[0] == "PATCH"
-    ]
-    assert patch_calls == [], "Expected no PATCH when membership is already in sync"
+    assert _scim_write_calls(mock_workspace_client, "PATCH") == [], (
+        "Expected no SCIM PATCH when membership is already in sync"
+    )
 
 
 def test_orchestrator_leaves_membership_untouched_when_members_omitted(
@@ -3020,13 +3073,10 @@ def test_orchestrator_leaves_membership_untouched_when_members_omitted(
 
     assert result.group_diff.members_to_add == {}
     assert result.group_diff.members_to_remove == {}
-    # Membership is unmanaged, so the per-group members GET is never issued.
-    member_gets = [
-        c
-        for c in mock_workspace_client.api_client.do.call_args_list
-        if c.args and c.args[0] == "GET" and "/account/scim/v2/Groups/g-1" in c.args[1]
-    ]
-    assert member_gets == [], "Expected no per-group member GET when members omitted"
+    # Membership is unmanaged, so the per-group member list is never fetched.
+    assert (
+        not mock_workspace_client.workspace_iam_v2.list_direct_group_members_proxy.called
+    ), "Expected no per-group member fetch when members omitted"
 
 
 def test_orchestrator_reconciles_group_assumers_end_to_end(
@@ -3101,7 +3151,7 @@ def test_orchestrator_creates_missing_group_when_creation_enabled(
     tmp_yaml_dir, mock_workspace_client, monkeypatch
 ):
     """With enable_group_creation=True, a missing configured group is created (with
-    its members) via a POST to the account SCIM proxy."""
+    its members) via the account SCIM proxy (which grants the creator MANAGER)."""
     config = _config_with_group(["alice@example.com"])
     root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
@@ -3122,14 +3172,9 @@ def test_orchestrator_creates_missing_group_when_creation_enabled(
     )
 
     assert "data_engineers" in result.group_diff.groups_to_create
-    post_calls = [
-        c
-        for c in mock_workspace_client.api_client.do.call_args_list
-        if c.args
-        and c.args[0] == "POST"
-        and c.args[1].endswith("/account/scim/v2/Groups")
-    ]
-    assert post_calls, "Expected a POST to create the missing group"
+    assert _scim_write_calls(mock_workspace_client, "POST"), (
+        "Expected a SCIM POST creating the missing group"
+    )
 
 
 def _grant_config_referencing_pending_group(group_name: str) -> dict:
@@ -3228,22 +3273,18 @@ def test_orchestrator_removes_extra_group_member_end_to_end(
     )
 
     assert "data_engineers" in result.group_diff.members_to_remove
-    remove_patches = [
-        c
-        for c in mock_workspace_client.api_client.do.call_args_list
-        if c.args
-        and c.args[0] == "PATCH"
-        and "/Groups/g-1" in c.args[1]
-        and "remove" in repr(c.kwargs)
-    ]
-    assert remove_patches, "Expected a PATCH remove against the group's SCIM id"
+    patch_calls = _scim_write_calls(mock_workspace_client, "PATCH")
+    assert patch_calls, "Expected a SCIM PATCH removing the member from the group"
+    assert any("remove" in repr(c.kwargs) for c in patch_calls), (
+        "Expected the PATCH to carry a remove operation"
+    )
 
 
 def test_orchestrator_does_not_manage_membership_when_flag_off(
     tmp_yaml_dir, mock_workspace_client, monkeypatch
 ):
     """Without --enable-group-management, configured groups are ignored — no member
-    PATCH is issued even when the group's membership differs from config."""
+    write is issued even when the group's membership differs from config."""
     config = _config_with_group(["alice@example.com"])
     root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
@@ -3266,14 +3307,9 @@ def test_orchestrator_does_not_manage_membership_when_flag_off(
 
     assert result.group_diff.members_to_add == {}
     assert result.group_diff.members_to_remove == {}
-    patch_calls = [
-        c
-        for c in mock_workspace_client.api_client.do.call_args_list
-        if c.args and c.args[0] == "PATCH"
-    ]
-    assert patch_calls == [], (
-        "Expected no membership PATCH when group management is off"
-    )
+    iam = mock_workspace_client.workspace_iam_v2
+    assert not iam.create_direct_group_member_proxy.called
+    assert not iam.delete_direct_group_member_proxy.called
 
 
 # ---------------------------------------------------------------------------
@@ -3302,86 +3338,64 @@ def _setup_mock_groups_state(
     groups: list[dict],
     users: list[tuple[str, str]] | None = None,
 ) -> None:
-    """Configure the account SCIM proxy mock for an arbitrary set of groups.
+    """Configure the account identity (V2) proxies for an arbitrary set of groups.
 
-    ``groups`` is a list of dicts each with keys: ``id``, ``displayName`` and
-    optionally ``member_ids`` (list[str]) and ``externalId`` (str). The Groups LIST
-    returns id + displayName for every group (modelling the not-yet-renamed account
-    state); the per-group GET /Groups/{id} returns the full group object including
-    members + externalId. PATCH/POST return {}. ``users`` is a list of
-    (scim_id, userName).
+    ``groups`` is a list of dicts each with keys: ``id`` (a numeric string — the helper
+    int-casts group ids for membership), ``displayName`` and optionally ``member_ids``
+    (list[str]) and ``externalId`` (str). ``list_groups_proxy`` returns every group
+    WITHOUT members (modelling the not-yet-renamed account state);
+    ``list_direct_group_members_proxy`` serves each group's members. ``users`` is a
+    list of (scim_id, userName).
     """
     users = users or []
-    by_id = {g["id"]: g for g in groups}
-
-    def _scim_do(method, path, **kwargs):
-        if method in ("PATCH", "POST") and "/account/scim/v2/Groups" in path:
-            return {}
-        if "/account/scim/v2/Groups/" in path:
-            group_id_arg = path.rsplit("/", 1)[-1]
-            g = by_id.get(group_id_arg)
-            if g is None:
-                return {}
-            return {
-                "id": g["id"],
-                "displayName": g["displayName"],
-                "externalId": g.get("externalId", ""),
-                "members": [{"value": mid} for mid in g.get("member_ids", [])],
-            }
-        if path.endswith("/account/scim/v2/Groups"):
-            resources = [
-                {"id": g["id"], "displayName": g["displayName"]} for g in groups
-            ]
-            return {
-                "totalResults": len(resources),
-                "startIndex": 1,
-                "itemsPerPage": 100,
-                "Resources": resources,
-            }
-        if "/account/scim/v2/Users" in path:
-            resources = [{"id": sid, "userName": un} for sid, un in users]
-            return {
-                "totalResults": len(resources),
-                "startIndex": 1,
-                "itemsPerPage": 100,
-                "Resources": resources,
-            }
-        return {
-            "totalResults": 0,
-            "startIndex": 1,
-            "itemsPerPage": 100,
-            "Resources": [],
-        }
-
-    mock_workspace_client.api_client.do.side_effect = _scim_do
+    _configure_iam(
+        mock_workspace_client,
+        users=[_iam_user(un, sid) for sid, un in users],
+        groups=[
+            _iam_group(
+                g["displayName"], group_id=g["id"], external_id=g.get("externalId", "")
+            )
+            for g in groups
+        ],
+        members_by_group_id={
+            g["id"]: [_iam_member(mid) for mid in g.get("member_ids", [])]
+            for g in groups
+        },
+    )
+    _route_scim_group_writes(mock_workspace_client, _numeric_id_mapper())
 
 
-def _rename_patch_calls(mock_workspace_client: MagicMock, group_id: str) -> list:
-    """PATCH calls against /Groups/{group_id} that replace the displayName."""
-    return [
-        c
-        for c in mock_workspace_client.api_client.do.call_args_list
-        if c.args
-        and c.args[0] == "PATCH"
-        and f"/Groups/{group_id}" in c.args[1]
-        and "displayName" in repr(c.kwargs)
-        and "replace" in repr(c.kwargs)
-    ]
+def _rename_calls(mock_workspace_client: MagicMock, group_id: str) -> list:
+    """SCIM PATCH calls renaming the given group id (replace on displayName)."""
+    calls = []
+    for c in mock_workspace_client.api_client.do.call_args_list:
+        if not (c.args and c.args[0] == "PATCH"):
+            continue
+        path = c.args[1] if len(c.args) > 1 else ""
+        if not path.endswith(f"/Groups/{group_id}"):
+            continue
+        operations = (c.kwargs.get("body") or {}).get("Operations", [])
+        if any(
+            op.get("op") == "replace" and op.get("path") == "displayName"
+            for op in operations
+        ):
+            calls.append(c)
+    return calls
 
 
 def test_orchestrator_renames_group_end_to_end_when_id_matches_and_name_differs(
     tmp_yaml_dir, mock_workspace_client, monkeypatch
 ):
     """Config keeps the same ``id`` but changes the display name; the account still
-    has the OLD name under that id. A GroupRename is recorded and a SCIM PATCH that
-    replaces displayName is issued against the group's id (real run)."""
-    config = _config_with_group_id("new_engineers", "g-1")
+    has the OLD name under that id. A GroupRename is recorded and a rename call that
+    updates group_name is issued against the group's id (real run)."""
+    config = _config_with_group_id("new_engineers", "10")
     root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
     _install_fetch_router(monkeypatch, config)
     _setup_mock_groups_state(
         mock_workspace_client,
-        groups=[{"id": "g-1", "displayName": "old_engineers", "member_ids": []}],
+        groups=[{"id": "10", "displayName": "old_engineers", "member_ids": []}],
     )
 
     result = run(
@@ -3394,13 +3408,13 @@ def test_orchestrator_renames_group_end_to_end_when_id_matches_and_name_differs(
 
     renames = result.group_diff.groups_to_rename
     assert any(
-        r.id == "g-1"
+        r.id == "10"
         and r.old_display_name == "old_engineers"
         and r.new_display_name == "new_engineers"
         for r in renames
-    ), f"Expected GroupRename(g-1, old_engineers -> new_engineers), got: {renames}"
-    assert _rename_patch_calls(mock_workspace_client, "g-1"), (
-        "Expected a PATCH replacing displayName against /Groups/g-1"
+    ), f"Expected GroupRename(10, old_engineers -> new_engineers), got: {renames}"
+    assert _rename_calls(mock_workspace_client, "10"), (
+        "Expected a rename call updating group_name for group 10"
     )
 
 
@@ -3413,7 +3427,7 @@ def test_orchestrator_dry_run_resolves_new_name_reference_without_error(
     config = {
         "resources": {
             "governed_tags": {"team": {"allowed_values": ["data"]}},
-            "groups": {"new_engineers": {"id": "g-1", "members": []}},
+            "groups": {"new_engineers": {"id": "10", "members": []}},
             "catalogs": {
                 "my_catalog": {
                     "schemas": [
@@ -3440,7 +3454,7 @@ def test_orchestrator_dry_run_resolves_new_name_reference_without_error(
     _install_fetch_router(monkeypatch, config)
     _setup_mock_groups_state(
         mock_workspace_client,
-        groups=[{"id": "g-1", "displayName": "old_engineers", "member_ids": []}],
+        groups=[{"id": "10", "displayName": "old_engineers", "member_ids": []}],
     )
 
     result = run(
@@ -3454,7 +3468,7 @@ def test_orchestrator_dry_run_resolves_new_name_reference_without_error(
     )
 
     assert any(
-        r.id == "g-1" and r.new_display_name == "new_engineers"
+        r.id == "10" and r.new_display_name == "new_engineers"
         for r in result.group_diff.groups_to_rename
     )
     # The grant resolved against the NEW name rather than erroring out.
@@ -3462,8 +3476,8 @@ def test_orchestrator_dry_run_resolves_new_name_reference_without_error(
         p.securable_full_name == "my_catalog.sales"
         for p in result.privilege_diff.to_grant
     ), f"Expected grant on my_catalog.sales, got: {result.privilege_diff.to_grant}"
-    assert _rename_patch_calls(mock_workspace_client, "g-1") == [], (
-        "Expected no rename PATCH in dry-run"
+    assert _rename_calls(mock_workspace_client, "10") == [], (
+        "Expected no rename call in dry-run"
     )
 
 
@@ -3476,7 +3490,7 @@ def test_orchestrator_dry_run_rejects_old_name_reference(
     config = {
         "resources": {
             "governed_tags": {"team": {"allowed_values": ["data"]}},
-            "groups": {"new_engineers": {"id": "g-1", "members": []}},
+            "groups": {"new_engineers": {"id": "10", "members": []}},
             "catalogs": {
                 "my_catalog": {
                     "schemas": [
@@ -3503,7 +3517,7 @@ def test_orchestrator_dry_run_rejects_old_name_reference(
     _install_fetch_router(monkeypatch, config)
     _setup_mock_groups_state(
         mock_workspace_client,
-        groups=[{"id": "g-1", "displayName": "old_engineers", "member_ids": []}],
+        groups=[{"id": "10", "displayName": "old_engineers", "member_ids": []}],
     )
 
     with pytest.raises(ExecutionBatchError) as exc_info:
@@ -3532,14 +3546,14 @@ def test_orchestrator_errors_when_group_id_does_not_exist(
     tmp_yaml_dir, mock_workspace_client, monkeypatch
 ):
     """A config group declaring an ``id`` absent from the account is a fatal error."""
-    config = _config_with_group_id("new_engineers", "g-nonexistent")
+    config = _config_with_group_id("new_engineers", "999")
     root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
     _install_fetch_router(monkeypatch, config)
     # Account has a different group id.
     _setup_mock_groups_state(
         mock_workspace_client,
-        groups=[{"id": "g-other", "displayName": "some_group", "member_ids": []}],
+        groups=[{"id": "20", "displayName": "some_group", "member_ids": []}],
     )
 
     with pytest.raises(ExecutionBatchError):
@@ -3556,15 +3570,15 @@ def test_orchestrator_errors_when_rename_target_name_already_taken(
 ):
     """Renaming group id g-1 to a display name already used by a different existing
     group is a fatal error and issues no rename PATCH."""
-    config = _config_with_group_id("taken_name", "g-1")
+    config = _config_with_group_id("taken_name", "10")
     root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
     _install_fetch_router(monkeypatch, config)
     _setup_mock_groups_state(
         mock_workspace_client,
         groups=[
-            {"id": "g-1", "displayName": "old_engineers", "member_ids": []},
-            {"id": "g-2", "displayName": "taken_name", "member_ids": []},
+            {"id": "10", "displayName": "old_engineers", "member_ids": []},
+            {"id": "20", "displayName": "taken_name", "member_ids": []},
         ],
     )
 
@@ -3576,8 +3590,8 @@ def test_orchestrator_errors_when_rename_target_name_already_taken(
             enable_group_management=True,
         )
 
-    assert _rename_patch_calls(mock_workspace_client, "g-1") == [], (
-        "Expected no rename PATCH when the target name collides"
+    assert _rename_calls(mock_workspace_client, "10") == [], (
+        "Expected no rename call when the target name collides"
     )
 
 
@@ -3593,7 +3607,7 @@ def test_orchestrator_rename_does_not_diff_actual_grants_referencing_old_name(
     config = {
         "resources": {
             "governed_tags": {"team": {"allowed_values": ["data"]}},
-            "groups": {"new_engineers": {"id": "g-1", "members": []}},
+            "groups": {"new_engineers": {"id": "10", "members": []}},
             "catalogs": {
                 "my_catalog": {
                     "schemas": [
@@ -3628,7 +3642,7 @@ def test_orchestrator_rename_does_not_diff_actual_grants_referencing_old_name(
     )
     _setup_mock_groups_state(
         mock_workspace_client,
-        groups=[{"id": "g-1", "displayName": "old_engineers", "member_ids": []}],
+        groups=[{"id": "10", "displayName": "old_engineers", "member_ids": []}],
     )
 
     result = run(
@@ -3643,7 +3657,7 @@ def test_orchestrator_rename_does_not_diff_actual_grants_referencing_old_name(
 
     # The rename was detected.
     assert any(
-        r.id == "g-1"
+        r.id == "10"
         and r.old_display_name == "old_engineers"
         and r.new_display_name == "new_engineers"
         for r in result.group_diff.groups_to_rename
@@ -3685,57 +3699,33 @@ def _setup_mock_group_inventory(
     mock_workspace_client: MagicMock,
     groups: list[tuple[str, str, str]],
 ) -> None:
-    """Configure the account SCIM proxy mock for group-deletion tests.
+    """Configure the account identity (V2) proxies for group-deletion tests.
 
-    ``groups`` is a list of (display_name, id, external_id). The Groups LIST returns
-    id + displayName + externalId for every group (matching the widened attrs the
-    deletion path relies on); per-group GET returns the group with empty membership;
-    DELETE / PATCH / POST return {}. Users and SPs are empty.
+    ``groups`` is a list of (display_name, id, external_id) with numeric-string ids.
+    ``list_groups_proxy`` returns every group (with external_id for the deletion
+    provenance filter); members are empty. Users and SPs are empty.
     """
-    by_id = {gid: (name, ext) for name, gid, ext in groups}
-
-    def _scim_do(method, path, **kwargs):
-        if method == "DELETE" and "/account/scim/v2/Groups/" in path:
-            return {}
-        if method in ("PATCH", "POST") and "/account/scim/v2/Groups" in path:
-            return {}
-        if "/account/scim/v2/Groups/" in path:
-            gid = path.rsplit("/", 1)[-1]
-            name, ext = by_id.get(gid, ("", ""))
-            return {
-                "id": gid,
-                "displayName": name,
-                "externalId": ext,
-                "members": [],
-            }
-        if path.endswith("/account/scim/v2/Groups"):
-            resources = [
-                {"id": gid, "displayName": name, "externalId": ext}
-                for name, gid, ext in groups
-            ]
-            return {
-                "totalResults": len(resources),
-                "startIndex": 1,
-                "itemsPerPage": 100,
-                "Resources": resources,
-            }
-        return {
-            "totalResults": 0,
-            "startIndex": 1,
-            "itemsPerPage": 100,
-            "Resources": [],
-        }
-
-    mock_workspace_client.api_client.do.side_effect = _scim_do
+    _configure_iam(
+        mock_workspace_client,
+        groups=[
+            _iam_group(name, group_id=gid, external_id=ext) for name, gid, ext in groups
+        ],
+    )
+    _route_scim_group_writes(mock_workspace_client, _numeric_id_mapper())
 
 
 def _delete_group_ids(mock_workspace_client: MagicMock) -> set[str]:
-    """Return the set of group SCIM ids a DELETE was issued against."""
-    return {
-        c.args[1].rsplit("/", 1)[-1]
-        for c in mock_workspace_client.api_client.do.call_args_list
-        if c.args and c.args[0] == "DELETE" and "/account/scim/v2/Groups/" in c.args[1]
-    }
+    """Return the set of group ids a SCIM DELETE /Groups/{id} was issued against."""
+    ids: set[str] = set()
+    for c in mock_workspace_client.api_client.do.call_args_list:
+        if (
+            c.args
+            and c.args[0] == "DELETE"
+            and len(c.args) > 1
+            and "/Groups/" in c.args[1]
+        ):
+            ids.add(c.args[1].rsplit("/", 1)[-1])
+    return ids
 
 
 def test_orchestrator_deletes_undeclared_group_when_flag_and_force_enabled(
@@ -3749,7 +3739,7 @@ def test_orchestrator_deletes_undeclared_group_when_flag_and_force_enabled(
     _install_fetch_router(monkeypatch, config)
     _setup_mock_group_inventory(
         mock_workspace_client,
-        [("data_engineers", "g-1", ""), ("legacy", "g-2", "")],
+        [("data_engineers", "10", ""), ("legacy", "20", "")],
     )
 
     result = run(
@@ -3763,7 +3753,7 @@ def test_orchestrator_deletes_undeclared_group_when_flag_and_force_enabled(
 
     deleted_names = {g.display_name for g in result.group_diff.groups_to_delete}
     assert deleted_names == {"legacy"}
-    assert _delete_group_ids(mock_workspace_client) == {"g-2"}
+    assert _delete_group_ids(mock_workspace_client) == {"20"}
 
 
 def test_orchestrator_does_not_delete_external_or_system_group(
@@ -3778,9 +3768,9 @@ def test_orchestrator_does_not_delete_external_or_system_group(
     _setup_mock_group_inventory(
         mock_workspace_client,
         [
-            ("data_engineers", "g-1", ""),
-            ("idp-group", "g-3", "ext-abc"),
-            ("account users", "g-4", ""),
+            ("data_engineers", "10", ""),
+            ("idp-group", "30", "ext-abc"),
+            ("account users", "40", ""),
         ],
     )
 
@@ -3807,7 +3797,7 @@ def test_orchestrator_does_not_delete_when_flag_disabled(
     _install_fetch_router(monkeypatch, config)
     _setup_mock_group_inventory(
         mock_workspace_client,
-        [("data_engineers", "g-1", ""), ("legacy", "g-2", "")],
+        [("data_engineers", "10", ""), ("legacy", "20", "")],
     )
 
     result = run(
@@ -4094,23 +4084,18 @@ def test_orchestrator_creates_nested_group_hierarchy_without_resolution_errors(
 def test_orchestrator_creates_nested_groups_before_linking_membership(
     tmp_yaml_dir, mock_workspace_client, monkeypatch
 ):
-    """On a real run, every group is created (POST) before any membership is linked
-    (PATCH), so the child exists (with a SCIM id) when the parent references it."""
+    """On a real run, every group is created before any membership is linked, so the
+    child exists (with an id) when the parent references it."""
     config = _config_with_nested_groups()
     root = tmp_yaml_dir({"resources/catalog.yaml": config})
     _setup_mock_workspace_empty_state(mock_workspace_client)
     _install_fetch_router(monkeypatch, config)
 
-    def _scim_do(method, path, **kwargs):
-        # Creating a group returns a per-name SCIM id so it can be registered and
-        # then targeted by the membership PATCH.
-        if method == "POST" and path.endswith("/account/scim/v2/Groups"):
-            return {"id": "id-" + kwargs["body"]["displayName"]}
-        if method in ("PATCH", "POST") and "/account/scim/v2/Groups" in path:
-            return {}
-        return {"totalResults": 0, "startIndex": 1, "itemsPerPage": 100, "Resources": []}
-
-    mock_workspace_client.api_client.do.side_effect = _scim_do
+    # Nothing exists yet; each create (SCIM POST) returns a per-name numeric id so the
+    # group can be registered and then targeted by the membership link (SCIM PATCH).
+    num = _numeric_id_mapper()
+    _configure_iam(mock_workspace_client)
+    _route_scim_group_writes(mock_workspace_client, num)
 
     run(
         config_dir=root,
@@ -4121,15 +4106,18 @@ def test_orchestrator_creates_nested_groups_before_linking_membership(
         dry_run=False,
     )
 
-    group_calls = [
+    # Ordered across the SCIM group writes: every create (POST) must precede any member
+    # link (PATCH), so the child exists with an id before the parent references it.
+    seq = [
         c.args[0]
         for c in mock_workspace_client.api_client.do.call_args_list
         if c.args
         and c.args[0] in ("POST", "PATCH")
-        and "/account/scim/v2/Groups" in c.args[1]
+        and len(c.args) > 1
+        and "/Groups" in c.args[1]
     ]
-    post_indices = [i for i, m in enumerate(group_calls) if m == "POST"]
-    patch_indices = [i for i, m in enumerate(group_calls) if m == "PATCH"]
-    assert len(post_indices) == 2  # both groups created empty
-    assert patch_indices  # the parent's membership is linked
-    assert max(post_indices) < min(patch_indices)  # all creates precede any linking
+    create_indices = [i for i, m in enumerate(seq) if m == "POST"]
+    link_indices = [i for i, m in enumerate(seq) if m == "PATCH"]
+    assert len(create_indices) == 2  # both groups created empty
+    assert link_indices  # the parent's membership is linked
+    assert max(create_indices) < min(link_indices)  # creates precede any linking

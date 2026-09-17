@@ -39,10 +39,10 @@ inputs:
     default: 'false'
   use-workspace-scim:
     description: >-
-      If "true", fetch principals from the workspace SCIM API instead of the account
-      SCIM proxy. This can be useful for limited test runs against a test workspace.
-      In this mode the account-level system groups "account users" and "account admins"
-      are automatically included, since the workspace SCIM API does not surface them.
+      DEPRECATED — omit this input; it will be removed in a future release. If "true",
+      fetch principals from the workspace SCIM API instead of the account path. The
+      default account path now lists all account principals, so this mode is no longer
+      needed and the engine logs a deprecation warning when it is set.
     required: false
     default: 'false'
   enable-tag-management:
@@ -248,9 +248,9 @@ inputs:
     default: '8'
   skip-users-fetch:
     description: >-
-      If "true", skip listing account/workspace users and treat the user set as
-      empty. Useful for faster interactive runs when access is governed only via
-      groups and service principals. Not intended for production use.
+      DEPRECATED — omit this input; it will be removed in a future release. If "true",
+      skip listing account/workspace users and treat the user set as empty. The engine
+      logs a deprecation warning when it is set. Not intended for production use.
     required: false
     default: 'false'
   enable-group-creation:
