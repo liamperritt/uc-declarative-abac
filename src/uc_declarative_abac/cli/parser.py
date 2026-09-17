@@ -400,9 +400,11 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         choices=["merge", "replace"],
         default=argparse.SUPPRESS,
         help=(
-            "How sibling fields on a $ref entry combine with the referenced definition. "
-            "'merge' recursively deep-merges maps and lists; 'replace' shallowly "
-            "replaces top-level keys (legacy behaviour) [default: merge]."
+            "(Deprecated — omit it; will be removed in a future release.) How sibling "
+            "fields on a $ref entry combine with the referenced definition. 'merge' (the "
+            "default, go-forward behaviour) recursively deep-merges maps and lists; "
+            "'replace' shallowly replaces top-level keys (legacy, going away) "
+            "[default: merge]."
         ),
     )
     parser.add_argument(
