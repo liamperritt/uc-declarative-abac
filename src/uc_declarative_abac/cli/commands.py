@@ -67,52 +67,79 @@ class _ScopeFeature:
 # when a deprecated flag is used on its own.
 _SCOPE_FEATURES: tuple[_ScopeFeature, ...] = (
     _ScopeFeature(
-        "tag_management_scopes", "--tag-management-scopes",
-        "enable_tag_management", "--enable-tag-management",
-        "manage_tags_for_namespaces", "--manage-tags-for-namespaces",
-        "manage_tags_for_catalogs", "--manage-tags-for-catalogs",
+        "tag_management_scopes",
+        "--tag-management-scopes",
+        "enable_tag_management",
+        "--enable-tag-management",
+        "manage_tags_for_namespaces",
+        "--manage-tags-for-namespaces",
+        "manage_tags_for_catalogs",
+        "--manage-tags-for-catalogs",
     ),
     _ScopeFeature(
-        "privilege_management_scopes", "--privilege-management-scopes",
-        "enable_privilege_management", "--enable-privilege-management",
-        "manage_privileges_for_namespaces", "--manage-privileges-for-namespaces",
-        "manage_privileges_for_catalogs", "--manage-privileges-for-catalogs",
+        "privilege_management_scopes",
+        "--privilege-management-scopes",
+        "enable_privilege_management",
+        "--enable-privilege-management",
+        "manage_privileges_for_namespaces",
+        "--manage-privileges-for-namespaces",
+        "manage_privileges_for_catalogs",
+        "--manage-privileges-for-catalogs",
     ),
     _ScopeFeature(
-        "taggable_management_scopes", "--taggable-management-scopes",
-        "enable_taggable_management", "--enable-taggable-management",
-        "manage_taggables_for_namespaces", "--manage-taggables-for-namespaces",
-        "manage_taggables_for_catalogs", "--manage-taggables-for-catalogs",
+        "taggable_management_scopes",
+        "--taggable-management-scopes",
+        "enable_taggable_management",
+        "--enable-taggable-management",
+        "manage_taggables_for_namespaces",
+        "--manage-taggables-for-namespaces",
+        "manage_taggables_for_catalogs",
+        "--manage-taggables-for-catalogs",
     ),
     _ScopeFeature(
-        "taggable_creation_scopes", "--taggable-creation-scopes",
-        "enable_taggable_creation", "--enable-taggable-creation",
-        "create_taggables_for_namespaces", "--create-taggables-for-namespaces",
-        "create_taggables_for_catalogs", "--create-taggables-for-catalogs",
+        "taggable_creation_scopes",
+        "--taggable-creation-scopes",
+        "enable_taggable_creation",
+        "--enable-taggable-creation",
+        "create_taggables_for_namespaces",
+        "--create-taggables-for-namespaces",
+        "create_taggables_for_catalogs",
+        "--create-taggables-for-catalogs",
     ),
     _ScopeFeature(
-        "policy_deletion_scopes", "--policy-deletion-scopes",
-        "enable_policy_deletion", "--enable-policy-deletion",
-        "delete_policies_for_namespaces", "--delete-policies-for-namespaces",
+        "policy_deletion_scopes",
+        "--policy-deletion-scopes",
+        "enable_policy_deletion",
+        "--enable-policy-deletion",
+        "delete_policies_for_namespaces",
+        "--delete-policies-for-namespaces",
     ),
     _ScopeFeature(
-        "group_creation_scopes", "--group-creation-scopes",
-        "enable_group_creation", "--enable-group-creation",
+        "group_creation_scopes",
+        "--group-creation-scopes",
+        "enable_group_creation",
+        "--enable-group-creation",
         hierarchical=False,
     ),
     _ScopeFeature(
-        "group_management_scopes", "--group-management-scopes",
-        "enable_group_management", "--enable-group-management",
+        "group_management_scopes",
+        "--group-management-scopes",
+        "enable_group_management",
+        "--enable-group-management",
         hierarchical=False,
     ),
     _ScopeFeature(
-        "group_deletion_scopes", "--group-deletion-scopes",
-        "enable_group_deletion", "--enable-group-deletion",
+        "group_deletion_scopes",
+        "--group-deletion-scopes",
+        "enable_group_deletion",
+        "--enable-group-deletion",
         hierarchical=False,
     ),
     _ScopeFeature(
-        "governed_tag_deletion_scopes", "--governed-tag-deletion-scopes",
-        "enable_governed_tag_deletion", "--enable-governed-tag-deletion",
+        "governed_tag_deletion_scopes",
+        "--governed-tag-deletion-scopes",
+        "enable_governed_tag_deletion",
+        "--enable-governed-tag-deletion",
         hierarchical=False,
     ),
 )
@@ -194,14 +221,15 @@ def _deprecated_flags_for_warning(
     used: list[str] = []
     if getattr(settings, feature.enable_field):
         used.append(feature.enable_flag)
-    if feature.namespace_field and getattr(settings, feature.namespace_field) is not None:
+    if (
+        feature.namespace_field
+        and getattr(settings, feature.namespace_field) is not None
+    ):
         used.append(feature.namespace_flag)
     return used
 
 
-def _resolve_scope_flags(
-    settings: RunSettings, namespace: argparse.Namespace
-) -> None:
+def _resolve_scope_flags(settings: RunSettings, namespace: argparse.Namespace) -> None:
     """Validate the new ``--*-scopes`` flags against the deprecated flags they
     supersede.
 
@@ -228,9 +256,7 @@ def _resolve_scope_flags(
             # Validate the grammar up front (so `validate` catches it too, and
             # deploy fails before contacting Databricks). ValueError -> exit 2.
             parse = (
-                parse_hierarchical_scope
-                if feature.hierarchical
-                else parse_flat_scope
+                parse_hierarchical_scope if feature.hierarchical else parse_flat_scope
             )
             try:
                 parse(new_spec)
@@ -291,6 +317,7 @@ def _run_kwargs(
         "enable_group_creation": settings.enable_group_creation,
         "enable_group_management": settings.enable_group_management,
         "enable_group_deletion": settings.enable_group_deletion,
+        "enable_domain_management": settings.enable_domain_management,
         "ignore_unresolvable_principals": settings.ignore_unresolvable_principals,
         "manage_tags_for_namespaces": namespaces["manage_tags_for_namespaces"],
         "manage_privileges_for_namespaces": namespaces[

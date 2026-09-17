@@ -273,6 +273,17 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--enable-domain-management",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help=(
+            "Permit the engine to create/update all UC Discovery domains derived from "
+            "governed tags: missing domains are created and existing domain descriptions "
+            "are updated. Governed-tag keys use domain for roots or domain/subdomain for "
+            "children. Off by default."
+        ),
+    )
+    parser.add_argument(
         "--manage-tags-for-catalogs",
         type=str,
         default=argparse.SUPPRESS,

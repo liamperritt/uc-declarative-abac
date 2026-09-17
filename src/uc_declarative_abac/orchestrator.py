@@ -15,6 +15,12 @@ from uc_declarative_abac.configs import (
     load_raw_configs,
     resolve_refs,
 )
+from uc_declarative_abac.discovery_domains import (
+    DiscoveryDomainDiff,
+    compile_desired_discovery_domains,
+    compute_discovery_domain_diff,
+    execute_discovery_domain_diff,
+)
 from uc_declarative_abac.governed_tags import (
     GovernedTagDiff,
     compile_desired_governed_tags,
@@ -86,6 +92,7 @@ class OrchestratorDiffsResult:
     group_diff: GroupDiff
     securable_diff: SecurableDiff
     governed_tag_diff: GovernedTagDiff
+    domain_diff: DiscoveryDomainDiff
     tag_diff: TagDiff
     policy_diff: PolicyDiff
     privilege_diff: PrivilegeDiff
@@ -105,8 +112,7 @@ def _filter_taggable_attributes(
     return {
         a
         for a in attrs
-        if a.securable_type == SecurableType.FUNCTION
-        or scope.matches(a.full_name)
+        if a.securable_type == SecurableType.FUNCTION or scope.matches(a.full_name)
     }
 
 
@@ -239,6 +245,7 @@ def run(
     enable_group_creation: bool = False,
     enable_group_management: bool = False,
     enable_group_deletion: bool = False,
+    enable_domain_management: bool = False,
     ignore_unresolvable_principals: str = "",
     manage_tags_for_namespaces: str = "*",
     manage_privileges_for_namespaces: str = "*",
@@ -264,7 +271,7 @@ def run(
     Returns the computed diffs for every domain in execution order.
     In dry-run mode, diffs are computed but no SQL is executed.
 
-    **Feature gating.** Each mutating feature resolves to a single ``Scope`` (see
+    **Feature gating.** Most mutating features resolve to a single ``Scope`` (see
     ``uc_declarative_abac.utils.Scope``) via ``_build_hierarchical_scope`` /
     ``_build_flat_scope``. A new-style ``*_scopes`` argument (non-``None``) wins
     and is parsed leniently — empty ⇒ disabled, ``"*"`` ⇒ all, otherwise a
@@ -277,8 +284,14 @@ def run(
     execute). An active ``privilege_management`` scope with an inactive
     ``tag_management`` scope makes the privileges compiler match its grant
     policies against the on-disk (``actual``) tag state instead of the config's
-    desired tags. A new-style scope entry that matches no configured securable
+    desired tags. A new-style scope entry that matches no applicable resource
     logs a warning (likely typo) but never fails the run.
+
+    ``enable_domain_management`` is deliberately all-or-none rather than scoped.
+    When enabled, every retained governed tag is compiled into a Discovery domain;
+    missing domains are created and existing descriptions are updated. Configured
+    tag state wins over fetched state so same-run description changes propagate.
+    When disabled, domain state is not fetched and the workflow is inert.
 
     The deprecated ``*_for_namespaces`` strings scope each enabled domain to a
     subset of the configured namespaces. Each comma-separated entry is either a
@@ -373,7 +386,6 @@ def run(
     governed_tag_deletion_scope = _build_flat_scope(
         governed_tag_deletion_scopes, legacy_enabled=enable_governed_tag_deletion
     )
-
     # Effective enablement: a feature is on iff its scope has any entry.
     enable_tag_management = tag_scope.is_active()
     enable_privilege_management = privilege_scope.is_active()
@@ -526,6 +538,11 @@ def run(
             ws_helper.fetch_actual_governed_tags,
             desired_governed_tag_names,
         )
+        actual_domains_f = (
+            pool.submit(ws_helper.fetch_actual_discovery_domains)
+            if enable_domain_management
+            else None
+        )
         principals_f = pool.submit(ws_helper.fetch_principals)
         actual_tags_f = (
             pool.submit(uc_helper.fetch_actual_tags, catalog_names)
@@ -541,6 +558,9 @@ def run(
         actual_securables, actual_attributes = actual_securables_f.result()
         actual_policies = actual_policies_f.result()
         actual_governed_tags = actual_governed_tags_f.result()
+        actual_domains = (
+            actual_domains_f.result() if actual_domains_f is not None else set()
+        )
         principals_f.result()
         actual_tags = actual_tags_f.result() if actual_tags_f is not None else set()
         actual_privileges = (
@@ -662,8 +682,23 @@ def run(
     # compiler to validate that each securable tag's value is in the governed
     # tag's allowed_values. Desired-only covers in-flight creations, actual-only
     # covers already-deployed tags the config doesn't redeclare.
-    governed_tags = desired_governed_tags | actual_governed_tags
+    governed_tags_by_name = {tag.name: tag for tag in actual_governed_tags}
+    governed_tags_by_name.update({tag.name: tag for tag in desired_governed_tags})
+    governed_tags = set(governed_tags_by_name.values())
     governed_tag_names = {t.name for t in governed_tags}
+    deleted_governed_tag_names = {tag.name for tag in governed_tag_diff.to_delete}
+    domain_source_governed_tags = {
+        tag for tag in governed_tags if tag.name not in deleted_governed_tag_names
+    }
+    domain_diff = (
+        compute_discovery_domain_diff(
+            compile_desired_discovery_domains(domain_source_governed_tags),
+            actual_domains,
+            change_logger,
+        )
+        if enable_domain_management
+        else DiscoveryDomainDiff()
+    )
 
     # 5. Securables workflow (before tags and privileges) — desired sides were
     # compiled up-front; here we apply taggable-management scoping.
@@ -694,19 +729,13 @@ def run(
     if enable_tag_management:
         desired_tags = compile_desired_tags(config, governed_tags, change_logger)
         in_scope_desired_tags = {
-            t
-            for t in desired_tags
-            if tag_scope.matches(t.securable_full_name)
+            t for t in desired_tags if tag_scope.matches(t.securable_full_name)
         }
         in_scope_actual_tags = {
-            t
-            for t in actual_tags
-            if tag_scope.matches(t.securable_full_name)
+            t for t in actual_tags if tag_scope.matches(t.securable_full_name)
         }
         out_of_scope_actual_tags = {
-            t
-            for t in actual_tags
-            if not tag_scope.matches(t.securable_full_name)
+            t for t in actual_tags if not tag_scope.matches(t.securable_full_name)
         }
         tag_diff = compute_tag_diff(in_scope_desired_tags, in_scope_actual_tags)
         tag_diff, retained_tags = filter_retained_removals(tag_diff, retain_prefixes)
@@ -804,6 +833,15 @@ def run(
         # max_parallel_changes not currently supported for governed tags
     )
 
+    if domain_diff.to_create or domain_diff.to_update:
+        change_logger.log_section_header("Discovery domains")
+    execute_discovery_domain_diff(
+        ws_helper,
+        domain_diff,
+        change_logger,
+        dry_run=dry_run,
+    )
+
     if (
         securable_diff.securables_to_create
         or securable_diff.securables_to_replace
@@ -862,6 +900,7 @@ def run(
         group_diff=group_diff,
         securable_diff=securable_diff,
         governed_tag_diff=governed_tag_diff,
+        domain_diff=domain_diff,
         tag_diff=tag_diff,
         policy_diff=policy_diff,
         privilege_diff=privilege_diff,

@@ -178,6 +178,12 @@ inputs:
       ``enable-governed-tag-deletion``.
     required: false
     default: ''
+  enable-domain-management:
+    description: >-
+      Create or update all Unity Catalog Discovery domains derived from governed
+      tags. Keys use ``domain`` for a root or ``domain/subdomain`` for a child.
+    required: false
+    default: 'false'
   manage-tags-for-catalogs:
     description: >-
       Deprecated — use ``manage-tags-for-namespaces``. Forwarded to the CLI's
@@ -329,6 +335,7 @@ runs:
         GROUP_MANAGEMENT_SCOPES: ${{ inputs.group-management-scopes }}
         GROUP_DELETION_SCOPES: ${{ inputs.group-deletion-scopes }}
         GOVERNED_TAG_DELETION_SCOPES: ${{ inputs.governed-tag-deletion-scopes }}
+        ENABLE_DOMAIN_MANAGEMENT: ${{ inputs.enable-domain-management }}
         MANAGE_TAGS_FOR_CATALOGS: ${{ inputs.manage-tags-for-catalogs }}
         MANAGE_PRIVILEGES_FOR_CATALOGS: ${{ inputs.manage-privileges-for-catalogs }}
         MANAGE_TAGGABLES_FOR_CATALOGS: ${{ inputs.manage-taggables-for-catalogs }}
@@ -427,6 +434,9 @@ runs:
         fi
         if [[ -n "$GOVERNED_TAG_DELETION_SCOPES" ]]; then
           args+=(--governed-tag-deletion-scopes "$GOVERNED_TAG_DELETION_SCOPES")
+        fi
+        if [[ "$ENABLE_DOMAIN_MANAGEMENT" == "true" ]]; then
+          args+=(--enable-domain-management)
         fi
         args+=(--retain-tag-prefixes "$RETAIN_TAG_PREFIXES")
         if [[ "$ENABLE_GOVERNED_TAG_DELETION" == "true" ]]; then

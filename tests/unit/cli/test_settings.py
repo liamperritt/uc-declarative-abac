@@ -102,6 +102,14 @@ def test_settings_loads_namespace_scope_from_env(monkeypatch):
     assert settings.manage_tags_for_namespaces == "cat_env.sch1"
 
 
+def test_settings_enables_domain_management_when_environment_variable_is_true(
+    monkeypatch,
+):
+    monkeypatch.setenv("UC_ABAC_ENABLE_DOMAIN_MANAGEMENT", "true")
+    settings = resolve_settings({}, settings_file=None)
+    assert settings.enable_domain_management is True
+
+
 def test_settings_empty_retain_prefixes_env_clears_default(monkeypatch):
     monkeypatch.setenv("UC_ABAC_RETAIN_TAG_PREFIXES", "")
     settings = resolve_settings({}, settings_file=None)

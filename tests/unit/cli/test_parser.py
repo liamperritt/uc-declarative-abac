@@ -115,6 +115,16 @@ def test_parser_displays_polished_deploy_help(capsys):
     assert all(len(line) <= 80 for line in output.splitlines())
 
 
+def test_parser_help_documents_domain_management_behavior(capsys):
+    output = _help_output(["deploy", "--help"], capsys)
+    help_text = " ".join(output.split())
+
+    assert "--enable-domain-management" in output
+    assert "create/update all UC Discovery domains" in help_text
+    assert "governed tags" in help_text
+    assert "domain/subdomain" in help_text
+
+
 def test_parser_displays_timezone_flag_in_validate_help(capsys):
     output = _help_output(["validate", "--help"], capsys)
     assert "--timezone" in output
@@ -180,6 +190,21 @@ def test_parser_deploy_dry_run_sets_flag():
     )
     assert namespace.command == "deploy"
     assert namespace.dry_run is True
+
+
+def test_parser_enables_domain_management_when_flag_provided():
+    namespace = parse_cli_args(
+        [
+            "deploy",
+            "--config-dir",
+            "cfg",
+            "--warehouse-id",
+            "wh",
+            "--enable-domain-management",
+        ],
+    )
+
+    assert namespace.enable_domain_management is True
 
 
 def test_parser_legacy_dry_run_maps_to_deploy():

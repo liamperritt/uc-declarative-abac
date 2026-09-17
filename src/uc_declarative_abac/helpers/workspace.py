@@ -7,9 +7,12 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.domains import Domain as SdkDomain
+from databricks.sdk.service.domains import FieldMask as DomainFieldMask
 from databricks.sdk.service.iam import GrantRule, RuleSetResponse, RuleSetUpdateRequest
 from databricks.sdk.service.tags import TagPolicy
 
+from uc_declarative_abac.discovery_domains import DiscoveryDomain
 from uc_declarative_abac.governed_tags import GovernedTag
 from uc_declarative_abac.principals import (
     Group,
@@ -158,6 +161,7 @@ class WorkspaceHelper:
         self._tag_policies_lock = threading.Lock()
         self._tag_policies: list[TagPolicy] | None = None
         self._tag_policy_id_by_name: dict[str, str] = {}
+        self._domain_id_by_tag_key: dict[str, str] = {}
 
     def _scim_list_all(self, endpoint: str, attributes: str) -> list[dict]:
         """Paginate through an account SCIM proxy endpoint, returning all resources."""
@@ -969,3 +973,69 @@ class WorkspaceHelper:
         ``--enable-governed-tag-deletion`` flag and interactive confirmation.
         """
         self._client.tag_policies.delete_tag_policy(_encode_path_segment(tag_key))
+
+    def fetch_actual_discovery_domains(self) -> set[DiscoveryDomain]:
+        """Fetch all readable Unity Catalog Discovery domains."""
+        domains = list(self._client.domains.list_domains())
+        tag_key_by_domain_id = {
+            domain.domain_id: domain.tag_key
+            for domain in domains
+            if domain.domain_id and domain.tag_key
+        }
+        self._domain_id_by_tag_key = {
+            tag_key: domain_id for domain_id, tag_key in tag_key_by_domain_id.items()
+        }
+        return {
+            DiscoveryDomain(
+                tag_key=domain.tag_key or "",
+                description=domain.description or "",
+                domain_id=domain.domain_id or "",
+                resource_name=domain.name or "",
+                parent_domain_id=domain.parent_domain_id or "",
+                parent_tag_key=tag_key_by_domain_id.get(
+                    domain.parent_domain_id or "", ""
+                ),
+            )
+            for domain in domains
+        }
+
+    def get_discovery_domain_id(self, tag_key: str) -> str | None:
+        """Return the cached domain id for a governed-tag key, or None."""
+        return self._domain_id_by_tag_key.get(tag_key)
+
+    def create_discovery_domain(
+        self,
+        tag_key: str,
+        description: str = "",
+        parent_domain_id: str = "",
+    ) -> SdkDomain:
+        """Create a Discovery domain with tag-derived metadata and cache its id."""
+        request = SdkDomain(
+            tag_key=tag_key,
+            description=description,
+            parent_domain_id=parent_domain_id or None,
+        )
+        domain = self._client.domains.create_domain(request)
+        if domain.tag_key and domain.domain_id:
+            self._domain_id_by_tag_key[domain.tag_key] = domain.domain_id
+        return domain
+
+    def update_discovery_domain(
+        self,
+        domain: DiscoveryDomain,
+        update_mask: str,
+    ) -> SdkDomain:
+        """Update managed Discovery domain metadata using its resource name."""
+        if not domain.resource_name:
+            raise OrchestratorError(
+                f"Discovery domain {domain.tag_key!r} has no resource name; "
+                "it cannot be updated."
+            )
+        return self._client.domains.update_domain(
+            name=domain.resource_name,
+            domain=SdkDomain(
+                tag_key=domain.tag_key,
+                description=domain.description,
+            ),
+            update_mask=DomainFieldMask(update_mask),
+        )

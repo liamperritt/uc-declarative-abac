@@ -179,6 +179,7 @@ Resolution precedence matches the SDK's unified-auth chain: explicit `--profile`
 > - **Workspace admin** on the target workspace — needed to fetch users, service principals and groups from the account SCIM proxy API.
 > - **Metastore admin** on the target metastore — needed to create/alter catalogs, schemas, tables, volumes, functions, tags, grants, masks, and filters.
 > - **Governed tag `creator`/`manager`** on the account — needed to create and update account-level governed tags (tag policies) under `resources.governed_tags`.
+> - **`MANAGE DISCOVERY`** — needed when `--enable-domain-management` creates or updates Unity Catalog Discovery domains.
 > - **Group `manager` on each managed group** — needed to add/remove members of the account groups under `resources.groups` when `--group-management-scopes` is active. The engine automatically receives the `manager` role on any group it creates via `--group-creation-scopes`, so groups created by the engine are manageable without further grants; for pre-existing groups, the role must be granted to the engine principal out of band.
 
 ### GitHub Action
@@ -206,6 +207,7 @@ The repo ships a composite GitHub Action at `deploy/action.yml` so any other rep
 | `group-management-scopes` | no | `''` | Scope reconciliation of the **members and assumers** of matching account groups (by display name) — for existing groups and groups created the same run. Each field is authoritative only when supplied in config: an omitted `members`/`assumers` is left untouched (not even fetched), while a supplied list — including an empty one — is enforced (empty removes all). Member reconciliation requires the `MANAGER` role on each managed group. Empty (default) disables it |
 | `group-deletion-scopes` | no | `''` | Scope deletion of Databricks-managed account groups absent from `resources.groups` to those matching by display name. External (IdP-provisioned) groups and account system groups (`account users`, `account admins`) are never deleted. Requires `group-creation-scopes` to be active and at least one group declared under `resources.groups`. Requires interactive confirmation unless `force: 'true'` — in CI you must set `force` or the run errors out |
 | `governed-tag-deletion-scopes` | no | `''` | Scope deletion of governed tags absent from config to those matching by name. System-managed tags are never deleted. Empty (default) disables it. Requires interactive confirmation unless `force: 'true'` — in CI you must set `force` or the run errors out |
+| `enable-domain-management` | no | `'false'` | Create or update all Unity Catalog Discovery domains derived from governed tags. Keys must use `domain` or `domain/subdomain`; a subdomain requires its root tag or an existing root domain. Domain descriptions follow governed-tag descriptions. Domains are never deleted |
 | `retain-tag-prefixes` | no | `'class.'` | Comma-separated tag-key prefixes the engine must never remove from securables, even when absent from config (it may still add/update them). Defaults to `'class.'` to protect UC auto data classification tags. Set to an empty string to allow removing any unconfigured tag |
 | `ignore-unresolvable-principals` | no | `''` | Comma-separated actual-state principal identifiers — usernames for users, application_ids for service principals, display names for groups — whose resolution-failure warning is suppressed across the privileges, securables (owner), and governed-tags (assigners) domains. Primarily for Databricks-managed system service principals that show up in system tables but aren't resolvable via SCIM (otherwise a warning every run) |
 | `force` | no | `'false'` | Skip every interactive confirmation prompt and auto-confirm destructive actions. Required in CI when any destructive gate is set |
@@ -848,6 +850,34 @@ resources:
 
 Once a tag policy is created, you can apply it to tables, columns, schemas, and other UC objects via the `tags:` field on any definition or resource. ABAC policies then match against these tag key-value pairs (e.g. `pii: email`, `classification: confidential`) to enforce masking, filtering, or grants.
 
+#### Unity Catalog Discovery Domains
+
+When `--enable-domain-management` is set, Discovery domains are reconciled from
+all governed-tag keys. A key such as `finance` creates a top-level domain;
+`finance/orders` creates an `orders` subdomain beneath it. The source governed
+tags may be declared under `resources.governed_tags` (including tags created or
+updated in the same run) or may already exist in the account.
+
+Only the `domain` or `domain/subdomain` form is accepted. A subdomain's root
+must be another governed tag or an existing Discovery domain:
+
+```yaml
+resources:
+  governed_tags:
+    finance:
+      description: Finance data domain
+    finance/orders:
+      description: Order processing subdomain
+```
+
+```bash
+uc-abac deploy --config-dir ./configs --warehouse-id <id> \
+  --enable-domain-management
+```
+
+Missing domains are created parent-first. Existing domain descriptions are
+updated to match their governed tags. Domains are never deleted.
+
 #### Catalogs
 
 Catalogs are deployed by placing an entry under `resources: catalogs:`. The recommended form is a thin `$ref` to a matching catalog definition — this keeps all the interesting composition (schemas, policies, tags) in the definition, and leaves the resource side as a one-line pointer. Overrides can be applied on the `$ref` entry when a resource needs to differ from its definition (for example, a test catalog that reuses a prod definition but changes `name`, a couple of tags, or a function reference).
@@ -1235,7 +1265,7 @@ Mask and filter policies are additive by default (create/update, never delete). 
 - **Structured logging** — `Securables` / `Governed tags` / `Tags` / `Policies` / `Privileges` section headers, ordered by securable type then name, with dry-run prefix support and summary counts
 
 #### Infrastructure
-- **CLI** (`uc-abac` / `uc-declarative-abac`) — subcommands: `validate` (local YAML check), `deploy` (execute; add `--dry-run` to preview). Required for `deploy`: `--config-dir`, `--warehouse-id`. Optional: `--profile` (CLI profile name from `~/.databrickscfg`; omit to use unified auth via env vars / default profile / metadata service — see the [Authentication](#authentication) section), `--timezone` (IANA timezone for the expiry run date; UTC by default), `--use-workspace-scim`, `--skip-users-fetch`, the per-feature scope flags (`--tag-management-scopes`, `--privilege-management-scopes`, `--taggable-management-scopes`, `--taggable-creation-scopes`, `--policy-deletion-scopes`, `--group-creation-scopes`, `--group-management-scopes`, `--group-deletion-scopes`, `--governed-tag-deletion-scopes` — each empty by default, disabling that feature; see [Feature scopes](#feature-scopes)), and `--force` (skip interactive confirmations) — all described below. Settings can also be supplied via `uc_abac.yml` or `UC_ABAC_*` environment variables.
+- **CLI** (`uc-abac` / `uc-declarative-abac`) — subcommands: `validate` (local YAML check), `deploy` (execute; add `--dry-run` to preview). Required for `deploy`: `--config-dir`, `--warehouse-id`. Optional: `--profile` (CLI profile name from `~/.databrickscfg`; omit to use unified auth via env vars / default profile / metadata service — see the [Authentication](#authentication) section), `--timezone` (IANA timezone for the expiry run date; UTC by default), `--use-workspace-scim`, `--skip-users-fetch`, `--enable-domain-management`, the per-feature scope flags (`--tag-management-scopes`, `--privilege-management-scopes`, `--taggable-management-scopes`, `--taggable-creation-scopes`, `--policy-deletion-scopes`, `--group-creation-scopes`, `--group-management-scopes`, `--group-deletion-scopes`, `--governed-tag-deletion-scopes` — each empty by default, disabling that feature; see [Feature scopes](#feature-scopes)), and `--force` (skip interactive confirmations) — all described below. Settings can also be supplied via `uc_abac.yml` or `UC_ABAC_*` environment variables.
 - **GitHub Actions** — two reusable composite actions: `deploy/action.yml` (invoked as `liamperritt/uc-declarative-abac/deploy@<ref>`) to reconcile YAML configs against UC on push / PR / schedule, and `validate/action.yml` (invoked as `liamperritt/uc-declarative-abac/validate@<ref>`) for offline config validation with no warehouse or credentials (see the [GitHub Action](#github-action) section)
 - **Hybrid SQL polling** — `wait_timeout=50s` with `on_wait_timeout=CONTINUE` and 10s polling for long-running queries
 - **External links** — fetches SQL results via external link URLs for large result sets

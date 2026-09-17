@@ -9,6 +9,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from uc_declarative_abac import orchestrator
+from uc_declarative_abac.discovery_domains import DiscoveryDomain
+from uc_declarative_abac.governed_tags import GovernedTag
+from uc_declarative_abac.helpers import WorkspaceHelper
 from uc_declarative_abac.orchestrator import run
 from uc_declarative_abac.policies import (
     PolicyDiff,
@@ -331,6 +334,215 @@ def _setup_mock_principals_with_groups(
 # ---------------------------------------------------------------------------
 # End-to-end workflows
 # ---------------------------------------------------------------------------
+
+
+def test_orchestrator_compiles_all_governed_tags_when_domain_management_enabled(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    config = {
+        "resources": {
+            "governed_tags": {
+                "finance": {"description": "Financial data"},
+                "finance/orders": {"description": "Order data"},
+                "operations": {"description": "Operational data"},
+            },
+            "catalogs": {},
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_empty_principals(mock_workspace_client)
+    mock_workspace_client.tag_policies.list_tag_policies.return_value = iter([])
+    mock_workspace_client.domains.list_domains.return_value = iter([])
+
+    fetch_actual_domains = WorkspaceHelper.fetch_actual_discovery_domains
+    with patch.object(
+        WorkspaceHelper,
+        "fetch_actual_discovery_domains",
+        autospec=True,
+        side_effect=fetch_actual_domains,
+    ) as mock_fetch_actual_domains:
+        result = run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            enable_domain_management=True,
+            dry_run=True,
+        )
+
+    assert result.domain_diff.to_create == {
+        DiscoveryDomain(tag_key="finance", description="Financial data"),
+        DiscoveryDomain(
+            tag_key="finance/orders",
+            description="Order data",
+            parent_tag_key="finance",
+        ),
+        DiscoveryDomain(tag_key="operations", description="Operational data"),
+    }
+    mock_fetch_actual_domains.assert_called_once()
+    mock_workspace_client.domains.list_domains.assert_called_once_with()
+
+
+def test_orchestrator_creates_discovery_domain_from_preexisting_governed_tag(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    config = {"resources": {"catalogs": {}}}
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_empty_principals(mock_workspace_client)
+
+    with (
+        patch.object(
+            WorkspaceHelper,
+            "fetch_actual_governed_tags",
+            autospec=True,
+            return_value={GovernedTag(name="finance", description="Financial data")},
+        ),
+        patch.object(
+            WorkspaceHelper,
+            "fetch_actual_discovery_domains",
+            autospec=True,
+            return_value=set(),
+        ),
+    ):
+        result = run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            enable_domain_management=True,
+            dry_run=True,
+        )
+
+    assert result.domain_diff.to_create == {
+        DiscoveryDomain(tag_key="finance", description="Financial data")
+    }
+
+
+def test_orchestrator_excludes_deleted_governed_tag_from_discovery_domain_creation(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    """An actual-only governed tag selected for deletion cannot also source a domain."""
+    config = {"resources": {"catalogs": {}}}
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_empty_principals(mock_workspace_client)
+    actual_tag = GovernedTag(name="finance")
+
+    with (
+        patch.object(
+            WorkspaceHelper,
+            "fetch_actual_governed_tags",
+            autospec=True,
+            return_value={actual_tag},
+        ),
+        patch.object(
+            WorkspaceHelper,
+            "fetch_actual_discovery_domains",
+            autospec=True,
+            return_value=set(),
+        ),
+    ):
+        result = run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            enable_governed_tag_deletion=True,
+            force=True,
+            enable_domain_management=True,
+            dry_run=True,
+        )
+
+    assert actual_tag in result.governed_tag_diff.to_delete
+    assert DiscoveryDomain(tag_key="finance") not in result.domain_diff.to_create
+
+
+def test_orchestrator_updates_discovery_domain_with_configured_description_when_fetched_tag_is_stale(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    config = {
+        "resources": {
+            "governed_tags": {"finance": {"description": "Configured financial data"}},
+            "catalogs": {},
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_empty_principals(mock_workspace_client)
+
+    with (
+        patch.object(
+            WorkspaceHelper,
+            "fetch_actual_governed_tags",
+            autospec=True,
+            return_value={
+                GovernedTag(name="finance", description="Stale tag description")
+            },
+        ),
+        patch.object(
+            WorkspaceHelper,
+            "fetch_actual_discovery_domains",
+            autospec=True,
+            return_value={
+                DiscoveryDomain(
+                    tag_key="finance",
+                    description="Legacy domain description",
+                    domain_id="domain-id",
+                    resource_name="domains/domain-id",
+                )
+            },
+        ),
+    ):
+        result = run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            enable_domain_management=True,
+            dry_run=True,
+        )
+
+    assert result.domain_diff.to_update == {
+        DiscoveryDomain(
+            tag_key="finance",
+            description="Configured financial data",
+            domain_id="domain-id",
+            resource_name="domains/domain-id",
+        )
+    }
+
+
+def test_orchestrator_skips_discovery_domain_fetch_when_management_is_disabled(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    config = {
+        "resources": {
+            "governed_tags": {"finance": {}},
+            "catalogs": {},
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_empty_principals(mock_workspace_client)
+    mock_workspace_client.tag_policies.list_tag_policies.return_value = iter([])
+
+    with patch.object(
+        WorkspaceHelper,
+        "fetch_actual_discovery_domains",
+        autospec=True,
+    ) as mock_fetch_actual_domains:
+        result = run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            dry_run=True,
+        )
+
+    assert result.domain_diff.to_create == set()
+    mock_fetch_actual_domains.assert_not_called()
 
 
 def test_orchestrator_runs_tags_workflow_end_to_end(
@@ -4108,7 +4320,12 @@ def test_orchestrator_creates_nested_groups_before_linking_membership(
             return {"id": "id-" + kwargs["body"]["displayName"]}
         if method in ("PATCH", "POST") and "/account/scim/v2/Groups" in path:
             return {}
-        return {"totalResults": 0, "startIndex": 1, "itemsPerPage": 100, "Resources": []}
+        return {
+            "totalResults": 0,
+            "startIndex": 1,
+            "itemsPerPage": 100,
+            "Resources": [],
+        }
 
     mock_workspace_client.api_client.do.side_effect = _scim_do
 
