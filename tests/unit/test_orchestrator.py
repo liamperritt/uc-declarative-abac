@@ -2922,6 +2922,64 @@ def test_orchestrator_raises_when_groups_configured_with_skip_users_fetch(
         )
 
 
+def test_orchestrator_warns_when_use_workspace_scim_used(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch, caplog
+):
+    """use_workspace_scim is deprecated: using it logs a warning telling the user to
+    omit it, while the run still completes (deprecated, not removed)."""
+    config = _catalog_with_tags_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    # use_workspace_scim=True uses the workspace SCIM SDK list methods, not the
+    # account identity proxy — return empty principal lists.
+    mock_workspace_client.users.list.return_value = []
+    mock_workspace_client.groups.list.return_value = []
+    mock_workspace_client.service_principals.list.return_value = []
+
+    with caplog.at_level(logging.WARNING, logger="uc_declarative_abac"):
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            use_workspace_scim=True,
+        )
+
+    assert any(
+        "use-workspace-scim" in r.getMessage()
+        and "deprecated" in r.getMessage().lower()
+        and "omit" in r.getMessage().lower()
+        for r in caplog.records
+    ), "Expected a deprecation warning instructing the user to omit --use-workspace-scim"
+
+
+def test_orchestrator_warns_when_skip_users_fetch_used(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch, caplog
+):
+    """skip_users_fetch is deprecated: using it logs a warning telling the user to
+    omit it, while the run still completes (deprecated, not removed)."""
+    config = _catalog_with_tags_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_empty_principals(mock_workspace_client)
+
+    with caplog.at_level(logging.WARNING, logger="uc_declarative_abac"):
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            skip_users_fetch=True,
+        )
+
+    assert any(
+        "skip-users-fetch" in r.getMessage()
+        and "deprecated" in r.getMessage().lower()
+        and "omit" in r.getMessage().lower()
+        for r in caplog.records
+    ), "Expected a deprecation warning instructing the user to omit --skip-users-fetch"
+
+
 def test_orchestrator_adds_group_members_end_to_end(
     tmp_yaml_dir, mock_workspace_client, monkeypatch
 ):
