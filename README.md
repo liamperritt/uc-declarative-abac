@@ -210,7 +210,7 @@ The repo ships a composite GitHub Action at `deploy/action.yml` so any other rep
 | `group-management-scopes` | no | `''` | Scope reconciliation of the **members and assumers** of matching account groups (by display name) — for existing groups and groups created the same run. Each field is authoritative only when supplied in config: an omitted `members`/`assumers` is left untouched (not even fetched), while a supplied list — including an empty one — is enforced (empty removes all). Member reconciliation requires the `MANAGER` role on each managed group. Empty (default) disables it |
 | `group-deletion-scopes` | no | `''` | Scope deletion of Databricks-managed account groups absent from `resources.groups` to those matching by display name. External (IdP-provisioned) groups and account system groups (`account users`, `account admins`) are never deleted. Requires `group-creation-scopes` to be active and at least one group declared under `resources.groups`. Requires interactive confirmation unless `force: 'true'` — in CI you must set `force` or the run errors out |
 | `governed-tag-deletion-scopes` | no | `''` | Scope deletion of governed tags absent from config to those matching by name. System-managed tags are never deleted. Empty (default) disables it. Requires interactive confirmation unless `force: 'true'` — in CI you must set `force` or the run errors out |
-| `domain-management-scopes` | no | `''` | Scope creation and update of Discovery domains declared under `resources.domains`, matching by governed-tag key. Flat grammar: `*` all, `finance*` prefix, or an exact key. Domain descriptions follow their referenced governed tags. Empty (default) disables it |
+| `domain-management-scopes` | no | `''` | Scope creation and update of Discovery domains declared under `resources.domains`, matching by governed-tag key. Flat grammar: `*` all, `finance*` prefix, or an exact key. Reconciles each domain's description, subtitle, draft, and icon (description falls back to the referenced governed tag when unset). Empty (default) disables it |
 | `domain-deletion-scopes` | no | `''` | Scope deletion of Discovery domains absent from `resources.domains`, matching by governed-tag key. Flat grammar: `*` all, `finance*` prefix, or an exact key. Empty (default) disables deletion independently of domain create/update management. Children are deleted before parents. Requires interactive confirmation unless `force: 'true'` — in CI you must set `force` or the run errors out |
 | `retain-tag-prefixes` | no | `'class.'` | Comma-separated tag-key prefixes the engine must never remove from securables, even when absent from config (it may still add/update them). Defaults to `'class.'` to protect UC auto data classification tags. Set to an empty string to allow removing any unconfigured tag |
 | `ignore-unresolvable-principals` | no | `''` | Comma-separated actual-state principal identifiers — usernames for users, application_ids for service principals, display names for groups — whose resolution-failure warning is suppressed across the privileges, securables (owner), and governed-tags (assigners) domains. Primarily for Databricks-managed system service principals that show up in system tables but aren't resolvable via SCIM (otherwise a warning every run) |
@@ -857,11 +857,23 @@ Once a tag policy is created, you can apply it to tables, columns, schemas, and 
 #### Unity Catalog Discovery Domains
 
 Discovery domains are declared explicitly under `resources.domains`. Each one
-references a governed tag, whose key determines the domain hierarchy and whose
-description becomes the domain description. A key such as `finance` creates a
-top-level domain; `finance/orders` creates an `orders` subdomain beneath it. The
-referenced governed tag may be declared in the same config or already exist in
-the account.
+references a governed tag, whose key determines the domain hierarchy: a key such
+as `finance` creates a top-level domain; `finance/orders` creates an `orders`
+subdomain beneath it. The referenced governed tag may be declared in the same
+config or already exist in the account.
+
+Alongside the governed tag, a domain may set presentation metadata:
+
+- `description` — the domain's description. When omitted it falls back to the
+  referenced governed tag's description.
+- `subtitle` — a short tagline (max 280 characters).
+- `draft` — mark the domain as a draft.
+- `icon` — a `name` from the Databricks icon set (e.g. `BANK`, `ROCKET`,
+  `SNOWFLAKE`) plus an optional hex `color`.
+
+`subtitle`, `draft`, and `icon` are managed only when set — an attribute left out
+of config is left untouched. Business and technical owners are not currently
+managed by the engine.
 
 Only the `domain` or `domain/subdomain` form is accepted. A subdomain's root
 must be another governed tag or an existing Discovery domain:
@@ -876,6 +888,12 @@ resources:
   domains:
     finance:
       governed_tag: finance
+      description: Curated finance datasets for the analytics org.
+      subtitle: Financial data assets
+      draft: false
+      icon:
+        name: BANK
+        color: "#1B5E20"
     finance-orders:
       governed_tag: finance/orders
 ```
@@ -885,8 +903,8 @@ uc-abac deploy --config-dir ./configs --warehouse-id <id> \
   --domain-management-scopes '*'
 ```
 
-Missing domains are created parent-first. Existing domain descriptions are
-updated to match their governed tags.
+Missing domains are created parent-first. Existing domains have their
+`description`, `subtitle`, `draft`, and `icon` reconciled to match config.
 
 `--domain-deletion-scopes` independently makes matching domain existence
 authoritative over `resources.domains`. A matching actual domain absent from

@@ -8,11 +8,13 @@ from urllib.parse import quote
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.domains import Domain as SdkDomain
+from databricks.sdk.service.domains import DomainIcon as SdkDomainIcon
+from databricks.sdk.service.domains import DomainIconName
 from databricks.sdk.service.domains import FieldMask as DomainFieldMask
 from databricks.sdk.service.iam import GrantRule, RuleSetResponse, RuleSetUpdateRequest
 from databricks.sdk.service.tags import TagPolicy
 
-from uc_declarative_abac.discovery_domains import DiscoveryDomain
+from uc_declarative_abac.discovery_domains import DiscoveryDomain, DomainIcon
 from uc_declarative_abac.governed_tags import GovernedTag
 from uc_declarative_abac.principals import (
     Group,
@@ -58,6 +60,26 @@ _ASSIGN_FETCH_WORKERS = 8
 
 # Bounded concurrency for per-group GET /Groups/{id} member fetches.
 _GROUP_FETCH_WORKERS = 8
+
+
+def _to_sdk_domain_icon(icon: DomainIcon | None) -> SdkDomainIcon | None:
+    """Convert an internal DomainIcon to an SDK SdkDomainIcon."""
+    if icon is None:
+        return None
+    return SdkDomainIcon(
+        name=DomainIconName(icon.name),
+        color=icon.color or None,
+    )
+
+
+def _from_sdk_domain_icon(sdk_icon: SdkDomainIcon | None) -> DomainIcon | None:
+    """Convert an SDK SdkDomainIcon to an internal DomainIcon."""
+    if sdk_icon is None:
+        return None
+    return DomainIcon(
+        name=sdk_icon.name.value if sdk_icon.name else "",
+        color=sdk_icon.color or "",
+    )
 
 
 def _ruleset_name(account_id: str, tag_id: str) -> str:
@@ -989,6 +1011,11 @@ class WorkspaceHelper:
             DiscoveryDomain(
                 tag_key=domain.tag_key or "",
                 description=domain.description or "",
+                subtitle=domain.subtitle,
+                draft=domain.draft
+                if domain.draft is not None
+                else domain.effective_draft,
+                icon=_from_sdk_domain_icon(domain.icon),
                 domain_id=domain.domain_id or "",
                 resource_name=domain.name or "",
                 parent_domain_id=domain.parent_domain_id or "",
@@ -1008,12 +1035,18 @@ class WorkspaceHelper:
         tag_key: str,
         description: str = "",
         parent_domain_id: str = "",
+        subtitle: str | None = None,
+        draft: bool | None = None,
+        icon: DomainIcon | None = None,
     ) -> SdkDomain:
-        """Create a Discovery domain with tag-derived metadata and cache its id."""
+        """Create a Discovery domain with the given metadata and cache its id."""
         request = SdkDomain(
             tag_key=tag_key,
             description=description,
             parent_domain_id=parent_domain_id or None,
+            subtitle=subtitle,
+            draft=draft,
+            icon=_to_sdk_domain_icon(icon),
         )
         domain = self._client.domains.create_domain(request)
         if domain.tag_key and domain.domain_id:
@@ -1023,21 +1056,33 @@ class WorkspaceHelper:
     def update_discovery_domain(
         self,
         domain: DiscoveryDomain,
-        update_mask: str,
+        update_mask: tuple[str, ...] | list[str],
     ) -> SdkDomain:
-        """Update managed Discovery domain metadata using its resource name."""
+        """Update managed Discovery domain metadata using its resource name.
+
+        The update_mask is a sequence of field-path strings specifying which fields
+        to update (e.g., ("description", "subtitle", "draft", "icon")).
+        """
         if not domain.resource_name:
             raise OrchestratorError(
                 f"Discovery domain {domain.tag_key!r} has no resource name; "
                 "it cannot be updated."
             )
+        # Build the domain body to include only the masked fields plus the tag_key.
+        body: dict[str, object] = {"tag_key": domain.tag_key}
+        for field in update_mask:
+            if field == "description":
+                body["description"] = domain.description
+            elif field == "subtitle":
+                body["subtitle"] = domain.subtitle
+            elif field == "draft":
+                body["draft"] = domain.draft
+            elif field == "icon":
+                body["icon"] = _to_sdk_domain_icon(domain.icon)
         return self._client.domains.update_domain(
             name=domain.resource_name,
-            domain=SdkDomain(
-                tag_key=domain.tag_key,
-                description=domain.description,
-            ),
-            update_mask=DomainFieldMask(update_mask),
+            domain=SdkDomain(**body),
+            update_mask=DomainFieldMask(list(update_mask)),
         )
 
     def delete_discovery_domain(self, domain: DiscoveryDomain) -> None:

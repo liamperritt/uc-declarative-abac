@@ -104,3 +104,105 @@ def test_discovery_domain_differ_deletes_only_actual_domains_matching_deletion_s
     )
 
     assert diff.to_delete == {legacy}
+
+
+# ---
+# Extended update mask tests
+
+
+def test_discovery_domain_differ_records_description_only_update_mask():
+    """Record update_masks when description changes in an existing domain."""
+    desired = {DiscoveryDomain(tag_key="finance", description="Finance data")}
+    actual = {
+        DiscoveryDomain(
+            tag_key="finance",
+            description="Legacy",
+            domain_id="d",
+            resource_name="domains/d",
+        )
+    }
+
+    diff = compute_discovery_domain_diff(desired, actual, ChangeLogger())
+
+    assert diff.update_masks == {"finance": ("description",)}
+    assert diff.to_update == {
+        DiscoveryDomain(
+            tag_key="finance",
+            description="Finance data",
+            domain_id="d",
+            resource_name="domains/d",
+        )
+    }
+    assert diff.old_values == {
+        "finance": DiscoveryDomain(
+            tag_key="finance",
+            description="Legacy",
+            domain_id="d",
+            resource_name="domains/d",
+        )
+    }
+
+
+def test_discovery_domain_differ_masks_subtitle_draft_and_icon_changes():
+    """Record update_masks for subtitle, draft, and icon changes while description remains unchanged."""
+    from uc_declarative_abac.discovery_domains import DomainIcon
+
+    actual = {
+        DiscoveryDomain(
+            tag_key="finance",
+            description="Fin",
+            subtitle="old",
+            draft=False,
+            icon=DomainIcon(name="BANK", color="#000000"),
+            domain_id="d",
+            resource_name="domains/d",
+        )
+    }
+    desired = {
+        DiscoveryDomain(
+            tag_key="finance",
+            description="Fin",
+            subtitle="new",
+            draft=True,
+            icon=DomainIcon(name="ROCKET", color="#FF5733"),
+        )
+    }
+
+    diff = compute_discovery_domain_diff(desired, actual, ChangeLogger())
+
+    # description NOT included since it's unchanged
+    assert diff.update_masks == {"finance": ("subtitle", "draft", "icon")}
+    assert len(diff.to_update) == 1
+    updated_domain = next(iter(diff.to_update))
+    assert updated_domain.subtitle == "new"
+    assert updated_domain.draft is True
+    assert updated_domain.icon == DomainIcon(name="ROCKET", color="#FF5733")
+    # Keep domain_id and resource_name from actual
+    assert updated_domain.domain_id == "d"
+    assert updated_domain.resource_name == "domains/d"
+
+
+def test_discovery_domain_differ_ignores_unmanaged_none_metadata_fields():
+    """None desired fields are unmanaged; no update recorded if only those differ."""
+    from uc_declarative_abac.discovery_domains import DomainIcon
+
+    actual = {
+        DiscoveryDomain(
+            tag_key="finance",
+            description="Fin",
+            subtitle="keep",
+            draft=True,
+            icon=DomainIcon(name="BANK", color="#111111"),
+            domain_id="d",
+            resource_name="domains/d",
+        )
+    }
+    # desired has None for subtitle, draft, icon (unmanaged)
+    desired = {DiscoveryDomain(tag_key="finance", description="Fin")}
+
+    diff = compute_discovery_domain_diff(desired, actual, ChangeLogger())
+
+    # No update because description matches and other fields are unmanaged (None)
+    assert diff.to_update == set()
+    assert diff.update_masks == {}
+    assert diff.old_values == {}

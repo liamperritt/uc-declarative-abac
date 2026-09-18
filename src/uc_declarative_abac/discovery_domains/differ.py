@@ -58,23 +58,56 @@ def _get_creatable_domains(
     return creatable
 
 
+def _changed_fields(
+    desired: DiscoveryDomain, actual: DiscoveryDomain
+) -> tuple[str, ...]:
+    """Determine which managed fields have changed.
+
+    Checks fields in canonical order: description, subtitle, draft, icon.
+    - description is ALWAYS managed.
+    - subtitle, draft, icon are managed only when desired is not None.
+    A field changed iff desired value differs from actual (for managed fields).
+    """
+    changed: list[str] = []
+    if desired.description != actual.description:
+        changed.append("description")
+    if desired.subtitle is not None and desired.subtitle != actual.subtitle:
+        changed.append("subtitle")
+    if desired.draft is not None and desired.draft != actual.draft:
+        changed.append("draft")
+    if desired.icon is not None and desired.icon != actual.icon:
+        changed.append("icon")
+    return tuple(changed)
+
+
 def _get_domain_updates(
     desired: set[DiscoveryDomain],
     actual_by_tag_key: dict[str, DiscoveryDomain],
-) -> tuple[set[DiscoveryDomain], dict[str, DiscoveryDomain]]:
-    """Return existing domains whose managed description has changed."""
+) -> tuple[
+    set[DiscoveryDomain], dict[str, DiscoveryDomain], dict[str, tuple[str, ...]]
+]:
+    """Return existing domains whose managed fields have changed.
+
+    Returns a tuple of (to_update, old_values, update_masks), where:
+    - to_update: domains with changes (using dataclasses.replace)
+    - old_values: original values keyed by tag_key for audit trail
+    - update_masks: changed field names per domain tag_key (canonical order)
+    """
     to_update: set[DiscoveryDomain] = set()
     old_values: dict[str, DiscoveryDomain] = {}
+    update_masks: dict[str, tuple[str, ...]] = {}
     for desired_domain in desired:
         actual_domain = actual_by_tag_key.get(desired_domain.tag_key)
-        if (
-            actual_domain is None
-            or desired_domain.description == actual_domain.description
-        ):
+        if actual_domain is None:
             continue
-        to_update.add(replace(actual_domain, description=desired_domain.description))
+        changed = _changed_fields(desired_domain, actual_domain)
+        if not changed:
+            continue
+        updated_values = {field: getattr(desired_domain, field) for field in changed}
+        to_update.add(replace(actual_domain, **updated_values))
         old_values[desired_domain.tag_key] = actual_domain
-    return to_update, old_values
+        update_masks[desired_domain.tag_key] = changed
+    return to_update, old_values, update_masks
 
 
 def _get_domain_deletes(
@@ -107,10 +140,13 @@ def compute_discovery_domain_diff(
     flat scope become deletion candidates.
     """
     actual_by_tag_key = {domain.tag_key: domain for domain in actual}
-    to_update, old_values = _get_domain_updates(desired, actual_by_tag_key)
+    to_update, old_values, update_masks = _get_domain_updates(
+        desired, actual_by_tag_key
+    )
     return DiscoveryDomainDiff(
         to_create=_get_creatable_domains(desired, actual_by_tag_key, change_logger),
         to_update=to_update,
         to_delete=_get_domain_deletes(desired, actual, deletion_scope),
         old_values=old_values,
+        update_masks=update_masks,
     )

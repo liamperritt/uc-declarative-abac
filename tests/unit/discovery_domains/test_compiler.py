@@ -5,6 +5,7 @@ import pytest
 from uc_declarative_abac.configs import ResourcesConfig
 from uc_declarative_abac.discovery_domains import (
     DiscoveryDomain,
+    DomainIcon,
     compile_desired_discovery_domains,
 )
 from uc_declarative_abac.governed_tags import GovernedTag
@@ -75,3 +76,95 @@ def test_discovery_domain_compiler_rejects_invalid_domain_hierarchy(governed_tag
 
     with pytest.raises(OrchestratorError, match="domain/subdomain"):
         compile_desired_discovery_domains(config, governed_tags)
+
+
+# ---
+
+
+def test_discovery_domain_compiler_uses_explicit_description_over_governed_tag():
+    """Domain declares description; its governed tag also has description.
+    Assert the compiled DiscoveryDomain uses the explicit description."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {},
+            "governed_tags": {
+                "finance": {"description": "Governed tag description"},
+            },
+            "domains": {
+                "finance-domain": {
+                    "governed_tag": "finance",
+                    "description": "Explicit domain description",
+                },
+            },
+        }
+    )
+    governed_tags = {
+        GovernedTag(name="finance", description="Governed tag description"),
+    }
+
+    result = compile_desired_discovery_domains(config, governed_tags)
+    domain = next(d for d in result if d.tag_key == "finance")
+
+    assert domain.description == "Explicit domain description"
+
+
+def test_discovery_domain_compiler_compiles_subtitle_draft_and_icon():
+    """Domain declares subtitle/draft/icon with governed_tag.
+    Assert the compiled DiscoveryDomain has these fields set correctly."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {},
+            "governed_tags": {
+                "finance": {"description": "Governed tag description"},
+            },
+            "domains": {
+                "finance-domain": {
+                    "governed_tag": "finance",
+                    "description": "Explicit domain description",
+                    "subtitle": "Financial data assets",
+                    "draft": True,
+                    "icon": {"name": "BANK", "color": "#1B5E20"},
+                },
+            },
+        }
+    )
+    governed_tags = {
+        GovernedTag(name="finance", description="Governed tag description"),
+    }
+
+    result = compile_desired_discovery_domains(config, governed_tags)
+    domain = next(d for d in result if d.tag_key == "finance")
+
+    assert domain.subtitle == "Financial data assets"
+    assert domain.draft is True
+    assert domain.icon == DomainIcon(name="BANK", color="#1B5E20")
+
+
+def test_discovery_domain_compiler_leaves_metadata_none_when_omitted():
+    """Domain declares only governed_tag (no subtitle/draft/icon/description).
+    Assert the compiled DiscoveryDomain has subtitle/draft/icon as None
+    and description falls back to the governed tag's description."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {},
+            "governed_tags": {
+                "finance": {"description": "Governed tag description"},
+            },
+            "domains": {
+                "finance-domain": {
+                    "governed_tag": "finance",
+                },
+            },
+        }
+    )
+    governed_tags = {
+        GovernedTag(name="finance", description="Governed tag description"),
+    }
+
+    result = compile_desired_discovery_domains(config, governed_tags)
+    domain = next(d for d in result if d.tag_key == "finance")
+
+    assert domain.subtitle is None
+    assert domain.draft is None
+    assert domain.icon is None
+    assert domain.description == "Governed tag description"

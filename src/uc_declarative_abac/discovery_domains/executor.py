@@ -65,14 +65,18 @@ def _execute_updates(
     change_logger: ChangeLogger,
     dry_run: bool,
 ) -> None:
-    """Update managed domain descriptions and isolate failures per domain."""
+    """Update managed domain metadata and isolate failures per domain.
+
+    Every domain in ``to_update`` has a matching ``update_masks`` entry naming the
+    fields the differ found changed, so the mask is looked up directly.
+    """
     for domain in sorted(diff.to_update, key=lambda item: item.tag_key):
         old = diff.old_values.get(domain.tag_key)
         if not dry_run:
             try:
                 ws_helper.update_discovery_domain(
                     domain,
-                    update_mask="description",
+                    update_mask=diff.update_masks[domain.tag_key],
                 )
             except (DatabricksError, OrchestratorError) as error:
                 change_logger.log_error(
@@ -163,6 +167,9 @@ def execute_discovery_domain_diff(
                 domain.tag_key,
                 description=domain.description,
                 parent_domain_id=parent_domain_id,
+                subtitle=domain.subtitle,
+                draft=domain.draft,
+                icon=domain.icon,
             )
         except (DatabricksError, OrchestratorError) as error:
             unavailable_tag_keys.add(domain.tag_key)

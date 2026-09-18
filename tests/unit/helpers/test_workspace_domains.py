@@ -3,9 +3,16 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.service.domains import Domain, FieldMask
+from databricks.sdk.service.domains import (
+    Domain,
+    DomainIconName,
+    FieldMask,
+)
+from databricks.sdk.service.domains import (
+    DomainIcon as SdkDomainIcon,
+)
 
-from uc_declarative_abac.discovery_domains import DiscoveryDomain
+from uc_declarative_abac.discovery_domains import DiscoveryDomain, DomainIcon
 from uc_declarative_abac.helpers import WorkspaceHelper
 
 
@@ -88,13 +95,129 @@ def test_workspace_helper_update_discovery_domain_uses_sdk_resource_name_and_upd
         resource_name="domains/domain-id",
     )
 
-    helper.update_discovery_domain(domain, "description")
+    helper.update_discovery_domain(domain, ("description",))
 
     client.domains.update_domain.assert_called_once_with(
         name="domains/domain-id",
         domain=Domain(tag_key="finance", description="Financial data"),
-        update_mask=FieldMask("description"),
+        update_mask=FieldMask(["description"]),
     )
+
+
+def test_workspace_helper_update_discovery_domain_builds_multi_field_mask_and_body() -> (
+    None
+):
+    client = MagicMock(spec=WorkspaceClient)
+    helper = WorkspaceHelper(client)
+    domain = DiscoveryDomain(
+        tag_key="finance",
+        description="Fin",
+        subtitle="Sub",
+        draft=True,
+        icon=DomainIcon(name="BANK", color="#1B5E20"),
+        domain_id="d",
+        resource_name="domains/d",
+    )
+
+    helper.update_discovery_domain(domain, ("description", "subtitle", "draft", "icon"))
+
+    client.domains.update_domain.assert_called_once_with(
+        name="domains/d",
+        domain=Domain(
+            tag_key="finance",
+            description="Fin",
+            subtitle="Sub",
+            draft=True,
+            icon=SdkDomainIcon(name=DomainIconName.BANK, color="#1B5E20"),
+        ),
+        update_mask=FieldMask(["description", "subtitle", "draft", "icon"]),
+    )
+
+
+def test_workspace_helper_create_discovery_domain_includes_metadata_attributes() -> (
+    None
+):
+    client = MagicMock(spec=WorkspaceClient)
+    client.domains.create_domain.return_value = Domain(
+        tag_key="finance",
+        domain_id="id",
+    )
+    helper = WorkspaceHelper(client)
+
+    helper.create_discovery_domain(
+        "finance",
+        description="Fin",
+        parent_domain_id="",
+        subtitle="Sub",
+        draft=True,
+        icon=DomainIcon(name="ROCKET", color="#FF5733"),
+    )
+
+    client.domains.create_domain.assert_called_once_with(
+        Domain(
+            tag_key="finance",
+            description="Fin",
+            parent_domain_id=None,
+            subtitle="Sub",
+            draft=True,
+            icon=SdkDomainIcon(name=DomainIconName.ROCKET, color="#FF5733"),
+        )
+    )
+
+
+def test_workspace_helper_fetch_actual_discovery_domains_includes_metadata_attributes() -> (
+    None
+):
+    client = MagicMock(spec=WorkspaceClient)
+    client.domains.list_domains.return_value = [
+        Domain(
+            tag_key="finance",
+            description="Fin",
+            subtitle="Sub",
+            draft=True,
+            effective_draft=True,
+            icon=SdkDomainIcon(name=DomainIconName.BANK, color="#1B5E20"),
+            domain_id="id",
+            name="domains/id",
+        )
+    ]
+    helper = WorkspaceHelper(client)
+
+    result = helper.fetch_actual_discovery_domains()
+
+    assert result == {
+        DiscoveryDomain(
+            tag_key="finance",
+            description="Fin",
+            subtitle="Sub",
+            draft=True,
+            icon=DomainIcon(name="BANK", color="#1B5E20"),
+            domain_id="id",
+            resource_name="domains/id",
+        )
+    }
+
+
+def test_workspace_helper_fetch_actual_discovery_domains_falls_back_to_effective_draft() -> (
+    None
+):
+    client = MagicMock(spec=WorkspaceClient)
+    client.domains.list_domains.return_value = [
+        Domain(
+            tag_key="finance",
+            draft=None,
+            effective_draft=True,
+            domain_id="id",
+            name="domains/id",
+        )
+    ]
+    helper = WorkspaceHelper(client)
+
+    result = helper.fetch_actual_discovery_domains()
+
+    assert len(result) == 1
+    domain = next(iter(result))
+    assert domain.draft is True
 
 
 def test_workspace_helper_delete_discovery_domain_uses_sdk_resource_name() -> None:

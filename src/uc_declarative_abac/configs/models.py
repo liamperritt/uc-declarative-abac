@@ -6,6 +6,7 @@ from datetime import date, datetime
 from typing import Annotated, Literal
 
 from databricks.sdk.service.catalog import ColumnTypeName
+from databricks.sdk.service.domains import DomainIconName
 from pydantic import (
     AfterValidator,
     AliasChoices,
@@ -40,6 +41,11 @@ from uc_declarative_abac.utils import (
 
 _VALID_DATA_TYPE_PREFIXES = frozenset(ct.value for ct in ColumnTypeName)
 _DATA_TYPE_PREFIX_PATTERN = re.compile(r"^([A-Z_][A-Z0-9_]*)")
+
+# Valid domain icon names from databricks.sdk.service.domains.DomainIconName
+_VALID_DOMAIN_ICON_NAMES = frozenset(i.value for i in DomainIconName)
+# Domain icon color must be a hex colour (3 or 6 hex digits, optionally preceded by #)
+_DOMAIN_ICON_COLOR_PATTERN = re.compile(r"^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$")
 
 # Default principals for a mask/filter (FGAC) policy when 'to' is not provided —
 # the Databricks all-users system group.
@@ -844,15 +850,65 @@ TaggableConfig = (
 SecurableConfig = TaggableConfig | FunctionConfig
 
 
+class DomainIconConfig(BaseConfig):
+    """Icon configuration for a UC discovery domain."""
+
+    name: str
+    color: str | None = None
+
+    @field_validator("name", mode="after")
+    @classmethod
+    def _validate_icon_name(cls, value: str) -> str:
+        if value not in _VALID_DOMAIN_ICON_NAMES:
+            raise ValueError(
+                f"icon name '{value}' is not valid; must be one of: "
+                f"{', '.join(sorted(_VALID_DOMAIN_ICON_NAMES))}"
+            )
+        return value
+
+    @field_validator("color", mode="after")
+    @classmethod
+    def _validate_icon_color(cls, value: str | None) -> str | None:
+        if value is not None and not _DOMAIN_ICON_COLOR_PATTERN.match(value):
+            raise ValueError(
+                "color must be a hex colour like '#1B5E20' (3 or 6 hex digits)"
+            )
+        return value
+
+
 class DomainConfig(BaseConfig):
     """Unity Catalog Discovery domain backed by one governed tag."""
 
     governed_tag: str
+    description: str | None = None
+    subtitle: str | None = None
+    draft: bool | None = None
+    icon: DomainIconConfig | None = None
 
     @field_validator("governed_tag", mode="after")
     @classmethod
     def _validate_governed_tag(cls, value: str) -> str:
         return _reject_blank_str(value, "governed_tag")
+
+    @field_validator("description", mode="after")
+    @classmethod
+    def _validate_description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        _reject_blank_str(value, "description")
+        if len(value) > 4096:
+            raise ValueError("description must not exceed 4096 characters")
+        return value
+
+    @field_validator("subtitle", mode="after")
+    @classmethod
+    def _validate_subtitle(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        _reject_blank_str(value, "subtitle")
+        if len(value) > 280:
+            raise ValueError("subtitle must not exceed 280 characters")
+        return value
 
 
 class GovernedTagConfig(BaseConfig):

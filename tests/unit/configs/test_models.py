@@ -2681,6 +2681,116 @@ def test_domain_config_parses_governed_tag_reference():
     assert config.domains["finance-domain"].governed_tag == "finance"
 
 
+def test_domain_config_parses_all_metadata_attributes():
+    """A domain with all metadata attributes (description, subtitle, draft, icon)
+    parses successfully and each field is accessible."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {},
+            "domains": {
+                "finance-domain": {
+                    "governed_tag": "finance",
+                    "description": "Curated finance datasets for the analytics org.",
+                    "subtitle": "Financial data assets",
+                    "draft": True,
+                    "icon": {"name": "BANK", "color": "#1B5E20"},
+                }
+            },
+        }
+    )
+
+    assert config.domains is not None
+    domain = config.domains["finance-domain"]
+    assert domain.governed_tag == "finance"
+    assert domain.description == "Curated finance datasets for the analytics org."
+    assert domain.subtitle == "Financial data assets"
+    assert domain.draft is True
+    assert domain.icon is not None
+    assert domain.icon.name == "BANK"
+    assert domain.icon.color == "#1B5E20"
+
+
+def test_domain_config_rejects_invalid_icon_name():
+    """A domain with an invalid icon name raises ValidationError."""
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {},
+                "domains": {
+                    "finance-domain": {
+                        "governed_tag": "finance",
+                        "icon": {"name": "NOT_A_REAL_ICON"},
+                    }
+                },
+            }
+        )
+
+
+def test_domain_config_rejects_invalid_icon_color():
+    """A domain with an invalid icon color (non-hex format) raises ValidationError."""
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {},
+                "domains": {
+                    "finance-domain": {
+                        "governed_tag": "finance",
+                        "icon": {"name": "BANK", "color": "red"},
+                    }
+                },
+            }
+        )
+
+
+def test_domain_config_rejects_subtitle_exceeding_max_length():
+    """A domain with a subtitle exceeding 280 characters raises ValidationError."""
+    long_subtitle = "x" * 281
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {},
+                "domains": {
+                    "finance-domain": {
+                        "governed_tag": "finance",
+                        "subtitle": long_subtitle,
+                    }
+                },
+            }
+        )
+
+
+def test_domain_config_rejects_blank_description():
+    """A domain with a blank (whitespace-only) description raises ValidationError."""
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {},
+                "domains": {
+                    "finance-domain": {
+                        "governed_tag": "finance",
+                        "description": "   ",
+                    }
+                },
+            }
+        )
+
+
+def test_domain_config_rejects_unknown_attribute():
+    """A domain with a misspelled attribute (unknown key) raises ValidationError."""
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {},
+                "domains": {
+                    "finance-domain": {
+                        "governed_tag": "finance",
+                        "descriptio": "typo in key",
+                    }
+                },
+            }
+        )
+
+
 # ---------------------------------------------------------------------------
 # GovernedTagConfig
 # ---------------------------------------------------------------------------

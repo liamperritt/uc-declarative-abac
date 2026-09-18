@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from unittest.mock import MagicMock
 
-from uc_declarative_abac.discovery_domains import DiscoveryDomain
+from uc_declarative_abac.discovery_domains import DiscoveryDomain, DomainIcon
 from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.policies import Policy
 from uc_declarative_abac.principals import Principal
@@ -325,6 +325,46 @@ def test_logger_includes_discovery_domain_delete_in_summary() -> None:
         for message in messages
     )
     assert "Discovery domains: 1 to delete" in messages[-1]
+
+
+def test_logger_discovery_domain_update_reports_changed_metadata_attributes() -> None:
+    """Discovery domain UPDATE log line reports ALL changed attributes
+    (subtitle, draft, icon—not just description)."""
+    cl, mock_logger = _make_change_logger(dry_run=True)
+    new = DiscoveryDomain(
+        tag_key="finance",
+        description="Fin",
+        subtitle="New subtitle",
+        draft=True,
+        icon=DomainIcon(name="ROCKET", color="#FF5733"),
+    )
+    old = DiscoveryDomain(
+        tag_key="finance",
+        description="Fin",
+        subtitle="Old subtitle",
+        draft=False,
+        icon=DomainIcon(name="BANK", color="#000000"),
+    )
+    cl.log_discovery_domain_update(new, old)
+
+    messages = _info_messages(mock_logger)
+    # Join all info messages to check for required substrings
+    full_message = " ".join(messages)
+
+    # Assert presence of domain identifier
+    assert "finance" in full_message
+
+    # Assert both old and new subtitle values appear
+    assert "Old subtitle" in full_message
+    assert "New subtitle" in full_message
+
+    # Assert both old and new icon names appear
+    assert "BANK" in full_message
+    assert "ROCKET" in full_message
+
+    # Assert draft change is reflected
+    assert "False" in full_message
+    assert "True" in full_message
 
 
 # ---------------------------------------------------------------------------

@@ -240,6 +240,11 @@ def _scope_discovery_domain_management(
             for tag_key, domain in diff.old_values.items()
             if management_scope.matches(tag_key)
         },
+        update_masks={
+            tag_key: mask
+            for tag_key, mask in diff.update_masks.items()
+            if management_scope.matches(tag_key)
+        },
     )
 
 

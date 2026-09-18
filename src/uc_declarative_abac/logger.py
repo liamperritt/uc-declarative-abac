@@ -7,7 +7,7 @@ from uc_declarative_abac.principals.state import Principal
 from uc_declarative_abac.utils import ExecutionError
 
 if TYPE_CHECKING:
-    from uc_declarative_abac.discovery_domains import DiscoveryDomain
+    from uc_declarative_abac.discovery_domains import DiscoveryDomain, DomainIcon
     from uc_declarative_abac.governed_tags.state import GovernedTag
     from uc_declarative_abac.policies.state import Policy
     from uc_declarative_abac.principals.state import Group
@@ -132,6 +132,36 @@ def _format_policy_diff(new: Policy, old: Policy | None) -> str:
             f"match_columns: {_format_set_delta(new_match - old_match, old_match - new_match)}"
         )
     return " | ".join(parts)
+
+
+def _format_discovery_domain_diff(
+    new: DiscoveryDomain, old: DiscoveryDomain | None
+) -> str:
+    """Return a comma-joined per-field diff for a DiscoveryDomain update, or ``''``
+    when ``old`` was not supplied. Reports changes to description, subtitle, draft,
+    and icon fields. Icon values render as ``name/color`` (e.g. BANK/#000000) or
+    ``-`` for None."""
+    if old is None:
+        return ""
+
+    def _format_icon(icon: DomainIcon | None) -> str:
+        """Render an icon as 'name/color' or '-' for None."""
+        if icon is None:
+            return "-"
+        return f"{icon.name}/{icon.color}"
+
+    parts: list[str] = []
+    if new.description != old.description:
+        parts.append(f"description: '{old.description}' -> '{new.description}'")
+    if new.subtitle != old.subtitle:
+        old_subtitle = old.subtitle if old.subtitle is not None else ""
+        new_subtitle = new.subtitle if new.subtitle is not None else ""
+        parts.append(f"subtitle: '{old_subtitle}' -> '{new_subtitle}'")
+    if new.draft != old.draft:
+        parts.append(f"draft: {old.draft} -> {new.draft}")
+    if new.icon != old.icon:
+        parts.append(f"icon: {_format_icon(old.icon)} -> {_format_icon(new.icon)}")
+    return ", ".join(parts)
 
 
 class ChangeLogger:
@@ -467,17 +497,21 @@ class ChangeLogger:
         domain: DiscoveryDomain,
         old: DiscoveryDomain | None,
     ) -> None:
-        """Log a Unity Catalog Discovery domain description update."""
+        """Log a Unity Catalog Discovery domain update, reporting all changed attributes
+        (description, subtitle, draft, icon)."""
         self._discovery_domains_updated += 1
         action_verb = "Update" if self._dry_run else "Updated"
-        old_description = old.description if old else ""
+        suffix = _format_discovery_domain_diff(domain, old)
+        if suffix:
+            action = f"{action_verb} discovery domain ({suffix})"
+        else:
+            action = f"{action_verb} discovery domain"
         self._log_info(
             _format_change_line(
                 "~",
                 "DISCOVERY_DOMAIN",
                 domain.tag_key,
-                f"{action_verb} discovery domain "
-                f"(description: '{old_description}' -> '{domain.description}')",
+                action,
             )
         )
 

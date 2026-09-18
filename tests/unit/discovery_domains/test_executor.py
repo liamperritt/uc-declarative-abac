@@ -7,6 +7,7 @@ from databricks.sdk.errors.base import DatabricksError
 from uc_declarative_abac.discovery_domains import (
     DiscoveryDomain,
     DiscoveryDomainDiff,
+    DomainIcon,
     execute_discovery_domain_diff,
 )
 from uc_declarative_abac.helpers import WorkspaceHelper
@@ -33,6 +34,9 @@ def test_discovery_domain_executor_creates_parent_before_child() -> None:
         *,
         description: str,
         parent_domain_id: str,
+        subtitle: str | None,
+        draft: bool | None,
+        icon: DomainIcon | None,
     ) -> None:
         if tag_key == "finance":
             created_domain_ids[tag_key] = "parent-id"
@@ -47,11 +51,17 @@ def test_discovery_domain_executor_creates_parent_before_child() -> None:
             "finance",
             description="Finance data",
             parent_domain_id="",
+            subtitle=None,
+            draft=None,
+            icon=None,
         ),
         call(
             "finance/orders",
             description="Finance orders data",
             parent_domain_id="parent-id",
+            subtitle=None,
+            draft=None,
+            icon=None,
         ),
     ]
     assert change_logger.log_discovery_domain_create.call_args_list == [
@@ -80,6 +90,9 @@ def test_discovery_domain_executor_logs_error_and_skips_child_when_parent_creati
         "finance",
         description="",
         parent_domain_id="",
+        subtitle=None,
+        draft=None,
+        icon=None,
     )
     assert change_logger.has_errors
 
@@ -100,6 +113,7 @@ def test_discovery_domain_executor_updates_description_and_logs_old_value() -> N
     diff = DiscoveryDomainDiff(
         to_update={updated_domain},
         old_values={"finance": old_domain},
+        update_masks={"finance": ("description",)},
     )
     ws_helper = MagicMock(spec=WorkspaceHelper)
     change_logger = MagicMock(spec=ChangeLogger)
@@ -108,11 +122,68 @@ def test_discovery_domain_executor_updates_description_and_logs_old_value() -> N
 
     ws_helper.update_discovery_domain.assert_called_once_with(
         updated_domain,
-        update_mask="description",
+        update_mask=("description",),
     )
     change_logger.log_discovery_domain_update.assert_called_once_with(
         updated_domain,
         old_domain,
+    )
+
+
+def test_discovery_domain_executor_forwards_metadata_attributes_on_create() -> None:
+    domain = DiscoveryDomain(
+        tag_key="finance",
+        description="Fin",
+        subtitle="Sub",
+        draft=True,
+        icon=DomainIcon(name="ROCKET", color="#FF5733"),
+    )
+    diff = DiscoveryDomainDiff(to_create={domain})
+    ws_helper = MagicMock(spec=WorkspaceHelper)
+    ws_helper.get_discovery_domain_id.return_value = None
+    change_logger = MagicMock(spec=ChangeLogger)
+
+    execute_discovery_domain_diff(ws_helper, diff, change_logger, dry_run=False)
+
+    ws_helper.create_discovery_domain.assert_called_once_with(
+        "finance",
+        description="Fin",
+        parent_domain_id="",
+        subtitle="Sub",
+        draft=True,
+        icon=DomainIcon(name="ROCKET", color="#FF5733"),
+    )
+
+
+def test_discovery_domain_executor_forwards_computed_update_mask() -> None:
+    domain = DiscoveryDomain(
+        tag_key="finance",
+        description="Fin",
+        subtitle="Sub",
+        draft=True,
+        icon=DomainIcon(name="BANK", color="#1B5E20"),
+        domain_id="d",
+        resource_name="domains/d",
+    )
+    old_domain = DiscoveryDomain(
+        tag_key="finance",
+        description="Old",
+        domain_id="d",
+        resource_name="domains/d",
+    )
+    diff = DiscoveryDomainDiff(
+        to_update={domain},
+        old_values={"finance": old_domain},
+        update_masks={"finance": ("description", "subtitle", "draft", "icon")},
+    )
+    ws_helper = MagicMock(spec=WorkspaceHelper)
+    change_logger = MagicMock(spec=ChangeLogger)
+
+    execute_discovery_domain_diff(ws_helper, diff, change_logger, dry_run=False)
+
+    ws_helper.update_discovery_domain.assert_called_once_with(
+        domain,
+        update_mask=("description", "subtitle", "draft", "icon"),
     )
 
 
@@ -134,6 +205,7 @@ def test_discovery_domain_executor_logs_fatal_error_without_success_when_descrip
     diff = DiscoveryDomainDiff(
         to_update={updated_domain},
         old_values={"finance": old_domain},
+        update_masks={"finance": ("description",)},
     )
     ws_helper = MagicMock(spec=WorkspaceHelper)
     ws_helper.update_discovery_domain.side_effect = DatabricksError("boom")
