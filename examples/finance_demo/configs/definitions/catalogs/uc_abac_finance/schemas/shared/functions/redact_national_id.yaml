@@ -4,7 +4,6 @@ definitions:
     finance|redact_national_id:
       name: redact_national_id
       comment: Redact a national id, revealing only the last four digits.
-      owner: uc_abac_data_platform
       parameters:
         - name: value
           type: string

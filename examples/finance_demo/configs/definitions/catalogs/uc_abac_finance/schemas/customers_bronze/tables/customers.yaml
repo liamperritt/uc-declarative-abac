@@ -5,7 +5,6 @@ definitions:
     uc_abac_finance|customers|customers:
       name: customers
       comment: Customer master record as landed from the CRM.
-      owner: uc_abac_data_platform
       tags:
         uc_abac_domain: customer
       columns:

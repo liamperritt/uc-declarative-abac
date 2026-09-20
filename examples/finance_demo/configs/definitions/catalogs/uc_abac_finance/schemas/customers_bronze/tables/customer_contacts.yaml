@@ -4,7 +4,6 @@ definitions:
     uc_abac_finance|customers|customer_contacts:
       name: customer_contacts
       comment: Customer contact details as landed from the CRM.
-      owner: uc_abac_data_platform
       tags:
         uc_abac_domain: customer
       columns:

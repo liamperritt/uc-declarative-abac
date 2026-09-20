@@ -2,13 +2,11 @@
 definitions:
   tables:
     uc_abac_finance|transactions_bronze|base_table:
-      owner: uc_abac_data_platform
       tags:
         uc_abac_domain: transaction
         uc_abac_layer: bronze
 
     uc_abac_finance|transactions_silver|base_table:
-      owner: uc_abac_data_platform
       tags:
         uc_abac_domain: transaction
         uc_abac_layer: silver

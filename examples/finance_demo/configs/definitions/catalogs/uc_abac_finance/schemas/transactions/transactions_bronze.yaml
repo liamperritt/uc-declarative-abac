@@ -22,11 +22,9 @@ definitions:
         # Inlined because these volumes are not reused by any other schema.
         - name: raw_files
           comment: Landing volume for raw {{ region }} extract files.
-          owner: uc_abac_data_platform
           tags:
             uc_abac_domain: transaction
         - name: quarantine
           comment: Quarantine volume for records that fail validation.
-          owner: uc_abac_data_platform
           tags:
             uc_abac_domain: transaction

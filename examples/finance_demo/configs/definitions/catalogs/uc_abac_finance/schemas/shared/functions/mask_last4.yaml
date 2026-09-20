@@ -6,7 +6,6 @@ definitions:
     finance|mask_last4:
       name: mask_last4
       comment: Mask all but the last four characters of a string value.
-      owner: uc_abac_data_platform
       parameters:
         - name: value
           type: string
