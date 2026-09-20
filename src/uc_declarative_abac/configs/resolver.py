@@ -308,7 +308,10 @@ def _resolve_inline_defs_strings(
             # A templated inline target is resolved only after $vars substitution (in
             # ``_apply_vars``): looking it up now, with the literal ``{{ ... }}`` still present,
             # would fail. Defer it here so the post-substitution ``_resolve_node`` pass resolves
-            # the concrete target.
+            # the concrete target. Consequence: unlike a concrete inline string, it is NOT a dict
+            # at merge time, so a templated inline string in a list is not merge-aligned by
+            # identifier and an override list replaces it wholesale — use the ``$ref``-dict form
+            # (whose sibling keys drive alignment) if the target is templated AND merged into.
             return node
         return _resolve_inline_defs_string(
             definitions, node, referenced, visited, override_strategy
@@ -483,11 +486,15 @@ def _candidate_bases_accepted_vars(definitions: dict, target: str) -> set[str]:
     are substituted, which the upfront signature check cannot do (the values come from the
     caller). To still recognise a variable declared purely to forward into the selected base,
     treat each ``{{ placeholder }}`` in the target's key as a wildcard, find every existing
-    definition key of that type that matches, and union their accepted variables. Over-matching
-    only widens the accepted set (it never rejects valid config); no match — or a malformed
-    target — yields an empty set, the same fallback as an unresolvable literal target. Only ever
-    reached at the upfront check: at runtime the target is already concrete and takes the
-    exact-lookup path in ``_base_accepted_vars``.
+    definition key of that type that matches, and union their accepted variables. Widening the
+    accepted set never rejects valid config; its only cost is weaker (not eliminated) typo
+    detection — if the wildcard coincidentally matches an unrelated definition that declares a
+    same-named variable, a declared-but-forward-only variable of that name passes the upfront
+    check even when the base actually selected does not accept it (at runtime it is then silently
+    dropped by ``_forward_scope_to_base_ref``, never reported). No match — or a malformed target —
+    yields an empty set, the same fallback as an unresolvable literal target. Only ever reached at
+    the upfront check: at runtime the target is already concrete and takes the exact-lookup path
+    in ``_base_accepted_vars``.
     """
     try:
         def_type, key_pattern = _split_ref(target)

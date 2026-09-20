@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from uc_declarative_abac.configs.variables import (
@@ -14,6 +16,7 @@ from uc_declarative_abac.configs.variables import (
     finalise,
     find_malformed_placeholders,
     find_placeholders,
+    placeholder_wildcard_pattern,
     substitute,
     substitute_in_body,
     unescape,
@@ -44,6 +47,26 @@ def test_find_placeholders_ignores_escaped_double_braces():
 def test_find_placeholders_returns_empty_for_plain_text():
     """A string with no tokens yields no names."""
     assert find_placeholders("just_a_plain_name") == set()
+
+
+# ---------------------------------------------------------------------------
+# placeholder_wildcard_pattern
+# ---------------------------------------------------------------------------
+
+
+def test_placeholder_wildcard_pattern_matches_substituted_values():
+    """A `{{ placeholder }}` becomes a wildcard matching any value it could take, incl. empty."""
+    pattern = re.compile(placeholder_wildcard_pattern("base_{{ suffix }}"))
+    assert pattern.match("base_silver")  # a normal value
+    assert pattern.match("base_")  # an empty-string value ('' is a real value)
+    assert not pattern.match("other")  # the literal prefix must still match
+
+
+def test_placeholder_wildcard_pattern_escapes_literal_delimiters():
+    """Literal segments (which contain the regex-special `|` key delimiter) are escaped."""
+    pattern = re.compile(placeholder_wildcard_pattern("finance|t_{{ layer }}"))
+    assert pattern.match("finance|t_bronze")
+    assert not pattern.match("financeXt_bronze")  # `|` is literal, not alternation
 
 
 # ---------------------------------------------------------------------------

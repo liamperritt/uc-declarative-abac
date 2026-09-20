@@ -123,8 +123,10 @@ def find_malformed_placeholders(text: str) -> set[str]:
 def placeholder_wildcard_pattern(text: str) -> str:
     """Return an anchored regex matching any literal ``text`` could become once substituted.
 
-    Each ``{{ name }}`` token is replaced with a ``.+`` wildcard and the literal segments around
-    the tokens are regex-escaped (definition keys contain the regex-special ``|`` delimiter).
+    Each ``{{ name }}`` token is replaced with a ``.*`` wildcard and the literal segments around
+    the tokens are regex-escaped (definition keys contain the regex-special ``|`` delimiter). The
+    wildcard is ``.*`` rather than ``.+`` because a variable may substitute to the empty string
+    (``''`` is a real value here), so ``base_{{ suffix }}`` must also match a base keyed ``base_``.
     Used to match a *templated* ``$ref`` target key (e.g. ``base_{{ layer }}``) against the
     definition registry when the concrete variable values are not yet known — so token detection
     stays single-sourced here rather than re-implemented by the resolver.
@@ -135,7 +137,7 @@ def placeholder_wildcard_pattern(text: str) -> str:
         if match.group(1) is None:
             continue  # an escaped {{{{ / }}}} — literal, folded into the surrounding escape
         parts.append(re.escape(text[last : match.start()]))
-        parts.append(".+")
+        parts.append(".*")
         last = match.end()
     parts.append(re.escape(text[last:]))
     return "^" + "".join(parts) + "$"
