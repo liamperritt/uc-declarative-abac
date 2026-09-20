@@ -1,0 +1,96 @@
+# Base schema and tables used by bronze and silver layers
+definitions:
+  tables:
+    uc_abac_finance|transactions_bronze|base_table:
+      owner: uc_abac_data_platform
+      tags:
+        uc_abac_domain: transaction
+        uc_abac_layer: bronze
+
+    uc_abac_finance|transactions_silver|base_table:
+      owner: uc_abac_data_platform
+      tags:
+        uc_abac_domain: transaction
+        uc_abac_layer: silver
+      columns:
+        - name: region
+          type: string
+          comment: Region (amer, emea or apac).
+          tags:
+            uc_abac_region_column: ~
+
+  schemas:
+    uc_abac_finance|base_transactions:
+      $ref: $defs/schemas/uc_abac_finance|base_schema
+      $vars:
+        env: ~
+        layer: ~
+      name: transactions_{{ layer }}
+      tags:
+        uc_abac_domain: transaction
+        uc_abac_layer: '{{ layer }}'
+      policies:
+        # Volume grants for the platform team, and read for this region's analysts.
+        - $ref: $defs/policies/domain|grant_volume_access
+      tables:
+        # Each raw table extends the layer-specific base table selected by {{ layer }}, so the
+        # silver instances resolve against the silver base_table and inherit its `region` column.
+        - $ref: $defs/tables/uc_abac_finance|transactions_{{ layer }}|base_table
+          name: payments
+          comment: Payments as landed from the payments gateway.
+          columns:
+            - name: payment_id
+              type: long
+              comment: Unique payment identifier.
+            - name: account_id
+              type: long
+              comment: Account the payment debits or credits.
+            - name: amount
+              type: decimal(18,2)
+              comment: Payment amount in the account currency.
+            - name: method
+              type: string
+              comment: Payment rail (card, wire, ach, ...).
+            - name: status
+              type: string
+        - $ref: $defs/tables/uc_abac_finance|transactions_{{ layer }}|base_table
+          name: settlements
+          comment: Settlement records as landed from the clearing system.
+          columns:
+            - name: settlement_id
+              type: long
+              comment: Unique settlement identifier.
+            - name: transaction_id
+              type: long
+              comment: Transaction being settled.
+            - name: amount
+              type: decimal(18,2)
+              comment: Settled amount in the settlement currency.
+            - name: currency
+              type: string
+              comment: ISO 4217 currency code.
+            - name: settled_at
+              type: timestamp
+              comment: Time the settlement completed.
+        - $ref: $defs/tables/uc_abac_finance|transactions_{{ layer }}|base_table
+          name: transactions
+          comment: Raw transaction ledger as landed from the source system.
+          columns:
+            - name: transaction_id
+              type: long
+              comment: Unique transaction identifier.
+            - name: account_id
+              type: long
+              comment: Account the transaction belongs to.
+            - name: amount
+              type: decimal(18,2)
+              comment: Transaction amount in the account currency.
+            - name: currency
+              type: string
+              comment: ISO 4217 currency code.
+            - name: transaction_type
+              type: string
+              comment: Debit or credit classification.
+            - name: booked_at
+              type: timestamp
+              comment: Time the transaction was booked.

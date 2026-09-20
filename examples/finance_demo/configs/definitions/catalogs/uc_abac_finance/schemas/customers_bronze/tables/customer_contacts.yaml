@@ -1,7 +1,7 @@
 # Customer contact details. Reused by customers_silver.
 definitions:
   tables:
-    finance|customer_contacts:
+    uc_abac_finance|customers|customer_contacts:
       name: customer_contacts
       comment: Customer contact details as landed from the CRM.
       owner: uc_abac_data_platform

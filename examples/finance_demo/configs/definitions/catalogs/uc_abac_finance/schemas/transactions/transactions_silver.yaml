@@ -1,0 +1,14 @@
+# Curated, region-unioned transaction layer. Extends base_transactions (root $ref) with
+# layer=silver, so its raw tables resolve against the silver base table — which carries the
+# `region` column (marked for row filtering) — without any per-table column overrides.
+definitions:
+  schemas:
+    uc_abac_finance|transactions_silver:
+      $ref: $defs/schemas/uc_abac_finance|base_transactions
+      $vars:
+        env: ~
+        layer: silver
+      comment: Curated, region-unioned transaction data.
+      policies:
+        - $ref: $defs/policies/region|filter_by_region
+        - $ref: $defs/policies/sensitivity|filter_large_transactions

@@ -217,18 +217,18 @@ def test_collect_placeholders_counts_forwarded_nested_ref_vars():
     assert collect_placeholders(body) == {"env"}
 
 
-def test_collect_placeholders_counts_nested_ref_overrides_ignores_target():
-    """A nested $ref's $vars and override values are the enclosing scope's; only the target is not."""
+def test_collect_placeholders_counts_ref_target():
+    """A placeholder in a $ref target is counted (bound by the enclosing definition)."""
     body = {
         "tables": [
             {
-                "$ref": "$defs/tables/{{ x }}",  # target — structural, not counted
+                "$ref": "$defs/tables/{{ x }}",  # target — now counted
                 "name": "{{ y }}",  # override value — enclosing scope, counted
                 "$vars": {"env": "{{ env }}"},  # forwarding — counted
             },
         ],
     }
-    assert collect_placeholders(body) == {"env", "y"}
+    assert collect_placeholders(body) == {"env", "y", "x"}
 
 
 # ---------------------------------------------------------------------------
@@ -249,22 +249,30 @@ def test_substitute_in_body_substitutes_forwarded_nested_vars():
     assert result["tables"][0]["$vars"]["env"] == "prod"
 
 
-def test_substitute_in_body_substitutes_nested_ref_overrides_leaves_target():
-    """The parent substitutes a nested $ref's $vars and override values; the target is untouched."""
+def test_substitute_in_body_substitutes_nested_ref_target():
+    """A placeholder in a nested $ref target is substituted (bound by the enclosing scope)."""
     body = {
         "tables": [
             {
-                "$ref": "$defs/tables/x",
+                "$ref": "$defs/tables/base_{{ layer }}",
                 "name": "{{ env }}",
                 "$vars": {"env": "{{ env }}"},
             },
         ],
     }
-    result = substitute_in_body(body, {"env": "prod"})
+    result = substitute_in_body(body, {"env": "prod", "layer": "silver"})
     entry = result["tables"][0]
-    assert entry["$ref"] == "$defs/tables/x"  # target untouched (structural)
+    assert entry["$ref"] == "$defs/tables/base_silver"  # target now substituted
     assert entry["name"] == "prod"  # override value → bound by enclosing scope
     assert entry["$vars"]["env"] == "prod"  # forwarded → substituted
+
+
+def test_substitute_in_body_substitutes_root_ref_target():
+    """A placeholder in a root $ref target is substituted (bound by the enclosing definition)."""
+    body = {"$ref": "$defs/tables/base_{{ layer }}"}
+    assert substitute_in_body(body, {"layer": "silver"}) == {
+        "$ref": "$defs/tables/base_silver"
+    }
 
 
 def test_substitute_in_body_does_not_mutate_input():
@@ -382,6 +390,12 @@ def test_check_signature_complete_counts_child_ref_override_var_as_used():
         "tables": [{"$ref": "$defs/tables/x", "comment": "created in {{ env }}"}],
     }
     check_signature_complete("s", body, body["$vars"])
+
+
+def test_check_signature_complete_counts_ref_target_use():
+    """A variable used only inside a $ref target counts as used (no unused-declaration error)."""
+    body = {"$vars": {"layer": None}, "$ref": "$defs/tables/base_{{ layer }}"}
+    check_signature_complete("t", body, body["$vars"])  # no raise
 
 
 def test_check_signature_complete_rejects_placeholder_default():
