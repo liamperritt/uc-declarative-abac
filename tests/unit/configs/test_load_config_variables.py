@@ -125,7 +125,10 @@ def test_load_config_resolves_templated_ref_target_end_to_end(tmp_yaml_dir):
                 "sch": {
                     "$vars": {"layer": None},
                     "tables": [
-                        {"$ref": "$defs/tables/payments", "$vars": {"layer": "{{ layer }}"}},
+                        {
+                            "$ref": "$defs/tables/payments",
+                            "$vars": {"layer": "{{ layer }}"},
+                        },
                     ],
                 },
             },
@@ -135,8 +138,16 @@ def test_load_config_resolves_templated_ref_target_end_to_end(tmp_yaml_dir):
                 "fin": {
                     "name": "fin",
                     "schemas": [
-                        {"$ref": "$defs/schemas/sch", "name": "bronze_s", "$vars": {"layer": "bronze"}},
-                        {"$ref": "$defs/schemas/sch", "name": "silver_s", "$vars": {"layer": "silver"}},
+                        {
+                            "$ref": "$defs/schemas/sch",
+                            "name": "bronze_s",
+                            "$vars": {"layer": "bronze"},
+                        },
+                        {
+                            "$ref": "$defs/schemas/sch",
+                            "name": "silver_s",
+                            "$vars": {"layer": "silver"},
+                        },
                     ],
                 },
             },

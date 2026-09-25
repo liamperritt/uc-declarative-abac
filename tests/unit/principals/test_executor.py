@@ -84,9 +84,7 @@ def test_group_executor_creates_all_groups_before_adding_members(
     execute_group_diff(ws_helper, diff, change_logger, dry_run=False)
 
     method_names = [c[0] for c in ws_helper.mock_calls]
-    last_create = max(
-        i for i, n in enumerate(method_names) if n == "create_group"
-    )
+    last_create = max(i for i, n in enumerate(method_names) if n == "create_group")
     add_indices = [i for i, n in enumerate(method_names) if n == "add_group_members"]
     assert add_indices  # the parent's member is added
     assert all(i > last_create for i in add_indices)
@@ -592,7 +590,9 @@ def test_group_executor_assumer_set_preserves_other_roles(ws_helper, change_logg
     from databricks.sdk.service.iam import GrantRule
 
     assumer = _resolved_user("assumer@co.com")
-    manager_rule = GrantRule(role="roles/group.manager", principals=["users/manager@co.com"])
+    manager_rule = GrantRule(
+        role="roles/group.manager", principals=["users/manager@co.com"]
+    )
 
     ws_helper.get_group_id.return_value = "g-1"
     current_ruleset = MagicMock()
@@ -655,12 +655,11 @@ def test_group_executor_assumer_ordering_after_member_ops_before_deletes(
     assert "delete_group" in method_names
     # Verify ordering: create -> add -> update_group_rule_set -> delete
     assert method_names.index("create_group") < method_names.index("add_group_members")
-    assert (
-        method_names.index("add_group_members")
-        < method_names.index("update_group_rule_set")
+    assert method_names.index("add_group_members") < method_names.index(
+        "update_group_rule_set"
     )
-    assert (
-        method_names.index("update_group_rule_set") < method_names.index("delete_group")
+    assert method_names.index("update_group_rule_set") < method_names.index(
+        "delete_group"
     )
 
 
@@ -691,9 +690,7 @@ def test_group_executor_assumer_dry_run_skips_ruleset_calls_but_logs(
     assert "assumer" in summary.lower()
 
 
-def test_group_executor_assumer_set_skipped_for_failed_create(
-    ws_helper, change_logger
-):
+def test_group_executor_assumer_set_skipped_for_failed_create(ws_helper, change_logger):
     """When a group's create fails, its assumer set is skipped (group doesn't exist)."""
     assumer = _resolved_user("assumer@co.com")
     ws_helper.create_group.side_effect = RuntimeError("boom")
@@ -737,7 +734,9 @@ def test_group_executor_assumer_add_and_remove_logged_separately(
 
     # Check that both add and remove log calls were made
     add_calls = [
-        c for c in logger_mock.info.call_args_list if c.args and "assumers" in c.args[0].lower()
+        c
+        for c in logger_mock.info.call_args_list
+        if c.args and "assumers" in c.args[0].lower()
     ]
     # Should have at least 2 lines mentioning assumers (add and remove)
     assert any("Added" in c.args[0] for c in add_calls)

@@ -282,7 +282,10 @@ def _policy_tags_match(
     Combining both fields is AND-of-groups."""
     if policy.has_tags and not _tags_match(policy.has_tags, actual_tags):
         return False
-    return not (policy.has_any_of_tags and not _tags_match_any(policy.has_any_of_tags, actual_tags))
+    return not (
+        policy.has_any_of_tags
+        and not _tags_match_any(policy.has_any_of_tags, actual_tags)
+    )
 
 
 def _tags_match(

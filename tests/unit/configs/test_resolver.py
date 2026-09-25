@@ -1723,7 +1723,9 @@ def test_resolver_supplying_declared_var_valid_even_if_usage_overridden():
 
     fn = result["catalogs"]["c"]["schemas"][0]["functions"][0]
     assert fn["owner"] == "sp_uc_governor_prod"  # the override literal
-    assert fn["return"] == "concat('+', code, phone)"  # redaction_character default applied
+    assert (
+        fn["return"] == "concat('+', code, phone)"
+    )  # redaction_character default applied
     assert "$vars" not in fn
 
 
@@ -1746,7 +1748,9 @@ def test_resolver_defaulted_var_overridden_away_needs_no_value():
                 "schemas": [
                     {
                         "$ref": "$defs/schemas/s",
-                        "tags": {"quality_tier": "gold"},  # overrides the only {{ medallion }} usage
+                        "tags": {
+                            "quality_tier": "gold"
+                        },  # overrides the only {{ medallion }} usage
                     },
                 ],
             },
@@ -1777,9 +1781,16 @@ def test_resolver_inline_defs_string_equivalent_to_ref_dict_for_templated_def():
     }
 
     def _resources(functions):
-        return {"catalogs": {"c": {"name": "c", "schemas": [
-            {"name": "s", "functions": functions},
-        ]}}}
+        return {
+            "catalogs": {
+                "c": {
+                    "name": "c",
+                    "schemas": [
+                        {"name": "s", "functions": functions},
+                    ],
+                }
+            }
+        }
 
     inline = resolve_refs(
         definitions, _resources(["$defs/functions/abac|format_phone"])
@@ -1800,11 +1811,20 @@ def test_resolver_inline_defs_string_equivalent_to_ref_dict_for_templated_def():
 def test_resolver_inline_defs_string_non_dict_body_is_unchanged():
     """A non-dict (list-bodied) definition referenced inline resolves without a $vars crash."""
     definitions = {
-        "columns": {"pair": [{"name": "a", "type": "string"}, {"name": "b", "type": "string"}]},
+        "columns": {
+            "pair": [{"name": "a", "type": "string"}, {"name": "b", "type": "string"}]
+        },
     }
-    resources = {"catalogs": {"c": {"name": "c", "tables": [
-        {"name": "t", "columns": ["$defs/columns/pair"]},
-    ]}}}
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "tables": [
+                    {"name": "t", "columns": ["$defs/columns/pair"]},
+                ],
+            }
+        }
+    }
 
     result = resolve_refs(definitions, resources)
 
@@ -1853,9 +1873,16 @@ def test_resolver_raises_on_malformed_placeholder_in_definition():
     definitions = {
         "schemas": {"s": {"name": "s", "tags": {"e": "{{ my-var }}"}}},
     }
-    resources = {"catalogs": {"c": {"name": "c", "schemas": [
-        {"$ref": "$defs/schemas/s"},
-    ]}}}
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {"$ref": "$defs/schemas/s"},
+                ],
+            }
+        }
+    }
 
     with pytest.raises(TemplateVariableError, match="[Mm]alformed"):
         resolve_refs(definitions, resources)
@@ -1875,9 +1902,16 @@ def test_resolver_rejects_defs_reference_in_ref_vars_value():
         "schemas": {"s": {"$vars": {"x": None}, "name": "{{ x }}"}},
         "columns": {"region": {"name": "region", "type": "string"}},
     }
-    resources = {"catalogs": {"c": {"name": "c", "schemas": [
-        {"$ref": "$defs/schemas/s", "$vars": {"x": "$defs/columns/region"}},
-    ]}}}
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {"$ref": "$defs/schemas/s", "$vars": {"x": "$defs/columns/region"}},
+                ],
+            }
+        }
+    }
 
     with pytest.raises(TemplateVariableError, match="reference"):
         resolve_refs(definitions, resources)
@@ -1889,9 +1923,16 @@ def test_resolver_rejects_defs_reference_in_definition_default():
         "schemas": {"s": {"$vars": {"x": "$defs/columns/region"}, "name": "{{ x }}"}},
         "columns": {"region": {"name": "region", "type": "string"}},
     }
-    resources = {"catalogs": {"c": {"name": "c", "schemas": [
-        {"$ref": "$defs/schemas/s"},
-    ]}}}
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {"$ref": "$defs/schemas/s"},
+                ],
+            }
+        }
+    }
 
     with pytest.raises(TemplateVariableError, match="reference"):
         resolve_refs(definitions, resources)
@@ -2464,7 +2505,10 @@ def test_resolver_resolves_root_ref_with_templated_target():
                 "$vars": {"layer": None},
                 "name": "sch",
                 "tables": [
-                    {"$ref": "$defs/tables/payments", "$vars": {"layer": "{{ layer }}"}},
+                    {
+                        "$ref": "$defs/tables/payments",
+                        "$vars": {"layer": "{{ layer }}"},
+                    },
                 ],
             },
         },
@@ -2490,7 +2534,10 @@ def test_resolver_resolves_root_ref_with_templated_target():
     silver_cols = {c["name"] for c in silver_table["columns"]}
     assert "region" not in bronze_cols  # bronze base has no region column
     assert bronze_cols == {"payment_id"}
-    assert silver_cols == {"region", "payment_id"}  # silver base merges its region column
+    assert silver_cols == {
+        "region",
+        "payment_id",
+    }  # silver base merges its region column
     assert silver_table["tags"]["layer"] == "silver"
 
 
@@ -2510,7 +2557,9 @@ def test_resolver_resolves_nested_ref_with_templated_target():
         "catalogs": {
             "c": {
                 "name": "c",
-                "schemas": [{"$ref": "$defs/schemas/sch", "$vars": {"layer": "silver"}}],
+                "schemas": [
+                    {"$ref": "$defs/schemas/sch", "$vars": {"layer": "silver"}}
+                ],
             },
         },
     }
@@ -2581,7 +2630,10 @@ def test_resolver_accepts_forward_only_var_into_templated_base():
     """A variable declared only to forward into a templated base validates (base accepts it)."""
     definitions = {
         "tables": {
-            "base_silver": {"$vars": {"retention": None}, "tags": {"r": "{{ retention }}"}},
+            "base_silver": {
+                "$vars": {"retention": None},
+                "tags": {"r": "{{ retention }}"},
+            },
             "t": {
                 "$ref": "$defs/tables/base_{{ layer }}",
                 "$vars": {"layer": None, "retention": None},
@@ -2635,7 +2687,10 @@ def test_resolver_rejects_unused_declared_var_with_templated_base():
                     {
                         "name": "s",
                         "tables": [
-                            {"$ref": "$defs/tables/t", "$vars": {"layer": "silver", "bogus": "x"}},
+                            {
+                                "$ref": "$defs/tables/t",
+                                "$vars": {"layer": "silver", "bogus": "x"},
+                            },
                         ],
                     },
                 ],

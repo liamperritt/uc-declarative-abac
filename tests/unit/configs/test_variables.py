@@ -560,9 +560,7 @@ def test_check_signature_complete_inherited_use_does_not_excuse_body_typo():
     """Inherited uses relax only the unused direction — a body placeholder must still be declared."""
     body = {"$ref": "$defs/schemas/base", "name": "{{ environmnet }}"}
     with pytest.raises(TemplateVariableError, match="undeclared"):
-        check_signature_complete(
-            "default", body, {"env": None}, inherited_uses={"env"}
-        )
+        check_signature_complete("default", body, {"env": None}, inherited_uses={"env"})
 
 
 # ---------------------------------------------------------------------------
@@ -593,7 +591,9 @@ def test_substitute_in_body_leaves_ref_key_in_tag_map():
 def test_substitute_in_body_leaves_non_tag_key_literal():
     """A placeholder in a non-tag key is not substituted (only values / tag keys are)."""
     body = {"weird_{{ env }}_field": "{{ env }}"}
-    assert substitute_in_body(body, {"env": "test"}) == {"weird_{{ env }}_field": "test"}
+    assert substitute_in_body(body, {"env": "test"}) == {
+        "weird_{{ env }}_field": "test"
+    }
 
 
 def test_finalise_raises_on_unbound_tag_map_key():
@@ -610,7 +610,9 @@ def test_finalise_raises_on_placeholder_in_non_tag_key():
 
 def test_finalise_unescapes_tag_map_key():
     """Escaped braces in a tag-map key collapse to literals, like a value would."""
-    assert finalise({"tags": {"lit_{{{{ x }}}}": "v"}}) == {"tags": {"lit_{{ x }}": "v"}}
+    assert finalise({"tags": {"lit_{{{{ x }}}}": "v"}}) == {
+        "tags": {"lit_{{ x }}": "v"}
+    }
 
 
 def test_check_no_placeholders_in_resources_raises_on_tag_key():

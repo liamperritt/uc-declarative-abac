@@ -348,8 +348,7 @@ def _setup_mock_principals_with_groups(
     _configure_iam(
         mock_workspace_client,
         groups=[
-            _iam_group(name, group_id=str(10 + i))
-            for i, name in enumerate(group_names)
+            _iam_group(name, group_id=str(10 + i)) for i, name in enumerate(group_names)
         ],
     )
 
@@ -3447,8 +3446,12 @@ def _setup_mock_group_state(
     _configure_iam(
         mock_workspace_client,
         users=[_iam_user(un, num(sid)) for sid, un in users],
-        groups=[_iam_group(group_name, group_id=num(group_id), external_id=external_id)],
-        members_by_group_id={num(group_id): [_iam_member(num(mid)) for mid in member_ids]},
+        groups=[
+            _iam_group(group_name, group_id=num(group_id), external_id=external_id)
+        ],
+        members_by_group_id={
+            num(group_id): [_iam_member(num(mid)) for mid in member_ids]
+        },
     )
     _route_scim_group_writes(mock_workspace_client, num)
 
@@ -3517,7 +3520,9 @@ def test_orchestrator_warns_when_use_workspace_scim_used(
         and "deprecated" in r.getMessage().lower()
         and "omit" in r.getMessage().lower()
         for r in caplog.records
-    ), "Expected a deprecation warning instructing the user to omit --use-workspace-scim"
+    ), (
+        "Expected a deprecation warning instructing the user to omit --use-workspace-scim"
+    )
 
 
 def test_orchestrator_warns_when_skip_users_fetch_used(
@@ -3571,7 +3576,9 @@ def test_orchestrator_warns_when_ref_override_strategy_used(
         and "deprecated" in r.getMessage().lower()
         and "omit" in r.getMessage().lower()
         for r in caplog.records
-    ), "Expected a deprecation warning instructing the user to omit --ref-override-strategy"
+    ), (
+        "Expected a deprecation warning instructing the user to omit --ref-override-strategy"
+    )
 
 
 def test_orchestrator_does_not_warn_ref_override_strategy_when_default(
@@ -3592,9 +3599,9 @@ def test_orchestrator_does_not_warn_ref_override_strategy_when_default(
             warehouse_id="test-warehouse-id",
         )
 
-    assert not any(
-        "ref-override-strategy" in r.getMessage() for r in caplog.records
-    ), "Did not expect a ref-override-strategy warning at the default strategy"
+    assert not any("ref-override-strategy" in r.getMessage() for r in caplog.records), (
+        "Did not expect a ref-override-strategy warning at the default strategy"
+    )
 
 
 def test_orchestrator_adds_group_members_end_to_end(
@@ -3691,9 +3698,9 @@ def test_orchestrator_leaves_membership_untouched_when_members_omitted(
     assert result.group_diff.members_to_add == {}
     assert result.group_diff.members_to_remove == {}
     # Membership is unmanaged, so the per-group member list is never fetched.
-    assert (
-        not mock_workspace_client.workspace_iam_v2.list_direct_group_members_proxy.called
-    ), "Expected no per-group member fetch when members omitted"
+    assert not mock_workspace_client.workspace_iam_v2.list_direct_group_members_proxy.called, (
+        "Expected no per-group member fetch when members omitted"
+    )
 
 
 def test_orchestrator_reconciles_group_assumers_end_to_end(

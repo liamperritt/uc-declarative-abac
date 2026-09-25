@@ -30,6 +30,7 @@ def _group(
     - When members/assumers is explicitly None, uses None (unmanaged).
     - When members/assumers is a set or frozenset, converts to frozenset.
     """
+
     # Helper to convert input to frozenset or None, respecting the sentinel.
     def _to_frozenset_or_none(value):
         if value is _NOT_PROVIDED:
@@ -752,7 +753,9 @@ def test_group_differ_omits_assumers_when_desired_and_actual_are_identical():
         _group(
             "analysts",
             members=set(),
-            assumers=frozenset({Principal(PrincipalType.UNKNOWN, identifier="alice@example.com")}),
+            assumers=frozenset(
+                {Principal(PrincipalType.UNKNOWN, identifier="alice@example.com")}
+            ),
         )
     }
     resolver = _resolver(
@@ -776,7 +779,9 @@ def test_group_differ_skips_assumers_when_desired_assumers_is_none():
         _group(
             "analysts",
             members=set(),
-            assumers=frozenset({Principal(PrincipalType.UNKNOWN, identifier="alice@example.com")}),
+            assumers=frozenset(
+                {Principal(PrincipalType.UNKNOWN, identifier="alice@example.com")}
+            ),
         )
     }
     resolver = _resolver(identifier_to_principal={"alice@example.com": _alice_resolved})
@@ -798,7 +803,9 @@ def test_group_differ_skips_members_when_desired_members_is_none():
     actual = {
         _group(
             "analysts",
-            members=frozenset({Principal(PrincipalType.UNKNOWN, identifier="alice@example.com")}),
+            members=frozenset(
+                {Principal(PrincipalType.UNKNOWN, identifier="alice@example.com")}
+            ),
         )
     }
     resolver = _resolver(identifier_to_principal={"alice@example.com": _alice_resolved})
@@ -819,7 +826,9 @@ def test_group_differ_removes_all_members_when_desired_is_empty_frozenset():
     actual = {
         _group(
             "analysts",
-            members=frozenset({Principal(PrincipalType.UNKNOWN, identifier="alice@example.com")}),
+            members=frozenset(
+                {Principal(PrincipalType.UNKNOWN, identifier="alice@example.com")}
+            ),
         )
     }
     resolver = _resolver(identifier_to_principal={"alice@example.com": _alice_resolved})
@@ -865,7 +874,14 @@ def test_group_differ_reconciles_assumers_for_external_group_with_members_none()
             assumers={Principal(PrincipalType.UNKNOWN, name="alice@example.com")},
         )
     }
-    actual = {_group("analysts", external_id="ext-idp-123", members=frozenset(), assumers=frozenset())}
+    actual = {
+        _group(
+            "analysts",
+            external_id="ext-idp-123",
+            members=frozenset(),
+            assumers=frozenset(),
+        )
+    }
     resolver = _resolver(name_to_principal={"alice@example.com": _alice_resolved})
     change_logger = ChangeLogger()
 
