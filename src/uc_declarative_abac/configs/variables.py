@@ -115,9 +115,7 @@ def find_malformed_placeholders(text: str) -> set[str]:
     ``{{{{ ... }}}}`` sequences and legitimate literal braces (``{{"a":1}}``, ``{{ SELECT 1 }}``)
     are not reported. See ``_MALFORMED_RE``.
     """
-    return {
-        m.group(1) for m in _MALFORMED_RE.finditer(text) if m.group(1) is not None
-    }
+    return {m.group(1) for m in _MALFORMED_RE.finditer(text) if m.group(1) is not None}
 
 
 def placeholder_wildcard_pattern(text: str) -> str:
@@ -221,7 +219,9 @@ def substitute_in_body(body: Any, variables: dict[str, str]) -> Any:
     return _substitute(copy.deepcopy(body), variables)
 
 
-def _substitute(node: Any, variables: dict[str, str], keys_templatable: bool = False) -> Any:
+def _substitute(
+    node: Any, variables: dict[str, str], keys_templatable: bool = False
+) -> Any:
     if isinstance(node, dict):
         result: dict = {}
         for key, value in node.items():
@@ -231,10 +231,14 @@ def _substitute(node: Any, variables: dict[str, str], keys_templatable: bool = F
             # and a child's keys are templatable iff its field is a tag map.
             new_key = (
                 substitute(key, variables)
-                if keys_templatable and isinstance(key, str) and key not in (_REF_KEY, _VARS_KEY)
+                if keys_templatable
+                and isinstance(key, str)
+                and key not in (_REF_KEY, _VARS_KEY)
                 else key
             )
-            result[new_key] = _substitute(value, variables, key in TEMPLATABLE_KEY_FIELDS)
+            result[new_key] = _substitute(
+                value, variables, key in TEMPLATABLE_KEY_FIELDS
+            )
         return result
     if isinstance(node, list):
         return [_substitute(item, variables, keys_templatable) for item in node]

@@ -29,6 +29,7 @@ Fixes #
 - [ ] Tests added or updated, following the BDD naming convention `test_<module>_<does_behaviour>[_when_<state>]` (see `AGENTS.md`)
 - [ ] `.venv/bin/pytest tests/unit -q` passes locally
 - [ ] `.venv/bin/ruff check src tests` is clean
+- [ ] `.venv/bin/ruff format --check src tests` is clean (run `.venv/bin/ruff format src tests` to fix)
 - [ ] Idempotency preserved — running the same configs twice produces no changes on the second run (for diff/apply changes)
 - [ ] Docs updated where behaviour, CLI flags, or YAML config structure changed (`README.md`, and `deploy/action.yml` inputs where relevant)
 - [ ] My code follows the project's [coding conventions](../CONTRIBUTING.md#coding-conventions)

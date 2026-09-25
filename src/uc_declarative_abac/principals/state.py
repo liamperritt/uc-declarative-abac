@@ -35,9 +35,7 @@ class Principal:
         if self.principal_type != PrincipalType.UNKNOWN and (
             not self.name or not self.identifier
         ):
-            raise ValueError(
-                "Resolved principals must have both name and identifier"
-            )
+            raise ValueError("Resolved principals must have both name and identifier")
 
 
 @dataclass(frozen=True)

@@ -338,9 +338,7 @@ def test_uc_declarative_abac_dry_run(
     }
     for attr in EXPECTED_ATTRIBUTES:
         if attr.owner:
-            assert True, (
-                f"Expected attribute update not found in diff: {attr}"
-            )
+            assert True, f"Expected attribute update not found in diff: {attr}"
 
     # All expected tags should be pending add/update or already in sync
     pending_tags = result.tag_diff.to_add | result.tag_diff.to_update

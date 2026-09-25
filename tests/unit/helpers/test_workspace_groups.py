@@ -667,9 +667,7 @@ def test_workspace_helper_rename_group_issues_replace_displayname_patch() -> Non
 # ---------------------------------------------------------------------------
 
 
-def test_workspace_helper_members_not_fetched_when_absent_from_member_fetch() -> (
-    None
-):
+def test_workspace_helper_members_not_fetched_when_absent_from_member_fetch() -> None:
     """When a group is not in member_fetch_names or member_fetch_ids,
     fetch_actual_groups does not fetch its members (no per-group member fetch).
     The returned group has members=None."""
@@ -814,12 +812,10 @@ def test_workspace_helper_update_group_rule_set_calls_with_request() -> None:
     account_access_control_proxy.update_rule_set with a RuleSetUpdateRequest."""
     client = _make_workspace_client()
     client.config.account_id = "acc-456"
-    client.account_access_control_proxy.update_rule_set.return_value = (
-        RuleSetResponse(
-            name="accounts/acc-456/groups/g-42/ruleSets/default",
-            etag="e-updated",
-            grant_rules=[],
-        )
+    client.account_access_control_proxy.update_rule_set.return_value = RuleSetResponse(
+        name="accounts/acc-456/groups/g-42/ruleSets/default",
+        etag="e-updated",
+        grant_rules=[],
     )
 
     helper = WorkspaceHelper(client, manage_groups=True)

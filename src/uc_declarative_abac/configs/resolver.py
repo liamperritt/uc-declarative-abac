@@ -432,9 +432,7 @@ def _apply_vars(
     return substituted
 
 
-def _forward_scope_to_base_ref(
-    body: dict, supplied: dict, definitions: dict
-) -> dict:
+def _forward_scope_to_base_ref(body: dict, supplied: dict, definitions: dict) -> dict:
     """Forward an extending definition's own variables into the base it extends.
 
     A definition whose body root is a ``$ref`` extends that base definition. Because the
@@ -558,9 +556,7 @@ def _resolve_inline_defs_string(
     referenced.add(ref_path)
     definition = _lookup_definition(definitions, ref_path)
     resolved = copy.deepcopy(definition)
-    resolved = _apply_vars(
-        resolved, ref_path, _declared_vars(definition), definitions
-    )
+    resolved = _apply_vars(resolved, ref_path, _declared_vars(definition), definitions)
     result = _resolve_node(
         definitions, resolved, referenced, visited, override_strategy
     )
