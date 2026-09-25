@@ -12,11 +12,13 @@ Literal double braces are escaped by doubling — ``{{{{`` renders a literal ``{
 and ``}}}}`` a literal ``}}`` — so genuine ``{{ }}`` in SQL function bodies survives.
 
 Structure-awareness (see ``collect_placeholders`` / ``substitute_in_body``): within a
-template body, every string value — plain values, a nested ``$ref``'s ``$vars`` values
-(forwarding), and a nested ``$ref``'s override values — belongs to the enclosing
-template's variable scope and is bound here. Only a nested ``$ref``'s target string is
-left untouched (it is resolved structurally and may never hold a placeholder). In short:
-the definition that *writes* a placeholder is the one that binds it.
+template body, every string value belongs to the enclosing template's variable scope and is
+bound here — plain values, a nested ``$ref``'s ``$vars`` values (forwarding), a nested
+``$ref``'s override values, and the ``$ref`` / ``$defs`` **target** itself (a placeholder
+there selects which definition is referenced, e.g. ``$defs/tables/base_{{ layer }}``, and is
+substituted to a concrete target before lookup). In short: the definition that *writes* a
+placeholder is the one that binds it. (A templated target under ``resources:`` is still an
+error — resources carry no ``$vars`` scope; see ``check_no_placeholders_in_resources``.)
 
 Dict *keys* are literal by default, with one exception: the keys of a **user-data map**
 (the fields in ``TEMPLATABLE_KEY_FIELDS`` — the tag-name maps ``tags``, ``has_tags``,
@@ -113,7 +115,32 @@ def find_malformed_placeholders(text: str) -> set[str]:
     ``{{{{ ... }}}}`` sequences and legitimate literal braces (``{{"a":1}}``, ``{{ SELECT 1 }}``)
     are not reported. See ``_MALFORMED_RE``.
     """
-    return {m.group(1) for m in _MALFORMED_RE.finditer(text) if m.group(1) is not None}
+    return {
+        m.group(1) for m in _MALFORMED_RE.finditer(text) if m.group(1) is not None
+    }
+
+
+def placeholder_wildcard_pattern(text: str) -> str:
+    """Return an anchored regex matching any literal ``text`` could become once substituted.
+
+    Each ``{{ name }}`` token is replaced with a ``.*`` wildcard and the literal segments around
+    the tokens are regex-escaped (definition keys contain the regex-special ``|`` delimiter). The
+    wildcard is ``.*`` rather than ``.+`` because a variable may substitute to the empty string
+    (``''`` is a real value here), so ``base_{{ suffix }}`` must also match a base keyed ``base_``.
+    Used to match a *templated* ``$ref`` target key (e.g. ``base_{{ layer }}``) against the
+    definition registry when the concrete variable values are not yet known — so token detection
+    stays single-sourced here rather than re-implemented by the resolver.
+    """
+    parts: list[str] = []
+    last = 0
+    for match in _TOKEN_RE.finditer(text):
+        if match.group(1) is None:
+            continue  # an escaped {{{{ / }}}} — literal, folded into the surrounding escape
+        parts.append(re.escape(text[last : match.start()]))
+        parts.append(".*")
+        last = match.end()
+    parts.append(re.escape(text[last:]))
+    return "^" + "".join(parts) + "$"
 
 
 def substitute(text: str, variables: dict[str, str]) -> str:
@@ -147,11 +174,12 @@ def collect_placeholders(node: Any) -> set[str]:
 
     Scans string *values*, plus the keys of tag-name maps (``TEMPLATABLE_KEY_FIELDS``) — a
     placeholder in a tag name counts as used. All other dict keys are literal and skipped. At a
-    nested ``$ref`` dict, every value except the ``$ref`` target — its ``$vars`` values
-    (forwarding) and its override values alike — is in the enclosing template's scope and is
-    counted here; only the ``$ref`` target string is skipped. So both a forwarding-only variable
-    (used solely as a nested ``$ref``'s ``$vars`` value) and a variable used only in an override
-    the enclosing template writes onto a child ``$ref`` count as used.
+    nested ``$ref`` dict, every value is in the enclosing template's scope and is counted here:
+    its ``$vars`` values (forwarding), its override values, and the ``$ref`` target string itself
+    (a placeholder there selects the referenced definition). So a forwarding-only variable (used
+    solely as a nested ``$ref``'s ``$vars`` value), a variable used only in an override the
+    enclosing template writes onto a child ``$ref``, and a variable used only inside a ``$ref``
+    target all count as used.
     """
     found: set[str] = set()
     _collect(node, found)
@@ -167,14 +195,11 @@ def _collect(node: Any, found: set[str], keys_templatable: bool = False) -> None
             for key in node:
                 if isinstance(key, str) and key not in (_REF_KEY, _VARS_KEY):
                     found |= find_placeholders(key)
-        ref_site = _REF_KEY in node
         for key, value in node.items():
-            # At a nested $ref site only the $ref target is excluded (resolved structurally,
-            # never templated); every other value — $vars forwarding and overrides alike — is
-            # the enclosing template's text. A child's keys are templatable iff its field is a
-            # tag map.
-            if ref_site and key == _REF_KEY:
-                continue
+            # Every value is the enclosing template's text and is scanned — including a nested
+            # $ref's target (a placeholder there selects the referenced definition and is bound
+            # by the enclosing definition), its $vars forwarding values, and its override values.
+            # A child's keys are templatable iff its field is a tag map.
             _collect(value, found, key in TEMPLATABLE_KEY_FIELDS)
     elif isinstance(node, list):
         for item in node:
@@ -186,41 +211,30 @@ def _collect(node: Any, found: set[str], keys_templatable: bool = False) -> None
 def substitute_in_body(body: Any, variables: dict[str, str]) -> Any:
     """Return a copy of ``body`` with placeholders substituted, structure-aware.
 
-    Substitutes every string value except a nested ``$ref``'s target: plain values, a
-    nested ``$ref``'s ``$vars`` values (forwarding), and a nested ``$ref``'s override
-    values are all bound in the enclosing template's scope, so they become literals before
-    that child ``$ref`` is expanded. Only the ``$ref`` target string is left untouched (it
-    is resolved structurally). Tag-name map keys (``TEMPLATABLE_KEY_FIELDS``) are substituted
-    too; all other dict keys are left literal. The enclosing definition binds every placeholder
-    it writes.
+    Substitutes every string value: plain values, a nested ``$ref``'s ``$vars`` values
+    (forwarding), a nested ``$ref``'s override values, and the ``$ref`` / ``$defs`` target
+    itself (a placeholder there is substituted to a concrete target before that child ``$ref``
+    is expanded, so it can be looked up). Tag-name map keys (``TEMPLATABLE_KEY_FIELDS``) are
+    substituted too; all other dict keys are left literal. The enclosing definition binds every
+    placeholder it writes.
     """
     return _substitute(copy.deepcopy(body), variables)
 
 
-def _substitute(
-    node: Any, variables: dict[str, str], keys_templatable: bool = False
-) -> Any:
+def _substitute(node: Any, variables: dict[str, str], keys_templatable: bool = False) -> Any:
     if isinstance(node, dict):
-        ref_site = _REF_KEY in node
         result: dict = {}
         for key, value in node.items():
             # A tag-map key (parent set ``keys_templatable``) is substituted like a value; the
-            # $ref/$vars structural keys never are. Only the $ref target value is left untouched
-            # (resolved structurally); every other value is substituted, and a child's keys are
-            # templatable iff its field is a tag map.
+            # $ref/$vars structural keys never are. Every value is substituted — including a
+            # nested $ref's target (a placeholder there is bound by the enclosing definition) —
+            # and a child's keys are templatable iff its field is a tag map.
             new_key = (
                 substitute(key, variables)
-                if keys_templatable
-                and isinstance(key, str)
-                and key not in (_REF_KEY, _VARS_KEY)
+                if keys_templatable and isinstance(key, str) and key not in (_REF_KEY, _VARS_KEY)
                 else key
             )
-            if ref_site and key == _REF_KEY:
-                result[new_key] = value
-            else:
-                result[new_key] = _substitute(
-                    value, variables, key in TEMPLATABLE_KEY_FIELDS
-                )
+            result[new_key] = _substitute(value, variables, key in TEMPLATABLE_KEY_FIELDS)
         return result
     if isinstance(node, list):
         return [_substitute(item, variables, keys_templatable) for item in node]

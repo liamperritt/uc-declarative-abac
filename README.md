@@ -179,7 +179,7 @@ The engine delegates authentication to the Databricks SDK's [unified authenticat
 Resolution precedence matches the SDK's unified-auth chain: explicit `--profile` takes precedence, followed by env vars, `~/.databrickscfg`, and finally the metadata service. Omit `--profile` entirely to let the SDK pick whichever source is configured in the current environment.
 
 > **Required permissions.** Whichever identity the engine authenticates as (typically a service principal for automation) must hold:
-> - **Workspace admin** on the target workspace — needed to fetch users, service principals and groups from the account SCIM proxy API.
+> - **Workspace admin** on the target workspace — needed to fetch users, service principals and groups from the account identity API.
 > - **Metastore admin** on the target metastore — needed to create/alter catalogs, schemas, tables, volumes, functions, tags, grants, masks, and filters.
 > - **Governed tag `creator`/`manager`** on the account — needed to create and update account-level governed tags (tag policies) under `resources.governed_tags`.
 > - **`MANAGE DISCOVERY`** — needed when creating, updating, or deleting Unity Catalog Discovery domains.
@@ -199,8 +199,8 @@ The repo ships a composite GitHub Action at `deploy/action.yml` so any other rep
 | `timezone` | no | `''` (UTC) | IANA timezone used to compute the run date for evaluating `expiry_date` on groups and grant policies (e.g. `Australia/Melbourne`); omit to use UTC. An unknown timezone fails the run at config load |
 | `profile` | no | `''` | Databricks CLI profile name from `~/.databrickscfg`; omit to use env-based auth (see the [Authentication](#authentication) table) |
 | `dry-run` | no | `'false'` | Print planned changes without executing when `'true'` |
-| `use-workspace-scim` | no | `'false'` | Fetch principals from the workspace SCIM API instead of the account SCIM proxy when `'true'`. The account-level system groups `account users` and `account admins` are automatically included, since the workspace SCIM API does not surface them. **Incompatible with configuring `resources.groups`** — group management requires the account SCIM proxy, so combining the two errors out |
-| `skip-users-fetch` | no | `'false'` | Skip listing users and treat the user set as empty when `'true'`. For organisations that govern access only via groups and service principals, this avoids the slowest SCIM list call and speeds up the initial fetch significantly in accounts with many users. It is useful when running interactively for a faster fetch time, but **it is not intended for production use.** |
+| `use-workspace-scim` | no | `'false'` | **Deprecated — omit it; slated for removal.** Fetch principals from the workspace SCIM API instead of the account identity API when `'true'`. The default account path now lists all account principals, so this mode is no longer needed and the engine logs a deprecation warning when it is set. Still **incompatible with configuring `resources.groups`** — group management requires account-level access, so combining the two errors out |
+| `skip-users-fetch` | no | `'false'` | **Deprecated — omit it; slated for removal.** Skip listing users and treat the user set as empty when `'true'`. The engine logs a deprecation warning when it is set. Not intended for production use. |
 | `tag-management-scopes` | no | `''` | Scope tag-assignment management to matching securables. Empty (default) disables it; `*` covers all; a trailing `*` is a raw name prefix (`main.*`, `main.sales*`); an entry without `*` covers that node and its subtree (`main`). See [Feature scopes](#feature-scopes) |
 | `privilege-management-scopes` | no | `''` | Scope `GRANT`/`REVOKE` privilege management to matching securables (same grammar as `tag-management-scopes`). Empty (default) disables it |
 | `taggable-management-scopes` | no | `''` | Scope attribute updates (owner, etc.) on existing catalogs/schemas/tables/volumes to matching securables. Function attributes always flow through. Empty (default) disables it |
@@ -239,7 +239,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: liamperritt/uc-declarative-abac/deploy@v0.11.0
+      - uses: liamperritt/uc-declarative-abac/deploy@v0.11.3
         with:
           config-dir: configs/
           warehouse-id: ${{ vars.DATABRICKS_WAREHOUSE_ID }}
@@ -263,7 +263,7 @@ The repo also ships a lightweight companion action at `validate/action.yml` that
 | Input | Required | Default | Description |
 |---|---|---|---|
 | `config-dir` | yes | — | Path to the YAML config directory, relative to the caller's repo root |
-| `ref-override-strategy` | no | `'merge'` | How sibling fields on a `$ref` entry combine with the referenced definition: `merge` (recursive deep-merge) or `replace` (shallow top-level replace) |
+| `ref-override-strategy` | no | `'merge'` | **Deprecated — omit it; slated for removal.** How sibling fields on a `$ref` entry combine with the referenced definition: `merge` (recursive deep-merge) or `replace` (shallow top-level replace). `merge` is the go-forward behaviour; the engine logs a deprecation warning when `replace` is set |
 
 **Example** (`.github/workflows/validate-uc-abac-configs.yml`):
 
@@ -280,7 +280,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: liamperritt/uc-declarative-abac/validate@v0.11.0
+      - uses: liamperritt/uc-declarative-abac/validate@v0.11.3
         with:
           config-dir: configs/
 ```
@@ -778,7 +778,7 @@ Resource configs are concrete, deployable instances (e.g., catalogs and their co
 Account groups and their membership are deployed under `resources: groups:` — they are account-level singletons, so a group resource is what actually gets reconciled. The dictionary key is used as the group's display name if `name` is not provided. (Groups can also be captured as reusable `definitions: groups:` templates and pulled in with `$ref: $defs/groups/<key>` — useful with template variables for environment-based group families; see [Template variables](#template-variables).)
 
 - **`name`** — the group's display name.
-- **`id`** — *(optional)* the group's account-level SCIM / internal id. When set, the engine matches the group by `id` instead of by `name`, which enables **renaming**: keep the `id` fixed and change `name`, and the engine updates the group's display name rather than treating it as a new group. Omit it for groups you never intend to rename.
+- **`id`** — *(optional)* the group's account-level internal id. When set, the engine matches the group by `id` instead of by `name`, which enables **renaming**: keep the `id` fixed and change `name`, and the engine updates the group's display name rather than treating it as a new group. Omit it for groups you never intend to rename.
 - **`members`** — *(optional)* the list of principals (users, groups, or service principals by display name) that must belong to the group. **Authoritative only when supplied**: omit it (or set it to `null`) to leave the group's current membership untouched — the engine won't even read it. A supplied list — **including an empty list `[]`** — is enforced: `[]` removes all members, a populated list reconciles the group to exactly those principals.
 - **`assumers`** — *(optional)* the list of principals granted the **assumer** role (`roles/group.assumer`) on the group's account [access-control ruleset](https://docs.databricks.com/aws/en/security/auth/rbac) — the RBAC grant that lets non-account-admins manage the group's role assignments. Same authoritative-only-when-supplied semantics as `members` (omit to leave alone; `[]` removes all assumers). Reconciled under `--group-management-scopes`.
 - **`expiry_date`** — *(optional)* an ISO date (`YYYY-MM-DD`). When a deployment runs **on or after** this date, all of the group's members **and** assumers are removed (the group itself is **not** deleted). Takes effect only under `--group-management-scopes` and is a no-op without it. Omit it for groups that never expire. The date it is compared against is computed in the configured `timezone` setting (UTC by default). Mirrors the `expiry_date` on grant policies.
@@ -792,7 +792,7 @@ Behaviour (governed by orthogonal, off-by-default scopes):
 - **Gating.** With neither scope the group domain is inert (configured groups are ignored). Under management, an in-scope configured group that doesn't exist is a fatal error unless creation also covers it.
 - **Externally-managed groups.** A group provisioned from an external IdP (it carries an `external_id`) may be declared **only without `members`** — its membership is owned by the IdP, so supplying `members` is a fatal error, and it is never renamed. Its **assumers** can still be managed.
 - **System-managed groups not declarable.** Databricks account system groups (`account users`, `account admins`) cannot be declared in `resources.groups` — the engine can manage neither their members nor their assumers, so declaring one is a config error.
-- **Account SCIM proxy required.** Group creation/management use the account SCIM proxy reachable from the workspace; an active group scope is incompatible with `use-workspace-scim` (combining them errors out).
+- **Account proxy access required.** Group creation/management use the account-level principal APIs reachable from the workspace; an active group scope is incompatible with `use-workspace-scim` (combining them errors out).
 - **Runs first.** The group domain is reconciled first (before governed tags), so groups referenced as policy/grant principals exist (and renames are reflected) before they're used.
 
 ```yaml
@@ -998,7 +998,7 @@ By default, overrides **recursively deep-merge** into the definition:
 - **Lists of primitives are unioned with dedupe.** Useful for `privileges`, where you want to add `MODIFY` to a definition's `[SELECT]` without dropping `SELECT`.
 - **Other shapes (mixed items, type mismatch, items without identifiers) fall back to replace.** The override wins entirely — there's no sensible way to align items.
 
-If you need the legacy shallow-replacement behaviour (where any override of a list or map replaces it in its entirety), pass `--ref-override-strategy replace` on the CLI. The default is `merge`.
+The legacy shallow-replacement behaviour (where any override of a list or map replaces it in its entirety) is available via `--ref-override-strategy replace`, but that flag is **deprecated and slated for removal** — using `replace` logs a deprecation warning. Migrate configs to rely on the default `merge` behaviour and omit the flag.
 
 ```yaml
 # Definition
@@ -1106,7 +1106,26 @@ definitions:
           owner: uc_gov_{{ env }}_team    # also used locally
 ```
 
-**User-data map keys.** Most dict keys are structural (field names, `$ref`/`$defs` targets, resource identities) and stay literal, but a **tag or identity-attribute name is user data** — so `{{ placeholder }}` is allowed in the *keys* of the user-data maps `tags`, `has_tags`, `has_any_of_tags`, and `has_none_of_tags` (on securables, columns, and policies), the FGAC-policy context-attribute maps (`has_context_attributes`, `has_any_of_context_attributes`, `has_none_of_context_attributes`), and the mask-policy identity-attribute maps (`has_identity_attributes`, `has_any_of_identity_attributes`, `has_none_of_identity_attributes`, `has_identity_attribute_tag_matches`, `has_any_of_identity_attribute_tag_matches`, `has_none_of_identity_attribute_tag_matches`), bound by the enclosing definition's `$vars` just like a value. A placeholder in any other key is still an error.
+**Templated reference targets.** A `$ref` / `$defs` target inside a definition may itself contain `{{ placeholder }}` tokens — `$ref: $defs/tables/base_{{ layer }}` — so a definition can select *which* definition it references (or extends) from a variable. The placeholder is bound by the enclosing definition's `$vars` and substituted to a concrete target before it is resolved; this works for a root `$ref` (extending a variable-selected base), a nested `$ref`, and a bare inline `$defs/...` string value. It lets one template pick a layer-specific base — e.g. a silver base table that already carries an extra `region` column — without overriding every reference by hand. A templated target under `resources:` is still an error (resources are concrete). One caveat: a *bare inline* `$defs/...` string with a placeholder is resolved only after `$ref`-override merge, so it isn't merge-aligned into an overriding list (an override list replaces it wholesale) — use the `$ref`-dict form when a templated target is also merged into.
+
+```yaml
+definitions:
+  tables:
+    base_bronze: { tags: { layer: bronze } }
+    base_silver:
+      tags: { layer: silver }
+      columns:
+        - { name: region, type: string }   # silver base adds a column
+    payments:
+      $ref: $defs/tables/base_{{ layer }}   # base chosen by the `layer` variable
+      $vars:
+        layer: ~
+      name: payments
+      columns:
+        - { name: payment_id, type: long }
+```
+
+**User-data map keys.** Most dict keys are structural (field names, resource identities) and stay literal, but a **tag or identity-attribute name is user data** — so `{{ placeholder }}` is allowed in the *keys* of the user-data maps `tags`, `has_tags`, `has_any_of_tags`, and `has_none_of_tags` (on securables, columns, and policies), the FGAC-policy context-attribute maps (`has_context_attributes`, `has_any_of_context_attributes`, `has_none_of_context_attributes`), and the mask-policy identity-attribute maps (`has_identity_attributes`, `has_any_of_identity_attributes`, `has_none_of_identity_attributes`, `has_identity_attribute_tag_matches`, `has_any_of_identity_attribute_tag_matches`, `has_none_of_identity_attribute_tag_matches`), bound by the enclosing definition's `$vars` just like a value. A placeholder in any other key is still an error.
 
 ```yaml
 definitions:
@@ -1131,7 +1150,7 @@ definitions:
 
 Two limitations: substitution happens after `$ref` override merge, so a tag key that still holds a placeholder cannot be targeted by an outer-level override (the outer writes a concrete key, which won't align); and two templated keys that resolve to the same tag name collapse (last wins).
 
-**Rules.** Variable names must be **bare identifiers** (letters, digits, underscore; not starting with a digit) — an identifier-shaped-but-invalid token like `{{ my-var }}` is rejected rather than passed through as literal text. Variable values are literal strings (a number/bool is rejected with a hint to quote it; `''` is a real empty string, null means "not supplied"; a value that looks like a `$defs/...` reference is rejected — `$vars` carry values, not references). A placeholder is bound by the `$vars` of the **enclosing definition** — the definition in whose text it appears, whether that's the definition's own body or an override the definition writes onto a child `$ref` (*the writer binds it*). A placeholder may therefore appear only inside a definition — in a value, or in a **user-data map key** (`tags`, `has_tags`, `has_any_of_tags`, and the context-attribute and identity-attribute maps; see **User-data map keys** below) — never in any other dict key, a `$defs/...` reference target, or **anywhere under a `resources:` entry** — a resource is the concrete instance layer and must supply literals, so a placeholder there is a hard error. Because binding is local to the writer, a parent cannot widen a child's variable contract via an override. A multi-level template forwards a variable to a child `$ref` by using `{{ placeholder }}` as the child's `$vars` value — except a definition's own body-root `$ref` (an *extends*), where a variable forwards into the base by name (see **Extending a definition** above). Every placeholder must be bound (by an argument or a default) and every supplied argument must be used; a missing, unused, incomplete-signature, non-string, or resource-placeholder case fails config validation. See the [feature proposal](https://github.com/liamperritt/uc-declarative-abac/issues/18) for the full specification.
+**Rules.** Variable names must be **bare identifiers** (letters, digits, underscore; not starting with a digit) — an identifier-shaped-but-invalid token like `{{ my-var }}` is rejected rather than passed through as literal text. Variable values are literal strings (a number/bool is rejected with a hint to quote it; `''` is a real empty string, null means "not supplied"; a value that looks like a `$defs/...` reference is rejected — `$vars` carry values, not references). A placeholder is bound by the `$vars` of the **enclosing definition** — the definition in whose text it appears, whether that's the definition's own body or an override the definition writes onto a child `$ref` (*the writer binds it*). A placeholder may therefore appear only inside a definition — in a value, in a `$ref` / `$defs` **reference target** (which selects the referenced definition; see **Templated reference targets** below), or in a **user-data map key** (`tags`, `has_tags`, `has_any_of_tags`, and the context-attribute and identity-attribute maps; see **User-data map keys** below) — never in any other dict key or **anywhere under a `resources:` entry** (a `$ref` target there included) — a resource is the concrete instance layer and must supply literals, so a placeholder there is a hard error. Because binding is local to the writer, a parent cannot widen a child's variable contract via an override. A multi-level template forwards a variable to a child `$ref` by using `{{ placeholder }}` as the child's `$vars` value — except a definition's own body-root `$ref` (an *extends*), where a variable forwards into the base by name (see **Extending a definition** above). Every placeholder must be bound (by an argument or a default) and every supplied argument must be used; a missing, unused, incomplete-signature, non-string, or resource-placeholder case fails config validation. See the [feature proposal](https://github.com/liamperritt/uc-declarative-abac/issues/18) for the full specification.
 
 ---
 
@@ -1226,11 +1245,11 @@ Mask and filter policies are additive by default (create/update, never delete). 
 #### Group management domain
 - **Two orthogonal gates** — `--group-creation-scopes` creates missing configured groups **empty** (the engine auto-gets MANAGER on them); `--group-management-scopes` reconciles the members and assumers of existing groups and of groups created the same run. With neither scope the domain is inert.
 - **Group compilation** — walks `resources.groups`, emitting `Group` state with members/assumers as unresolved principals; a supplied field (incl. `[]`) becomes a frozenset, an omitted field stays `None` (unmanaged); an expired group compiles to empty members **and** assumers (both removed). Dict key is the default display name. System-managed group names (`account users`/`account admins`) are rejected at config load
-- **Group fetch** — account group existence, SCIM ids and `external_id` come from the principal fetch (cached, no extra call). Membership is read via a per-group `GET /Groups/{id}` and assumers via a per-group access-control rule-set GET, **each scoped to only the groups whose respective field is supplied and in the management scope** (an omitted field is never fetched), dispatched concurrently. Member/assumer SCIM ids are translated back to canonical identifiers so both sides of the diff speak the same dialect
+- **Group fetch** — account group existence, ids and `external_id` come from the principal fetch (cached, no extra call). Membership is read via a per-group direct-members list and assumers via a per-group access-control rule-set GET, **each scoped to only the groups whose respective field is supplied and in the management scope** (an omitted field is never fetched), dispatched concurrently. Member/assumer ids are translated back to canonical identifiers so both sides of the diff speak the same dialect
 - **Group diffing** — for a supplied `members`, computes the members to add (desired − actual) and remove (actual − desired); for a supplied `assumers`, writes the full desired set to the ruleset when it differs from actual. An omitted field is skipped; an empty supplied field removes all. Idempotent — a fully-synced group produces no change. Unresolvable actual principals are dropped (never removed)
-- **Group execution** — creates missing groups **empty** via SCIM POST, then (management) adds/removes members via SCIM PatchOps and read-modify-writes the assumer rule set (`roles/group.assumer`) via the account access-control proxy — for existing groups and groups created this run (a group whose create failed is skipped). Externally-managed (IdP-provisioned) groups may set assumers but not `members` (a supplied `members` is a fatal error, and they are never renamed); under management a missing group without the creation flag is a fatal error
+- **Group execution** — writes go through the account SCIM proxy (its `POST /Groups` grants the creating principal MANAGER on the new group, which the identity-V2 create does not): creates missing groups **empty** via SCIM POST, then (management) adds/removes members via SCIM PatchOps and read-modify-writes the assumer rule set (`roles/group.assumer`) via the account access-control proxy — for existing groups and groups created this run (a group whose create failed is skipped). Externally-managed (IdP-provisioned) groups may set assumers but not `members` (a supplied `members` is a fatal error, and they are never renamed); under management a missing group without the creation flag is a fatal error
 - **Ordering** — the group domain is reconciled *first* (before governed tags), and groups slated for creation are seeded into the principal cache so they resolve as principals in the governed-tag/policy/privilege/owner domains the same run
-- **Account SCIM proxy required** — enabling a group flag is incompatible with `--use-workspace-scim` (the run errors out), since the workspace SCIM API does not manage account groups
+- **Account proxy access required** — enabling a group flag is incompatible with `--use-workspace-scim` (the run errors out), since the workspace SCIM API does not manage account groups
 
 #### Governed tags domain
 - **Governed tag compilation** — walks `resources.governed_tags`, emitting `GovernedTag` state with `description` and `allowed_values` per entry; dict key is used as the default tag name
@@ -1280,7 +1299,7 @@ Mask and filter policies are additive by default (create/update, never delete). 
 - **Privilege execution** — generates and executes `GRANT`/`REVOKE` SQL
 
 #### Principal management
-- **Account SCIM proxy** (default) — fetches all account-level principals via `/api/2.0/account/scim/v2/` endpoints with pagination
+- **Account identity API** (default) — fetches all account-level principals via the Workspace Identity V2 API (`workspace_iam_v2`)
 - **Workspace SCIM** (optional `--use-workspace-scim`) — fetches workspace-level principals via SDK, automatically including the account-level system groups `account users` and `account admins` (which the workspace SCIM API does not surface)
 - **Centralised resolution** — `PrincipalResolver` (in `uc_declarative_abac.principals`) bridges YAML display names with UC identifiers. Service principals appear in config by display name but in UC system tables / SDK responses as `application_id`; the resolver normalises both sides to the same `Principal` object so diffs compare correctly across all domains
 - **Per-domain integration** — each domain's `compute_*_diff` accepts the shared `PrincipalResolver` and `ChangeLogger` and resolves principals internally on both desired and actual state before diffing
@@ -1321,7 +1340,8 @@ Mask and filter policies are additive by default (create/update, never delete). 
   - `--retain-tag-prefixes <prefix_a,prefix_b>` — comma-separated tag-key prefixes the engine must never remove from securables, even when those tags are absent from config (it may still add/update them). Defaults to `class.`, so tags applied by UC's auto data classification (e.g. `class.phone_number`) are preserved across runs. Pass an empty string (`--retain-tag-prefixes ""`) to override the default and allow the engine to remove any unconfigured tag. No effect unless `--tag-management-scopes` is active.
 
   **Auxiliary flags:**
-  - `--skip-users-fetch` — skip listing users entirely and treat the user set as empty. Intended for organisations that govern access only via groups and service principals: the user list is the slowest of the three concurrent SCIM calls, so skipping it materially speeds up the initial fetch in accounts with many users. It is useful when running interactively for a faster fetch time, but **it is not intended for production use.** Off by default.
+  - `--use-workspace-scim` — **deprecated; omit it (slated for removal).** Fetch principals from the workspace SCIM API instead of the account path. The default account path now lists all account principals, so this mode is no longer needed; setting it logs a deprecation warning. Off by default.
+  - `--skip-users-fetch` — **deprecated; omit it (slated for removal).** Skip listing users entirely and treat the user set as empty. Setting it logs a deprecation warning. Not intended for production use. Off by default.
   - `--ignore-unresolvable-principals <id_a,id_b>` — comma-separated actual-state (UC-side) principal identifiers whose **resolution-failure warning** is suppressed: usernames for users, `application_id`s for service principals, display names for groups. The motivating case is Databricks-managed *system / application* service principals (predictive optimization, scheduled dashboard refresh) that appear in the privilege system tables / rule sets as `application_id` UUIDs but aren't returned by SCIM — without this flag each one logs a non-fatal warning on every run. Empty by default.
   - `--force` — skip every interactive confirmation prompt and auto-confirm destructive actions. Required in non-interactive CI contexts (GitHub Actions, scripted runs) whenever a destructive gate like `--governed-tag-deletion-scopes` is active; if the engine needs to prompt but stdin has no TTY, it aborts with `InteractiveConfirmationRequiredError` directing the user to set this flag. Scope is deliberately broad — future confirmation prompts (e.g. hypothetical securable deletion) will honour it without requiring a new flag.
 

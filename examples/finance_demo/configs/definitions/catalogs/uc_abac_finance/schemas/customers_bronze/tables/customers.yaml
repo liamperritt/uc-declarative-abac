@@ -2,10 +2,9 @@
 # pii|* mask policies (attached at the silver layer) apply to them.
 definitions:
   tables:
-    finance|customers:
+    uc_abac_finance|customers|customers:
       name: customers
       comment: Customer master record as landed from the CRM.
-      owner: uc_abac_data_platform
       tags:
         uc_abac_domain: customer
       columns:

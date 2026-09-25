@@ -1991,7 +1991,11 @@ def test_resolver_raises_on_placeholder_in_plain_resource_value():
 
 
 def test_resolver_raises_on_placeholder_in_ref_target():
-    """A placeholder in a $ref target is never substituted; it fails to resolve."""
+    """A placeholder in a $ref target under resources: is never substituted; it fails to resolve.
+
+    (Placeholders are allowed in $ref targets within definitions: they are bound by the
+    enclosing definition's $vars. But a resource-level placeholder remains prohibited.)
+    """
     resources = {
         "catalogs": {
             "c": {
@@ -2437,6 +2441,210 @@ def test_resolver_root_ref_base_without_vars_unchanged():
     schema = result["catalogs"]["c"]["schemas"][0]
     assert schema["tags"] == {"team": "platform"}
     assert schema["volumes"][0]["owner"] == "uc_gov_test_team"
+
+
+def test_resolver_resolves_root_ref_with_templated_target():
+    """A definition whose body root is a $ref with a templated target extends the layer-specific base."""
+    definitions = {
+        "tables": {
+            "base_bronze": {"tags": {"layer": "bronze"}},
+            "base_silver": {
+                "tags": {"layer": "silver"},
+                "columns": [{"name": "region", "type": "string"}],
+            },
+            "payments": {
+                "$ref": "$defs/tables/base_{{ layer }}",
+                "$vars": {"layer": None},
+                "name": "payments",
+                "columns": [{"name": "payment_id", "type": "long"}],
+            },
+        },
+        "schemas": {
+            "sch": {
+                "$vars": {"layer": None},
+                "name": "sch",
+                "tables": [
+                    {"$ref": "$defs/tables/payments", "$vars": {"layer": "{{ layer }}"}},
+                ],
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {"$ref": "$defs/schemas/sch", "$vars": {"layer": "bronze"}},
+                    {"$ref": "$defs/schemas/sch", "$vars": {"layer": "silver"}},
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    schemas = result["catalogs"]["c"]["schemas"]
+    bronze_table = schemas[0]["tables"][0]
+    silver_table = schemas[1]["tables"][0]
+    bronze_cols = {c["name"] for c in bronze_table["columns"]}
+    silver_cols = {c["name"] for c in silver_table["columns"]}
+    assert "region" not in bronze_cols  # bronze base has no region column
+    assert bronze_cols == {"payment_id"}
+    assert silver_cols == {"region", "payment_id"}  # silver base merges its region column
+    assert silver_table["tags"]["layer"] == "silver"
+
+
+def test_resolver_resolves_nested_ref_with_templated_target():
+    """A nested $ref's templated target is bound by the enclosing definition's $vars."""
+    definitions = {
+        "tables": {"tbl_silver": {"name": "t", "tags": {"layer": "silver"}}},
+        "schemas": {
+            "sch": {
+                "$vars": {"layer": None},
+                "name": "sch",
+                "tables": [{"$ref": "$defs/tables/tbl_{{ layer }}"}],
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [{"$ref": "$defs/schemas/sch", "$vars": {"layer": "silver"}}],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    table = result["catalogs"]["c"]["schemas"][0]["tables"][0]
+    assert table["name"] == "t"
+    assert table["tags"]["layer"] == "silver"
+
+
+def test_resolver_resolves_templated_inline_defs_string():
+    """A bare inline $defs/... string containing a placeholder resolves after substitution."""
+    definitions = {
+        "columns": {"region": {"name": "region", "type": "string"}},
+        "tables": {
+            "t": {
+                "$vars": {"col": None},
+                "name": "t",
+                "columns": ["$defs/columns/{{ col }}"],
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "name": "s",
+                        "tables": [
+                            {"$ref": "$defs/tables/t", "$vars": {"col": "region"}},
+                        ],
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    table = result["catalogs"]["c"]["schemas"][0]["tables"][0]
+    assert table["columns"] == [{"name": "region", "type": "string"}]
+
+
+def test_resolver_raises_on_missing_var_in_templated_target():
+    """A templated target whose variable is never supplied raises a clear TemplateVariableError."""
+    definitions = {
+        "tables": {
+            "base_silver": {"tags": {"layer": "silver"}},
+            "t": {"$ref": "$defs/tables/base_{{ layer }}", "name": "t"},
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [{"name": "s", "tables": [{"$ref": "$defs/tables/t"}]}],
+            },
+        },
+    }
+
+    with pytest.raises(TemplateVariableError, match="[Mm]issing"):
+        resolve_refs(definitions, resources)
+
+
+def test_resolver_accepts_forward_only_var_into_templated_base():
+    """A variable declared only to forward into a templated base validates (base accepts it)."""
+    definitions = {
+        "tables": {
+            "base_silver": {"$vars": {"retention": None}, "tags": {"r": "{{ retention }}"}},
+            "t": {
+                "$ref": "$defs/tables/base_{{ layer }}",
+                "$vars": {"layer": None, "retention": None},
+                "name": "t",
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "name": "s",
+                        "tables": [
+                            {
+                                "$ref": "$defs/tables/t",
+                                "$vars": {"layer": "silver", "retention": "30d"},
+                            },
+                        ],
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    table = result["catalogs"]["c"]["schemas"][0]["tables"][0]
+    assert table["name"] == "t"
+    assert table["tags"]["r"] == "30d"
+
+
+def test_resolver_rejects_unused_declared_var_with_templated_base():
+    """A declared variable that no candidate base accepts and the body never uses is still rejected."""
+    definitions = {
+        "tables": {
+            "base_silver": {"tags": {"layer": "silver"}},  # accepts no vars
+            "t": {
+                "$ref": "$defs/tables/base_{{ layer }}",
+                "$vars": {"layer": None, "bogus": None},
+                "name": "t",
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "name": "s",
+                        "tables": [
+                            {"$ref": "$defs/tables/t", "$vars": {"layer": "silver", "bogus": "x"}},
+                        ],
+                    },
+                ],
+            },
+        },
+    }
+
+    with pytest.raises(TemplateVariableError):
+        resolve_refs(definitions, resources)
 
 
 # ---------------------------------------------------------------------------

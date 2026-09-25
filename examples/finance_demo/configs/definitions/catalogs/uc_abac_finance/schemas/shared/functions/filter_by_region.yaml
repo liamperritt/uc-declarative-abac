@@ -6,7 +6,6 @@ definitions:
     finance|filter_by_region:
       name: filter_by_region
       comment: Row is visible only to members of the matching regional access group.
-      owner: uc_abac_data_platform
       parameters:
         - name: region
           type: string

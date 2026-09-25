@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import re
 from typing import Any, Literal
 
 from uc_declarative_abac.configs.variables import (
@@ -12,6 +13,8 @@ from uc_declarative_abac.configs.variables import (
     check_string_vars,
     collect_placeholders,
     finalise,
+    find_placeholders,
+    placeholder_wildcard_pattern,
     substitute_in_body,
 )
 from uc_declarative_abac.utils import (
@@ -301,6 +304,15 @@ def _resolve_inline_defs_strings(
             for item in node
         ]
     if isinstance(node, str) and node.startswith("$defs/"):
+        if find_placeholders(node):
+            # A templated inline target is resolved only after $vars substitution (in
+            # ``_apply_vars``): looking it up now, with the literal ``{{ ... }}`` still present,
+            # would fail. Defer it here so the post-substitution ``_resolve_node`` pass resolves
+            # the concrete target. Consequence: unlike a concrete inline string, it is NOT a dict
+            # at merge time, so a templated inline string in a list is not merge-aligned by
+            # identifier and an override list replaces it wholesale — use the ``$ref``-dict form
+            # (whose sibling keys drive alignment) if the target is templated AND merged into.
+            return node
         return _resolve_inline_defs_string(
             definitions, node, referenced, visited, override_strategy
         )
@@ -386,11 +398,11 @@ def _apply_vars(
     in ``declared``, so it must be supplied. Conversely, supplying a declared variable is
     always allowed (it is in ``accepted``), even if an override removed its usage.
 
-    Substitution is structure-aware, so a nested $ref's forwarded ``$vars`` values *and*
-    any override values this definition writes onto that nested $ref become literals before
-    the child is expanded; a nested $ref's target string is the sole thing left untouched.
-    Every placeholder this definition writes is bound here, so a child $ref only ever sees
-    its own declared variables.
+    Substitution is structure-aware, so a nested $ref's forwarded ``$vars`` values, any
+    override values this definition writes onto that nested $ref, *and* the nested $ref's own
+    target string (a placeholder there selects the referenced definition) all become literals
+    before the child is expanded. Every placeholder this definition writes is bound here, so a
+    child $ref only ever sees its own declared variables and a concrete target.
 
     Finally, if the substituted body is itself a root ``$ref`` — this definition *extends* a
     base definition — its concrete variables are forwarded into that base by name (see
@@ -446,17 +458,77 @@ def _forward_scope_to_base_ref(
     return body
 
 
+def _split_ref(ref: str) -> tuple[str, str]:
+    """Split a ``$defs/<type>/<key>`` reference into ``(type, key)``.
+
+    Raises ``ResolutionError`` for a malformed reference (missing ``$defs/`` prefix or no
+    ``type/key`` separator). Does not check that the key exists — callers needing existence do
+    their own lookup. Single source of the ``$defs/`` parse, shared by ``_lookup_definition`` and
+    ``_candidate_bases_accepted_vars``.
+    """
+    prefix = "$defs/"
+    if not ref.startswith(prefix):
+        raise ResolutionError(f"Invalid $ref format: {ref}")
+    remainder = ref[len(prefix) :]
+    try:
+        slash_idx = remainder.index("/")
+    except ValueError:
+        raise ResolutionError(
+            f"Invalid $ref format (missing type/key separator): {ref}"
+        )
+    return remainder[:slash_idx], remainder[slash_idx + 1 :]
+
+
+def _candidate_bases_accepted_vars(definitions: dict, target: str) -> set[str]:
+    """Union of ``accepted_vars`` over every definition a *templated* ``$ref`` target could select.
+
+    A target such as ``$defs/tables/base_{{ layer }}`` can only be resolved once its variables
+    are substituted, which the upfront signature check cannot do (the values come from the
+    caller). To still recognise a variable declared purely to forward into the selected base,
+    treat each ``{{ placeholder }}`` in the target's key as a wildcard, find every existing
+    definition key of that type that matches, and union their accepted variables. Widening the
+    accepted set never rejects valid config; its only cost is weaker (not eliminated) typo
+    detection — if the wildcard coincidentally matches an unrelated definition that declares a
+    same-named variable, a declared-but-forward-only variable of that name passes the upfront
+    check even when the base actually selected does not accept it (at runtime it is then silently
+    dropped by ``_forward_scope_to_base_ref``, never reported). No match — or a malformed target —
+    yields an empty set, the same fallback as an unresolvable literal target. Only ever reached at
+    the upfront check: at runtime the target is already concrete and takes the exact-lookup path
+    in ``_base_accepted_vars``.
+    """
+    try:
+        def_type, key_pattern = _split_ref(target)
+    except ResolutionError:
+        return set()
+    type_defs = definitions.get(def_type, {})
+    if not isinstance(type_defs, dict):
+        return set()
+    matcher = re.compile(placeholder_wildcard_pattern(key_pattern))
+    accepted: set[str] = set()
+    for key, base in type_defs.items():
+        if isinstance(key, str) and matcher.match(key):
+            accepted |= accepted_vars(base)
+    return accepted
+
+
 def _base_accepted_vars(definitions: dict, body: Any) -> set[str]:
     """The variables the base of a root-``$ref`` definition accepts, else an empty set.
 
-    Returns ``accepted_vars`` of the definition ``body`` extends via a root ``$ref``. Empty
-    when ``body`` is not a root-``$ref`` extension or the base cannot be resolved to a dict
-    (a missing/invalid ``$ref`` surfaces later, during resolution, with a clearer error).
+    Returns ``accepted_vars`` of the definition ``body`` extends via a root ``$ref``. When the
+    target is **templated** (holds a ``{{ placeholder }}``, e.g. ``$defs/tables/base_{{ layer }}``)
+    the concrete base is not yet known, so the union over every candidate base the pattern could
+    select is returned instead (see ``_candidate_bases_accepted_vars``) — this lets a variable
+    declared purely to forward into the selected base validate at the upfront signature check.
+    Empty when ``body`` is not a root-``$ref`` extension or the (literal) base cannot be resolved
+    to a dict (a missing/invalid ``$ref`` surfaces later, during resolution, with a clearer error).
     """
     if not isinstance(body, dict) or "$ref" not in body:
         return set()
+    target = body["$ref"]
+    if find_placeholders(target):
+        return _candidate_bases_accepted_vars(definitions, target)
     try:
-        base = _lookup_definition(definitions, body["$ref"])
+        base = _lookup_definition(definitions, target)
     except ResolutionError:
         return set()
     return accepted_vars(base)
@@ -501,20 +573,7 @@ def _lookup_definition(definitions: dict, ref: str) -> dict:
 
     Expected format: $defs/<type>/<key>
     """
-    prefix = "$defs/"
-    if not ref.startswith(prefix):
-        raise ResolutionError(f"Invalid $ref format: {ref}")
-
-    remainder = ref[len(prefix) :]
-    try:
-        slash_idx = remainder.index("/")
-    except ValueError:
-        raise ResolutionError(
-            f"Invalid $ref format (missing type/key separator): {ref}"
-        )
-    def_type = remainder[:slash_idx]
-    def_key = remainder[slash_idx + 1 :]
-
+    def_type, def_key = _split_ref(ref)
     type_defs = definitions.get(def_type, {})
     if def_key not in type_defs:
         raise ResolutionError(

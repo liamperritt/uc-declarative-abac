@@ -792,7 +792,7 @@ wheels = [
 
 [[package]]
 name = "uc-declarative-abac"
-version = "0.11.0"
+version = "0.11.3"
 source = { editable = "." }
 dependencies = [
     { name = "databricks-sdk" },

@@ -262,6 +262,38 @@ def load_config(
     return ResourcesConfig.model_validate(consolidated)
 
 
+def _warn_deprecated_flags(
+    use_workspace_scim: bool,
+    skip_users_fetch: bool,
+    ref_override_strategy: str,
+) -> None:
+    """Log a deprecation warning for each legacy flag that is still in effect.
+
+    ``use_workspace_scim`` / ``skip_users_fetch`` predate the current account path
+    (Workspace Identity V2 reads listing every account principal). ``ref_override_strategy``
+    only warns for the non-default ``replace`` value — the deprecated behaviour — since
+    the default ``merge`` is the go-forward mode and is indistinguishable at this layer
+    from omitting the flag. All remain functional for now but are slated for removal, so
+    a run that uses one is told to omit it."""
+    if use_workspace_scim:
+        _logger.warning(
+            "--use-workspace-scim is deprecated and will be removed in a future "
+            "release; omit it. The default account path now lists all account "
+            "principals, so the workspace-SCIM mode is no longer needed."
+        )
+    if skip_users_fetch:
+        _logger.warning(
+            "--skip-users-fetch is deprecated and will be removed in a future "
+            "release; omit it."
+        )
+    if ref_override_strategy != "merge":
+        _logger.warning(
+            "--ref-override-strategy is deprecated and will be removed in a future "
+            "release; omit it. The 'replace' strategy in particular is going away — "
+            "migrate configs to rely on the default 'merge' behaviour."
+        )
+
+
 def run(
     config_dir: Path,
     workspace_client: WorkspaceClient,
@@ -366,6 +398,8 @@ def run(
     system service principals that appear in system tables but aren't resolvable
     via SCIM. Empty by default.
     """
+    _warn_deprecated_flags(use_workspace_scim, skip_users_fetch, ref_override_strategy)
+
     # The run date used to evaluate every expiry_date (groups and grant policies)
     # is computed once, in the configured timezone, so both compilers agree even
     # across a midnight boundary.

@@ -7,7 +7,6 @@ resources:
       catalog_name: uc_abac_finance_uat
       name: sandbox
       comment: Ad-hoc analyst sandbox (UAT only).
-      owner: uc_abac_data_platform
       tags:
         uc_abac_layer: shared
       volumes:

@@ -9,6 +9,6 @@ definitions:
         uc_abac_domain: customer
         uc_abac_layer: bronze
       tables:
-        - $ref: $defs/tables/finance|customers
-        - $ref: $defs/tables/finance|customer_addresses
-        - $ref: $defs/tables/finance|customer_contacts
+        - $ref: $defs/tables/uc_abac_finance|customers|customers
+        - $ref: $defs/tables/uc_abac_finance|customers|customer_addresses
+        - $ref: $defs/tables/uc_abac_finance|customers|customer_contacts

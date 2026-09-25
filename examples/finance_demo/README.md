@@ -20,8 +20,10 @@ real Unity Catalog setup. Every catalog, group, and governed tag is prefixed `uc
   (`<sub_domain>_<medallion>`), never as a folder level:
   - **transactions** — a region-partitioned raw layer `transactions_bronze_amer` /
     `_emea` / `_apac` (one schema template instantiated three times) unioned into
-    `transactions_silver` (which adds a `region` column for row filtering) and rolled up
-    into `transactions_gold`.
+    `transactions_silver` and rolled up into `transactions_gold`. Bronze and silver both
+    extend a shared `base_transactions` schema whose tables `$ref` a layer-specific base
+    table selected by `{{ layer }}` — so the silver layer picks up a `region` column (for row
+    filtering) without overriding each table.
   - **customers** — `customers_bronze` → `customers_silver` (PII masking) →
     `customers_gold` (a high-sensitivity `customer_360` masked by default).
   - **shared** — a utility schema holding the reusable governance UDFs.
@@ -41,11 +43,10 @@ lives in the schema *name*, not the path.
 configs/
 ├── definitions/
 │   ├── catalogs/uc_abac_finance/
-│   │   ├── uc_abac_finance.yaml            # the one catalog definition
+│   │   ├── uc_abac_finance.yaml            # the one catalog definition (+ the reusable base_schema mixin)
 │   │   └── schemas/
-│   │       ├── base_schema/                # a reusable schema mixin, "extended" by silver/gold
-│   │       ├── transactions_bronze/        # region template + one file per raw table + inline volumes
-│   │       ├── transactions_silver/        # reuses the raw table defs, appends a region column
+│   │       ├── transactions/               # base_transactions + the bronze/silver layers that extend it;
+│   │       │                               #   the base selects a layer-specific base table via {{ layer }}
 │   │       ├── transactions_gold/          # inline aggregate tables
 │   │       ├── customers_bronze/ … _gold/
 │   │       └── shared/                      # reusable UDFs (+ one inline UDF)
@@ -60,13 +61,14 @@ configs/
 
 ### When to use a separate file vs. inline
 
-- **A definition reused across schemas gets its own file.** The raw transaction and customer
-  tables live one-per-file under their bronze schema's `tables/` folder because the regional
-  bronze schemas *and* silver all `$ref` them. The UDFs and policies are separate files for
-  the same reason.
-- **A definition nothing else uses is inlined.** The `*_gold` aggregate tables are written
-  inline in their schema file; the bronze landing volumes are inlined in the bronze schema;
-  one filter policy uses an inline function.
+- **A definition reused across schemas gets its own file.** The raw customer tables live
+  one-per-file under their bronze schema's `tables/` folder because `customers_silver` and
+  `_gold` also `$ref` them. The UDFs and policies are separate files for the same reason.
+- **A definition nothing else uses is inlined.** The raw transaction tables are inlined in
+  `base_transactions` (the bronze and silver schemas share them by *extending* that schema,
+  not by `$ref`-ing each table); the `*_gold` aggregate tables are inlined in their schema
+  file; the bronze landing volumes are inlined in the bronze schema; one filter policy uses an
+  inline function.
 
 ### Policies are grouped by tag
 
@@ -109,8 +111,10 @@ Leaf groups (`uc_abac_platform_engineers`, `uc_abac_data_stewards`, `uc_abac_com
 Definitions vs. resources · one catalog definition deployed to two environments · template
 variables (`$vars` defaults + required, `{{ env }}` / `{{ region }}` in values, templated
 principals, a schema template instantiated per region, a group template per environment) ·
-extending a base schema via a root `$ref` · `$ref` deep-merge overrides (appending a column,
-merging a column tag) · reusable + inline table/function/policy definitions · columns with
+extending a base schema via a root `$ref` · a templated `$ref` target (each raw table `$ref`s
+a layer-specific base table selected by `{{ layer }}`, so silver gains a `region` column
+without per-table overrides) · `$ref` deep-merge overrides · reusable + inline
+table/function/policy definitions · columns with
 types, comments and tags · owners · RFA destinations (email + URL) · catalog vs. schema tags
 (no duplication of inherited catalog tags) · governed tags with allowed values + assigners +
 a key-only tag · a nested group hierarchy with an expiring group and a rename-ready `id` ·

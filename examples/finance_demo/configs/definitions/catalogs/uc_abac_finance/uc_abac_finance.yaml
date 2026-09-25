@@ -3,6 +3,16 @@
 # grant policies and schemas. The region-partitioned bronze schema is instantiated
 # once per region here.
 definitions:
+  schemas:
+    uc_abac_finance|base_schema:
+      $vars:
+        env: ~
+      policies:
+        - $ref: $defs/policies/domain|grant_engineer_create
+        - $ref: $defs/policies/domain|grant_domain_read
+          $vars:
+            env: '{{ env }}'
+
   catalogs:
     uc_abac_finance:
       $vars:
@@ -27,12 +37,15 @@ definitions:
         # Region-partitioned raw layer: one bronze schema per region.
         - $ref: $defs/schemas/uc_abac_finance|transactions_bronze
           $vars:
+            env: '{{ env }}'
             region: amer
         - $ref: $defs/schemas/uc_abac_finance|transactions_bronze
           $vars:
+            env: '{{ env }}'
             region: emea
         - $ref: $defs/schemas/uc_abac_finance|transactions_bronze
           $vars:
+            env: '{{ env }}'
             region: apac
         # Curated + aggregated layers.
         - $ref: $defs/schemas/uc_abac_finance|transactions_silver

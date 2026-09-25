@@ -45,11 +45,11 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         default=argparse.SUPPRESS,
         help=(
-            "Fetch principals from the workspace SCIM API instead of the account SCIM proxy "
-            "(default: account). The 'account users' and 'account admins' system groups are "
-            "automatically included, since the workspace SCIM API does not surface them. "
-            "Incompatible with configuring groups under resources.groups (group management "
-            "requires the account SCIM proxy)."
+            "(Deprecated — omit it; will be removed in a future release.) Fetch principals "
+            "from the workspace SCIM API instead of the account path (default: account). The "
+            "default account path now lists all account principals, so this mode is no longer "
+            "needed. Incompatible with configuring groups under resources.groups (group "
+            "management requires the account-level path)."
         ),
     )
     parser.add_argument(
@@ -57,11 +57,11 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         default=argparse.SUPPRESS,
         help=(
-            "Skip listing account/workspace users and treat the user set as empty. "
-            "For organisations that govern access only via groups and service principals, "
-            "this avoids the slowest SCIM list call and speeds up the initial fetch "
-            "significantly in accounts with many users. It is useful when running interactively "
-            "for a faster fetch time, but it is not intended for production use."
+            "(Deprecated — omit it; will be removed in a future release.) Skip listing "
+            "account/workspace users and treat the user set as empty. For organisations that "
+            "govern access only via groups and service principals, this avoids the slowest "
+            "list call and speeds up the initial fetch in accounts with many users. Not "
+            "intended for production use."
         ),
     )
     parser.add_argument(
@@ -423,9 +423,11 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         choices=["merge", "replace"],
         default=argparse.SUPPRESS,
         help=(
-            "How sibling fields on a $ref entry combine with the referenced definition. "
-            "'merge' recursively deep-merges maps and lists; 'replace' shallowly "
-            "replaces top-level keys (legacy behaviour) [default: merge]."
+            "(Deprecated — omit it; will be removed in a future release.) How sibling "
+            "fields on a $ref entry combine with the referenced definition. 'merge' (the "
+            "default, go-forward behaviour) recursively deep-merges maps and lists; "
+            "'replace' shallowly replaces top-level keys (legacy, going away) "
+            "[default: merge]."
         ),
     )
     parser.add_argument(

@@ -15,7 +15,6 @@ definitions:
         - $ref: $defs/functions/finance|filter_by_region
         - name: mask_redact
           comment: Replace a value with a caller-supplied constant.
-          owner: uc_abac_data_platform
           parameters:
             - name: value
               type: string
