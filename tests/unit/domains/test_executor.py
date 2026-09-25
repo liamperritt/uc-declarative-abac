@@ -14,6 +14,41 @@ from uc_declarative_abac.helpers import WorkspaceHelper
 from uc_declarative_abac.logger import ChangeLogger
 
 
+def test_domain_executor_passes_owners_on_create() -> None:
+    from uc_declarative_abac.principals import Principal
+    from uc_declarative_abac.types import PrincipalType
+
+    business = frozenset(
+        {Principal(PrincipalType.GROUP, name="stewards", identifier="stewards")}
+    )
+    technical = frozenset(
+        {Principal(PrincipalType.USER, name="alice", identifier="alice@co")}
+    )
+    domain = Domain(
+        tag_key="finance",
+        description="Fin",
+        business_owners=business,
+        technical_owners=technical,
+    )
+    diff = DomainDiff(to_create={domain})
+    ws_helper = MagicMock(spec=WorkspaceHelper)
+    change_logger = MagicMock(spec=ChangeLogger)
+    ws_helper.get_domain_id.return_value = None
+
+    execute_domain_diff(ws_helper, diff, change_logger, dry_run=False)
+
+    ws_helper.create_domain.assert_called_once_with(
+        "finance",
+        description="Fin",
+        parent_domain_id="",
+        subtitle=None,
+        draft=None,
+        icon=None,
+        business_owners=business,
+        technical_owners=technical,
+    )
+
+
 def test_domain_executor_creates_parent_before_child() -> None:
     parent = Domain(
         tag_key="finance",
@@ -37,6 +72,8 @@ def test_domain_executor_creates_parent_before_child() -> None:
         subtitle: str | None,
         draft: bool | None,
         icon: DomainIcon | None,
+        business_owners: frozenset | None,
+        technical_owners: frozenset | None,
     ) -> None:
         if tag_key == "finance":
             created_domain_ids[tag_key] = "parent-id"
@@ -54,6 +91,8 @@ def test_domain_executor_creates_parent_before_child() -> None:
             subtitle=None,
             draft=None,
             icon=None,
+            business_owners=None,
+            technical_owners=None,
         ),
         call(
             "finance/orders",
@@ -62,6 +101,8 @@ def test_domain_executor_creates_parent_before_child() -> None:
             subtitle=None,
             draft=None,
             icon=None,
+            business_owners=None,
+            technical_owners=None,
         ),
     ]
     assert change_logger.log_domain_create.call_args_list == [
@@ -93,6 +134,8 @@ def test_domain_executor_logs_error_and_skips_child_when_parent_creation_fails()
         subtitle=None,
         draft=None,
         icon=None,
+        business_owners=None,
+        technical_owners=None,
     )
     assert change_logger.has_errors
 
@@ -152,6 +195,8 @@ def test_domain_executor_forwards_metadata_attributes_on_create() -> None:
         subtitle="Sub",
         draft=True,
         icon=DomainIcon(name="ROCKET", color="#FF5733"),
+        business_owners=None,
+        technical_owners=None,
     )
 
 

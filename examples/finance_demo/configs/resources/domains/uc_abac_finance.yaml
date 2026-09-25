@@ -9,3 +9,8 @@ resources:
       icon:
         name: BANK
         color: "#1B5E20"
+      business_owners:
+        - uc_abac_data_governors
+      technical_owners:
+        - uc_abac_data_platform
+        - uc_abac_platform_engineers

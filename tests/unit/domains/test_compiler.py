@@ -168,3 +168,55 @@ def test_domain_compiler_leaves_metadata_none_when_omitted():
     assert domain.draft is None
     assert domain.icon is None
     assert domain.description == "Governed tag description"
+
+
+def test_domain_compiler_compiles_owners_to_unresolved_principals():
+    """business_owners/technical_owners names compile to unresolved principals."""
+    from uc_declarative_abac.principals import Principal
+    from uc_declarative_abac.types import PrincipalType
+
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {},
+            "governed_tags": {"finance": {"description": "Finance domain"}},
+            "domains": {
+                "finance-domain": {
+                    "governed_tag": "finance",
+                    "business_owners": ["finance-stewards"],
+                    "technical_owners": ["data-eng", "alice@co"],
+                },
+            },
+        }
+    )
+    governed_tags = {GovernedTag(name="finance", description="Finance domain")}
+
+    result = compile_desired_domains(config, governed_tags)
+    domain = next(d for d in result if d.tag_key == "finance")
+
+    assert domain.business_owners == frozenset(
+        {Principal(PrincipalType.UNKNOWN, name="finance-stewards")}
+    )
+    assert domain.technical_owners == frozenset(
+        {
+            Principal(PrincipalType.UNKNOWN, name="data-eng"),
+            Principal(PrincipalType.UNKNOWN, name="alice@co"),
+        }
+    )
+
+
+def test_domain_compiler_leaves_owners_none_when_omitted():
+    """Omitted owner fields compile to None (unmanaged)."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {},
+            "governed_tags": {"finance": {"description": "Finance domain"}},
+            "domains": {"finance-domain": {"governed_tag": "finance"}},
+        }
+    )
+    governed_tags = {GovernedTag(name="finance", description="Finance domain")}
+
+    result = compile_desired_domains(config, governed_tags)
+    domain = next(d for d in result if d.tag_key == "finance")
+
+    assert domain.business_owners is None
+    assert domain.technical_owners is None

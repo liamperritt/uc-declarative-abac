@@ -211,8 +211,8 @@ The repo ships a composite GitHub Action at `deploy/action.yml` so any other rep
 | `group-management-scopes` | no | `''` | Scope reconciliation of the **members and assumers** of matching account groups (by display name) — for existing groups and groups created the same run. Each field is authoritative only when supplied in config: an omitted `members`/`assumers` is left untouched (not even fetched), while a supplied list — including an empty one — is enforced (empty removes all). Member reconciliation requires the `MANAGER` role on each managed group. Empty (default) disables it |
 | `group-deletion-scopes` | no | `''` | Scope deletion of Databricks-managed account groups absent from `resources.groups` to those matching by display name. External (IdP-provisioned) groups and account system groups (`account users`, `account admins`) are never deleted. Requires `group-creation-scopes` to be active and at least one group declared under `resources.groups`. Requires interactive confirmation unless `force: 'true'` — in CI you must set `force` or the run errors out |
 | `governed-tag-deletion-scopes` | no | `''` | Scope deletion of governed tags absent from config to those matching by name. System-managed tags are never deleted. Empty (default) disables it. Requires interactive confirmation unless `force: 'true'` — in CI you must set `force` or the run errors out |
-| `domain-creation-scopes` | no | `''` | Scope creation of Discovery domains declared under `resources.domains` that are missing from the workspace, matching by governed-tag key. Flat grammar: `*` all, `finance*` prefix, or an exact key. A new domain's description, subtitle, draft, and icon are set on creation (description falls back to the referenced governed tag when unset). Empty (default) disables creation. Independent of `domain-management-scopes` |
-| `domain-management-scopes` | no | `''` | Scope metadata updates of Discovery domains declared under `resources.domains` that already exist, matching by governed-tag key. Flat grammar: `*` all, `finance*` prefix, or an exact key. Reconciles each existing domain's description, subtitle, draft, and icon. Empty (default) disables updates. Independent of `domain-creation-scopes` |
+| `domain-creation-scopes` | no | `''` | Scope creation of Discovery domains declared under `resources.domains` that are missing from the workspace, matching by governed-tag key. Flat grammar: `*` all, `finance*` prefix, or an exact key. A new domain's description, subtitle, draft, icon, and business/technical owners are set on creation (description falls back to the referenced governed tag when unset). Empty (default) disables creation. Independent of `domain-management-scopes` |
+| `domain-management-scopes` | no | `''` | Scope metadata updates of Discovery domains declared under `resources.domains` that already exist, matching by governed-tag key. Flat grammar: `*` all, `finance*` prefix, or an exact key. Reconciles each existing domain's description, subtitle, draft, icon, and business/technical owners. Empty (default) disables updates. Independent of `domain-creation-scopes` |
 | `domain-deletion-scopes` | no | `''` | Scope deletion of Discovery domains absent from `resources.domains`, matching by governed-tag key. Flat grammar: `*` all, `finance*` prefix, or an exact key. Empty (default) disables deletion independently of domain creation and update. Children are deleted before parents. Requires interactive confirmation unless `force: 'true'` — in CI you must set `force` or the run errors out |
 | `retain-tag-prefixes` | no | `'class.'` | Comma-separated tag-key prefixes the engine must never remove from securables, even when absent from config (it may still add/update them). Defaults to `'class.'` to protect UC auto data classification tags. Set to an empty string to allow removing any unconfigured tag |
 | `ignore-unresolvable-principals` | no | `''` | Comma-separated actual-state principal identifiers — usernames for users, application_ids for service principals, display names for groups — whose resolution-failure warning is suppressed across the privileges, securables (owner), and governed-tags (assigners) domains. Primarily for Databricks-managed system service principals that show up in system tables but aren't resolvable via SCIM (otherwise a warning every run) |
@@ -872,10 +872,19 @@ Alongside the governed tag, a domain may set presentation metadata:
 - `draft` — mark the domain as a draft.
 - `icon` — a `name` from the Databricks icon set (e.g. `BANK`, `ROCKET`,
   `SNOWFLAKE`) plus an optional hex `color`.
+- `business_owners` / `technical_owners` — lists of principal display names (users,
+  groups, or service principals) to set as the domain's business and technical
+  owners.
 
-`subtitle`, `draft`, and `icon` are managed only when set — an attribute left out
-of config is left untouched. Business and technical owners are not currently
-managed by the engine.
+`subtitle`, `draft`, `icon`, `business_owners`, and `technical_owners` are managed
+only when set — an attribute left out of config is left untouched. For the owner
+lists specifically, a supplied list (**including an empty list**) is authoritative:
+an empty list clears all owners, a populated list reconciles to exactly those
+principals. Owners are reconciled under the same creation/management scopes as the
+rest of a domain's metadata (set on creation, updated on existing domains); no
+separate scope is required. An owner name that cannot be resolved fails the run,
+while an unresolvable owner already on a domain in the workspace is reported as a
+warning and skipped (suppressible with `--ignore-unresolvable-principals`).
 
 Only the `domain` or `domain/subdomain` form is accepted. A subdomain's root
 must be another governed tag or an existing Discovery domain:
@@ -896,6 +905,10 @@ resources:
       icon:
         name: BANK
         color: "#1B5E20"
+      business_owners:
+        - finance-stewards
+      technical_owners:
+        - data-platform-engineers
     finance-orders:
       governed_tag: finance/orders
 ```
@@ -1340,7 +1353,7 @@ Mask and filter policies are additive by default (create/update, never delete). 
   - `--privilege-management-scopes` — grant/revoke privileges via `GRANT`/`REVOKE` SQL for in-scope securables.
   - `--governed-tag-deletion-scopes` — delete in-scope governed tags (account-level tag policies) that exist in UC but are absent from config. **High blast radius — deleting a tag policy orphans every object assigned that tag key across the account.** The engine logs the list of tags slated for deletion and requires an interactive `y`/`yes` confirmation at the terminal before issuing any `delete_tag_policy` call. UC itself decides what happens to objects that reference the deleted tag (typically: orphans them); the engine does not scan for references. Pair with `--force` in non-interactive contexts (see below). **Databricks system-managed governed tags (any tag key containing a `.`, e.g. `class.email_address`, `system.certification_status`) are never deleted** — they can't be, so they're excluded from deletion regardless of this scope. System tags are likewise never created or definition-updated: only their assigners are managed. Declaring a `.`-named governed tag with `allowed_values` is a config error, and declaring one that doesn't exist in the account fails the run (system tags can't be created).
   - `--domain-creation-scopes` — create matching Discovery domains declared under `resources.domains` that are missing from the workspace, keyed by their governed-tag references. Missing domains are created parent-first. Independent of `--domain-management-scopes`, so a domain outside this scope is never created even when it matches the management scope.
-  - `--domain-management-scopes` — update the metadata (`description`, `subtitle`, `draft`, `icon`) of matching Discovery domains declared under `resources.domains` that already exist, keyed by their governed-tag references. Independent of `--domain-creation-scopes`; it does not create missing domains.
+  - `--domain-management-scopes` — update the metadata (`description`, `subtitle`, `draft`, `icon`, `business_owners`, `technical_owners`) of matching Discovery domains declared under `resources.domains` that already exist, keyed by their governed-tag references. Independent of `--domain-creation-scopes`; it does not create missing domains.
   - `--domain-deletion-scopes` — delete matching Discovery domains absent from `resources.domains`. The scope is independent of `--domain-creation-scopes` and `--domain-management-scopes`; it activates domain state discovery and deletion without enabling creates or updates. The engine deletes children before parents, logs the plan, and prompts unless `--force` is set. `--force` skips that prompt only; domains containing Glossary pages fail safely instead of cascading deletion to those pages.
   - `--policy-deletion-scopes` — make config authoritative over mask/filter policies and `DROP` any actual policy discovered on an in-scope securable but not declared in config. **This applies to *every* mask/filter policy on an in-scope securable, regardless of whether it declares a `policies` list** — an out-of-config policy on an undeclared table is deleted just the same. Actual policies are discovered via the `system.information_schema.abac_policy_definitions` system table (catalog-scoped) and read in full via the policies SDK (`list_policies`). The engine logs the policies slated for deletion and requires an interactive `y`/`yes` confirmation before issuing any `DROP POLICY`; pair with `--force` in non-interactive contexts. Grant policies are unaffected — they stay managed (with revokes) by the privileges domain.
   - `--group-creation-scopes`, `--group-management-scopes`, `--group-deletion-scopes` — flat-domain scopes over account-group display names, described in detail in the groups section above.

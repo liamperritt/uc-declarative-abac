@@ -136,6 +136,45 @@ def _principal_to_member_dict(
     }
 
 
+def _owner_ids(
+    owners: frozenset[Principal] | None,
+    scim_id_by_identifier: dict[str, str],
+) -> list[int] | None:
+    """Convert a resolved owner principal set to the SDK's numeric id list.
+
+    ``None`` (unmanaged) is returned unchanged. Each resolved principal's canonical
+    identifier is mapped to its numeric internal id via the id map; ids are returned
+    sorted for a deterministic request body. A principal with no known id is skipped
+    (it can only happen for a principal absent from the account, which resolution
+    would already have dropped)."""
+    if owners is None:
+        return None
+    ids: list[int] = []
+    for principal in owners:
+        ensure_resolved(principal)
+        scim_id = scim_id_by_identifier.get(principal.identifier)
+        if scim_id:
+            ids.append(int(scim_id))
+    return sorted(ids)
+
+
+def _owner_principals(
+    ids: list[int] | None,
+    identifier_by_scim_id: dict[str, str],
+) -> frozenset[Principal]:
+    """Convert the SDK's numeric owner id list to an unresolved principal set.
+
+    Each numeric id is mapped back to its canonical identifier; an id with no known
+    identifier is dropped (mirrors ``_direct_member_to_principal``). A missing/empty
+    list becomes the empty set — actual owners are always fully known state."""
+    principals: set[Principal] = set()
+    for owner_id in ids or []:
+        identifier = identifier_by_scim_id.get(str(owner_id))
+        if identifier:
+            principals.add(Principal(PrincipalType.UNKNOWN, identifier=identifier))
+    return frozenset(principals)
+
+
 class WorkspaceHelper:
     """Wraps WorkspaceClient for fetching and validating principals.
 
@@ -159,11 +198,15 @@ class WorkspaceHelper:
         use_workspace_scim: bool = False,
         manage_groups: bool = False,
         skip_users_fetch: bool = False,
+        manage_domain_owners: bool = False,
     ) -> None:
         self._client = workspace_client
         self._use_workspace_scim = use_workspace_scim
         self._manage_groups = manage_groups
         self._skip_users_fetch = skip_users_fetch
+        # Domain owners are set as numeric principal ids, so an owner-managing run needs
+        # the id maps built even when it manages no groups (see _build_group_id_maps).
+        self._manage_domain_owners = manage_domain_owners
         self._users: set[str] | None = None
         self._groups: set[str] | None = None
         self._service_principals: dict[str, str] | None = (
@@ -244,7 +287,7 @@ class WorkspaceHelper:
                 for sp in sps_data
             ]
         )
-        if self._manage_groups:
+        if self._manage_groups or self._manage_domain_owners:
             self._build_group_id_maps(users_data, groups_data, sps_data)
 
     def _build_group_id_maps(
@@ -949,7 +992,12 @@ class WorkspaceHelper:
         self._client.tag_policies.delete_tag_policy(_encode_path_segment(tag_key))
 
     def fetch_actual_domains(self) -> set[Domain]:
-        """Fetch all readable domains."""
+        """Fetch all readable domains.
+
+        Owners are mapped from the SDK's numeric ids back to unresolved principals
+        (by identifier) only when ``manage_domain_owners`` is set — that is the run
+        that built the id maps and the only run that compares owners. Otherwise owners
+        stay ``None`` (unmanaged), leaving the server's owners untouched."""
         domains = list(self._client.domains.list_domains())
         tag_key_by_domain_id = {
             domain.domain_id: domain.tag_key
@@ -968,6 +1016,16 @@ class WorkspaceHelper:
                 if domain.draft is not None
                 else domain.effective_draft,
                 icon=_from_sdk_domain_icon(domain.icon),
+                business_owners=_owner_principals(
+                    domain.business_owner_ids, self._identifier_by_scim_id
+                )
+                if self._manage_domain_owners
+                else None,
+                technical_owners=_owner_principals(
+                    domain.technical_owner_ids, self._identifier_by_scim_id
+                )
+                if self._manage_domain_owners
+                else None,
                 domain_id=domain.domain_id or "",
                 resource_name=domain.name or "",
                 parent_domain_id=domain.parent_domain_id or "",
@@ -990,8 +1048,15 @@ class WorkspaceHelper:
         subtitle: str | None = None,
         draft: bool | None = None,
         icon: DomainIcon | None = None,
+        business_owners: frozenset[Principal] | None = None,
+        technical_owners: frozenset[Principal] | None = None,
     ) -> SdkDomain:
-        """Create a domain with the given metadata and cache its id."""
+        """Create a domain with the given metadata and cache its id.
+
+        ``business_owners`` / ``technical_owners`` are resolved principals; each is
+        converted to its numeric SDK id here (the WorkspaceHelper boundary), so an
+        owner that is a group created earlier in the same run resolves correctly.
+        ``None`` leaves the SDK owner list unset."""
         request = SdkDomain(
             tag_key=tag_key,
             description=description,
@@ -999,6 +1064,10 @@ class WorkspaceHelper:
             subtitle=subtitle,
             draft=draft,
             icon=_to_sdk_domain_icon(icon),
+            business_owner_ids=_owner_ids(business_owners, self._scim_id_by_identifier),
+            technical_owner_ids=_owner_ids(
+                technical_owners, self._scim_id_by_identifier
+            ),
         )
         domain = self._client.domains.create_domain(request)
         if domain.tag_key and domain.domain_id:
@@ -1013,7 +1082,10 @@ class WorkspaceHelper:
         """Update managed domain metadata using its resource name.
 
         The update_mask is a sequence of field-path strings specifying which fields
-        to update (e.g., ("description", "subtitle", "draft", "icon")).
+        to update (e.g., ("description", "subtitle", "draft", "icon",
+        "business_owner_ids", "technical_owner_ids")). Owner masks carry the whole
+        replacement id list (the API forbids element-level owner masks); resolved
+        owner principals are converted to numeric ids at this boundary.
         """
         if not domain.resource_name:
             raise OrchestratorError(
@@ -1030,6 +1102,14 @@ class WorkspaceHelper:
                 body["draft"] = domain.draft
             elif field == "icon":
                 body["icon"] = _to_sdk_domain_icon(domain.icon)
+            elif field == "business_owner_ids":
+                body["business_owner_ids"] = _owner_ids(
+                    domain.business_owners, self._scim_id_by_identifier
+                )
+            elif field == "technical_owner_ids":
+                body["technical_owner_ids"] = _owner_ids(
+                    domain.technical_owners, self._scim_id_by_identifier
+                )
         return self._client.domains.update_domain(
             name=domain.resource_name,
             domain=SdkDomain(**body),

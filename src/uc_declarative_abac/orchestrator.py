@@ -401,10 +401,10 @@ def run(
     ``ignore_unresolvable_principals`` is a comma-separated list of actual-state
     (UC-side) principal identifiers — usernames, service-principal
     application_ids, or group display names — whose resolution-failure warning is
-    suppressed across the privileges, securables (owner), and governed-tags
-    (assigners) domains. Primarily for Databricks-managed
-    system service principals that appear in system tables but aren't resolvable
-    via SCIM. Empty by default.
+    suppressed across the privileges, securables (owner), governed-tags
+    (assigners), and domains (business/technical owners) domains. Primarily for
+    Databricks-managed system service principals that appear in system tables but
+    aren't resolvable via SCIM. Empty by default.
     """
     _warn_deprecated_flags(use_workspace_scim, skip_users_fetch, ref_override_strategy)
 
@@ -488,6 +488,13 @@ def run(
         domain_creation_scope.is_active()
         or domain_management_scope.is_active()
         or domain_deletion_scope.is_active()
+    )
+    # Domain owners are stored as numeric principal ids, whose id maps are built only
+    # when the workspace helper is told to manage them (see WorkspaceHelper). Trigger
+    # that build whenever the domain workflow runs and any declared domain sets owners.
+    manage_domain_owners = domain_workflow_active and any(
+        domain.business_owners is not None or domain.technical_owners is not None
+        for domain in (config.domains or {}).values()
     )
 
     # Warn (never fail) about new-style hierarchical scope entries that match no
@@ -609,6 +616,7 @@ def run(
         workspace_client,
         use_workspace_scim=use_workspace_scim,
         manage_groups=group_domain_active and bool(desired_groups),
+        manage_domain_owners=manage_domain_owners,
         skip_users_fetch=skip_users_fetch,
     )
     change_logger = ChangeLogger(dry_run=dry_run, logger=_logger)
@@ -631,11 +639,6 @@ def run(
             ws_helper.fetch_actual_governed_tags,
             desired_governed_tag_names,
         )
-        actual_domains_f = (
-            pool.submit(ws_helper.fetch_actual_domains)
-            if domain_workflow_active
-            else None
-        )
         principals_f = pool.submit(ws_helper.fetch_principals)
         actual_tags_f = (
             pool.submit(uc_helper.fetch_actual_tags, catalog_names)
@@ -651,14 +654,19 @@ def run(
         actual_securables, actual_attributes = actual_securables_f.result()
         actual_policies = actual_policies_f.result()
         actual_governed_tags = actual_governed_tags_f.result()
-        actual_domains = (
-            actual_domains_f.result() if actual_domains_f is not None else set()
-        )
         principals_f.result()
         actual_tags = actual_tags_f.result() if actual_tags_f is not None else set()
         actual_privileges = (
             actual_privs_f.result() if actual_privs_f is not None else set()
         )
+    # Domains are fetched after the pool, once fetch_principals has built the
+    # principal id maps: fetch_actual_domains maps each owner's numeric id back to a
+    # principal via those maps, so running it concurrently with the principal fetch
+    # would read owners as empty and make the diff re-add them on every run. Mirrors
+    # fetch_actual_groups, which is sequenced after principals for the same reason.
+    actual_domains = (
+        ws_helper.fetch_actual_domains() if domain_workflow_active else set()
+    )
     _logger.info("  Successfully fetched current state")
 
     # Fetch actual state for the configured groups. Membership and assumers are
@@ -793,7 +801,9 @@ def run(
             desired_domains,
             actual_domains,
             change_logger,
+            resolver,
             deletion_scope=domain_deletion_scope,
+            ignore_unresolvable=ignore_unresolvable,
         )
         if domain_workflow_active
         else DomainDiff()

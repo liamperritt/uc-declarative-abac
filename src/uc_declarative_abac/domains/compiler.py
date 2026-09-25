@@ -6,6 +6,7 @@ from uc_declarative_abac.domains.state import (
     DomainIcon,
 )
 from uc_declarative_abac.governed_tags import GovernedTag
+from uc_declarative_abac.principals import compile_principal_names
 from uc_declarative_abac.utils import OrchestratorError
 
 
@@ -27,7 +28,9 @@ def _compile_domain(
 
     Resolves description from the domain's explicit value if set, otherwise falls
     back to the referenced governed tag's description. Includes subtitle, draft, and
-    icon metadata when supplied in the domain config.
+    icon metadata when supplied in the domain config. ``business_owners`` /
+    ``technical_owners`` names compile to unresolved principals (or ``None`` when
+    omitted); the differ resolves them against the workspace before comparison.
     """
     description = (
         domain.description or governed_tags_by_name[domain.governed_tag].description
@@ -46,6 +49,8 @@ def _compile_domain(
         subtitle=domain.subtitle,
         draft=domain.draft,
         icon=icon,
+        business_owners=compile_principal_names(domain.business_owners),
+        technical_owners=compile_principal_names(domain.technical_owners),
         parent_tag_key=_parent_tag_key(domain.governed_tag),
     )
 

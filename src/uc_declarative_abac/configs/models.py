@@ -877,13 +877,23 @@ class DomainIconConfig(BaseConfig):
 
 
 class DomainConfig(BaseConfig):
-    """domain backed by one governed tag."""
+    """A domain backed by one governed tag, with optional metadata and owners.
+
+    ``business_owners`` and ``technical_owners`` are principal display names (users,
+    groups, or service principals). They follow the authoritative-only-when-supplied
+    contract shared with ``subtitle``/``draft``/``icon`` and group ``members``:
+    ``None`` (omitted) leaves the server's owners untouched, while a supplied list —
+    including an empty one — is authoritative (empty clears all owners). The engine
+    resolves each name to its numeric principal id before applying it.
+    """
 
     governed_tag: str
     description: str | None = None
     subtitle: str | None = None
     draft: bool | None = None
     icon: DomainIconConfig | None = None
+    business_owners: list[str] | None = None
+    technical_owners: list[str] | None = None
 
     @field_validator("governed_tag", mode="after")
     @classmethod
