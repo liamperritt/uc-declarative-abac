@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.0",
     "pyyaml>=6.0",
-    "databricks-sdk>=0.130.0",
+    "databricks-sdk>=0.136.0",
 ]
 
 [project.scripts]

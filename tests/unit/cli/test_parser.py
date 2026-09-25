@@ -115,6 +115,30 @@ def test_parser_displays_polished_deploy_help(capsys):
     assert all(len(line) <= 80 for line in output.splitlines())
 
 
+def test_parser_help_documents_domain_management_behavior(capsys):
+    output = _help_output(["deploy", "--help"], capsys)
+    help_text = " ".join(output.split())
+
+    assert "--domain-management-scopes" in output
+    assert "explicitly declared resources.domains" in help_text
+    assert "by governed-tag key" in help_text
+    assert re.search(r"Comma-\s*separated names", output)
+    assert "Empty (default) disables the feature" in help_text
+    assert "'*' covers all" in help_text
+    assert "a trailing '*' is a raw name prefix" in help_text
+    assert "any other entry is an exact name" in help_text
+
+
+def test_parser_help_documents_domain_deletion_scopes_behavior(capsys):
+    output = _help_output(["deploy", "--help"], capsys)
+    help_text = " ".join(output.split())
+
+    assert "--domain-deletion-scopes" in output
+    assert "domain deletion" in help_text
+    assert "matching domains (by governed-tag key)" in help_text
+    assert "Requires interactive confirmation unless --force is set." in help_text
+
+
 def test_parser_displays_timezone_flag_in_validate_help(capsys):
     output = _help_output(["validate", "--help"], capsys)
     assert "--timezone" in output
@@ -180,6 +204,67 @@ def test_parser_deploy_dry_run_sets_flag():
     )
     assert namespace.command == "deploy"
     assert namespace.dry_run is True
+
+
+def test_parser_accepts_domain_management_scopes():
+    namespace = parse_cli_args(
+        [
+            "deploy",
+            "--config-dir",
+            "/tmp/configs",
+            "--warehouse-id",
+            "wh",
+            "--domain-management-scopes",
+            "finance*",
+        ],
+    )
+
+    assert namespace.domain_management_scopes == "finance*"
+
+    with pytest.raises(SystemExit) as exc_info:
+        parse_cli_args(
+            [
+                "deploy",
+                "--config-dir",
+                "/tmp/configs",
+                "--warehouse-id",
+                "wh",
+                "--enable-domain-management",
+            ]
+        )
+    assert exc_info.value.code == 2
+
+
+def test_parser_accepts_domain_deletion_scopes():
+    namespace = parse_cli_args(
+        [
+            "deploy",
+            "--config-dir",
+            "cfg",
+            "--warehouse-id",
+            "wh",
+            "--domain-deletion-scopes",
+            "finance*",
+        ],
+    )
+
+    assert namespace.domain_deletion_scopes == "finance*"
+
+
+def test_parser_accepts_domain_creation_scopes():
+    namespace = parse_cli_args(
+        [
+            "deploy",
+            "--config-dir",
+            "cfg",
+            "--warehouse-id",
+            "wh",
+            "--domain-creation-scopes",
+            "finance*",
+        ],
+    )
+
+    assert namespace.domain_creation_scopes == "finance*"
 
 
 def test_parser_legacy_dry_run_maps_to_deploy():

@@ -47,14 +47,14 @@ _DEPRECATED_CATALOG_FLAGS = frozenset(
 class _ScopeFeature:
     """Maps a new ``--*-scopes`` flag to the deprecated flags it supersedes.
 
-    ``namespace_*`` / ``catalog_*`` are ``None`` for the flat domains (groups,
-    governed tags), which only ever had an enable gate.
+    ``namespace_*`` / ``catalog_*`` are ``None`` for flat domains. The
+    ``enable_*`` fields are also ``None`` when a scope has no deprecated gate.
     """
 
     new_field: str
     new_flag: str
-    enable_field: str
-    enable_flag: str
+    enable_field: str | None = None
+    enable_flag: str | None = None
     namespace_field: str | None = None
     namespace_flag: str | None = None
     catalog_attr: str | None = None
@@ -67,52 +67,94 @@ class _ScopeFeature:
 # when a deprecated flag is used on its own.
 _SCOPE_FEATURES: tuple[_ScopeFeature, ...] = (
     _ScopeFeature(
-        "tag_management_scopes", "--tag-management-scopes",
-        "enable_tag_management", "--enable-tag-management",
-        "manage_tags_for_namespaces", "--manage-tags-for-namespaces",
-        "manage_tags_for_catalogs", "--manage-tags-for-catalogs",
+        "tag_management_scopes",
+        "--tag-management-scopes",
+        "enable_tag_management",
+        "--enable-tag-management",
+        "manage_tags_for_namespaces",
+        "--manage-tags-for-namespaces",
+        "manage_tags_for_catalogs",
+        "--manage-tags-for-catalogs",
     ),
     _ScopeFeature(
-        "privilege_management_scopes", "--privilege-management-scopes",
-        "enable_privilege_management", "--enable-privilege-management",
-        "manage_privileges_for_namespaces", "--manage-privileges-for-namespaces",
-        "manage_privileges_for_catalogs", "--manage-privileges-for-catalogs",
+        "privilege_management_scopes",
+        "--privilege-management-scopes",
+        "enable_privilege_management",
+        "--enable-privilege-management",
+        "manage_privileges_for_namespaces",
+        "--manage-privileges-for-namespaces",
+        "manage_privileges_for_catalogs",
+        "--manage-privileges-for-catalogs",
     ),
     _ScopeFeature(
-        "taggable_management_scopes", "--taggable-management-scopes",
-        "enable_taggable_management", "--enable-taggable-management",
-        "manage_taggables_for_namespaces", "--manage-taggables-for-namespaces",
-        "manage_taggables_for_catalogs", "--manage-taggables-for-catalogs",
+        "taggable_management_scopes",
+        "--taggable-management-scopes",
+        "enable_taggable_management",
+        "--enable-taggable-management",
+        "manage_taggables_for_namespaces",
+        "--manage-taggables-for-namespaces",
+        "manage_taggables_for_catalogs",
+        "--manage-taggables-for-catalogs",
     ),
     _ScopeFeature(
-        "taggable_creation_scopes", "--taggable-creation-scopes",
-        "enable_taggable_creation", "--enable-taggable-creation",
-        "create_taggables_for_namespaces", "--create-taggables-for-namespaces",
-        "create_taggables_for_catalogs", "--create-taggables-for-catalogs",
+        "taggable_creation_scopes",
+        "--taggable-creation-scopes",
+        "enable_taggable_creation",
+        "--enable-taggable-creation",
+        "create_taggables_for_namespaces",
+        "--create-taggables-for-namespaces",
+        "create_taggables_for_catalogs",
+        "--create-taggables-for-catalogs",
     ),
     _ScopeFeature(
-        "policy_deletion_scopes", "--policy-deletion-scopes",
-        "enable_policy_deletion", "--enable-policy-deletion",
-        "delete_policies_for_namespaces", "--delete-policies-for-namespaces",
+        "policy_deletion_scopes",
+        "--policy-deletion-scopes",
+        "enable_policy_deletion",
+        "--enable-policy-deletion",
+        "delete_policies_for_namespaces",
+        "--delete-policies-for-namespaces",
     ),
     _ScopeFeature(
-        "group_creation_scopes", "--group-creation-scopes",
-        "enable_group_creation", "--enable-group-creation",
+        "group_creation_scopes",
+        "--group-creation-scopes",
+        "enable_group_creation",
+        "--enable-group-creation",
         hierarchical=False,
     ),
     _ScopeFeature(
-        "group_management_scopes", "--group-management-scopes",
-        "enable_group_management", "--enable-group-management",
+        "group_management_scopes",
+        "--group-management-scopes",
+        "enable_group_management",
+        "--enable-group-management",
         hierarchical=False,
     ),
     _ScopeFeature(
-        "group_deletion_scopes", "--group-deletion-scopes",
-        "enable_group_deletion", "--enable-group-deletion",
+        "group_deletion_scopes",
+        "--group-deletion-scopes",
+        "enable_group_deletion",
+        "--enable-group-deletion",
         hierarchical=False,
     ),
     _ScopeFeature(
-        "governed_tag_deletion_scopes", "--governed-tag-deletion-scopes",
-        "enable_governed_tag_deletion", "--enable-governed-tag-deletion",
+        "governed_tag_deletion_scopes",
+        "--governed-tag-deletion-scopes",
+        "enable_governed_tag_deletion",
+        "--enable-governed-tag-deletion",
+        hierarchical=False,
+    ),
+    _ScopeFeature(
+        "domain_creation_scopes",
+        "--domain-creation-scopes",
+        hierarchical=False,
+    ),
+    _ScopeFeature(
+        "domain_management_scopes",
+        "--domain-management-scopes",
+        hierarchical=False,
+    ),
+    _ScopeFeature(
+        "domain_deletion_scopes",
+        "--domain-deletion-scopes",
         hierarchical=False,
     ),
 )
@@ -192,16 +234,21 @@ def _deprecated_flags_for_warning(
     namespace non-None). Excludes the ``*-for-catalogs`` flags, whose own
     deprecation warning is owned by ``_resolve_namespace_flag``."""
     used: list[str] = []
-    if getattr(settings, feature.enable_field):
+    if (
+        feature.enable_field
+        and feature.enable_flag
+        and getattr(settings, feature.enable_field)
+    ):
         used.append(feature.enable_flag)
-    if feature.namespace_field and getattr(settings, feature.namespace_field) is not None:
+    if (
+        feature.namespace_field
+        and getattr(settings, feature.namespace_field) is not None
+    ):
         used.append(feature.namespace_flag)
     return used
 
 
-def _resolve_scope_flags(
-    settings: RunSettings, namespace: argparse.Namespace
-) -> None:
+def _resolve_scope_flags(settings: RunSettings, namespace: argparse.Namespace) -> None:
     """Validate the new ``--*-scopes`` flags against the deprecated flags they
     supersede.
 
@@ -228,9 +275,7 @@ def _resolve_scope_flags(
             # Validate the grammar up front (so `validate` catches it too, and
             # deploy fails before contacting Databricks). ValueError -> exit 2.
             parse = (
-                parse_hierarchical_scope
-                if feature.hierarchical
-                else parse_flat_scope
+                parse_hierarchical_scope if feature.hierarchical else parse_flat_scope
             )
             try:
                 parse(new_spec)
@@ -312,6 +357,9 @@ def _run_kwargs(
         "group_management_scopes": settings.group_management_scopes,
         "group_deletion_scopes": settings.group_deletion_scopes,
         "governed_tag_deletion_scopes": settings.governed_tag_deletion_scopes,
+        "domain_creation_scopes": settings.domain_creation_scopes,
+        "domain_management_scopes": settings.domain_management_scopes,
+        "domain_deletion_scopes": settings.domain_deletion_scopes,
         "retain_tag_prefixes": settings.retain_tag_prefixes,
         "force": settings.force,
         "ref_override_strategy": settings.ref_override_strategy,

@@ -7,10 +7,15 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.domains import Domain as SdkDomain
+from databricks.sdk.service.domains import DomainIcon as SdkDomainIcon
+from databricks.sdk.service.domains import DomainIconName
+from databricks.sdk.service.domains import FieldMask as DomainFieldMask
 from databricks.sdk.service.iam import GrantRule, RuleSetResponse, RuleSetUpdateRequest
 from databricks.sdk.service.iamv2 import DirectGroupMember
 from databricks.sdk.service.tags import TagPolicy
 
+from uc_declarative_abac.domains import Domain, DomainIcon
 from uc_declarative_abac.governed_tags import GovernedTag
 from uc_declarative_abac.principals import (
     Group,
@@ -54,6 +59,26 @@ _ASSIGN_FETCH_WORKERS = 8
 
 # Bounded concurrency for per-group member-list fetches.
 _GROUP_FETCH_WORKERS = 8
+
+
+def _to_sdk_domain_icon(icon: DomainIcon | None) -> SdkDomainIcon | None:
+    """Convert an internal DomainIcon to an SDK SdkDomainIcon."""
+    if icon is None:
+        return None
+    return SdkDomainIcon(
+        name=DomainIconName(icon.name),
+        color=icon.color or None,
+    )
+
+
+def _from_sdk_domain_icon(sdk_icon: SdkDomainIcon | None) -> DomainIcon | None:
+    """Convert an SDK SdkDomainIcon to an internal DomainIcon."""
+    if sdk_icon is None:
+        return None
+    return DomainIcon(
+        name=sdk_icon.name.value if sdk_icon.name else "",
+        color=sdk_icon.color or "",
+    )
 
 
 def _ruleset_name(account_id: str, tag_id: str) -> str:
@@ -166,6 +191,7 @@ class WorkspaceHelper:
         self._tag_policies_lock = threading.Lock()
         self._tag_policies: list[TagPolicy] | None = None
         self._tag_policy_id_by_name: dict[str, str] = {}
+        self._domain_id_by_tag_key: dict[str, str] = {}
 
     def fetch_principals(self) -> None:
         """Fetch and cache all principals. Dispatches based on use_workspace_scim."""
@@ -921,3 +947,103 @@ class WorkspaceHelper:
         ``--enable-governed-tag-deletion`` flag and interactive confirmation.
         """
         self._client.tag_policies.delete_tag_policy(_encode_path_segment(tag_key))
+
+    def fetch_actual_domains(self) -> set[Domain]:
+        """Fetch all readable domains."""
+        domains = list(self._client.domains.list_domains())
+        tag_key_by_domain_id = {
+            domain.domain_id: domain.tag_key
+            for domain in domains
+            if domain.domain_id and domain.tag_key
+        }
+        self._domain_id_by_tag_key = {
+            tag_key: domain_id for domain_id, tag_key in tag_key_by_domain_id.items()
+        }
+        return {
+            Domain(
+                tag_key=domain.tag_key or "",
+                description=domain.description or "",
+                subtitle=domain.subtitle,
+                draft=domain.draft
+                if domain.draft is not None
+                else domain.effective_draft,
+                icon=_from_sdk_domain_icon(domain.icon),
+                domain_id=domain.domain_id or "",
+                resource_name=domain.name or "",
+                parent_domain_id=domain.parent_domain_id or "",
+                parent_tag_key=tag_key_by_domain_id.get(
+                    domain.parent_domain_id or "", ""
+                ),
+            )
+            for domain in domains
+        }
+
+    def get_domain_id(self, tag_key: str) -> str | None:
+        """Return the cached domain id for a governed-tag key, or None."""
+        return self._domain_id_by_tag_key.get(tag_key)
+
+    def create_domain(
+        self,
+        tag_key: str,
+        description: str = "",
+        parent_domain_id: str = "",
+        subtitle: str | None = None,
+        draft: bool | None = None,
+        icon: DomainIcon | None = None,
+    ) -> SdkDomain:
+        """Create a domain with the given metadata and cache its id."""
+        request = SdkDomain(
+            tag_key=tag_key,
+            description=description,
+            parent_domain_id=parent_domain_id or None,
+            subtitle=subtitle,
+            draft=draft,
+            icon=_to_sdk_domain_icon(icon),
+        )
+        domain = self._client.domains.create_domain(request)
+        if domain.tag_key and domain.domain_id:
+            self._domain_id_by_tag_key[domain.tag_key] = domain.domain_id
+        return domain
+
+    def update_domain(
+        self,
+        domain: Domain,
+        update_mask: tuple[str, ...] | list[str],
+    ) -> SdkDomain:
+        """Update managed domain metadata using its resource name.
+
+        The update_mask is a sequence of field-path strings specifying which fields
+        to update (e.g., ("description", "subtitle", "draft", "icon")).
+        """
+        if not domain.resource_name:
+            raise OrchestratorError(
+                f"domain {domain.tag_key!r} has no resource name; it cannot be updated."
+            )
+        # Build the domain body to include only the masked fields plus the tag_key.
+        body: dict[str, object] = {"tag_key": domain.tag_key}
+        for field in update_mask:
+            if field == "description":
+                body["description"] = domain.description
+            elif field == "subtitle":
+                body["subtitle"] = domain.subtitle
+            elif field == "draft":
+                body["draft"] = domain.draft
+            elif field == "icon":
+                body["icon"] = _to_sdk_domain_icon(domain.icon)
+        return self._client.domains.update_domain(
+            name=domain.resource_name,
+            domain=SdkDomain(**body),
+            update_mask=DomainFieldMask(list(update_mask)),
+        )
+
+    def delete_domain(self, domain: Domain) -> None:
+        """Delete one domain using its SDK resource name.
+
+        The Domains API's optional ``force`` argument is intentionally omitted:
+        it would also delete any Glossary pages contained by the domain.
+        """
+        if not domain.resource_name:
+            raise OrchestratorError(
+                f"domain {domain.tag_key!r} has no resource name; it cannot be deleted."
+            )
+        self._client.domains.delete_domain(name=domain.resource_name)

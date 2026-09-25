@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from unittest.mock import MagicMock
 
+from uc_declarative_abac.domains import Domain, DomainIcon
 from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.policies import Policy
 from uc_declarative_abac.principals import Principal
@@ -281,6 +282,87 @@ def test_change_logger_logs_dry_run_summary() -> None:
     assert "1 to update" in summary
     assert "1 to grant" in summary
     assert "dry run" in summary.lower()
+
+
+def test_logger_includes_domain_changes_in_summary() -> None:
+    """domain creations and updates appear in output and the summary."""
+    cl, mock_logger = _make_change_logger(dry_run=True)
+    cl.log_domain_create(Domain(tag_key="finance/orders", parent_tag_key="finance"))
+    cl.log_domain_update(
+        Domain(tag_key="finance", description="Financial data"),
+        Domain(tag_key="finance", description="Finance data"),
+    )
+
+    cl.log_summary()
+
+    messages = _info_messages(mock_logger)
+    assert any(
+        "create domain" in message.lower() and "finance/orders" in message
+        for message in messages
+    )
+    assert any(
+        "update domain" in message.lower()
+        and "finance" in message
+        and "Finance data" in message
+        and "Financial data" in message
+        for message in messages
+    )
+    assert "Domains: 1 to create, 1 to update" in messages[-1]
+
+
+def test_logger_includes_domain_delete_in_summary() -> None:
+    """domain deletions appear in output and the summary."""
+    cl, mock_logger = _make_change_logger(dry_run=True)
+    cl.log_domain_delete(Domain(tag_key="finance/legacy"))
+
+    cl.log_summary()
+
+    messages = _info_messages(mock_logger)
+    assert any(
+        "delete domain" in message.lower() and "finance/legacy" in message
+        for message in messages
+    )
+    assert "Domains: 1 to delete" in messages[-1]
+
+
+def test_logger_domain_update_reports_changed_metadata_attributes() -> None:
+    """domain UPDATE log line reports ALL changed attributes
+    (subtitle, draft, icon—not just description)."""
+    cl, mock_logger = _make_change_logger(dry_run=True)
+    new = Domain(
+        tag_key="finance",
+        description="Fin",
+        subtitle="New subtitle",
+        draft=True,
+        icon=DomainIcon(name="ROCKET", color="#FF5733"),
+    )
+    old = Domain(
+        tag_key="finance",
+        description="Fin",
+        subtitle="Old subtitle",
+        draft=False,
+        icon=DomainIcon(name="BANK", color="#000000"),
+    )
+    cl.log_domain_update(new, old)
+
+    messages = _info_messages(mock_logger)
+    # Join all info messages to check for required substrings
+    full_message = " ".join(messages)
+
+    # Assert presence of domain identifier
+    assert "finance" in full_message
+
+    # Assert both old and new subtitle values appear
+    assert "Old subtitle" in full_message
+    assert "New subtitle" in full_message
+
+    # Assert both old and new icon names appear
+    assert "BANK" in full_message
+    assert "ROCKET" in full_message
+
+    # Assert draft change is reflected
+    assert "False" in full_message
+    assert "True" in full_message
 
 
 # ---------------------------------------------------------------------------

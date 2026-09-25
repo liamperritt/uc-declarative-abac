@@ -67,7 +67,7 @@ _VARS_KEY = "$vars"
 
 # Fields whose child-dict KEYS are user data, so a ``{{ placeholder }}`` may appear in those keys
 # and is bound like any value placeholder. Every other key — config field names, ``$ref``/``$defs``
-# targets, and resource identity keys (catalogs/governed_tags/groups) — stays literal. Mirrors the
+# targets, and resource identity keys (catalogs/domains/governed_tags/groups) — stays literal. Mirrors the
 # user-data maps in ``configs/models.py``: ``tags`` on taggables,
 # ``has_tags``/``has_any_of_tags``/``has_none_of_tags`` on policies and column aliases, the
 # context-attribute maps (``has_*_context_attributes``, whose keys are context-attribute names)

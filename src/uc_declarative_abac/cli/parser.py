@@ -273,6 +273,40 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--domain-deletion-scopes",
+        type=str,
+        metavar="SCOPES",
+        default=argparse.SUPPRESS,
+        help=(
+            "Scope domain deletion to matching domains (by governed-tag key). "
+            f"{_FLAT_SCOPE_GRAMMAR} Only matching domains absent from "
+            "resources.domains are deleted. Requires interactive confirmation unless "
+            "--force is set."
+        ),
+    )
+    parser.add_argument(
+        "--domain-creation-scopes",
+        type=str,
+        metavar="SCOPES",
+        default=argparse.SUPPRESS,
+        help=(
+            "Scope creation of explicitly declared resources.domains that are "
+            "missing from the workspace, by governed-tag key. "
+            f"{_FLAT_SCOPE_GRAMMAR}"
+        ),
+    )
+    parser.add_argument(
+        "--domain-management-scopes",
+        type=str,
+        metavar="SCOPES",
+        default=argparse.SUPPRESS,
+        help=(
+            "Scope metadata updates of explicitly declared resources.domains "
+            "that already exist, by governed-tag key. "
+            f"{_FLAT_SCOPE_GRAMMAR}"
+        ),
+    )
+    parser.add_argument(
         "--manage-tags-for-catalogs",
         type=str,
         default=argparse.SUPPRESS,

@@ -7,6 +7,7 @@ from uc_declarative_abac.principals.state import Principal
 from uc_declarative_abac.utils import ExecutionError
 
 if TYPE_CHECKING:
+    from uc_declarative_abac.domains import Domain, DomainIcon
     from uc_declarative_abac.governed_tags.state import GovernedTag
     from uc_declarative_abac.policies.state import Policy
     from uc_declarative_abac.principals.state import Group
@@ -133,6 +134,34 @@ def _format_policy_diff(new: Policy, old: Policy | None) -> str:
     return " | ".join(parts)
 
 
+def _format_domain_diff(new: Domain, old: Domain | None) -> str:
+    """Return a comma-joined per-field diff for a Domain update, or ``''``
+    when ``old`` was not supplied. Reports changes to description, subtitle, draft,
+    and icon fields. Icon values render as ``name/color`` (e.g. BANK/#000000) or
+    ``-`` for None."""
+    if old is None:
+        return ""
+
+    def _format_icon(icon: DomainIcon | None) -> str:
+        """Render an icon as 'name/color' or '-' for None."""
+        if icon is None:
+            return "-"
+        return f"{icon.name}/{icon.color}"
+
+    parts: list[str] = []
+    if new.description != old.description:
+        parts.append(f"description: '{old.description}' -> '{new.description}'")
+    if new.subtitle != old.subtitle:
+        old_subtitle = old.subtitle if old.subtitle is not None else ""
+        new_subtitle = new.subtitle if new.subtitle is not None else ""
+        parts.append(f"subtitle: '{old_subtitle}' -> '{new_subtitle}'")
+    if new.draft != old.draft:
+        parts.append(f"draft: {old.draft} -> {new.draft}")
+    if new.icon != old.icon:
+        parts.append(f"icon: {_format_icon(old.icon)} -> {_format_icon(new.icon)}")
+    return ", ".join(parts)
+
+
 class ChangeLogger:
     """Context manager for logging governance changes.
 
@@ -159,6 +188,9 @@ class ChangeLogger:
         self._policies_created = 0
         self._policies_replaced = 0
         self._policies_deleted = 0
+        self._domains_created = 0
+        self._domains_updated = 0
+        self._domains_deleted = 0
         self._governed_tags_created = 0
         self._governed_tags_updated = 0
         self._governed_tags_deleted = 0
@@ -442,8 +474,57 @@ class ChangeLogger:
         )
 
     # ------------------------------------------------------------------
-    # Governed tag logging
+    # domain and governed tag logging
     # ------------------------------------------------------------------
+
+    def log_domain_create(self, domain: Domain) -> None:
+        """Log a domain being created."""
+        self._domains_created += 1
+        action_verb = "Create" if self._dry_run else "Created"
+        self._log_info(
+            _format_change_line(
+                "+",
+                "DOMAIN",
+                domain.tag_key,
+                f"{action_verb} domain",
+            )
+        )
+
+    def log_domain_update(
+        self,
+        domain: Domain,
+        old: Domain | None,
+    ) -> None:
+        """Log a domain update, reporting all changed attributes
+        (description, subtitle, draft, icon)."""
+        self._domains_updated += 1
+        action_verb = "Update" if self._dry_run else "Updated"
+        suffix = _format_domain_diff(domain, old)
+        if suffix:
+            action = f"{action_verb} domain ({suffix})"
+        else:
+            action = f"{action_verb} domain"
+        self._log_info(
+            _format_change_line(
+                "~",
+                "DOMAIN",
+                domain.tag_key,
+                action,
+            )
+        )
+
+    def log_domain_delete(self, domain: Domain) -> None:
+        """Log a scoped domain deletion."""
+        self._domains_deleted += 1
+        action_verb = "Delete" if self._dry_run else "Deleted"
+        self._log_info(
+            _format_change_line(
+                "-",
+                "DOMAIN",
+                domain.tag_key,
+                f"{action_verb} domain",
+            )
+        )
 
     def log_governed_tag_create(self, gt: GovernedTag) -> None:
         """Log a governed tag (account-level tag policy) being created — enumerates
@@ -726,6 +807,14 @@ class ChangeLogger:
         if self._governed_tags_deleted:
             gt_parts.append(f"{self._governed_tags_deleted} deleted")
 
+        domain_parts: list[str] = []
+        if self._domains_created:
+            domain_parts.append(f"{self._domains_created} created")
+        if self._domains_updated:
+            domain_parts.append(f"{self._domains_updated} updated")
+        if self._domains_deleted:
+            domain_parts.append(f"{self._domains_deleted} deleted")
+
         gt_assigner_parts: list[str] = []
         if self._governed_tag_assigners_granted:
             gt_assigner_parts.append(f"{self._governed_tag_assigners_granted} granted")
@@ -753,6 +842,8 @@ class ChangeLogger:
             sections.append("Groups: " + ", ".join(group_parts))
         if sec_parts:
             sections.append("Securables: " + ", ".join(sec_parts))
+        if domain_parts:
+            sections.append("Domains: " + ", ".join(domain_parts))
         if gt_parts:
             sections.append("Governed tags: " + ", ".join(gt_parts))
         if gt_assigner_parts:
@@ -809,6 +900,14 @@ class ChangeLogger:
         if self._governed_tags_deleted:
             gt_parts.append(f"{self._governed_tags_deleted} to delete")
 
+        domain_parts: list[str] = []
+        if self._domains_created:
+            domain_parts.append(f"{self._domains_created} to create")
+        if self._domains_updated:
+            domain_parts.append(f"{self._domains_updated} to update")
+        if self._domains_deleted:
+            domain_parts.append(f"{self._domains_deleted} to delete")
+
         gt_assigner_parts: list[str] = []
         if self._governed_tag_assigners_granted:
             gt_assigner_parts.append(f"{self._governed_tag_assigners_granted} to grant")
@@ -838,6 +937,8 @@ class ChangeLogger:
             sections.append("Groups: " + ", ".join(group_parts))
         if sec_parts:
             sections.append("Securables: " + ", ".join(sec_parts))
+        if domain_parts:
+            sections.append("Domains: " + ", ".join(domain_parts))
         if gt_parts:
             sections.append("Governed tags: " + ", ".join(gt_parts))
         if gt_assigner_parts:
