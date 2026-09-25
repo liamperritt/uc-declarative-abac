@@ -133,11 +133,7 @@ def _ungoverned_tag_keys(
             referenced |= set(col.has_none_of_tags or {})
         elif isinstance(col, PolicyColumnExpressionConfig):
             # A tag-introspection expression reads a governed tag key at query time.
-            expr = col.expression
-            if expr.get_column_tag_value is not None:
-                referenced.add(expr.get_column_tag_value.tag)
-            elif expr.get_tag_value is not None:
-                referenced.add(expr.get_tag_value.tag)
+            referenced.add(col.arguments.tag)
     return referenced - governed_tag_names
 
 
@@ -328,11 +324,9 @@ def _using_token(col: PolicyColumnConfig) -> str:
     if isinstance(col, PolicyColumnConstantConfig):
         return _render_sql_constant(col.constant)
     if isinstance(col, PolicyColumnExpressionConfig):
-        expr = col.expression
-        if expr.get_column_tag_value is not None:
-            v = expr.get_column_tag_value
-            return render_column_tag_value(v.alias, v.tag)
-        return render_tag_value(expr.get_tag_value.tag)
+        if col.expression == "get_column_tag_value":
+            return render_column_tag_value(col.arguments.alias, col.arguments.tag)
+        return render_tag_value(col.arguments.tag)
     return col.alias
 
 

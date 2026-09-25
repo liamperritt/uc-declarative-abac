@@ -2367,7 +2367,8 @@ def test_mask_policy_config_accepts_singular_constant_column():
 
 
 def test_mask_policy_config_accepts_column_tag_value_expression():
-    """A get_column_tag_value expression column is accepted when its alias
+    """The legacy nested expression form is still accepted for get_column_tag_value.
+    A get_column_tag_value expression column is accepted when its alias
     names an alias column in the same policy."""
     data = _mask_or_filter_policy_catalog(
         "mask",
@@ -2382,12 +2383,14 @@ def test_mask_policy_config_accepts_column_tag_value_expression():
     )
     config = ResourcesConfig.model_validate(data)
     columns = config.catalogs["cat"].schemas[0].tables[0].policies[0].columns
-    assert columns[1].expression.get_column_tag_value.alias == "pii"
-    assert columns[1].expression.get_column_tag_value.tag == "uc_gov_pii"
+    assert columns[1].expression == "get_column_tag_value"
+    assert columns[1].arguments.alias == "pii"
+    assert columns[1].arguments.tag == "uc_gov_pii"
 
 
 def test_mask_policy_config_accepts_tag_value_expression():
-    """A get_tag_value expression column (securable-level tag, no alias) is accepted."""
+    """The legacy nested expression form is still accepted for get_tag_value.
+    A get_tag_value expression column (securable-level tag, no alias) is accepted."""
     data = _mask_or_filter_policy_catalog(
         "mask",
         columns=[
@@ -2397,11 +2400,13 @@ def test_mask_policy_config_accepts_tag_value_expression():
     )
     config = ResourcesConfig.model_validate(data)
     columns = config.catalogs["cat"].schemas[0].tables[0].policies[0].columns
-    assert columns[1].expression.get_tag_value.tag == "classification"
+    assert columns[1].expression == "get_tag_value"
+    assert columns[1].arguments.tag == "classification"
 
 
 def test_filter_policy_config_accepts_expression_column():
-    """Expression columns are allowed on filter policies too."""
+    """The legacy nested expression form is still accepted.
+    Expression columns are allowed on filter policies too."""
     data = _mask_or_filter_policy_catalog(
         "filter",
         columns=[
@@ -2411,7 +2416,8 @@ def test_filter_policy_config_accepts_expression_column():
     )
     config = ResourcesConfig.model_validate(data)
     columns = config.catalogs["cat"].schemas[0].tables[0].policies[0].columns
-    assert columns[1].expression.get_tag_value.tag == "classification"
+    assert columns[1].expression == "get_tag_value"
+    assert columns[1].arguments.tag == "classification"
 
 
 def test_mask_policy_config_rejects_expression_with_both_variants():
@@ -2517,6 +2523,85 @@ def test_mask_policy_config_rejects_leading_expression_column():
         ],
     )
     with pytest.raises(ValidationError, match="alias"):
+        ResourcesConfig.model_validate(data)
+
+
+def test_mask_policy_config_accepts_flat_column_tag_value_expression():
+    """The flat expression/arguments form is accepted for get_column_tag_value."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "pii", "has_tags": {"uc_gov_pii": "*"}},
+            {
+                "expression": "get_column_tag_value",
+                "arguments": {"alias": "pii", "tag": "uc_gov_pii"},
+            },
+        ],
+    )
+    config = ResourcesConfig.model_validate(data)
+    columns = config.catalogs["cat"].schemas[0].tables[0].policies[0].columns
+    assert columns[1].expression == "get_column_tag_value"
+    assert columns[1].arguments.alias == "pii"
+    assert columns[1].arguments.tag == "uc_gov_pii"
+
+
+def test_mask_policy_config_accepts_flat_tag_value_expression():
+    """The flat expression/arguments form is accepted for get_tag_value."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "pii", "has_tags": {"uc_gov_pii": "*"}},
+            {"expression": "get_tag_value", "arguments": {"tag": "classification"}},
+        ],
+    )
+    config = ResourcesConfig.model_validate(data)
+    columns = config.catalogs["cat"].schemas[0].tables[0].policies[0].columns
+    assert columns[1].expression == "get_tag_value"
+    assert columns[1].arguments.tag == "classification"
+
+
+def test_mask_policy_config_rejects_unknown_expression_function():
+    """An unknown expression function name is rejected."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "pii", "has_tags": {"uc_gov_pii": "*"}},
+            {"expression": "bogus_fn", "arguments": {"tag": "uc_gov_pii"}},
+        ],
+    )
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate(data)
+
+
+def test_mask_policy_config_rejects_flat_tag_value_with_alias_argument():
+    """get_tag_value does not accept an alias argument (flat form)."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "pii", "has_tags": {"uc_gov_pii": "*"}},
+            {
+                "expression": "get_tag_value",
+                "arguments": {"tag": "classification", "alias": "pii"},
+            },
+        ],
+    )
+    with pytest.raises(ValidationError):
+        ResourcesConfig.model_validate(data)
+
+
+def test_mask_policy_config_rejects_nested_expression_combined_with_arguments():
+    """Mixing the legacy nested expression form with a sibling arguments key is rejected."""
+    data = _mask_or_filter_policy_catalog(
+        "mask",
+        columns=[
+            {"alias": "pii", "has_tags": {"uc_gov_pii": "*"}},
+            {
+                "expression": {"get_tag_value": {"tag": "classification"}},
+                "arguments": {"tag": "classification"},
+            },
+        ],
+    )
+    with pytest.raises(ValidationError):
         ResourcesConfig.model_validate(data)
 
 

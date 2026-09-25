@@ -30,7 +30,6 @@ from uc_declarative_abac.configs.models import (
     SecurableConfig,
     TableConfig,
     TaggableConfig,
-    TagIntrospectionExpressionConfig,
     VolumeConfig,
 )
 from uc_declarative_abac.configs.resolver import resolve_refs
@@ -59,7 +58,6 @@ __all__ = [
     "SchemaConfig",
     "SecurableConfig",
     "TableConfig",
-    "TagIntrospectionExpressionConfig",
     "TaggableConfig",
     "VolumeConfig",
     "consolidate_resources",

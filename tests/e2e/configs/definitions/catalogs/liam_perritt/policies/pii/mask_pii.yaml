@@ -18,13 +18,13 @@ definitions:
             uc_gov_zone: bronze
             uc_gov_managed_by: uc_declarative_abac
         - constant: '{{ constant }}'
-        - expression:
-            get_column_tag_value:
-              alias: pii
-              tag: uc_gov_pipeline
-        - expression:
-            get_tag_value:
-              tag: uc_gov_pipeline
+        - expression: get_column_tag_value
+          arguments:
+            alias: pii
+            tag: uc_gov_pipeline
+        - expression: get_tag_value
+          arguments:
+            tag: uc_gov_pipeline
       function:
         parameters:
           - name: pii
