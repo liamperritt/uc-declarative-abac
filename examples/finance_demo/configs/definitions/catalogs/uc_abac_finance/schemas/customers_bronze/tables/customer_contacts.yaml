@@ -5,7 +5,7 @@ definitions:
       name: customer_contacts
       comment: Customer contact details as landed from the CRM.
       tags:
-        uc_abac_domain: customer
+        uc_abac_finance/customer:
       columns:
         - name: contact_id
           type: long

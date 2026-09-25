@@ -1,0 +1,10 @@
+# Customer subdomain of the finance domain. The governed-tag key
+# `uc_abac_finance/customer` places it beneath `uc_abac_finance` in the hierarchy.
+resources:
+  domains:
+    uc_abac_finance|customer:
+      governed_tag: uc_abac_finance/customer
+      subtitle: Customer master, contact, and address data
+      icon:
+        name: USERS_THREE
+        color: "#1565C0"

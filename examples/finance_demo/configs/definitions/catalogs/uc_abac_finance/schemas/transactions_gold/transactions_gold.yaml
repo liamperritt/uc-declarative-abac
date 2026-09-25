@@ -10,13 +10,13 @@ definitions:
       name: transactions_gold
       comment: Aggregated transaction reporting tables.
       tags:
-        uc_abac_domain: transaction
+        uc_abac_finance/transaction:
         uc_abac_layer: gold
       tables:
         - name: revenue_by_region
           comment: Daily revenue rolled up by region.
           tags:
-            uc_abac_domain: aggregate
+            uc_abac_finance:
           columns:
             - name: business_date
               type: date
@@ -30,7 +30,7 @@ definitions:
         - name: daily_transaction_summary
           comment: Daily transaction counts and totals.
           tags:
-            uc_abac_domain: aggregate
+            uc_abac_finance:
           columns:
             - name: business_date
               type: date
@@ -44,7 +44,7 @@ definitions:
         - name: payment_method_breakdown
           comment: Payment volume by method.
           tags:
-            uc_abac_domain: aggregate
+            uc_abac_finance:
           columns:
             - name: business_date
               type: date

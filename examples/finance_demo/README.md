@@ -54,7 +54,8 @@ configs/
 │       ├── pii/  sensitivity/  region/  domain/  managed_by/
 └── resources/
     ├── catalogs/                            # uc_abac_finance_prod.yaml, uc_abac_finance_uat.yaml
-    ├── governed_tags/                       # one file per governed tag
+    ├── governed_tags/                       # one file per governed tag (finance subdomains nested under uc_abac_finance/)
+    ├── domains/                             # Discovery domains: uc_abac_finance parent + one file per subdomain
     ├── groups/                              # one file per group
     └── schemas/                             # a standalone UAT-only sandbox schema
 ```
@@ -83,12 +84,29 @@ governs a tag by looking in that tag's folder.
 | `uc_abac_pii` | name, email, phone, national_id, address | column masking |
 | `uc_abac_classification` | public, internal, confidential, restricted | classification tier |
 | `uc_abac_sensitivity` | low, medium, high | table/column sensitivity; drives secure-by-default masking + large-txn filter |
-| `uc_abac_domain` | customer, account, transaction, aggregate | business domain of a schema/table |
+| `uc_abac_finance` | *(key-only)* | finance Discovery domain; tags the catalog (inherited to all children) + the gold/aggregate reporting tables |
+| `uc_abac_finance/account`, `/customer`, `/transaction` | *(key-only)* | finance subdomains; tag the per-subject schemas and back the child Discovery domains |
 | `uc_abac_layer` | bronze, silver, gold, shared | medallion layer of a schema |
 | `uc_abac_region` | amer, emea, apac | region of a regional (bronze) schema; drives per-region grants |
 | `uc_abac_region_column` | *(key-only)* | marks the silver `region` column for row filtering |
 | `uc_abac_environment` | prod, uat | catalog environment (inherited to children) |
 | `uc_abac_managed_by` | uc_declarative_abac | marks a catalog as governed by this project |
+
+## Discovery domains
+
+The `uc_abac_finance*` governed tags back a Unity Catalog **Discovery domain**
+hierarchy declared under `resources/domains/`:
+
+- **`uc_abac_finance`** — the parent domain. Its governed tag is set on the catalog and
+  inherited by every child, and it is also applied directly to the gold/aggregate
+  reporting tables so they surface in the finance domain rather than a subdomain.
+- **`uc_abac_finance/account` · `/customer` · `/transaction`** — subdomains (the `/` in the
+  governed-tag key nests them under `uc_abac_finance`). Each tags its per-subject schemas.
+
+Each domain sets a `subtitle` and an `icon`; the description falls back to the referenced
+governed tag, keeping it single-sourced. Domains are gated by three independent scopes
+(`domain_creation_scopes`, `domain_management_scopes`, `domain_deletion_scopes` in
+`uc_abac.yml`) that mirror the group create/manage/delete gates.
 
 ## Group hierarchy
 

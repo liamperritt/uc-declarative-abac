@@ -1,6 +1,6 @@
 # Give the environment's analyst group USE CATALOG on any catalog governed by this
 # project (matched by the uc_abac_managed_by tag the catalog carries). Pairs with
-# domain|grant_domain_read (SELECT + USE SCHEMA on curated tables) so analysts can
+# finance|grant_domain_read (SELECT + USE SCHEMA on curated tables) so analysts can
 # traverse to data.
 definitions:
   policies:

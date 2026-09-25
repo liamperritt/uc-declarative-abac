@@ -11,7 +11,7 @@ definitions:
       name: customers_gold
       comment: Aggregated customer reporting tables.
       tags:
-        uc_abac_domain: customer
+        uc_abac_finance/customer:
         uc_abac_layer: gold
       policies:
         - $ref: $defs/policies/sensitivity|mask_high_sensitivity
@@ -19,7 +19,7 @@ definitions:
         - name: customer_360
           comment: Wide customer profile joining master, address and contact data.
           tags:
-            uc_abac_domain: aggregate
+            uc_abac_finance:
             uc_abac_sensitivity: high
           columns:
             - name: customer_id
@@ -37,7 +37,7 @@ definitions:
         - name: customer_segment_summary
           comment: Customer counts by segment.
           tags:
-            uc_abac_domain: aggregate
+            uc_abac_finance:
           columns:
             - name: segment
               type: string
