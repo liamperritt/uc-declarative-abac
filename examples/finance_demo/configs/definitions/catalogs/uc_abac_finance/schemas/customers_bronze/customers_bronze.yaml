@@ -6,7 +6,7 @@ definitions:
       name: customers_bronze
       comment: Raw customer landing zone.
       tags:
-        uc_abac_finance/customer:
+        uc_abac_finance/customer: ~
         uc_abac_layer: bronze
       tables:
         - $ref: $defs/tables/uc_abac_finance|customers|customers

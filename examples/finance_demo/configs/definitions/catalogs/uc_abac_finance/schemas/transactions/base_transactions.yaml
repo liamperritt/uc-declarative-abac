@@ -3,12 +3,12 @@ definitions:
   tables:
     uc_abac_finance|transactions_bronze|base_table:
       tags:
-        uc_abac_finance/transaction:
+        uc_abac_finance/transaction: ~
         uc_abac_layer: bronze
 
     uc_abac_finance|transactions_silver|base_table:
       tags:
-        uc_abac_finance/transaction:
+        uc_abac_finance/transaction: ~
         uc_abac_layer: silver
       columns:
         - name: region
@@ -25,7 +25,7 @@ definitions:
         layer: ~
       name: transactions_{{ layer }}
       tags:
-        uc_abac_finance/transaction:
+        uc_abac_finance/transaction: ~
         uc_abac_layer: '{{ layer }}'
       policies:
         # Volume grants for the platform team, and read for this region's analysts.

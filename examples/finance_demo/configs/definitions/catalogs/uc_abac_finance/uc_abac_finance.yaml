@@ -30,7 +30,7 @@ definitions:
         # their own uc_abac_finance/<subdomain> subdomain tag.
         uc_abac_environment: '{{ env }}'
         uc_abac_managed_by: uc_declarative_abac
-        uc_abac_finance:
+        uc_abac_finance: ~
       policies:
         - $ref: $defs/policies/managed_by|grant_admin_manage
         - $ref: $defs/policies/finance|grant_engineer_create

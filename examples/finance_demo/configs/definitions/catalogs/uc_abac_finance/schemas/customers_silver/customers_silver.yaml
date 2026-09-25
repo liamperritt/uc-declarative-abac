@@ -10,7 +10,7 @@ definitions:
       name: customers_silver
       comment: Curated customer data with PII masking applied.
       tags:
-        uc_abac_finance/customer:
+        uc_abac_finance/customer: ~
         uc_abac_layer: silver
       policies:
         - $ref: $defs/policies/pii|mask_email
