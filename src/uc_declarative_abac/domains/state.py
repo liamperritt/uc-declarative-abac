@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from uc_declarative_abac.principals import Principal
+
 
 @dataclass(frozen=True)
 class DomainIcon:
@@ -17,9 +19,14 @@ class Domain:
 
     ``description`` is always authoritative (an explicit domain value, or the
     referenced governed tag's description as a fallback). ``subtitle``, ``draft``,
-    and ``icon`` are managed only when supplied: ``None`` means "leave the server
-    value alone" (unmanaged), so omitting them never clobbers values set outside
-    this tool and never produces diff churn.
+    ``icon``, ``business_owners``, and ``technical_owners`` are managed only when
+    supplied: ``None`` means "leave the server value alone" (unmanaged), so omitting
+    them never clobbers values set outside this tool and never produces diff churn.
+
+    Owners are held as ``frozenset[Principal]`` (not the SDK's numeric id lists) so
+    ``Domain`` stays hashable for the set-based diff and the differ can resolve
+    principals on both sides before comparing; the numeric-id conversion happens at
+    the ``WorkspaceHelper`` boundary (create/update).
     """
 
     tag_key: str
@@ -27,6 +34,8 @@ class Domain:
     subtitle: str | None = None
     draft: bool | None = None
     icon: DomainIcon | None = None
+    business_owners: frozenset[Principal] | None = None
+    technical_owners: frozenset[Principal] | None = None
     domain_id: str = ""
     resource_name: str = ""
     parent_domain_id: str = ""

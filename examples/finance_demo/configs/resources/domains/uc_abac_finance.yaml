@@ -1,0 +1,16 @@
+# Parent Discovery domain for the finance catalog. Backed by the uc_abac_finance
+# governed tag (inherited onto every securable in the catalog). Description falls
+# back to that governed tag, so it stays single-sourced.
+resources:
+  domains:
+    uc_abac_finance:
+      governed_tag: uc_abac_finance
+      subtitle: Financial services data domain
+      icon:
+        name: BANK
+        color: "#1B5E20"
+      business_owners:
+        - uc_abac_data_governors
+      technical_owners:
+        - uc_abac_data_platform
+        - uc_abac_platform_engineers

@@ -3,13 +3,13 @@
 # concrete privileges.
 definitions:
   policies:
-    domain|grant_volume_access:
+    finance|grant_volume_access:
       name: grant_volume_access
       comment: Platform team may read and write transaction landing volumes.
       type: grant
       for: volume
       has_tags:
-        uc_abac_domain: transaction
+        uc_abac_finance/transaction: '*'
       privileges:
         - read_volume
         - write_volume

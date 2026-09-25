@@ -8,8 +8,8 @@ definitions:
       $vars:
         env: ~
       policies:
-        - $ref: $defs/policies/domain|grant_engineer_create
-        - $ref: $defs/policies/domain|grant_domain_read
+        - $ref: $defs/policies/finance|grant_engineer_create
+        - $ref: $defs/policies/finance|grant_domain_read
           $vars:
             env: '{{ env }}'
 
@@ -24,12 +24,16 @@ definitions:
         - data-access@example.com                            # an email destination
       tags:
         # Catalog-level tags; Unity Catalog inherits these down to schemas/tables,
-        # so they are intentionally not repeated on child securables.
+        # so they are intentionally not repeated on child securables. The
+        # uc_abac_finance domain tag roots the finance Discovery domain: every
+        # securable in the catalog inherits it, and the per-subject schemas add
+        # their own uc_abac_finance/<subdomain> subdomain tag.
         uc_abac_environment: '{{ env }}'
         uc_abac_managed_by: uc_declarative_abac
+        uc_abac_finance: ~
       policies:
         - $ref: $defs/policies/managed_by|grant_admin_manage
-        - $ref: $defs/policies/domain|grant_engineer_create
+        - $ref: $defs/policies/finance|grant_engineer_create
         - $ref: $defs/policies/managed_by|grant_use_catalog
           $vars:
             env: '{{ env }}'

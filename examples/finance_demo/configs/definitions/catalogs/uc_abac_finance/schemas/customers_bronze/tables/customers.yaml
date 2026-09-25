@@ -6,7 +6,7 @@ definitions:
       name: customers
       comment: Customer master record as landed from the CRM.
       tags:
-        uc_abac_domain: customer
+        uc_abac_finance/customer: ~
       columns:
         - name: customer_id
           type: long

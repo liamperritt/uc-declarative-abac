@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from uc_declarative_abac.principals.compiler import compile_desired_groups
+from uc_declarative_abac.principals.compiler import (
+    compile_desired_groups,
+    compile_principal_names,
+)
 from uc_declarative_abac.principals.differ import (
     compute_group_diff,
     groups_pending_creation,
@@ -27,6 +30,7 @@ __all__ = [
     "Principal",
     "PrincipalResolver",
     "compile_desired_groups",
+    "compile_principal_names",
     "compute_group_diff",
     "ensure_all_resolved",
     "ensure_resolved",

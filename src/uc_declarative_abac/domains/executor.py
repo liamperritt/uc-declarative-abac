@@ -170,6 +170,8 @@ def execute_domain_diff(
                 subtitle=domain.subtitle,
                 draft=domain.draft,
                 icon=domain.icon,
+                business_owners=domain.business_owners,
+                technical_owners=domain.technical_owners,
             )
         except (DatabricksError, OrchestratorError) as error:
             unavailable_tag_keys.add(domain.tag_key)

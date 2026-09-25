@@ -23,8 +23,8 @@ definitions:
         - name: raw_files
           comment: Landing volume for raw {{ region }} extract files.
           tags:
-            uc_abac_domain: transaction
+            uc_abac_finance/transaction: ~
         - name: quarantine
           comment: Quarantine volume for records that fail validation.
           tags:
-            uc_abac_domain: transaction
+            uc_abac_finance/transaction: ~

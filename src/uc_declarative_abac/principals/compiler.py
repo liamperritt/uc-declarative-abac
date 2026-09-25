@@ -7,14 +7,15 @@ from uc_declarative_abac.principals.state import Group, Principal
 from uc_declarative_abac.types import PrincipalType
 
 
-def _compile_principals(names: list[str] | None) -> frozenset[Principal] | None:
+def compile_principal_names(names: list[str] | None) -> frozenset[Principal] | None:
     """Compile a config principal-name list into unresolved Principals.
 
     Preserves the authoritative-only-when-supplied contract: ``None`` (the field
     omitted) stays ``None`` (unmanaged), while a supplied list — including the empty
     one — becomes a frozenset (authoritative), so an empty list reconciles to
     "remove all". Each name becomes an unresolved Principal that the differ resolves
-    against the workspace before comparison."""
+    against the workspace before comparison. Shared by the groups compiler
+    (members/assumers) and the domains compiler (business/technical owners)."""
     if names is None:
         return None
     return frozenset(Principal(PrincipalType.UNKNOWN, name=n) for n in names)
@@ -34,7 +35,7 @@ def compile_desired_groups(
     state for IdP-provisioned groups.
 
     ``members`` and ``assumers`` follow the authoritative-only-when-supplied contract
-    (see ``_compile_principals``): an omitted field compiles to ``None`` (unmanaged —
+    (see ``compile_principal_names``): an omitted field compiles to ``None`` (unmanaged —
     not fetched, not reconciled), while a supplied list (including the empty one) is
     authoritative.
 
@@ -52,8 +53,8 @@ def compile_desired_groups(
     desired: set[Group] = set()
     for group in config.groups.values():
         expired = group.expiry_date is not None and group.expiry_date <= run_date
-        members = frozenset() if expired else _compile_principals(group.members)
-        assumers = frozenset() if expired else _compile_principals(group.assumers)
+        members = frozenset() if expired else compile_principal_names(group.members)
+        assumers = frozenset() if expired else compile_principal_names(group.assumers)
         desired.add(
             Group(
                 display_name=group.name,

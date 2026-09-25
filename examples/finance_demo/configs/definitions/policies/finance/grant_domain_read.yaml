@@ -6,14 +6,14 @@
 # applies to; use_catalog is granted separately by managed_by|grant_use_catalog.
 definitions:
   policies:
-    domain|grant_domain_read:
+    finance|grant_domain_read:
       $vars:
         env: ~
       name: grant_domain_read
       comment: Analysts may read curated, domain-tagged data until the access review date.
       type: grant
       has_tags:
-        uc_abac_domain: '*'
+        uc_abac_finance: '*'
       privileges:
         - read
         - use

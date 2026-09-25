@@ -1,0 +1,9 @@
+# Account subdomain of the finance domain.
+resources:
+  domains:
+    uc_abac_finance|account:
+      governed_tag: uc_abac_finance/account
+      subtitle: Account reference and balance data
+      icon:
+        name: COINS
+        color: "#6A1B9A"

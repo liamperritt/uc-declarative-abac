@@ -365,6 +365,41 @@ def test_logger_domain_update_reports_changed_metadata_attributes() -> None:
     assert "True" in full_message
 
 
+def test_logger_domain_update_reports_owner_changes_by_name() -> None:
+    """domain UPDATE log line reports business/technical owner changes by principal
+    name (not numeric id), as an add/remove delta."""
+    from uc_declarative_abac.principals import Principal
+    from uc_declarative_abac.types import PrincipalType
+
+    cl, mock_logger = _make_change_logger(dry_run=True)
+    new = Domain(
+        tag_key="finance",
+        description="Fin",
+        business_owners=frozenset(
+            {Principal(PrincipalType.GROUP, name="new-stewards", identifier="ns")}
+        ),
+        technical_owners=frozenset(),
+    )
+    old = Domain(
+        tag_key="finance",
+        description="Fin",
+        business_owners=frozenset(
+            {Principal(PrincipalType.GROUP, name="old-stewards", identifier="os")}
+        ),
+        technical_owners=frozenset(
+            {Principal(PrincipalType.USER, name="alice", identifier="alice@co")}
+        ),
+    )
+    cl.log_domain_update(new, old)
+
+    full_message = " ".join(_info_messages(mock_logger))
+    assert "business_owner" in full_message
+    assert "+new-stewards" in full_message
+    assert "-old-stewards" in full_message
+    assert "technical_owner" in full_message
+    assert "-alice" in full_message
+
+
 # ---------------------------------------------------------------------------
 # Error tracking
 # ---------------------------------------------------------------------------

@@ -632,6 +632,124 @@ def test_orchestrator_creates_domain_from_preexisting_governed_tag(
     }
 
 
+def test_orchestrator_resolves_domain_owners_into_the_create_diff(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    """A declared domain owner (a group by name) is resolved against the workspace so
+    the created domain carries a resolved owner principal (not the UNKNOWN name)."""
+    config = {
+        "resources": {
+            "catalogs": {},
+            "domains": {
+                "finance": {
+                    "governed_tag": "finance",
+                    "business_owners": ["finance-stewards"],
+                }
+            },
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_principals_with_groups(mock_workspace_client, ["finance-stewards"])
+
+    with (
+        patch.object(
+            WorkspaceHelper,
+            "fetch_actual_governed_tags",
+            autospec=True,
+            return_value={GovernedTag(name="finance", description="Financial data")},
+        ),
+        patch.object(
+            WorkspaceHelper,
+            "fetch_actual_domains",
+            autospec=True,
+            return_value=set(),
+        ),
+    ):
+        result = run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            domain_creation_scopes="*",
+            dry_run=True,
+        )
+
+    created = next(iter(result.domain_diff.to_create))
+    assert created.business_owners is not None
+    assert {p.name for p in created.business_owners} == {"finance-stewards"}
+    assert all(
+        p.principal_type != PrincipalType.UNKNOWN for p in created.business_owners
+    )
+
+
+def test_orchestrator_reads_domain_owners_after_principal_maps_are_built(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    """Regression: a domain whose server owners already match config must produce no
+    owner update. This only holds if actual owners are read *after* the principal
+    id maps are built; if the domain fetch races ahead of the principal fetch, owner
+    ids can't be mapped and the diff spuriously re-adds owners on every run.
+
+    The principal fetch is deliberately delayed so that, under a buggy concurrent
+    fetch, the domain fetch reliably wins the race and reads empty owners."""
+    import time
+
+    from databricks.sdk.service.domains import Domain as SdkDomain
+
+    config = {
+        "resources": {
+            "catalogs": {},
+            "domains": {
+                "finance": {
+                    "governed_tag": "finance",
+                    "business_owners": ["uc_abac_data_governors"],
+                }
+            },
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+
+    iam = mock_workspace_client.workspace_iam_v2
+    iam.list_users_proxy.side_effect = lambda **k: iter([])
+    iam.list_service_principals_proxy.side_effect = lambda **k: iter([])
+
+    def _slow_groups(**kwargs):
+        time.sleep(0.05)
+        return iter([_iam_group("uc_abac_data_governors", group_id="10")])
+
+    iam.list_groups_proxy.side_effect = _slow_groups
+    iam.list_direct_group_members_proxy.side_effect = lambda group_id, **k: iter([])
+
+    mock_workspace_client.domains.list_domains.return_value = [
+        SdkDomain(
+            tag_key="finance",
+            description="Financial data",
+            domain_id="id",
+            name="domains/id",
+            business_owner_ids=[10],
+        )
+    ]
+
+    with patch.object(
+        WorkspaceHelper,
+        "fetch_actual_governed_tags",
+        autospec=True,
+        return_value={GovernedTag(name="finance", description="Financial data")},
+    ):
+        result = run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            domain_management_scopes="*",
+            dry_run=True,
+        )
+
+    assert result.domain_diff.to_update == set()
+
+
 def test_orchestrator_does_not_create_undeclared_domain_for_actual_only_governed_tag_selected_for_deletion(
     tmp_yaml_dir, mock_workspace_client, monkeypatch
 ):

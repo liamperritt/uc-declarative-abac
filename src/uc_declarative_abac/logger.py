@@ -137,8 +137,9 @@ def _format_policy_diff(new: Policy, old: Policy | None) -> str:
 def _format_domain_diff(new: Domain, old: Domain | None) -> str:
     """Return a comma-joined per-field diff for a Domain update, or ``''``
     when ``old`` was not supplied. Reports changes to description, subtitle, draft,
-    and icon fields. Icon values render as ``name/color`` (e.g. BANK/#000000) or
-    ``-`` for None."""
+    icon, and the business/technical owner sets. Icon values render as ``name/color``
+    (e.g. BANK/#000000) or ``-`` for None. Owner changes render as an add/remove
+    delta of principal names (``+name, -name``), never numeric ids."""
     if old is None:
         return ""
 
@@ -147,6 +148,18 @@ def _format_domain_diff(new: Domain, old: Domain | None) -> str:
         if icon is None:
             return "-"
         return f"{icon.name}/{icon.color}"
+
+    def _owner_delta(
+        field_name: str,
+        new_owners: frozenset[Principal] | None,
+        old_owners: frozenset[Principal] | None,
+    ) -> str | None:
+        """Render one owner-set change as ``field: +name, -name``, or None if equal."""
+        new_set = new_owners or frozenset()
+        old_set = old_owners or frozenset()
+        if new_set == old_set:
+            return None
+        return f"{field_name}: {_format_principal_delta(new_set - old_set, old_set - new_set)}"
 
     parts: list[str] = []
     if new.description != old.description:
@@ -159,6 +172,16 @@ def _format_domain_diff(new: Domain, old: Domain | None) -> str:
         parts.append(f"draft: {old.draft} -> {new.draft}")
     if new.icon != old.icon:
         parts.append(f"icon: {_format_icon(old.icon)} -> {_format_icon(new.icon)}")
+    business_delta = _owner_delta(
+        "business_owners", new.business_owners, old.business_owners
+    )
+    if business_delta:
+        parts.append(business_delta)
+    technical_delta = _owner_delta(
+        "technical_owners", new.technical_owners, old.technical_owners
+    )
+    if technical_delta:
+        parts.append(technical_delta)
     return ", ".join(parts)
 
 

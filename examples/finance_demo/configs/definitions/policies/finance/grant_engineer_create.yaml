@@ -3,13 +3,13 @@
 # volume / materialized view / model) on each. Demonstrates `for: schema`.
 definitions:
   policies:
-    domain|grant_engineer_create:
+    finance|grant_engineer_create:
       name: grant_engineer_create
       comment: Platform engineers may create objects in domain schemas.
       type: grant
       for: schema
       has_tags:
-        uc_abac_domain: '*'
+        uc_abac_finance: '*'
       privileges:
         - create
       to:

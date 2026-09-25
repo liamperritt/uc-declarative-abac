@@ -2710,6 +2710,46 @@ def test_domain_config_parses_all_metadata_attributes():
     assert domain.icon.color == "#1B5E20"
 
 
+def test_domain_config_parses_business_and_technical_owners():
+    """A domain declares business_owners/technical_owners as principal-name lists."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {},
+            "domains": {
+                "finance-domain": {
+                    "governed_tag": "finance",
+                    "business_owners": ["finance-stewards", "alice@co"],
+                    "technical_owners": ["data-eng"],
+                }
+            },
+        }
+    )
+
+    domain = config.domains["finance-domain"]
+    assert domain.business_owners == ["finance-stewards", "alice@co"]
+    assert domain.technical_owners == ["data-eng"]
+
+
+def test_domain_config_leaves_owners_none_when_omitted():
+    """Omitting owner fields leaves them None (unmanaged); an empty list is kept."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {},
+            "domains": {
+                "no-owners": {"governed_tag": "finance"},
+                "cleared-owners": {
+                    "governed_tag": "marketing",
+                    "business_owners": [],
+                },
+            },
+        }
+    )
+
+    assert config.domains["no-owners"].business_owners is None
+    assert config.domains["no-owners"].technical_owners is None
+    assert config.domains["cleared-owners"].business_owners == []
+
+
 def test_domain_config_rejects_invalid_icon_name():
     """A domain with an invalid icon name raises ValidationError."""
     with pytest.raises(ValidationError):

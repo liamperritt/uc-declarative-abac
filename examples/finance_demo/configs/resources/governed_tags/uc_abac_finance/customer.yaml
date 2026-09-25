@@ -1,0 +1,7 @@
+resources:
+  governed_tags:
+    uc_abac_finance|customer:
+      name: uc_abac_finance/customer
+      description: Customer master, contact, and address data within the finance domain.
+      assigners:
+        - uc_abac_data_platform

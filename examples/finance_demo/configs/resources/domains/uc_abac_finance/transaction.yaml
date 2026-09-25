@@ -1,0 +1,9 @@
+# Transaction subdomain of the finance domain.
+resources:
+  domains:
+    uc_abac_finance|transaction:
+      governed_tag: uc_abac_finance/transaction
+      subtitle: Payments, settlements, and transactions
+      icon:
+        name: RECEIPT
+        color: "#EF6C00"
