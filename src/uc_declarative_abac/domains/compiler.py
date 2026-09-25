@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from uc_declarative_abac.configs import DomainConfig, ResourcesConfig
-from uc_declarative_abac.discovery_domains.state import (
-    DiscoveryDomain,
+from uc_declarative_abac.domains.state import (
+    Domain,
     DomainIcon,
 )
 from uc_declarative_abac.governed_tags import GovernedTag
@@ -10,11 +10,11 @@ from uc_declarative_abac.utils import OrchestratorError
 
 
 def _parent_tag_key(tag_key: str) -> str:
-    """Validate a Discovery domain tag key and return its parent tag key."""
+    """Validate a domain tag key and return its parent tag key."""
     segments = tag_key.split("/")
     if len(segments) not in (1, 2) or any(not segment for segment in segments):
         raise OrchestratorError(
-            "Discovery domain governed tags must use domain or domain/subdomain "
+            "domain governed tags must use domain or domain/subdomain "
             f"form; received {tag_key!r}."
         )
     return segments[0] if len(segments) == 2 else ""
@@ -22,8 +22,8 @@ def _parent_tag_key(tag_key: str) -> str:
 
 def _compile_domain(
     domain: DomainConfig, governed_tags_by_name: dict[str, GovernedTag]
-) -> DiscoveryDomain:
-    """Compile a single domain configuration into a DiscoveryDomain.
+) -> Domain:
+    """Compile a single domain configuration into a Domain.
 
     Resolves description from the domain's explicit value if set, otherwise falls
     back to the referenced governed tag's description. Includes subtitle, draft, and
@@ -40,7 +40,7 @@ def _compile_domain(
         if domain.icon
         else None
     )
-    return DiscoveryDomain(
+    return Domain(
         tag_key=domain.governed_tag,
         description=description,
         subtitle=domain.subtitle,
@@ -50,10 +50,10 @@ def _compile_domain(
     )
 
 
-def compile_desired_discovery_domains(
+def compile_desired_domains(
     config: ResourcesConfig,
     governed_tags: set[GovernedTag],
-) -> set[DiscoveryDomain]:
+) -> set[Domain]:
     """Compile explicitly declared domain resources with tag-derived metadata."""
     if not config.domains:
         return set()
@@ -67,7 +67,7 @@ def compile_desired_discovery_domains(
     if missing_governed_tags:
         missing_names = ", ".join(sorted(missing_governed_tags))
         raise OrchestratorError(
-            f"Discovery domains reference missing governed tags: {missing_names}."
+            f"domains reference missing governed tags: {missing_names}."
         )
 
     return {

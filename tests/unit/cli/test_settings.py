@@ -114,6 +114,12 @@ def test_settings_loads_domain_deletion_scopes_from_env(monkeypatch):
     assert settings.domain_deletion_scopes == "finance*"
 
 
+def test_settings_loads_domain_creation_scopes_from_env(monkeypatch):
+    monkeypatch.setenv("UC_ABAC_DOMAIN_CREATION_SCOPES", "finance*")
+    settings = resolve_settings({}, settings_file=None)
+    assert settings.domain_creation_scopes == "finance*"
+
+
 def test_settings_empty_retain_prefixes_env_clears_default(monkeypatch):
     monkeypatch.setenv("UC_ABAC_RETAIN_TAG_PREFIXES", "")
     settings = resolve_settings({}, settings_file=None)

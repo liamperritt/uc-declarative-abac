@@ -1,24 +1,24 @@
 from __future__ import annotations
 
-from uc_declarative_abac.discovery_domains import (
-    DiscoveryDomain,
-    compute_discovery_domain_diff,
+from uc_declarative_abac.domains import (
+    Domain,
+    compute_domain_diff,
 )
 from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.utils import parse_flat_scope
 
 
-def test_discovery_domain_differ_creates_only_missing_domains_when_parent_is_available():
+def test_domain_differ_creates_only_missing_domains_when_parent_is_available():
     desired = {
-        DiscoveryDomain(tag_key="finance"),
-        DiscoveryDomain(tag_key="finance/orders", parent_tag_key="finance"),
+        Domain(tag_key="finance"),
+        Domain(tag_key="finance/orders", parent_tag_key="finance"),
     }
-    actual = {DiscoveryDomain(tag_key="finance", domain_id="parent-id")}
+    actual = {Domain(tag_key="finance", domain_id="parent-id")}
 
-    diff = compute_discovery_domain_diff(desired, actual, ChangeLogger())
+    diff = compute_domain_diff(desired, actual, ChangeLogger())
 
     assert diff.to_create == {
-        DiscoveryDomain(
+        Domain(
             tag_key="finance/orders",
             parent_domain_id="parent-id",
             parent_tag_key="finance",
@@ -26,27 +26,27 @@ def test_discovery_domain_differ_creates_only_missing_domains_when_parent_is_ava
     }
 
 
-def test_discovery_domain_differ_creates_parent_and_child_when_both_are_missing():
+def test_domain_differ_creates_parent_and_child_when_both_are_missing():
     desired = {
-        DiscoveryDomain(tag_key="finance"),
-        DiscoveryDomain(tag_key="finance/orders", parent_tag_key="finance"),
+        Domain(tag_key="finance"),
+        Domain(tag_key="finance/orders", parent_tag_key="finance"),
     }
 
-    diff = compute_discovery_domain_diff(desired, set(), ChangeLogger())
+    diff = compute_domain_diff(desired, set(), ChangeLogger())
 
     assert diff.to_create == {
-        DiscoveryDomain(tag_key="finance"),
-        DiscoveryDomain(tag_key="finance/orders", parent_tag_key="finance"),
+        Domain(tag_key="finance"),
+        Domain(tag_key="finance/orders", parent_tag_key="finance"),
     }
 
 
-def test_discovery_domain_differ_logs_error_when_child_parent_is_unavailable():
+def test_domain_differ_logs_error_when_child_parent_is_unavailable():
     desired = {
-        DiscoveryDomain(tag_key="finance/orders", parent_tag_key="finance"),
+        Domain(tag_key="finance/orders", parent_tag_key="finance"),
     }
     change_logger = ChangeLogger()
 
-    diff = compute_discovery_domain_diff(desired, set(), change_logger)
+    diff = compute_domain_diff(desired, set(), change_logger)
 
     assert diff.to_create == set()
     assert change_logger.has_errors
@@ -56,23 +56,23 @@ def test_discovery_domain_differ_logs_error_when_child_parent_is_unavailable():
     assert "parent" in error_details
 
 
-def test_discovery_domain_differ_updates_existing_domain_when_description_differs():
-    desired = {DiscoveryDomain(tag_key="finance", description="Finance data")}
-    actual_domain = DiscoveryDomain(
+def test_domain_differ_updates_existing_domain_when_description_differs():
+    desired = {Domain(tag_key="finance", description="Finance data")}
+    actual_domain = Domain(
         tag_key="finance",
         description="Legacy description",
         domain_id="domain-id",
         resource_name="domains/domain-id",
     )
 
-    diff = compute_discovery_domain_diff(
+    diff = compute_domain_diff(
         desired,
         {actual_domain},
         ChangeLogger(),
     )
 
     assert diff.to_update == {
-        DiscoveryDomain(
+        Domain(
             tag_key="finance",
             description="Finance data",
             domain_id="domain-id",
@@ -82,21 +82,21 @@ def test_discovery_domain_differ_updates_existing_domain_when_description_differ
     assert diff.old_values == {"finance": actual_domain}
 
 
-def test_discovery_domain_differ_does_not_delete_actual_only_domain_without_scope():
-    actual = {DiscoveryDomain(tag_key="finance/legacy", domain_id="legacy-id")}
+def test_domain_differ_does_not_delete_actual_only_domain_without_scope():
+    actual = {Domain(tag_key="finance/legacy", domain_id="legacy-id")}
 
-    diff = compute_discovery_domain_diff(set(), actual, ChangeLogger())
+    diff = compute_domain_diff(set(), actual, ChangeLogger())
 
     assert diff.to_delete == set()
 
 
-def test_discovery_domain_differ_deletes_only_actual_domains_matching_deletion_scope():
-    desired = {DiscoveryDomain(tag_key="finance/current")}
-    current = DiscoveryDomain(tag_key="finance/current", domain_id="current-id")
-    legacy = DiscoveryDomain(tag_key="finance/legacy", domain_id="legacy-id")
-    marketing = DiscoveryDomain(tag_key="marketing", domain_id="marketing-id")
+def test_domain_differ_deletes_only_actual_domains_matching_deletion_scope():
+    desired = {Domain(tag_key="finance/current")}
+    current = Domain(tag_key="finance/current", domain_id="current-id")
+    legacy = Domain(tag_key="finance/legacy", domain_id="legacy-id")
+    marketing = Domain(tag_key="marketing", domain_id="marketing-id")
 
-    diff = compute_discovery_domain_diff(
+    diff = compute_domain_diff(
         desired,
         {current, legacy, marketing},
         ChangeLogger(),
@@ -110,11 +110,11 @@ def test_discovery_domain_differ_deletes_only_actual_domains_matching_deletion_s
 # Extended update mask tests
 
 
-def test_discovery_domain_differ_records_description_only_update_mask():
+def test_domain_differ_records_description_only_update_mask():
     """Record update_masks when description changes in an existing domain."""
-    desired = {DiscoveryDomain(tag_key="finance", description="Finance data")}
+    desired = {Domain(tag_key="finance", description="Finance data")}
     actual = {
-        DiscoveryDomain(
+        Domain(
             tag_key="finance",
             description="Legacy",
             domain_id="d",
@@ -122,11 +122,11 @@ def test_discovery_domain_differ_records_description_only_update_mask():
         )
     }
 
-    diff = compute_discovery_domain_diff(desired, actual, ChangeLogger())
+    diff = compute_domain_diff(desired, actual, ChangeLogger())
 
     assert diff.update_masks == {"finance": ("description",)}
     assert diff.to_update == {
-        DiscoveryDomain(
+        Domain(
             tag_key="finance",
             description="Finance data",
             domain_id="d",
@@ -134,7 +134,7 @@ def test_discovery_domain_differ_records_description_only_update_mask():
         )
     }
     assert diff.old_values == {
-        "finance": DiscoveryDomain(
+        "finance": Domain(
             tag_key="finance",
             description="Legacy",
             domain_id="d",
@@ -143,12 +143,12 @@ def test_discovery_domain_differ_records_description_only_update_mask():
     }
 
 
-def test_discovery_domain_differ_masks_subtitle_draft_and_icon_changes():
+def test_domain_differ_masks_subtitle_draft_and_icon_changes():
     """Record update_masks for subtitle, draft, and icon changes while description remains unchanged."""
-    from uc_declarative_abac.discovery_domains import DomainIcon
+    from uc_declarative_abac.domains import DomainIcon
 
     actual = {
-        DiscoveryDomain(
+        Domain(
             tag_key="finance",
             description="Fin",
             subtitle="old",
@@ -159,7 +159,7 @@ def test_discovery_domain_differ_masks_subtitle_draft_and_icon_changes():
         )
     }
     desired = {
-        DiscoveryDomain(
+        Domain(
             tag_key="finance",
             description="Fin",
             subtitle="new",
@@ -168,7 +168,7 @@ def test_discovery_domain_differ_masks_subtitle_draft_and_icon_changes():
         )
     }
 
-    diff = compute_discovery_domain_diff(desired, actual, ChangeLogger())
+    diff = compute_domain_diff(desired, actual, ChangeLogger())
 
     # description NOT included since it's unchanged
     assert diff.update_masks == {"finance": ("subtitle", "draft", "icon")}
@@ -182,12 +182,12 @@ def test_discovery_domain_differ_masks_subtitle_draft_and_icon_changes():
     assert updated_domain.resource_name == "domains/d"
 
 
-def test_discovery_domain_differ_ignores_unmanaged_none_metadata_fields():
+def test_domain_differ_ignores_unmanaged_none_metadata_fields():
     """None desired fields are unmanaged; no update recorded if only those differ."""
-    from uc_declarative_abac.discovery_domains import DomainIcon
+    from uc_declarative_abac.domains import DomainIcon
 
     actual = {
-        DiscoveryDomain(
+        Domain(
             tag_key="finance",
             description="Fin",
             subtitle="keep",
@@ -198,9 +198,9 @@ def test_discovery_domain_differ_ignores_unmanaged_none_metadata_fields():
         )
     }
     # desired has None for subtitle, draft, icon (unmanaged)
-    desired = {DiscoveryDomain(tag_key="finance", description="Fin")}
+    desired = {Domain(tag_key="finance", description="Fin")}
 
-    diff = compute_discovery_domain_diff(desired, actual, ChangeLogger())
+    diff = compute_domain_diff(desired, actual, ChangeLogger())
 
     # No update because description matches and other fields are unmanaged (None)
     assert diff.to_update == set()

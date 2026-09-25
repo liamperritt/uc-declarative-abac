@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from uc_declarative_abac import orchestrator
-from uc_declarative_abac.discovery_domains import DiscoveryDomain
+from uc_declarative_abac.domains import Domain
 from uc_declarative_abac.governed_tags import GovernedTag
 from uc_declarative_abac.helpers import WorkspaceHelper
 from uc_declarative_abac.orchestrator import run
@@ -359,7 +359,7 @@ def _setup_mock_principals_with_groups(
 # ---------------------------------------------------------------------------
 
 
-def test_orchestrator_compiles_only_declared_domains_when_management_scope_active(
+def test_orchestrator_compiles_only_declared_domains_when_creation_scope_active(
     tmp_yaml_dir, mock_workspace_client, monkeypatch
 ):
     config = {
@@ -383,10 +383,10 @@ def test_orchestrator_compiles_only_declared_domains_when_management_scope_activ
     mock_workspace_client.tag_policies.list_tag_policies.return_value = iter([])
     mock_workspace_client.domains.list_domains.return_value = iter([])
 
-    fetch_actual_domains = WorkspaceHelper.fetch_actual_discovery_domains
+    fetch_actual_domains = WorkspaceHelper.fetch_actual_domains
     with patch.object(
         WorkspaceHelper,
-        "fetch_actual_discovery_domains",
+        "fetch_actual_domains",
         autospec=True,
         side_effect=fetch_actual_domains,
     ) as mock_fetch_actual_domains:
@@ -394,13 +394,13 @@ def test_orchestrator_compiles_only_declared_domains_when_management_scope_activ
             config_dir=root,
             workspace_client=mock_workspace_client,
             warehouse_id="test-warehouse-id",
-            domain_management_scopes="*",
+            domain_creation_scopes="*",
             dry_run=True,
         )
 
     assert result.domain_diff.to_create == {
-        DiscoveryDomain(tag_key="finance", description="Financial data"),
-        DiscoveryDomain(
+        Domain(tag_key="finance", description="Financial data"),
+        Domain(
             tag_key="finance/orders",
             description="Order data",
             parent_tag_key="finance",
@@ -410,7 +410,7 @@ def test_orchestrator_compiles_only_declared_domains_when_management_scope_activ
     mock_workspace_client.domains.list_domains.assert_called_once_with()
 
 
-def test_orchestrator_manages_only_declared_domains_matching_management_scopes(
+def test_orchestrator_creates_only_domains_matching_creation_scopes(
     tmp_yaml_dir, mock_workspace_client, monkeypatch
 ):
     config = {
@@ -437,12 +437,107 @@ def test_orchestrator_manages_only_declared_domains_matching_management_scopes(
         config_dir=root,
         workspace_client=mock_workspace_client,
         warehouse_id="test-warehouse-id",
-        domain_management_scopes="finance*",
+        domain_creation_scopes="finance*",
         dry_run=True,
     )
 
     assert result.domain_diff.to_create == {
-        DiscoveryDomain(tag_key="finance", description="Financial data")
+        Domain(tag_key="finance", description="Financial data")
+    }
+
+
+def test_orchestrator_does_not_create_declared_domain_when_only_management_scope_active(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    """Management scope gates updates only: with no creation scope, a declared
+    domain absent from the workspace is never created."""
+    config = {
+        "resources": {
+            "governed_tags": {"finance": {"description": "Financial data"}},
+            "domains": {"finance": {"governed_tag": "finance"}},
+            "catalogs": {},
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_empty_principals(mock_workspace_client)
+    mock_workspace_client.tag_policies.list_tag_policies.return_value = iter([])
+
+    with patch.object(
+        WorkspaceHelper,
+        "fetch_actual_domains",
+        autospec=True,
+        return_value=set(),
+    ):
+        result = run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            domain_management_scopes="*",
+            dry_run=True,
+        )
+
+    assert result.domain_diff.to_create == set()
+
+
+def test_orchestrator_creation_and_management_scopes_gate_domains_independently(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    """Creation scope gates creates and management scope gates updates, acting
+    independently: a missing domain in the creation scope is created while a
+    differing existing domain in the management scope is updated."""
+    config = {
+        "resources": {
+            "governed_tags": {
+                "finance": {"description": "Financial data"},
+                "operations": {"description": "Operational data"},
+            },
+            "domains": {
+                "finance": {"governed_tag": "finance"},
+                "operations": {"governed_tag": "operations"},
+            },
+            "catalogs": {},
+        }
+    }
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_empty_principals(mock_workspace_client)
+    mock_workspace_client.tag_policies.list_tag_policies.return_value = iter([])
+
+    with patch.object(
+        WorkspaceHelper,
+        "fetch_actual_domains",
+        autospec=True,
+        return_value={
+            Domain(
+                tag_key="operations",
+                description="Legacy operations",
+                domain_id="ops-id",
+                resource_name="domains/ops-id",
+            )
+        },
+    ):
+        result = run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            domain_creation_scopes="finance*",
+            domain_management_scopes="operations*",
+            dry_run=True,
+        )
+
+    assert result.domain_diff.to_create == {
+        Domain(tag_key="finance", description="Financial data")
+    }
+    assert result.domain_diff.to_update == {
+        Domain(
+            tag_key="operations",
+            description="Operational data",
+            domain_id="ops-id",
+            resource_name="domains/ops-id",
+        )
     }
 
 
@@ -467,7 +562,7 @@ def test_orchestrator_protects_declared_domain_outside_management_scope_from_del
     _install_fetch_router(monkeypatch, config)
     _setup_mock_empty_principals(mock_workspace_client)
     mock_workspace_client.tag_policies.list_tag_policies.return_value = iter([])
-    operations_domain = DiscoveryDomain(
+    operations_domain = Domain(
         tag_key="operations",
         description="Operational data",
         domain_id="operations-domain-id",
@@ -476,7 +571,7 @@ def test_orchestrator_protects_declared_domain_outside_management_scope_from_del
 
     with patch.object(
         WorkspaceHelper,
-        "fetch_actual_discovery_domains",
+        "fetch_actual_domains",
         autospec=True,
         return_value={operations_domain},
     ):
@@ -496,7 +591,7 @@ def test_orchestrator_protects_declared_domain_outside_management_scope_from_del
     )
 
 
-def test_orchestrator_creates_discovery_domain_from_preexisting_governed_tag(
+def test_orchestrator_creates_domain_from_preexisting_governed_tag(
     tmp_yaml_dir, mock_workspace_client, monkeypatch
 ):
     config = {
@@ -519,7 +614,7 @@ def test_orchestrator_creates_discovery_domain_from_preexisting_governed_tag(
         ),
         patch.object(
             WorkspaceHelper,
-            "fetch_actual_discovery_domains",
+            "fetch_actual_domains",
             autospec=True,
             return_value=set(),
         ),
@@ -528,12 +623,12 @@ def test_orchestrator_creates_discovery_domain_from_preexisting_governed_tag(
             config_dir=root,
             workspace_client=mock_workspace_client,
             warehouse_id="test-warehouse-id",
-            domain_management_scopes="*",
+            domain_creation_scopes="*",
             dry_run=True,
         )
 
     assert result.domain_diff.to_create == {
-        DiscoveryDomain(tag_key="finance", description="Financial data")
+        Domain(tag_key="finance", description="Financial data")
     }
 
 
@@ -557,7 +652,7 @@ def test_orchestrator_does_not_create_undeclared_domain_for_actual_only_governed
         ),
         patch.object(
             WorkspaceHelper,
-            "fetch_actual_discovery_domains",
+            "fetch_actual_domains",
             autospec=True,
             return_value=set(),
         ),
@@ -568,15 +663,15 @@ def test_orchestrator_does_not_create_undeclared_domain_for_actual_only_governed
             warehouse_id="test-warehouse-id",
             enable_governed_tag_deletion=True,
             force=True,
-            domain_management_scopes="*",
+            domain_creation_scopes="*",
             dry_run=True,
         )
 
     assert actual_tag in result.governed_tag_diff.to_delete
-    assert DiscoveryDomain(tag_key="finance") not in result.domain_diff.to_create
+    assert Domain(tag_key="finance") not in result.domain_diff.to_create
 
 
-def test_orchestrator_updates_discovery_domain_with_configured_description_when_fetched_tag_is_stale(
+def test_orchestrator_updates_domain_with_configured_description_when_fetched_tag_is_stale(
     tmp_yaml_dir, mock_workspace_client, monkeypatch
 ):
     config = {
@@ -602,10 +697,10 @@ def test_orchestrator_updates_discovery_domain_with_configured_description_when_
         ),
         patch.object(
             WorkspaceHelper,
-            "fetch_actual_discovery_domains",
+            "fetch_actual_domains",
             autospec=True,
             return_value={
-                DiscoveryDomain(
+                Domain(
                     tag_key="finance",
                     description="Legacy domain description",
                     domain_id="domain-id",
@@ -623,7 +718,7 @@ def test_orchestrator_updates_discovery_domain_with_configured_description_when_
         )
 
     assert result.domain_diff.to_update == {
-        DiscoveryDomain(
+        Domain(
             tag_key="finance",
             description="Configured financial data",
             domain_id="domain-id",
@@ -632,7 +727,7 @@ def test_orchestrator_updates_discovery_domain_with_configured_description_when_
     }
 
 
-def test_orchestrator_skips_discovery_domain_fetch_when_management_is_disabled(
+def test_orchestrator_skips_domain_fetch_when_management_is_disabled(
     tmp_yaml_dir, mock_workspace_client, monkeypatch
 ):
     config = {
@@ -649,7 +744,7 @@ def test_orchestrator_skips_discovery_domain_fetch_when_management_is_disabled(
 
     with patch.object(
         WorkspaceHelper,
-        "fetch_actual_discovery_domains",
+        "fetch_actual_domains",
         autospec=True,
     ) as mock_fetch_actual_domains:
         result = run(
@@ -671,12 +766,12 @@ def test_orchestrator_domain_deletion_scope_deletes_matching_actual_domain_witho
     _setup_mock_workspace_empty_state(mock_workspace_client)
     _install_fetch_router(monkeypatch, config)
     _setup_mock_empty_principals(mock_workspace_client)
-    finance_domain = DiscoveryDomain(
+    finance_domain = Domain(
         tag_key="finance/legacy",
         domain_id="finance-domain-id",
         resource_name="domains/finance-domain-id",
     )
-    marketing_domain = DiscoveryDomain(
+    marketing_domain = Domain(
         tag_key="marketing/legacy",
         domain_id="marketing-domain-id",
         resource_name="domains/marketing-domain-id",
@@ -691,7 +786,7 @@ def test_orchestrator_domain_deletion_scope_deletes_matching_actual_domain_witho
         ),
         patch.object(
             WorkspaceHelper,
-            "fetch_actual_discovery_domains",
+            "fetch_actual_domains",
             autospec=True,
             return_value={finance_domain, marketing_domain},
         ) as mock_fetch_actual_domains,

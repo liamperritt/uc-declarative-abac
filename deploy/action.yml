@@ -178,19 +178,26 @@ inputs:
       ``enable-governed-tag-deletion``.
     required: false
     default: ''
+  domain-creation-scopes:
+    description: >-
+      Scope creation of explicitly declared Discovery domains that are missing
+      from the workspace, by governed-tag key (same flat grammar as
+      ``governed-tag-deletion-scopes``).
+    required: false
+    default: ''
   domain-management-scopes:
     description: >-
-      Scope creation and update of explicitly declared Unity Catalog Discovery
-      domains by governed-tag key (same flat grammar as
+      Scope metadata updates of explicitly declared Discovery domains that
+      already exist, by governed-tag key (same flat grammar as
       ``governed-tag-deletion-scopes``).
     required: false
     default: ''
   domain-deletion-scopes:
     description: >-
-      Scope Unity Catalog Discovery domain deletion by governed-tag key (same
-      flat grammar as ``governed-tag-deletion-scopes``). Only domains absent
-      from ``resources.domains`` are deleted. Requires interactive
-      confirmation unless ``force`` is "true".
+      Scope Discovery domain deletion by governed-tag key (same flat grammar as
+      ``governed-tag-deletion-scopes``). Only domains absent from
+      ``resources.domains`` are deleted. Requires interactive confirmation
+      unless ``force`` is "true".
     required: false
     default: ''
   manage-tags-for-catalogs:
@@ -344,6 +351,7 @@ runs:
         GROUP_MANAGEMENT_SCOPES: ${{ inputs.group-management-scopes }}
         GROUP_DELETION_SCOPES: ${{ inputs.group-deletion-scopes }}
         GOVERNED_TAG_DELETION_SCOPES: ${{ inputs.governed-tag-deletion-scopes }}
+        DOMAIN_CREATION_SCOPES: ${{ inputs.domain-creation-scopes }}
         DOMAIN_MANAGEMENT_SCOPES: ${{ inputs.domain-management-scopes }}
         DOMAIN_DELETION_SCOPES: ${{ inputs.domain-deletion-scopes }}
         MANAGE_TAGS_FOR_CATALOGS: ${{ inputs.manage-tags-for-catalogs }}
@@ -444,6 +452,9 @@ runs:
         fi
         if [[ -n "$GOVERNED_TAG_DELETION_SCOPES" ]]; then
           args+=(--governed-tag-deletion-scopes "$GOVERNED_TAG_DELETION_SCOPES")
+        fi
+        if [[ -n "$DOMAIN_CREATION_SCOPES" ]]; then
+          args+=(--domain-creation-scopes "$DOMAIN_CREATION_SCOPES")
         fi
         if [[ -n "$DOMAIN_MANAGEMENT_SCOPES" ]]; then
           args+=(--domain-management-scopes "$DOMAIN_MANAGEMENT_SCOPES")

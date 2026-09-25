@@ -143,6 +143,11 @@ _SCOPE_FEATURES: tuple[_ScopeFeature, ...] = (
         hierarchical=False,
     ),
     _ScopeFeature(
+        "domain_creation_scopes",
+        "--domain-creation-scopes",
+        hierarchical=False,
+    ),
+    _ScopeFeature(
         "domain_management_scopes",
         "--domain-management-scopes",
         hierarchical=False,
@@ -352,6 +357,7 @@ def _run_kwargs(
         "group_management_scopes": settings.group_management_scopes,
         "group_deletion_scopes": settings.group_deletion_scopes,
         "governed_tag_deletion_scopes": settings.governed_tag_deletion_scopes,
+        "domain_creation_scopes": settings.domain_creation_scopes,
         "domain_management_scopes": settings.domain_management_scopes,
         "domain_deletion_scopes": settings.domain_deletion_scopes,
         "retain_tag_prefixes": settings.retain_tag_prefixes,

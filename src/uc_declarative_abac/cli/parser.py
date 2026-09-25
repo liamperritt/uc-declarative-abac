@@ -278,10 +278,21 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         metavar="SCOPES",
         default=argparse.SUPPRESS,
         help=(
-            "Scope Discovery domain deletion to matching domains (by governed-tag key). "
+            "Scope domain deletion to matching domains (by governed-tag key). "
             f"{_FLAT_SCOPE_GRAMMAR} Only matching domains absent from "
             "resources.domains are deleted. Requires interactive confirmation unless "
             "--force is set."
+        ),
+    )
+    parser.add_argument(
+        "--domain-creation-scopes",
+        type=str,
+        metavar="SCOPES",
+        default=argparse.SUPPRESS,
+        help=(
+            "Scope creation of explicitly declared resources.domains that are "
+            "missing from the workspace, by governed-tag key. "
+            f"{_FLAT_SCOPE_GRAMMAR}"
         ),
     )
     parser.add_argument(
@@ -290,8 +301,8 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         metavar="SCOPES",
         default=argparse.SUPPRESS,
         help=(
-            "Scope Discovery domain create/update for explicitly declared "
-            "resources.domains by governed-tag key. "
+            "Scope metadata updates of explicitly declared resources.domains "
+            "that already exist, by governed-tag key. "
             f"{_FLAT_SCOPE_GRAMMAR}"
         ),
     )

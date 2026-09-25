@@ -15,11 +15,11 @@ from uc_declarative_abac.configs import (
     load_raw_configs,
     resolve_refs,
 )
-from uc_declarative_abac.discovery_domains import (
-    DiscoveryDomainDiff,
-    compile_desired_discovery_domains,
-    compute_discovery_domain_diff,
-    execute_discovery_domain_diff,
+from uc_declarative_abac.domains import (
+    DomainDiff,
+    compile_desired_domains,
+    compute_domain_diff,
+    execute_domain_diff,
 )
 from uc_declarative_abac.governed_tags import (
     GovernedTagDiff,
@@ -92,7 +92,7 @@ class OrchestratorDiffsResult:
     group_diff: GroupDiff
     securable_diff: SecurableDiff
     governed_tag_diff: GovernedTagDiff
-    domain_diff: DiscoveryDomainDiff
+    domain_diff: DomainDiff
     tag_diff: TagDiff
     policy_diff: PolicyDiff
     privilege_diff: PrivilegeDiff
@@ -213,21 +213,25 @@ def _warn_unmatched_scopes(
             )
 
 
-def _scope_discovery_domain_management(
-    diff: DiscoveryDomainDiff,
+def _scope_domain_changes(
+    diff: DomainDiff,
+    creation_scope: Scope,
     management_scope: Scope,
-) -> DiscoveryDomainDiff:
-    """Limit domain creates and updates while preserving scoped deletions.
+) -> DomainDiff:
+    """Gate domain creates and updates independently while preserving scoped deletions.
 
-    Deletion authority is evaluated against the full declared domain set before
-    this helper runs. This ensures a declared domain outside the management scope
-    remains protected from deletion while its metadata stays untouched.
+    The creation scope gates ``to_create`` and the management scope gates
+    ``to_update`` (with its ``old_values`` / ``update_masks``), so the two act as
+    independent gates — mirroring the group creation/management scopes. Deletion
+    authority is evaluated against the full declared domain set before this helper
+    runs, so a declared domain outside both scopes remains protected from deletion
+    while its metadata stays untouched.
     """
-    return DiscoveryDomainDiff(
+    return DomainDiff(
         to_create={
             domain
             for domain in diff.to_create
-            if management_scope.matches(domain.tag_key)
+            if creation_scope.matches(domain.tag_key)
         },
         to_update={
             domain
@@ -327,6 +331,7 @@ def run(
     group_management_scopes: str | None = None,
     group_deletion_scopes: str | None = None,
     governed_tag_deletion_scopes: str | None = None,
+    domain_creation_scopes: str | None = None,
     domain_management_scopes: str | None = None,
     domain_deletion_scopes: str | None = None,
     retain_tag_prefixes: str = "class.",
@@ -355,12 +360,15 @@ def run(
     desired tags. A new-style scope entry that matches no applicable resource
     logs a warning (likely typo) but never fails the run.
 
-    ``domain_management_scopes`` selects explicitly declared ``resources.domains``
-    for creation and description updates using flat governed-tag-key patterns.
-    ``domain_deletion_scopes`` independently selects actual-only Discovery domains
-    for deletion with the same scope grammar. Either active scope fetches and diffs
-    domain state; when management is inactive, creates and updates remain disabled.
-    Deletions prompt for confirmation unless ``force`` is set.
+    ``domain_creation_scopes``, ``domain_management_scopes``, and
+    ``domain_deletion_scopes`` are three independent flat governed-tag-key scopes
+    (mirroring the group creation/management/deletion gates): creation gates
+    creating declared ``resources.domains`` missing from the workspace, management
+    gates metadata updates of declared domains that already exist, and deletion
+    independently selects actual-only domains for removal. Any active scope fetches
+    and diffs domain state; each gate acts alone, so a domain outside the creation
+    scope is never created even when it matches the management scope, and vice
+    versa. Deletions prompt for confirmation unless ``force`` is set.
 
     The deprecated ``*_for_namespaces`` strings scope each enabled domain to a
     subset of the configured namespaces. Each comma-separated entry is either a
@@ -457,6 +465,9 @@ def run(
     governed_tag_deletion_scope = _build_flat_scope(
         governed_tag_deletion_scopes, legacy_enabled=enable_governed_tag_deletion
     )
+    domain_creation_scope = _build_flat_scope(
+        domain_creation_scopes, legacy_enabled=False
+    )
     domain_management_scope = _build_flat_scope(
         domain_management_scopes, legacy_enabled=False
     )
@@ -473,9 +484,10 @@ def run(
     enable_group_management = group_management_scope.is_active()
     enable_group_deletion = group_deletion_scope.is_active()
     enable_governed_tag_deletion = governed_tag_deletion_scope.is_active()
-    domain_management_active = domain_management_scope.is_active()
     domain_workflow_active = (
-        domain_management_active or domain_deletion_scope.is_active()
+        domain_creation_scope.is_active()
+        or domain_management_scope.is_active()
+        or domain_deletion_scope.is_active()
     )
 
     # Warn (never fail) about new-style hierarchical scope entries that match no
@@ -620,7 +632,7 @@ def run(
             desired_governed_tag_names,
         )
         actual_domains_f = (
-            pool.submit(ws_helper.fetch_actual_discovery_domains)
+            pool.submit(ws_helper.fetch_actual_domains)
             if domain_workflow_active
             else None
         )
@@ -772,22 +784,23 @@ def run(
         tag for tag in governed_tags if tag.name not in deleted_governed_tag_names
     }
     desired_domains = (
-        compile_desired_discovery_domains(config, domain_source_governed_tags)
+        compile_desired_domains(config, domain_source_governed_tags)
         if domain_workflow_active
         else set()
     )
     computed_domain_diff = (
-        compute_discovery_domain_diff(
+        compute_domain_diff(
             desired_domains,
             actual_domains,
             change_logger,
             deletion_scope=domain_deletion_scope,
         )
         if domain_workflow_active
-        else DiscoveryDomainDiff()
+        else DomainDiff()
     )
-    domain_diff = _scope_discovery_domain_management(
+    domain_diff = _scope_domain_changes(
         computed_domain_diff,
+        domain_creation_scope,
         domain_management_scope,
     )
 
@@ -925,8 +938,8 @@ def run(
     )
 
     if domain_diff.to_create or domain_diff.to_update or domain_diff.to_delete:
-        change_logger.log_section_header("Discovery domains")
-    execute_discovery_domain_diff(
+        change_logger.log_section_header("Domains")
+    execute_domain_diff(
         ws_helper,
         domain_diff,
         change_logger,

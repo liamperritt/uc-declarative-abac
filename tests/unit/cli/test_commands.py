@@ -3,8 +3,6 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-import pytest
-
 import uc_declarative_abac.cli.commands as cli
 from uc_declarative_abac.cli.settings import RunSettings
 
@@ -418,24 +416,6 @@ def test_main_fails_on_malformed_domain_deletion_scope():
     assert exit_code == 2
 
 
-def test_main_exits_with_usage_error_when_domain_creation_scopes_option_is_removed(
-    monkeypatch,
-):
-    monkeypatch.setattr(
-        "sys.argv",
-        [
-            "uc-abac",
-            "deploy",
-            "--config-dir",
-            "cfg",
-            "--warehouse-id",
-            "wh",
-            "--domain-creation-scopes",
-            "finance",
-        ],
-    )
-
-    with pytest.raises(SystemExit) as exc_info:
-        cli.main()
-
-    assert exc_info.value.code == 2
+def test_main_passes_domain_creation_scopes_through_to_run(monkeypatch):
+    captured = _run_legacy(monkeypatch, ["--domain-creation-scopes", "finance*"])
+    assert captured["domain_creation_scopes"] == "finance*"

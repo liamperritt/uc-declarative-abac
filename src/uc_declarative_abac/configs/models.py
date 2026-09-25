@@ -851,7 +851,7 @@ SecurableConfig = TaggableConfig | FunctionConfig
 
 
 class DomainIconConfig(BaseConfig):
-    """Icon configuration for a UC discovery domain."""
+    """Icon configuration for a UC domain."""
 
     name: str
     color: str | None = None
@@ -877,7 +877,7 @@ class DomainIconConfig(BaseConfig):
 
 
 class DomainConfig(BaseConfig):
-    """Unity Catalog Discovery domain backed by one governed tag."""
+    """domain backed by one governed tag."""
 
     governed_tag: str
     description: str | None = None

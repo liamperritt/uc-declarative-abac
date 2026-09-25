@@ -4,30 +4,30 @@ from unittest.mock import MagicMock
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.domains import (
-    Domain,
-    DomainIconName,
-    FieldMask,
+    Domain as SdkDomain,
 )
 from databricks.sdk.service.domains import (
     DomainIcon as SdkDomainIcon,
 )
+from databricks.sdk.service.domains import (
+    DomainIconName,
+    FieldMask,
+)
 
-from uc_declarative_abac.discovery_domains import DiscoveryDomain, DomainIcon
+from uc_declarative_abac.domains import Domain, DomainIcon
 from uc_declarative_abac.helpers import WorkspaceHelper
 
 
-def test_workspace_helper_fetch_actual_discovery_domains_normalizes_parent_tag_key() -> (
-    None
-):
+def test_workspace_helper_fetch_actual_domains_normalizes_parent_tag_key() -> None:
     client = MagicMock(spec=WorkspaceClient)
     client.domains.list_domains.return_value = [
-        Domain(
+        SdkDomain(
             tag_key="finance",
             description="Financial data",
             domain_id="parent-id",
             name="domains/parent-id",
         ),
-        Domain(
+        SdkDomain(
             tag_key="finance/orders",
             description="Order data",
             domain_id="child-id",
@@ -37,16 +37,16 @@ def test_workspace_helper_fetch_actual_discovery_domains_normalizes_parent_tag_k
     ]
     helper = WorkspaceHelper(client)
 
-    result = helper.fetch_actual_discovery_domains()
+    result = helper.fetch_actual_domains()
 
     assert result == {
-        DiscoveryDomain(
+        Domain(
             tag_key="finance",
             description="Financial data",
             domain_id="parent-id",
             resource_name="domains/parent-id",
         ),
-        DiscoveryDomain(
+        Domain(
             tag_key="finance/orders",
             description="Order data",
             domain_id="child-id",
@@ -55,61 +55,59 @@ def test_workspace_helper_fetch_actual_discovery_domains_normalizes_parent_tag_k
             parent_tag_key="finance",
         ),
     }
-    assert helper.get_discovery_domain_id("finance") == "parent-id"
+    assert helper.get_domain_id("finance") == "parent-id"
 
 
-def test_workspace_helper_create_discovery_domain_uses_sdk_and_caches_result() -> None:
+def test_workspace_helper_create_domain_uses_sdk_and_caches_result() -> None:
     client = MagicMock(spec=WorkspaceClient)
-    client.domains.create_domain.return_value = Domain(
+    client.domains.create_domain.return_value = SdkDomain(
         tag_key="finance/orders",
         domain_id="child-id",
         parent_domain_id="parent-id",
     )
     helper = WorkspaceHelper(client)
 
-    helper.create_discovery_domain(
+    helper.create_domain(
         "finance/orders",
         description="Financial data",
         parent_domain_id="parent-id",
     )
 
     client.domains.create_domain.assert_called_once_with(
-        Domain(
+        SdkDomain(
             tag_key="finance/orders",
             description="Financial data",
             parent_domain_id="parent-id",
         )
     )
-    assert helper.get_discovery_domain_id("finance/orders") == "child-id"
+    assert helper.get_domain_id("finance/orders") == "child-id"
 
 
-def test_workspace_helper_update_discovery_domain_uses_sdk_resource_name_and_update_mask() -> (
+def test_workspace_helper_update_domain_uses_sdk_resource_name_and_update_mask() -> (
     None
 ):
     client = MagicMock(spec=WorkspaceClient)
     helper = WorkspaceHelper(client)
-    domain = DiscoveryDomain(
+    domain = Domain(
         tag_key="finance",
         description="Financial data",
         domain_id="domain-id",
         resource_name="domains/domain-id",
     )
 
-    helper.update_discovery_domain(domain, ("description",))
+    helper.update_domain(domain, ("description",))
 
     client.domains.update_domain.assert_called_once_with(
         name="domains/domain-id",
-        domain=Domain(tag_key="finance", description="Financial data"),
+        domain=SdkDomain(tag_key="finance", description="Financial data"),
         update_mask=FieldMask(["description"]),
     )
 
 
-def test_workspace_helper_update_discovery_domain_builds_multi_field_mask_and_body() -> (
-    None
-):
+def test_workspace_helper_update_domain_builds_multi_field_mask_and_body() -> None:
     client = MagicMock(spec=WorkspaceClient)
     helper = WorkspaceHelper(client)
-    domain = DiscoveryDomain(
+    domain = Domain(
         tag_key="finance",
         description="Fin",
         subtitle="Sub",
@@ -119,11 +117,11 @@ def test_workspace_helper_update_discovery_domain_builds_multi_field_mask_and_bo
         resource_name="domains/d",
     )
 
-    helper.update_discovery_domain(domain, ("description", "subtitle", "draft", "icon"))
+    helper.update_domain(domain, ("description", "subtitle", "draft", "icon"))
 
     client.domains.update_domain.assert_called_once_with(
         name="domains/d",
-        domain=Domain(
+        domain=SdkDomain(
             tag_key="finance",
             description="Fin",
             subtitle="Sub",
@@ -134,17 +132,15 @@ def test_workspace_helper_update_discovery_domain_builds_multi_field_mask_and_bo
     )
 
 
-def test_workspace_helper_create_discovery_domain_includes_metadata_attributes() -> (
-    None
-):
+def test_workspace_helper_create_domain_includes_metadata_attributes() -> None:
     client = MagicMock(spec=WorkspaceClient)
-    client.domains.create_domain.return_value = Domain(
+    client.domains.create_domain.return_value = SdkDomain(
         tag_key="finance",
         domain_id="id",
     )
     helper = WorkspaceHelper(client)
 
-    helper.create_discovery_domain(
+    helper.create_domain(
         "finance",
         description="Fin",
         parent_domain_id="",
@@ -154,7 +150,7 @@ def test_workspace_helper_create_discovery_domain_includes_metadata_attributes()
     )
 
     client.domains.create_domain.assert_called_once_with(
-        Domain(
+        SdkDomain(
             tag_key="finance",
             description="Fin",
             parent_domain_id=None,
@@ -165,12 +161,10 @@ def test_workspace_helper_create_discovery_domain_includes_metadata_attributes()
     )
 
 
-def test_workspace_helper_fetch_actual_discovery_domains_includes_metadata_attributes() -> (
-    None
-):
+def test_workspace_helper_fetch_actual_domains_includes_metadata_attributes() -> None:
     client = MagicMock(spec=WorkspaceClient)
     client.domains.list_domains.return_value = [
-        Domain(
+        SdkDomain(
             tag_key="finance",
             description="Fin",
             subtitle="Sub",
@@ -183,10 +177,10 @@ def test_workspace_helper_fetch_actual_discovery_domains_includes_metadata_attri
     ]
     helper = WorkspaceHelper(client)
 
-    result = helper.fetch_actual_discovery_domains()
+    result = helper.fetch_actual_domains()
 
     assert result == {
-        DiscoveryDomain(
+        Domain(
             tag_key="finance",
             description="Fin",
             subtitle="Sub",
@@ -198,12 +192,10 @@ def test_workspace_helper_fetch_actual_discovery_domains_includes_metadata_attri
     }
 
 
-def test_workspace_helper_fetch_actual_discovery_domains_falls_back_to_effective_draft() -> (
-    None
-):
+def test_workspace_helper_fetch_actual_domains_falls_back_to_effective_draft() -> None:
     client = MagicMock(spec=WorkspaceClient)
     client.domains.list_domains.return_value = [
-        Domain(
+        SdkDomain(
             tag_key="finance",
             draft=None,
             effective_draft=True,
@@ -213,21 +205,21 @@ def test_workspace_helper_fetch_actual_discovery_domains_falls_back_to_effective
     ]
     helper = WorkspaceHelper(client)
 
-    result = helper.fetch_actual_discovery_domains()
+    result = helper.fetch_actual_domains()
 
     assert len(result) == 1
     domain = next(iter(result))
     assert domain.draft is True
 
 
-def test_workspace_helper_delete_discovery_domain_uses_sdk_resource_name() -> None:
+def test_workspace_helper_delete_domain_uses_sdk_resource_name() -> None:
     client = MagicMock(spec=WorkspaceClient)
     helper = WorkspaceHelper(client)
-    domain = DiscoveryDomain(
+    domain = Domain(
         tag_key="finance",
         resource_name="domains/domain-id",
     )
 
-    helper.delete_discovery_domain(domain)
+    helper.delete_domain(domain)
 
     client.domains.delete_domain.assert_called_once_with(name="domains/domain-id")

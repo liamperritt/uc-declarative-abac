@@ -387,7 +387,7 @@ def prompt_delete_confirmation(names: list[str], noun: str, warning: str) -> boo
     or ``yes`` (case-insensitive) as affirmative; anything else aborts. Re-raises
     ``EOFError`` (e.g. a non-TTY input stream) as ``InteractiveConfirmationRequiredError``
     so CI contexts get a clear "set --force" directive instead of a silent skip. Shared
-    by the governed-tag, group, policy, and Discovery-domain deletion executors.
+    by the governed-tag, group, policy, and domain deletion executors.
     """
     print(f"\nAbout to delete {len(names)} {noun}(s):")
     for name in names:

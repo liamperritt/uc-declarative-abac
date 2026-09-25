@@ -134,7 +134,7 @@ def test_parser_help_documents_domain_deletion_scopes_behavior(capsys):
     help_text = " ".join(output.split())
 
     assert "--domain-deletion-scopes" in output
-    assert "Discovery domain deletion" in help_text
+    assert "domain deletion" in help_text
     assert "matching domains (by governed-tag key)" in help_text
     assert "Requires interactive confirmation unless --force is set." in help_text
 
@@ -249,6 +249,22 @@ def test_parser_accepts_domain_deletion_scopes():
     )
 
     assert namespace.domain_deletion_scopes == "finance*"
+
+
+def test_parser_accepts_domain_creation_scopes():
+    namespace = parse_cli_args(
+        [
+            "deploy",
+            "--config-dir",
+            "cfg",
+            "--warehouse-id",
+            "wh",
+            "--domain-creation-scopes",
+            "finance*",
+        ],
+    )
+
+    assert namespace.domain_creation_scopes == "finance*"
 
 
 def test_parser_legacy_dry_run_maps_to_deploy():
