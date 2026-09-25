@@ -240,7 +240,7 @@ class PolicyColumnConstantConfig(BaseConfig):
     constant: PolicyColumnConstantValue
 
 
-class ColumnTagValueExtractionConfig(BaseConfig):
+class ColumnTagValueExtractionArgumentsConfig(BaseConfig):
     """Args for get_column_tag_value(alias, 'tag') — a governed tag on the matched
     column named by ``alias``. Mirrors the SDK's ColumnTagValueExtraction."""
 
@@ -258,7 +258,7 @@ class ColumnTagValueExtractionConfig(BaseConfig):
         return _reject_blank_str(v, "tag")
 
 
-class TagValueExtractionConfig(BaseConfig):
+class TagValueExtractionArgumentsConfig(BaseConfig):
     """Arg for get_tag_value('tag') — a securable-level governed tag. Mirrors the
     SDK's TagValueExtraction."""
 
@@ -270,39 +270,25 @@ class TagValueExtractionConfig(BaseConfig):
         return _reject_blank_str(v, "tag")
 
 
-class TagIntrospectionExpressionConfig(BaseConfig):
-    """A tag-introspection expression passed as a USING COLUMNS argument (beta;
-    requires DBR 18 LTS+). Exactly one variant must be set:
+class ColumnTagValueExtractionConfig(BaseConfig):
+    """A ``get_column_tag_value(alias, 'tag')`` expression column (beta; requires DBR
+    18 LTS+) — reads a governed tag on the matched column named by ``arguments.alias``
+    and passes its value as a USING COLUMNS function argument at query time."""
 
-    - ``get_column_tag_value`` with nested ``alias`` and ``tag`` fields →
-      ``get_column_tag_value(alias, 'tag')`` reads a governed tag on a matched column.
-    - ``get_tag_value`` with nested ``tag`` field → ``get_tag_value('tag')`` reads a
-      securable-level governed tag.
-    """
-
-    get_column_tag_value: ColumnTagValueExtractionConfig | None = None
-    get_tag_value: TagValueExtractionConfig | None = None
-
-    @model_validator(mode="after")
-    def _validate_variant(self) -> TagIntrospectionExpressionConfig:
-        variants = [
-            name
-            for name, value in (
-                ("get_column_tag_value", self.get_column_tag_value),
-                ("get_tag_value", self.get_tag_value),
-            )
-            if value is not None
-        ]
-        if len(variants) != 1:
-            raise ValueError(
-                "expression column must set exactly one of 'get_column_tag_value' "
-                "or 'get_tag_value'"
-            )
-        return self
+    expression: Literal["get_column_tag_value"]
+    arguments: ColumnTagValueExtractionArgumentsConfig
 
 
-class PolicyColumnExpressionConfig(BaseConfig):
-    expression: TagIntrospectionExpressionConfig
+class TagValueExtractionConfig(BaseConfig):
+    """A ``get_tag_value('tag')`` expression column (beta; requires DBR 18 LTS+) —
+    reads a securable-level governed tag and passes its value as a USING COLUMNS
+    function argument at query time."""
+
+    expression: Literal["get_tag_value"]
+    arguments: TagValueExtractionArgumentsConfig
+
+
+PolicyColumnExpressionConfig = ColumnTagValueExtractionConfig | TagValueExtractionConfig
 
 
 PolicyColumnConfig = (
@@ -360,6 +346,30 @@ class BasePolicyConfig(BaseConfig, ABC):
         if self.schema_name:
             return f"{self.catalog_name}.{self.schema_name}"
         return self.catalog_name
+
+
+def _flatten_legacy_expression_column(col):
+    """Map a legacy nested expression column to the flat expression/arguments form:
+    ``{expression: {get_column_tag_value: {...}}}`` becomes
+    ``{expression: get_column_tag_value, arguments: {...}}``. Columns that are not in
+    the legacy nested form (already-flat expressions, alias/constant columns, or any
+    non-dict) pass through unchanged, so the mapping is idempotent."""
+    if not isinstance(col, dict) or not isinstance(col.get("expression"), dict):
+        return col
+    expr = col["expression"]
+    if "arguments" in col:
+        raise ValueError("cannot combine the nested 'expression' form with 'arguments'")
+    if len(expr) != 1:
+        raise ValueError(
+            "expression column must set exactly one of 'get_column_tag_value' "
+            "or 'get_tag_value'"
+        )
+    fn_name, args = next(iter(expr.items()))
+    return {
+        **{k: v for k, v in col.items() if k != "expression"},
+        "expression": fn_name,
+        "arguments": args,
+    }
 
 
 class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
@@ -426,6 +436,23 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
 
     @model_validator(mode="before")
     @classmethod
+    def _normalise_legacy_expression_columns(cls, data):
+        """Accept the legacy nested expression-column form by flattening it to the
+        expression/arguments form before the column union validates. Handles both the
+        singular ``column`` and the plural ``columns`` keys."""
+        if not isinstance(data, dict):
+            return data
+        result = dict(data)
+        if isinstance(result.get("column"), dict):
+            result["column"] = _flatten_legacy_expression_column(result["column"])
+        if isinstance(result.get("columns"), list):
+            result["columns"] = [
+                _flatten_legacy_expression_column(c) for c in result["columns"]
+            ]
+        return result
+
+    @model_validator(mode="before")
+    @classmethod
     def _normalise_singular_column(cls, data: dict) -> dict:
         """Accept singular ``column: {...}`` as shorthand for ``columns: [{...}]``."""
         if not isinstance(data, dict) or "column" not in data:
@@ -465,9 +492,9 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
         for c in self.columns or []:
             if (
                 isinstance(c, PolicyColumnExpressionConfig)
-                and c.expression.get_column_tag_value is not None
+                and c.expression == "get_column_tag_value"
             ):
-                alias = c.expression.get_column_tag_value.alias
+                alias = c.arguments.alias
                 if alias not in declared:
                     raise ValueError(
                         f"expression column references unknown column_alias '{alias}'; "

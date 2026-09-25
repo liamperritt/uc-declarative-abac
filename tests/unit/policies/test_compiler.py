@@ -1062,6 +1062,42 @@ def test_policy_compiler_logs_error_when_expression_tag_key_is_ungoverned():
     assert result == set()
 
 
+def test_policy_compiler_renders_flat_column_tag_value_expression_into_using():
+    """The flat expression/arguments form renders get_column_tag_value(alias, 'tag')."""
+    policy_dict = _fgac_policy(
+        columns=[
+            {"alias": "email", "has_tags": {"pii": "email"}},
+            {
+                "expression": "get_column_tag_value",
+                "arguments": {"alias": "email", "tag": "pii"},
+            },
+        ],
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.on_column == "email"
+    assert policy.using_columns == ("get_column_tag_value(email, 'pii')",)
+
+
+def test_policy_compiler_renders_flat_tag_value_expression_into_using():
+    """The flat expression/arguments form renders get_tag_value('tag')."""
+    policy_dict = _fgac_policy(
+        columns=[
+            {"alias": "email", "has_tags": {"pii": "email"}},
+            {"expression": "get_tag_value", "arguments": {"tag": "domain"}},
+        ],
+    )
+    config = ResourcesConfig.model_validate(
+        _catalog_with_policy(policy_dict, level="table")
+    )
+
+    (policy,) = _compile(config)
+    assert policy.using_columns == ("get_tag_value('domain')",)
+
+
 # ---------------------------------------------------------------------------
 # Grant policies are ignored
 # ---------------------------------------------------------------------------
