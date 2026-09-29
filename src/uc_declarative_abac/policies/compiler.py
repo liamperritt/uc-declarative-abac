@@ -266,6 +266,21 @@ def _render_identity_attribute_tag_match_atom(key: str, value: str) -> str:
     return f"has_identity_attribute_tag_match({_quote(key)}, {_quote(value)})"
 
 
+def render_tag_condition(
+    has_tags: dict[str, str] | None,
+    has_any_of_tags: dict[str, str] | None,
+) -> str | None:
+    """Render a policy tag predicate into a WHEN-clause condition string, or None when
+    both groups are empty.
+
+    Public wrapper over the same rendering the mask/filter compiler uses for
+    ``when_condition`` (the ``has_tags`` AND-group + ``has_any_of_tags`` OR-group, via
+    ``_render_match_expr`` and ``_render_tag_atom``), so grant ("pseudo") policies can be
+    reported with byte-identical conditions. There is no NOR group — grant policies carry
+    no ``has_none_of_tags``."""
+    return _render_match_expr(has_tags, has_any_of_tags, None, _render_tag_atom)
+
+
 def _build_match_columns(
     columns: list[PolicyColumnConfig] | None,
 ) -> tuple[tuple[str, str], ...]:

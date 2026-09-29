@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 
@@ -29,6 +29,7 @@ from uc_declarative_abac.utils import (
     DuplicateServicePrincipalError,
     OrchestratorError,
     PrincipalValidationError,
+    parallel_for_each,
 )
 
 _logger = logging.getLogger("uc_declarative_abac")
@@ -199,6 +200,7 @@ class WorkspaceHelper:
         manage_groups: bool = False,
         skip_users_fetch: bool = False,
         manage_domain_owners: bool = False,
+        report_group_members: bool = False,
     ) -> None:
         self._client = workspace_client
         self._use_workspace_scim = use_workspace_scim
@@ -207,6 +209,10 @@ class WorkspaceHelper:
         # Domain owners are set as numeric principal ids, so an owner-managing run needs
         # the id maps built even when it manages no groups (see _build_group_id_maps).
         self._manage_domain_owners = manage_domain_owners
+        # Reporting all group memberships also needs the group id maps built (the
+        # membership fetch is keyed by numeric group id), so it likewise triggers the
+        # _build_group_id_maps pass (see _fetch_account_principals).
+        self._report_group_members = report_group_members
         self._users: set[str] | None = None
         self._groups: set[str] | None = None
         self._service_principals: dict[str, str] | None = (
@@ -287,7 +293,11 @@ class WorkspaceHelper:
                 for sp in sps_data
             ]
         )
-        if self._manage_groups or self._manage_domain_owners:
+        if (
+            self._manage_groups
+            or self._manage_domain_owners
+            or self._report_group_members
+        ):
             self._build_group_id_maps(users_data, groups_data, sps_data)
 
     def _build_group_id_maps(
@@ -514,6 +524,80 @@ class WorkspaceHelper:
                 results[gid] = future.result()
         return results
 
+    def _fetch_group_assumers(self, group_id: str) -> frozenset[Principal]:
+        """Fetch one group's assumer principals from its account rule set."""
+        return self._extract_group_assumers(self.get_group_rule_set(group_id))
+
+    def _fetch_all_for_groups(
+        self,
+        fetch_one: Callable[[str], frozenset[Principal]],
+        exclude_ids: set[str],
+        *,
+        max_workers: int,
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> dict[str, frozenset[Principal]]:
+        """Run ``fetch_one`` for every account group id not in ``exclude_ids``, in bounded
+        parallel, for the post-deploy report.
+
+        Group ids come from the id maps built by ``fetch_principals``. Intended for the
+        report, so it is **resilient and silent**: a group whose fetch raises (e.g. it was
+        deleted between listing and fetch, or has no rule set) is skipped without logging —
+        the operator can't act on it. ``on_progress(done, total)`` fires on the main thread
+        as each group completes. Returns ``group id -> value`` for the groups that
+        succeeded."""
+        group_ids = [gid for gid in self._group_name_by_id if gid not in exclude_ids]
+        if not group_ids:
+            return {}
+        total = len(group_ids)
+        results: dict[str, frozenset[Principal]] = {}
+        done = 0
+
+        def _on_complete(*_: object) -> None:
+            nonlocal done
+            done += 1
+            if on_progress is not None:
+                on_progress(done, total)
+
+        for gid, value, error in parallel_for_each(
+            group_ids,
+            fetch_one,
+            max_workers=max_workers,
+            on_complete=_on_complete,
+        ):
+            if error is None and value is not None:
+                results[gid] = value
+        return results
+
+    def fetch_all_group_memberships(
+        self,
+        exclude_ids: set[str],
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> dict[str, frozenset[Principal]]:
+        """Fetch direct members (as canonical-identifier Principals; unresolvable members
+        dropped) for every account group not in ``exclude_ids``. See ``_fetch_all_for_groups``
+        for the resilient/silent semantics."""
+        return self._fetch_all_for_groups(
+            self._fetch_group_members,
+            exclude_ids,
+            max_workers=_GROUP_FETCH_WORKERS,
+            on_progress=on_progress,
+        )
+
+    def fetch_all_group_assumers(
+        self,
+        exclude_ids: set[str],
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> dict[str, frozenset[Principal]]:
+        """Fetch assumer principals (``roles/group.assumer`` from each group's account rule
+        set) for every account group not in ``exclude_ids``. See ``_fetch_all_for_groups``
+        for the resilient/silent semantics."""
+        return self._fetch_all_for_groups(
+            self._fetch_group_assumers,
+            exclude_ids,
+            max_workers=_ASSIGN_FETCH_WORKERS,
+            on_progress=on_progress,
+        )
+
     def _fetch_group_assumers_for(
         self, group_ids: set[str]
     ) -> dict[str, frozenset[Principal]]:
@@ -628,10 +712,10 @@ class WorkspaceHelper:
         Built from the group id/external-id maps populated during ``fetch_principals()``
         — no additional API calls and no membership fetch, since the group-deletion
         candidate filter only needs identity and provenance (``external_id``). Returns an
-        empty set unless group management (the ``manage_groups`` fetch path) is enabled.
-        Must be called after ``fetch_principals()``.
+        empty set unless the group id maps were built (group management, or the reporting
+        membership fetch). Must be called after ``fetch_principals()``.
         """
-        if not self._manage_groups:
+        if not (self._manage_groups or self._report_group_members):
             return set()
         return {
             Group(

@@ -96,6 +96,12 @@ def test_settings_loads_enable_group_deletion_from_env(monkeypatch):
     assert settings.enable_group_deletion is True
 
 
+def test_settings_loads_report_schema_from_env(monkeypatch):
+    monkeypatch.setenv("UC_ABAC_REPORT_SCHEMA", "reporting.abac")
+    settings = resolve_settings({}, settings_file=None)
+    assert settings.report_schema == "reporting.abac"
+
+
 def test_settings_loads_namespace_scope_from_env(monkeypatch):
     monkeypatch.setenv("UC_ABAC_MANAGE_TAGS_FOR_NAMESPACES", "cat_env.sch1")
     settings = resolve_settings({}, settings_file=None)

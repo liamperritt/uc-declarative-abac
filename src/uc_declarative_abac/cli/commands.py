@@ -337,6 +337,7 @@ def _run_kwargs(
         "enable_group_management": settings.enable_group_management,
         "enable_group_deletion": settings.enable_group_deletion,
         "ignore_unresolvable_principals": settings.ignore_unresolvable_principals,
+        "report_schema": settings.report_schema,
         "manage_tags_for_namespaces": namespaces["manage_tags_for_namespaces"],
         "manage_privileges_for_namespaces": namespaces[
             "manage_privileges_for_namespaces"

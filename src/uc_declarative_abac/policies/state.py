@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from uc_declarative_abac.principals import Principal
 from uc_declarative_abac.types import (
     PolicyType,
+    PrivilegeType,
     SecurableType,
 )
 
@@ -18,6 +19,10 @@ class Policy:
 
     The to/except principals may be unresolved (principal_type=UNKNOWN) when
     emitted by the compiler or fetch helper, and are resolved before diffing.
+
+    ``privileges`` is populated only when this Policy represents a grant ("pseudo")
+    policy for reporting; it is always None for real mask/filter policies, so their diff
+    and equality behaviour is unchanged. It is not a real UC policy attribute.
     """
 
     securable_type: SecurableType
@@ -36,6 +41,7 @@ class Policy:
     # Always TABLE for mask/filter policies; part of equality (so a change is
     # detected) but not of identity.
     for_securable_type: SecurableType = SecurableType.TABLE
+    privileges: tuple[PrivilegeType, ...] | None = None  # grant pseudo-policies
 
 
 @dataclass

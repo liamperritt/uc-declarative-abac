@@ -306,6 +306,14 @@ inputs:
       system service principals). Empty by default.
     required: false
     default: ''
+  report-schema:
+    description: >-
+      After a successful (non-dry-run) deploy, write the full deployed state to
+      Unity Catalog tables in this fully-qualified schema (catalog.schema), one
+      table per domain plus group memberships. Requires the account path
+      (incompatible with use-workspace-scim). Empty by default (disabled).
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -368,6 +376,7 @@ runs:
         ENABLE_GROUP_MANAGEMENT: ${{ inputs.enable-group-management }}
         ENABLE_GROUP_DELETION: ${{ inputs.enable-group-deletion }}
         IGNORE_UNRESOLVABLE_PRINCIPALS: ${{ inputs.ignore-unresolvable-principals }}
+        REPORT_SCHEMA: ${{ inputs.report-schema }}
       run: |
         args=(
           "deploy"
@@ -483,6 +492,9 @@ runs:
         fi
         if [[ -n "$IGNORE_UNRESOLVABLE_PRINCIPALS" ]]; then
           args+=(--ignore-unresolvable-principals "$IGNORE_UNRESOLVABLE_PRINCIPALS")
+        fi
+        if [[ -n "$REPORT_SCHEMA" ]]; then
+          args+=(--report-schema "$REPORT_SCHEMA")
         fi
         if [[ "$FORCE" == "true" ]]; then
           args+=(--force)

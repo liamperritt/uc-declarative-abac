@@ -4745,3 +4745,100 @@ def test_orchestrator_creates_nested_groups_before_linking_membership(
     assert len(create_indices) == 2  # both groups created empty
     assert link_indices  # the parent's membership is linked
     assert max(create_indices) < min(link_indices)  # creates precede any linking
+
+
+# ---------------------------------------------------------------------------
+# --report-schema: post-deploy state report
+# ---------------------------------------------------------------------------
+
+
+def _setup_completing_run(monkeypatch, tmp_yaml_dir, mock_workspace_client):
+    """Minimal empty-config setup that lets run() complete successfully."""
+    config = {"resources": {"catalogs": {}}}
+    root = tmp_yaml_dir({"resources/catalog.yaml": config})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config)
+    _setup_mock_empty_principals(mock_workspace_client)
+    mock_workspace_client.tag_policies.list_tag_policies.return_value = iter([])
+    mock_workspace_client.domains.list_domains.return_value = iter([])
+    return root
+
+
+def test_orchestrator_writes_report_after_successful_deploy(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    """A non-dry run with --report-schema invokes write_report with that schema."""
+    root = _setup_completing_run(monkeypatch, tmp_yaml_dir, mock_workspace_client)
+    captured = {}
+    monkeypatch.setattr(
+        "uc_declarative_abac.orchestrator.write_report",
+        lambda report_schema, *a, **k: captured.update(schema=report_schema),
+    )
+
+    run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        report_schema="rep.sch",
+        dry_run=False,
+    )
+
+    assert captured.get("schema") == "rep.sch"
+
+
+def test_orchestrator_skips_report_on_dry_run(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    """--report-schema does nothing under --dry-run."""
+    root = _setup_completing_run(monkeypatch, tmp_yaml_dir, mock_workspace_client)
+    calls = []
+    monkeypatch.setattr(
+        "uc_declarative_abac.orchestrator.write_report",
+        lambda *a, **k: calls.append(a),
+    )
+
+    run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        report_schema="rep.sch",
+        dry_run=True,
+    )
+
+    assert calls == []
+
+
+def test_orchestrator_skips_report_when_schema_unset(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    """No --report-schema ⇒ no report write."""
+    root = _setup_completing_run(monkeypatch, tmp_yaml_dir, mock_workspace_client)
+    calls = []
+    monkeypatch.setattr(
+        "uc_declarative_abac.orchestrator.write_report",
+        lambda *a, **k: calls.append(a),
+    )
+
+    run(
+        config_dir=root,
+        workspace_client=mock_workspace_client,
+        warehouse_id="test-warehouse-id",
+        dry_run=False,
+    )
+
+    assert calls == []
+
+
+def test_orchestrator_rejects_report_schema_with_workspace_scim(
+    tmp_yaml_dir, mock_workspace_client
+):
+    """--report-schema needs the account path, so it errors with --use-workspace-scim."""
+    root = tmp_yaml_dir({"resources/catalog.yaml": {"resources": {"catalogs": {}}}})
+    with pytest.raises(OrchestratorError, match="(?i)report"):
+        run(
+            config_dir=root,
+            workspace_client=mock_workspace_client,
+            warehouse_id="test-warehouse-id",
+            report_schema="rep.sch",
+            use_workspace_scim=True,
+        )

@@ -34,6 +34,16 @@ def test_main_passes_new_namespace_flag_through_to_run(monkeypatch):
     assert captured["manage_tags_for_namespaces"] == "cat_a.sch1"
 
 
+def test_main_passes_report_schema_through_to_run(monkeypatch):
+    captured = _run_legacy(monkeypatch, ["--report-schema", "reporting.abac"])
+    assert captured["report_schema"] == "reporting.abac"
+
+
+def test_main_defaults_report_schema_to_none(monkeypatch):
+    captured = _run_legacy(monkeypatch, [])
+    assert captured["report_schema"] is None
+
+
 def test_main_defaults_namespace_flag_to_star_when_unset(monkeypatch):
     captured = _run_legacy(monkeypatch, [])
     assert captured["manage_tags_for_namespaces"] == "*"

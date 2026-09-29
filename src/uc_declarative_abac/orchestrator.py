@@ -52,6 +52,7 @@ from uc_declarative_abac.privileges import (
     compute_privilege_diff,
     execute_privilege_diff,
 )
+from uc_declarative_abac.report import ReportState, write_report
 from uc_declarative_abac.securables import (
     SecurableAttributes,
     SecurableDiff,
@@ -317,6 +318,7 @@ def run(
     enable_group_management: bool = False,
     enable_group_deletion: bool = False,
     ignore_unresolvable_principals: str = "",
+    report_schema: str | None = None,
     manage_tags_for_namespaces: str = "*",
     manage_privileges_for_namespaces: str = "*",
     manage_taggables_for_namespaces: str = "*",
@@ -534,6 +536,14 @@ def run(
             "--use-workspace-scim was set. Remove --use-workspace-scim to create or "
             "manage the groups declared in config."
         )
+    # The state report enumerates all account groups and their members via the account
+    # path (Workspace Identity V2), which --use-workspace-scim does not provide.
+    if report_schema and use_workspace_scim:
+        raise OrchestratorError(
+            "--report-schema requires the account path (Workspace Identity V2), but "
+            "--use-workspace-scim was set. Remove --use-workspace-scim to write the "
+            "state report."
+        )
     # Resolving user members of a managed group requires the account users list, so
     # group management cannot run alongside --skip-users-fetch.
     if config.groups and group_domain_active and skip_users_fetch:
@@ -618,6 +628,7 @@ def run(
         manage_groups=group_domain_active and bool(desired_groups),
         manage_domain_owners=manage_domain_owners,
         skip_users_fetch=skip_users_fetch,
+        report_group_members=bool(report_schema) and not dry_run,
     )
     change_logger = ChangeLogger(dry_run=dry_run, logger=_logger)
     change_logger.log_banner()
@@ -1010,6 +1021,50 @@ def run(
 
     if change_logger.has_errors:
         raise ExecutionBatchError(change_logger.errors)
+
+    # The state report runs only after a successful, non-dry-run deploy. It recompiles the
+    # full desired state from config (independent of which management gates were on, via a
+    # throwaway logger so report-only compilation can't add errors) and writes it to the
+    # report schema. Group memberships beyond those already cached are fetched inside.
+    if report_schema and not dry_run:
+        report_compile_logger = ChangeLogger(dry_run=True, logger=_logger)
+        report_state = ReportState(
+            config=config,
+            governed_tags=desired_governed_tags,
+            policies=desired_policies,
+            privileges=compile_desired_privileges(
+                config,
+                tags_for_privilege_matching,
+                governed_tag_names,
+                report_compile_logger,
+                run_date=run_date,
+            ),
+            principals=set(ws_helper.get_principals().values()),
+            securables=desired_securables,
+            attributes=compile_desired_attributes(config),
+            securable_tags=compile_desired_tags(
+                config, governed_tags, report_compile_logger
+            ),
+            domains=compile_desired_domains(config, domain_source_governed_tags),
+            account_groups=ws_helper.list_account_groups(),
+            cached_group_members={
+                g.id: g.members for g in actual_groups if g.id and g.members is not None
+            },
+            cached_group_assumers={
+                g.id: g.assumers
+                for g in actual_groups
+                if g.id and g.assumers is not None
+            },
+        )
+        write_report(
+            report_schema,
+            report_state,
+            uc_helper,
+            ws_helper,
+            resolver,
+            change_logger,
+            max_parallel=max_parallel_changes,
+        )
 
     return OrchestratorDiffsResult(
         group_diff=group_diff,

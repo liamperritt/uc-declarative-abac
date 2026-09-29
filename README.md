@@ -216,6 +216,7 @@ The repo ships a composite GitHub Action at `deploy/action.yml` so any other rep
 | `domain-deletion-scopes` | no | `''` | Scope deletion of Discovery domains absent from `resources.domains`, matching by governed-tag key. Flat grammar: `*` all, `finance*` prefix, or an exact key. Empty (default) disables deletion independently of domain creation and update. Children are deleted before parents. Requires interactive confirmation unless `force: 'true'` — in CI you must set `force` or the run errors out |
 | `retain-tag-prefixes` | no | `'class.'` | Comma-separated tag-key prefixes the engine must never remove from securables, even when absent from config (it may still add/update them). Defaults to `'class.'` to protect UC auto data classification tags. Set to an empty string to allow removing any unconfigured tag |
 | `ignore-unresolvable-principals` | no | `''` | Comma-separated actual-state principal identifiers — usernames for users, application_ids for service principals, display names for groups — whose resolution-failure warning is suppressed across the privileges, securables (owner), and governed-tags (assigners) domains. Primarily for Databricks-managed system service principals that show up in system tables but aren't resolvable via SCIM (otherwise a warning every run) |
+| `report-schema` | no | `''` | After a successful (non-dry-run) deploy, write the full deployed governance state to Unity Catalog tables in this fully-qualified `catalog.schema` — one table per domain (governed tags, policies, pseudo (grant) policies, privileges, principals, securables, securable tags, domains, groups) plus full group memberships. Each table is overwritten every run. Requires the account path (incompatible with `use-workspace-scim`). Empty (default) disables it |
 | `force` | no | `'false'` | Skip every interactive confirmation prompt and auto-confirm destructive actions. Required in CI when any destructive gate is set |
 | `max-parallel-changes` | no | `'8'` | Max worker threads used per (securable_type, change_type) execution batch. Set to `'1'` to disable parallelism and force sequential execution |
 
@@ -810,7 +811,7 @@ resources:
         - bob@example.com
         - platform_admins         # groups can be members of groups
         - etl-service-principal   # service principals by display name
-      assumers:                   # principals allowed to manage this group's role assignments
+      assumers:                   # principals granted the assumer role for exclusive RBAC
         - group_admins
 ```
 

@@ -355,6 +355,18 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--report-schema",
+        type=str,
+        metavar="CATALOG.SCHEMA",
+        default=argparse.SUPPRESS,
+        help=(
+            "After a successful (non-dry-run) deploy, write the full deployed state to Unity "
+            "Catalog tables in this fully-qualified schema (catalog.schema), one table per "
+            "domain plus group memberships. Requires the account path (incompatible with "
+            "--use-workspace-scim). Off by default."
+        ),
+    )
+    parser.add_argument(
         "--enable-group-creation",
         action="store_true",
         default=argparse.SUPPRESS,

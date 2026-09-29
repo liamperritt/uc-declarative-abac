@@ -867,3 +867,98 @@ def test_workspace_helper_get_group_id_returns_none_for_unknown_group() -> None:
     result = helper.get_group_id("unknown_group")
 
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# fetch_all_group_memberships (report path)
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_helper_fetches_all_group_memberships_when_reporting() -> None:
+    """With report_group_members=True the id maps are built and every account group's
+    direct members are returned, mapped to canonical-identifier Principals."""
+    client = _make_workspace_client(
+        users=[_make_user("alice", "1")],
+        groups=[
+            _make_group("data_engineers", "10", members=[_make_member(1)]),
+            _make_group("analysts", "20", members=[]),
+        ],
+    )
+    helper = WorkspaceHelper(client, report_group_members=True)
+    helper.fetch_principals()
+
+    result = helper.fetch_all_group_memberships(exclude_ids=set())
+
+    assert result["10"] == frozenset(
+        {Principal(PrincipalType.UNKNOWN, identifier="alice")}
+    )
+    assert result["20"] == frozenset()
+
+
+def test_workspace_helper_excludes_given_group_ids_from_membership_fetch() -> None:
+    """Group ids in exclude_ids (already cached by the group domain) are not re-fetched."""
+    client = _make_workspace_client(
+        users=[_make_user("alice", "1")],
+        groups=[
+            _make_group("data_engineers", "10", members=[_make_member(1)]),
+            _make_group("analysts", "20", members=[_make_member(1)]),
+        ],
+    )
+    helper = WorkspaceHelper(client, report_group_members=True)
+    helper.fetch_principals()
+
+    result = helper.fetch_all_group_memberships(exclude_ids={"20"})
+
+    assert "10" in result
+    assert "20" not in result
+
+
+def test_workspace_helper_membership_fetch_skips_groups_whose_call_errors() -> None:
+    """A group whose member listing raises is logged and skipped; other groups still
+    return, and the fetch never raises."""
+    client = _make_workspace_client(
+        users=[_make_user("alice", "1")],
+        groups=[
+            _make_group("data_engineers", "10", members=[_make_member(1)]),
+            _make_group("broken", "20", members=[_make_member(1)]),
+        ],
+    )
+
+    def _members(group_id, **kwargs):
+        if int(group_id) == 20:
+            raise RuntimeError("boom")
+        return iter([_make_member(1)])
+
+    client.workspace_iam_v2.list_direct_group_members_proxy.side_effect = _members
+
+    helper = WorkspaceHelper(client, report_group_members=True)
+    helper.fetch_principals()
+
+    result = helper.fetch_all_group_memberships(exclude_ids=set())
+
+    assert "10" in result
+    assert "20" not in result
+
+
+def test_workspace_helper_fetches_all_group_assumers_when_reporting() -> None:
+    """fetch_all_group_assumers returns each account group's assumers (from its rule set),
+    excluding ids already cached, with assumer principals extracted."""
+    client = _make_workspace_client(
+        groups=[_make_group("data_engineers", "10"), _make_group("analysts", "20")],
+    )
+    client.config.account_id = "acc-123"
+    client.account_access_control_proxy.get_rule_set.return_value = RuleSetResponse(
+        name="rs",
+        etag="e1",
+        grant_rules=[
+            GrantRule(role="roles/group.assumer", principals=["users/alice@co.com"]),
+        ],
+    )
+    helper = WorkspaceHelper(client, report_group_members=True)
+    helper.fetch_principals()
+
+    result = helper.fetch_all_group_assumers(exclude_ids={"20"})
+
+    assert "10" in result
+    assert "20" not in result
+    assert Principal(PrincipalType.UNKNOWN, identifier="alice@co.com") in result["10"]
