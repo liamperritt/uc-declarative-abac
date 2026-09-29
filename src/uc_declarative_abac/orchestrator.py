@@ -52,7 +52,11 @@ from uc_declarative_abac.privileges import (
     compute_privilege_diff,
     execute_privilege_diff,
 )
-from uc_declarative_abac.report import ReportState, write_report
+from uc_declarative_abac.report import (
+    ReportState,
+    referenced_group_ids,
+    write_report,
+)
 from uc_declarative_abac.securables import (
     SecurableAttributes,
     SecurableDiff,
@@ -1056,6 +1060,17 @@ def run(
                 if g.id and g.assumers is not None
             },
         )
+        # Scope the report's groups (and thus its member/assumer fetch) to the groups the
+        # deployed state actually references, plus the managed groups already cached — not
+        # every account group.
+        keep_group_ids = (
+            referenced_group_ids(report_state, resolver, ws_helper)
+            | set(report_state.cached_group_members)
+            | set(report_state.cached_group_assumers)
+        )
+        report_state.account_groups = {
+            g for g in report_state.account_groups if g.id in keep_group_ids
+        }
         write_report(
             report_schema,
             report_state,

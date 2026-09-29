@@ -387,6 +387,50 @@ def build_pseudo_policies(config: ResourcesConfig) -> set[Policy]:
     return pseudo
 
 
+def referenced_group_ids(
+    state: ReportState,
+    resolver: PrincipalResolver,
+    ws_helper: WorkspaceHelper,
+) -> set[str]:
+    """Internal ids of the account groups referenced as principals anywhere in the
+    deployed state — governed-tag assigners, securable owners, privilege grantees,
+    (pseudo-)policy ``to``/``except``, domain business/technical owners, and the members
+    and assumers of managed groups.
+
+    Each referenced principal is resolved; those resolving to a GROUP are mapped to their
+    internal id via the group name→id cache. This scopes the report's member/assumer fetch
+    (and the groups table) to the groups the governance actually touches, rather than every
+    account group."""
+    principals: list[Principal] = []
+    for tag in state.governed_tags:
+        principals.extend(tag.assigners)
+    for policy in (*state.policies, *build_pseudo_policies(state.config)):
+        principals.extend(policy.to_principals)
+        principals.extend(policy.except_principals)
+    for privilege in state.privileges:
+        principals.append(privilege.principal)
+    for attrs in state.attributes:
+        if attrs.owner is not None:
+            principals.append(attrs.owner)
+    for domain in state.domains:
+        principals.extend(domain.business_owners or ())
+        principals.extend(domain.technical_owners or ())
+    for members in state.cached_group_members.values():
+        principals.extend(members)
+    for assumers in state.cached_group_assumers.values():
+        principals.extend(assumers)
+
+    ids: set[str] = set()
+    for principal in principals:
+        resolved = _resolve(resolver, principal)
+        if resolved.principal_type != PrincipalType.GROUP:
+            continue
+        gid = ws_helper.get_group_id(resolved.identifier or resolved.name)
+        if gid:
+            ids.add(gid)
+    return ids
+
+
 # --- Writing ---------------------------------------------------------------
 
 
@@ -534,15 +578,19 @@ def write_report(
 
         return _cb
 
+    # Fetch members/assumers only for the (already scoped) report groups, minus those the
+    # group domain already cached during the deploy.
+    target_ids = {g.id for g in state.account_groups if g.id}
+
     def _fetch_members() -> dict[str, frozenset[Principal]]:
-        return ws_helper.fetch_all_group_memberships(
-            exclude_ids=set(state.cached_group_members),
+        return ws_helper.fetch_group_memberships(
+            target_ids - set(state.cached_group_members),
             on_progress=_progress("members"),
         )
 
     def _fetch_assumers() -> dict[str, frozenset[Principal]]:
-        return ws_helper.fetch_all_group_assumers(
-            exclude_ids=set(state.cached_group_assumers),
+        return ws_helper.fetch_group_assumers(
+            target_ids - set(state.cached_group_assumers),
             on_progress=_progress("assumers"),
         )
 

@@ -10,7 +10,12 @@ from uc_declarative_abac.governed_tags import GovernedTag
 from uc_declarative_abac.helpers import UnityCatalogHelper
 from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.principals import Group, Principal
-from uc_declarative_abac.report import ReportState, build_pseudo_policies, write_report
+from uc_declarative_abac.report import (
+    ReportState,
+    build_pseudo_policies,
+    referenced_group_ids,
+    write_report,
+)
 from uc_declarative_abac.types import PolicyType, PrincipalType
 from uc_declarative_abac.utils import OrchestratorError
 
@@ -34,8 +39,8 @@ def _ws_helper(
     memberships: dict | None = None, assumers: dict | None = None
 ) -> MagicMock:
     ws = MagicMock()
-    ws.fetch_all_group_memberships.return_value = memberships or {}
-    ws.fetch_all_group_assumers.return_value = assumers or {}
+    ws.fetch_group_memberships.return_value = memberships or {}
+    ws.fetch_group_assumers.return_value = assumers or {}
     return ws
 
 
@@ -187,3 +192,36 @@ def test_build_pseudo_policies_carries_privileges_and_when_condition():
     assert policy.when_condition == "has_tag_value('pii', 'email')"
     assert [p.value for p in policy.privileges] == ["select"]
     assert policy.to_principals == (Principal(PrincipalType.UNKNOWN, name="analysts"),)
+
+
+def test_referenced_group_ids_maps_group_principals_to_ids():
+    """Group principals referenced in state resolve to their ids; non-groups are ignored."""
+    state = ReportState(
+        config=_config(),
+        governed_tags={
+            GovernedTag(
+                name="pii",
+                assigners=frozenset(
+                    {
+                        Principal(PrincipalType.UNKNOWN, name="data_engineers"),
+                        Principal(PrincipalType.UNKNOWN, name="alice"),
+                    }
+                ),
+            )
+        },
+    )
+
+    def _resolve_principal(p):
+        ident = p.name or p.identifier
+        if ident == "data_engineers":
+            return Principal(PrincipalType.GROUP, identifier=ident, name=ident)
+        return Principal(PrincipalType.USER, identifier=ident, name=ident)
+
+    resolver = MagicMock()
+    resolver.resolve_principal.side_effect = _resolve_principal
+    ws = MagicMock()
+    ws.get_group_id.side_effect = lambda name: (
+        "10" if name == "data_engineers" else None
+    )
+
+    assert referenced_group_ids(state, resolver, ws) == {"10"}
