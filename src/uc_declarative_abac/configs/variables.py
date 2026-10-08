@@ -1,21 +1,25 @@
 """Template-variable helpers for the config resolver.
 
-A ``definitions`` entry may be a *template* containing ``{{ placeholder }}`` tokens;
+A ``definitions`` entry may be a *template* containing placeholder tokens;
 a ``$ref`` that instantiates it supplies concrete values via a sibling ``$vars``
 block, and a definition may declare per-variable defaults via its own ``$vars``
 block. This module is the single source of truth for detecting, validating, and
 substituting those tokens. It is dependency-light and imported by ``resolver.py``
 (never the reverse).
 
-Delimiter: ``{{ name }}`` wraps a bare variable name (optional inner whitespace).
-Literal double braces are escaped by doubling — ``{{{{`` renders a literal ``{{``
-and ``}}}}`` a literal ``}}`` — so genuine ``{{ }}`` in SQL function bodies survives.
+Delimiters: ``${name}`` (tight — no inner whitespace) is the recommended form, and
+``{{ name }}`` (optional inner whitespace) is the legacy form kept for backward
+compatibility; both wrap a bare variable name. Literal dollar-braces are escaped by
+doubling the dollar — ``$${`` renders a literal ``${`` — and literal double braces by
+doubling — ``{{{{`` renders a literal ``{{`` and ``}}}}`` a literal ``}}`` — so genuine
+``${}`` and ``{{ }}`` in SQL function bodies survive. A bare ``$$`` not immediately
+followed by ``{`` (e.g. SQL dollar-quote ``$$func$$``) is left untouched.
 
 Structure-awareness (see ``collect_placeholders`` / ``substitute_in_body``): within a
 template body, every string value belongs to the enclosing template's variable scope and is
 bound here — plain values, a nested ``$ref``'s ``$vars`` values (forwarding), a nested
 ``$ref``'s override values, and the ``$ref`` / ``$defs`` **target** itself (a placeholder
-there selects which definition is referenced, e.g. ``$defs/tables/base_{{ layer }}``, and is
+there selects which definition is referenced, e.g. ``$defs/tables/base_${layer}``, and is
 substituted to a concrete target before lookup). In short: the definition that *writes* a
 placeholder is the one that binds it. (A templated target under ``resources:`` is still an
 error — resources carry no ``$vars`` scope; see ``check_no_placeholders_in_resources``.)
@@ -38,28 +42,33 @@ from typing import Any
 
 from uc_declarative_abac.utils import TemplateVariableError
 
-# A single token scanner. Order matters: the escaped four-brace sequences are matched
-# before the two-brace placeholder, so `{{{{ env }}}}` is read as literal braces around
-# ` env `, never as a placeholder. Only the third alternative captures a name (group 1).
+# A single token scanner. Order matters: escapes first (so `$${env}` and `{{{{ env }}}}`
+# are read as literal braces, never as placeholders), then valid placeholders. The `${}`
+# alternative captures to group 1, and `{{ }}` to group 2. Only these two alternatives
+# capture names; escape alternatives never do.
 _TOKEN_RE = re.compile(
-    r"\{\{\{\{"  # escaped literal "{{"
+    r"\$\$\{"  # escaped literal "${"
+    r"|\{\{\{\{"  # escaped literal "{{"
     r"|\}\}\}\}"  # escaped literal "}}"
-    r"|\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}"  # a {{ placeholder }}
+    r"|\$\{([A-Za-z_][A-Za-z0-9_]*)\}"  # a ${placeholder} -> group 1
+    r"|\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}"  # a {{ placeholder }} -> group 2
 )
 
-# A validation-only scanner for *malformed* placeholders — a `{{ token }}` whose token is
-# identifier-shaped but not a valid bare identifier (e.g. `{{ my-var }}`, `{{ a.b }}`,
-# `{{ 1x }}`), which `_TOKEN_RE` never matches and so would otherwise pass through as literal
-# text. Order matters: escapes are consumed first (so `{{{{ my-var }}}}` is a literal, not a
-# hit), then a valid placeholder (non-capturing — handled by substitution), and only then the
-# malformed alternative (group 1). The single-token, word-chars-plus-`.`/`-` shape deliberately
-# does NOT match legitimate literal SQL/JSON braces (`{{"a":1}}`, `{{ SELECT 1 }}`, `{{ f(x) }}`),
-# preserving the delimiter's collision-safety.
+# A validation-only scanner for *malformed* placeholders — tokens that are identifier-shaped
+# but not valid bare identifiers (e.g. `${my-var}`, `${ env }`, `{{ a.b }}`, `{{ 1x }}`, etc.),
+# which `_TOKEN_RE` never matches and so would pass through as literal text undetected. Order
+# matters: escapes first (so `$${my-var}` and `{{{{ my-var }}}}` are literals, not hits), then
+# valid placeholders (non-capturing — handled by substitution), then malformed (capturing).
+# The shape deliberately does NOT match legitimate literal SQL/JSON braces (`${1+2}`,
+# `${ SELECT 1 }`, `{{"a":1}}`, `{{ SELECT 1 }}`), preserving collision-safety.
 _MALFORMED_RE = re.compile(
-    r"\{\{\{\{"  # escaped literal "{{"
+    r"\$\$\{"  # escaped literal "${"
+    r"|\{\{\{\{"  # escaped literal "{{"
     r"|\}\}\}\}"  # escaped literal "}}"
+    r"|\$\{[A-Za-z_][A-Za-z0-9_]*\}"  # a VALID ${placeholder} — ignored
     r"|\{\{\s*[A-Za-z_][A-Za-z0-9_]*\s*\}\}"  # a VALID {{ placeholder }} — ignored
-    r"|\{\{\s*([A-Za-z0-9_][\w.\-]*)\s*\}\}"  # identifier-shaped but INVALID -> group 1
+    r"|\$\{\s*([A-Za-z0-9_][\w.\-]*)\s*\}"  # identifier-shaped but INVALID -> group 1
+    r"|\{\{\s*([A-Za-z0-9_][\w.\-]*)\s*\}\}"  # identifier-shaped but INVALID -> group 2
 )
 
 _REF_KEY = "$ref"
@@ -93,47 +102,64 @@ TEMPLATABLE_KEY_FIELDS = frozenset(
 )
 
 
+def _token_name(match: re.Match) -> str | None:
+    """Extract the variable name from a ``_TOKEN_RE`` or ``_MALFORMED_RE`` match.
+
+    Both scanners capture the ``${}`` name into group 1 and the ``{{ }}`` name into
+    group 2, so this returns whichever matched. ``None`` means the match was an escape
+    or other non-capturing alternative.
+    """
+    return match.group(1) if match.group(1) is not None else match.group(2)
+
+
 def _quote_names(names) -> str:
     """Render an iterable of variable names as a sorted, single-quoted, comma list."""
     return ", ".join(f"'{name}'" for name in sorted(names))
 
 
 def find_placeholders(text: str) -> set[str]:
-    """Return the set of variable names referenced by ``{{ name }}`` tokens in ``text``.
+    """Return the set of variable names referenced by `${name}` or `{{ name }}` tokens.
 
-    Escaped ``{{{{ ... }}}}`` sequences are not placeholders and contribute nothing.
+    Escaped `$${` and `{{{{` / `}}}}` sequences are not placeholders and contribute nothing.
     """
-    return {m.group(1) for m in _TOKEN_RE.finditer(text) if m.group(1) is not None}
+    return {
+        name for m in _TOKEN_RE.finditer(text) if (name := _token_name(m)) is not None
+    }
 
 
 def find_malformed_placeholders(text: str) -> set[str]:
-    """Return identifier-shaped-but-invalid ``{{ token }}`` names in ``text``.
+    """Return identifier-shaped-but-invalid placeholder names in ``text``.
 
-    These are tokens a user likely intended as a placeholder but whose name is not a valid
-    bare identifier (``{{ my-var }}``, ``{{ a.b }}``, ``{{ 1x }}``). ``_TOKEN_RE`` never
-    matches them, so without this they would pass through as literal text. Escaped
-    ``{{{{ ... }}}}`` sequences and legitimate literal braces (``{{"a":1}}``, ``{{ SELECT 1 }}``)
-    are not reported. See ``_MALFORMED_RE``.
+    These include tokens in both `${}` and `{{ }}` forms that look like a placeholder but
+    whose name is not a valid bare identifier (e.g. `${my-var}`, `${ env }`, `{{ a.b }}`,
+    `{{ 1x }}`). ``_TOKEN_RE`` never matches them, so without this they would pass through
+    as literal text. Escaped `$${`, `{{{{`, `}}}}` and legitimate literal braces
+    (e.g. `${1+2}`, `{{ SELECT 1 }}`) are not reported. See ``_MALFORMED_RE``.
     """
-    return {m.group(1) for m in _MALFORMED_RE.finditer(text) if m.group(1) is not None}
+    return {
+        name
+        for m in _MALFORMED_RE.finditer(text)
+        if (name := _token_name(m)) is not None
+    }
 
 
 def placeholder_wildcard_pattern(text: str) -> str:
     """Return an anchored regex matching any literal ``text`` could become once substituted.
 
-    Each ``{{ name }}`` token is replaced with a ``.*`` wildcard and the literal segments around
-    the tokens are regex-escaped (definition keys contain the regex-special ``|`` delimiter). The
-    wildcard is ``.*`` rather than ``.+`` because a variable may substitute to the empty string
-    (``''`` is a real value here), so ``base_{{ suffix }}`` must also match a base keyed ``base_``.
-    Used to match a *templated* ``$ref`` target key (e.g. ``base_{{ layer }}``) against the
-    definition registry when the concrete variable values are not yet known — so token detection
-    stays single-sourced here rather than re-implemented by the resolver.
+    Each `${name}` or `{{ name }}` token is replaced with a ``.*`` wildcard and the literal
+    segments around the tokens are regex-escaped (definition keys contain the regex-special ``|``
+    delimiter). The wildcard is ``.*`` rather than ``.+`` because a variable may substitute to
+    the empty string (``''`` is a real value here), so ``base_${suffix}`` must also match a
+    base keyed ``base_``. Used to match a *templated* ``$ref`` target key (e.g.
+    ``base_${layer}``) against the definition registry when the concrete variable values are
+    not yet known — so token detection stays single-sourced here rather than re-implemented by
+    the resolver.
     """
     parts: list[str] = []
     last = 0
     for match in _TOKEN_RE.finditer(text):
-        if match.group(1) is None:
-            continue  # an escaped {{{{ / }}}} — literal, folded into the surrounding escape
+        if _token_name(match) is None:
+            continue  # an escaped $${, {{{{, or }}}} — literal, folded into the surrounding escape
         parts.append(re.escape(text[last : match.start()]))
         parts.append(".*")
         last = match.end()
@@ -142,19 +168,19 @@ def placeholder_wildcard_pattern(text: str) -> str:
 
 
 def substitute(text: str, variables: dict[str, str]) -> str:
-    """Replace each ``{{ name }}`` token in ``text`` with ``variables[name]``.
+    """Replace each `${name}` or `{{ name }}` token in ``text`` with ``variables[name]``.
 
     Only tokens whose name is present in ``variables`` are replaced; any other token is
-    left intact (an unbound placeholder is caught elsewhere). Escaped ``{{{{``/``}}}}``
+    left intact (an unbound placeholder is caught elsewhere). Escaped `$${` and `{{{{`/`}}}}`
     sequences are **not** unescaped here — that happens once, at the end of resolution,
     via ``finalise`` — so a substituted string is never re-scanned as if its escaped
     braces were live placeholders.
     """
 
     def _replace(match: re.Match) -> str:
-        name = match.group(1)
+        name = _token_name(match)
         if name is None:
-            return match.group(0)  # an escaped {{{{ or }}}} — leave for finalise()
+            return match.group(0)  # an escaped sequence — leave for finalise()
         if name not in variables:
             return match.group(0)  # unbound here — reported elsewhere
         return variables[name]
@@ -163,8 +189,12 @@ def substitute(text: str, variables: dict[str, str]) -> str:
 
 
 def unescape(text: str) -> str:
-    """Collapse escaped double-braces: ``{{{{`` -> ``{{`` and ``}}}}`` -> ``}}``."""
-    return text.replace("{{{{", "{{").replace("}}}}", "}}")
+    """Collapse escaped sequences: `$${` -> `${` and `{{{{` -> `{{` and `}}}}` -> `}}`.
+
+    A bare `$$` not immediately followed by `{` (e.g. SQL dollar-quote `$$func$$`) is
+    preserved and not collapsed.
+    """
+    return text.replace("$${", "${").replace("{{{{", "{{").replace("}}}}", "}}")
 
 
 def collect_placeholders(node: Any) -> set[str]:
@@ -250,14 +280,15 @@ def _substitute(
 def finalise(node: Any) -> Any:
     """Final placeholder pass over a fully-resolved tree.
 
-    Any remaining live ``{{ name }}`` token is a placeholder that nothing bound — a hard
-    error, wherever it sits. In practice these are caught earlier (an unbound definition
-    placeholder by ``check_no_unbound`` at its ``$ref``; a resource placeholder by
+    Any remaining live ``${name}`` or ``{{ name }}`` token is a placeholder that nothing
+    bound — a hard error, wherever it sits. In practice these are caught earlier (an unbound
+    definition placeholder by ``check_no_unbound`` at its ``$ref``; a resource placeholder by
     ``check_no_placeholders_in_resources``), so this is a defensive backstop. It also
-    rejects any *malformed* placeholder (an identifier-shaped ``{{ token }}`` whose name is
-    not a valid bare identifier), which no earlier check sees because ``_TOKEN_RE`` never
-    matched it. Escaped ``{{{{ ... }}}}`` sequences are not placeholders and are collapsed
-    to their literal braces. Runs once, after all ``$ref`` expansion.
+    rejects any *malformed* placeholder (an identifier-shaped ``${token}`` / ``{{ token }}``
+    whose name is not a valid bare identifier), which no earlier check sees because
+    ``_TOKEN_RE`` never matched it. Escaped ``$${``, ``{{{{``, and ``}}}}`` sequences are not
+    placeholders and are collapsed to their literal braces. Runs once, after all ``$ref``
+    expansion.
     """
     return _finalise(node)
 
@@ -280,12 +311,12 @@ def _finalise(node: Any) -> Any:
 
 def _finalise_str(text: str) -> str:
     """Finalise one string (a value or a tag-map key): any surviving placeholder is a hard
-    error, a malformed placeholder is a hard error, and escaped braces collapse to literals."""
+    error, a malformed placeholder is a hard error, and escaped sequences collapse to literals."""
     unresolved = find_placeholders(text)
     if unresolved:
         raise TemplateVariableError(
             f"Unbound template variable(s) {_quote_names(unresolved)} in "
-            f"{text!r}: a '{{{{ ... }}}}' placeholder is bound by the enclosing "
+            f"{text!r}: a '${{...}}' or '{{{{ ... }}}}' placeholder is bound by the enclosing "
             f"definition's $vars and may appear only inside a definition (in a value, or a "
             f"tag-name map key), never in a resource, which must be concrete."
         )
@@ -293,25 +324,26 @@ def _finalise_str(text: str) -> str:
     if malformed:
         raise TemplateVariableError(
             f"Malformed template placeholder(s) {_quote_names(malformed)} in "
-            f"{text!r}: a '{{{{ ... }}}}' variable reference must be a bare identifier "
-            f"(letters, digits, and underscore, not starting with a digit). Rename the "
-            f"variable, or if the braces are literal escape them by doubling."
+            f"{text!r}: a '${{...}}' or '{{{{ ... }}}}' variable reference must be a bare "
+            f"identifier (letters, digits, and underscore, not starting with a digit). Rename "
+            f"the variable, or if the braces are literal escape them by doubling the leading "
+            f"delimiter ('$$' escapes '${{', doubled braces escape '{{{{'/'}}}}')."
         )
     return unescape(text)
 
 
 def check_no_placeholders_in_resources(resources: Any) -> None:
-    """Assert no ``{{ placeholder }}`` appears anywhere in the authored resources tree.
+    """Assert no `${placeholder}` or `{{ placeholder }}` appears in the resources tree.
 
     Placeholders are a *definition* facility, bound by the enclosing definition's
     ``$vars``. Resources are the concrete instance layer and carry no ``$vars`` scope, so
     a placeholder anywhere under ``resources`` (a plain value, a ``$ref`` override value,
     a ``$vars`` value, or a dict key — tag-name keys included) has nothing to bind it and is
-    a hard error. This scans the raw
-    resources — before any ``$ref`` expansion inlines definition bodies — so it never sees
-    (and never faults) the placeholders that legitimately live inside definitions. Escaped
-    ``{{{{ ... }}}}`` sequences are not placeholders and are ignored (they survive to
-    ``finalise``, which collapses them to literal braces).
+    a hard error. This scans the raw resources — before any ``$ref`` expansion inlines
+    definition bodies — so it never sees (and never faults) the placeholders that
+    legitimately live inside definitions. Escaped sequences like `$${` and `{{{{` are not
+    placeholders and are ignored (they survive to ``finalise``, which collapses them to
+    literal braces).
     """
     _check_no_placeholders(resources, path="resources")
 
@@ -325,8 +357,8 @@ def _check_no_placeholders(node: Any, *, path: str) -> None:
                     f"Template placeholder(s) {_quote_names(names)} found in a resource "
                     f"key at {path}.{key!r}. Placeholders are bound by the enclosing "
                     f"definition's $vars; a resource is the concrete instance layer and must "
-                    f"not contain '{{{{ ... }}}}' — supply the literal key, or move the "
-                    f"templating into a definition and instantiate it via $ref + $vars."
+                    f"not contain '${{...}}' or '{{{{ ... }}}}' — supply the literal key, or "
+                    f"move the templating into a definition and instantiate it via $ref + $vars."
                 )
             _check_no_placeholders(value, path=f"{path}.{key}")
     elif isinstance(node, list):
@@ -339,8 +371,8 @@ def _check_no_placeholders(node: Any, *, path: str) -> None:
                 f"Template placeholder(s) {_quote_names(names)} found in a resource "
                 f"value at {path}: {node!r}. Placeholders are bound by the enclosing "
                 f"definition's $vars; a resource is the concrete instance layer and must "
-                f"not contain '{{{{ ... }}}}' — supply the literal value, or move the "
-                f"templating into a definition and instantiate it via $ref + $vars."
+                f"not contain '${{...}}' or '{{{{ ... }}}}' — supply the literal value, or "
+                f"move the templating into a definition and instantiate it via $ref + $vars."
             )
 
 
@@ -351,7 +383,8 @@ def check_string_vars(variables: dict[str, Any], *, context: str) -> None:
     it is dropped before this check. Numbers, booleans, lists, and maps are rejected —
     a placeholder interpolates into a string, and quoting keeps the rendering explicit. A
     string that looks like a reference (``$defs/...``) is rejected too: ``$vars`` values are
-    literal strings (or a forwarding ``{{ ... }}`` placeholder), never definition references.
+    literal strings (or a forwarding `${ ... }` or `{{ ... }}` placeholder), never definition
+    references.
     """
     for name, value in variables.items():
         if value is None:
@@ -365,7 +398,7 @@ def check_string_vars(variables: dict[str, Any], *, context: str) -> None:
             raise TemplateVariableError(
                 f"Template variable '{name}' in {context} has a reference-like value "
                 f"{value!r}: $vars values are literal strings (or a forwarding "
-                f"'{{{{ ... }}}}' placeholder), not '$defs/...' references."
+                f"'${{...}}' or '{{{{ ... }}}}' placeholder), not '$defs/...' references."
             )
 
 
@@ -392,8 +425,8 @@ def check_no_unused(supplied: set[str], used: set[str], *, ref: str) -> None:
     if unused:
         raise TemplateVariableError(
             f"Unused template variable(s) {_quote_names(unused)} supplied to $ref "
-            f"'{ref}': the template has no matching '{{{{ ... }}}}' placeholder (check "
-            f"for a name mismatch)."
+            f"'{ref}': the template has no matching '${{...}}' or '{{{{ ... }}}}' "
+            f"placeholder (check for a name mismatch)."
         )
 
 
@@ -415,7 +448,7 @@ def check_signature_complete(
     extends via a root ``$ref`` (see ``accepted_vars``). A definition whose body root is
     a ``$ref`` implicitly forwards its own variables into that base by name, so a declared
     variable that the base accepts counts as *used* even when the body writes no
-    ``{{ placeholder }}`` for it — this is what lets a variable be declared purely to pass
+    ``${placeholder}`` for it — this is what lets a variable be declared purely to pass
     through to the base. Inherited uses relax only the "unused declared variable" direction;
     they never force a base's internally-defaulted variable into this definition's signature.
     """
@@ -444,7 +477,7 @@ def check_signature_complete(
         raise TemplateVariableError(
             f"Definition '{def_key}' declares variable(s) {_quote_names(unused)} in "
             f"$vars that its body never uses; remove them or reference them via "
-            f"'{{{{ ... }}}}'."
+            f"'${{...}}' or '{{{{ ... }}}}'."
         )
 
 

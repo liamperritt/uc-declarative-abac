@@ -18,5 +18,5 @@ definitions:
         - read
         - use
       to:
-        - uc_abac_finance_analysts_{{ env }}
+        - uc_abac_finance_analysts_${env}
       expiry_date: 2026-12-31

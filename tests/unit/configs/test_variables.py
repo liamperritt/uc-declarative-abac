@@ -678,3 +678,418 @@ def test_templatable_key_fields_are_real_model_fields():
             "has_none_of_identity_attribute_tag_matches",
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# Dollar-brace `${}` syntax
+# ---------------------------------------------------------------------------
+
+
+def test_find_placeholders_finds_dollar_brace_tight():
+    """A `${env}` token with no inner whitespace is a placeholder."""
+    assert find_placeholders("a_${env}_${layer}") == {"env", "layer"}
+
+
+def test_find_placeholders_finds_dollar_brace_mixed_with_double_brace():
+    """Both `${env}` and `{{ region }}` syntax coexist in the same string."""
+    assert find_placeholders("${env}_{{ region }}") == {"env", "region"}
+
+
+def test_find_placeholders_ignores_dollar_brace_spaced():
+    """A spaced `${ env }` is not a placeholder; inner whitespace disqualifies it."""
+    assert find_placeholders("${ env }") == set()
+
+
+def test_find_placeholders_ignores_dollar_brace_escaped():
+    """An escaped `$${env}` is a literal, not a placeholder."""
+    assert find_placeholders("$${env}") == set()
+
+
+def test_find_placeholders_ignores_dollar_brace_non_identifier():
+    """Non-identifier-shaped `${...}` is a literal and ignored."""
+    assert find_placeholders("${1+2}") == set()
+    assert find_placeholders("${ SELECT 1 }") == set()
+    assert find_placeholders('${"a":1}') == set()
+
+
+def test_find_placeholders_preserves_dollar_quote_syntax():
+    """A bare `$$` not immediately followed by `{` is left untouched (e.g. SQL dollar-quote)."""
+    assert find_placeholders("$$body$$") == set()
+    assert find_placeholders("$$func$$ SELECT 1") == set()
+
+
+def test_find_placeholders_finds_dollar_brace_with_underscore_in_name():
+    """A valid identifier with underscores in `${my_var}` is a placeholder."""
+    assert find_placeholders("${my_var}_${other_name}") == {"my_var", "other_name"}
+
+
+def test_find_placeholders_ignores_dollar_single_brace_variant():
+    """A single `${` without matching `}` is not a placeholder."""
+    assert find_placeholders("prefix ${var") == set()
+
+
+# ---
+
+
+def test_find_malformed_placeholders_flags_dollar_brace_hyphen():
+    """A `${my-var}` with a hyphen is malformed (identifier-shaped but invalid)."""
+    assert find_malformed_placeholders("${my-var}") == {"my-var"}
+
+
+def test_find_malformed_placeholders_flags_dollar_brace_dot():
+    """A `${a.b}` with a dot is malformed (identifier-shaped but invalid)."""
+    assert find_malformed_placeholders("${a.b}") == {"a.b"}
+
+
+def test_find_malformed_placeholders_flags_dollar_brace_leading_digit():
+    """A `${1x}` with leading digit is malformed (identifier-shaped but invalid)."""
+    assert find_malformed_placeholders("${1x}") == {"1x"}
+
+
+def test_find_malformed_placeholders_flags_dollar_brace_spaced():
+    """A spaced `${ env }` with valid identifier is malformed (inner whitespace invalid)."""
+    assert find_malformed_placeholders("${ env }") == {"env"}
+
+
+def test_find_malformed_placeholders_ignores_dollar_brace_tight_valid():
+    """A tight `${env}` with valid identifier is not malformed."""
+    assert find_malformed_placeholders("${env}") == set()
+
+
+def test_find_malformed_placeholders_ignores_dollar_brace_escaped():
+    """An escaped `$${my-var}` is not malformed (it's literal)."""
+    assert find_malformed_placeholders("$${my-var}") == set()
+
+
+def test_find_malformed_placeholders_ignores_dollar_brace_non_identifier():
+    """Non-identifier-shaped `${...}` is not malformed (it's a literal)."""
+    assert find_malformed_placeholders("${1+2}") == set()
+    assert find_malformed_placeholders("${ SELECT 1 }") == set()
+
+
+def test_find_malformed_placeholders_multiple_dollar_brace_errors():
+    """Multiple malformed `${}` tokens are all reported."""
+    result = find_malformed_placeholders("${my-var}_${ other }_${a.b}")
+    assert result == {"my-var", "other", "a.b"}
+
+
+# ---
+
+
+def test_substitute_dollar_brace_single():
+    """A bound `${env}` is replaced by its value."""
+    assert substitute("ingestion_${env}", {"env": "prod"}) == "ingestion_prod"
+
+
+def test_substitute_dollar_brace_multiple():
+    """Several `${...}` tokens in one string are all replaced."""
+    result = substitute("${env}_${layer}", {"env": "prod", "layer": "bronze"})
+    assert result == "prod_bronze"
+
+
+def test_substitute_dollar_brace_empty_value():
+    """A bound `${tier}` with empty-string value is inserted (not removed)."""
+    assert substitute("q_${tier}", {"tier": ""}) == "q_"
+
+
+def test_substitute_dollar_brace_unbound():
+    """An unbound `${env}` is left intact for later validation."""
+    assert substitute("${env}", {"other": "x"}) == "${env}"
+
+
+def test_substitute_dollar_brace_mixed_with_double_brace():
+    """Both `${}` and `{{ }}` tokens are substituted together."""
+    result = substitute("${env}_{{ region }}", {"env": "prod", "region": "us-east"})
+    assert result == "prod_us-east"
+
+
+def test_substitute_dollar_brace_escaped_left_intact():
+    """An escaped `$${env}` is left intact (unescaping happens in finalise)."""
+    assert substitute("a_$${env}_b", {"env": "prod"}) == "a_$${env}_b"
+
+
+def test_substitute_dollar_brace_partially_unbound():
+    """When only some variables are bound, unbound ones are left intact."""
+    result = substitute("${env}_${layer}", {"env": "prod"})
+    assert result == "prod_${layer}"
+
+
+def test_substitute_dollar_brace_with_underscore_in_name():
+    """Variables with underscores in names are substituted correctly."""
+    assert substitute("s_${my_var}", {"my_var": "value"}) == "s_value"
+
+
+# ---
+
+
+def test_unescape_dollar_brace_escape_sequence():
+    """An escaped `$${x}` collapses to literal `${x}`."""
+    assert unescape("a_$${x}_b") == "a_${x}_b"
+
+
+def test_unescape_dollar_brace_multiple_escapes():
+    """Multiple escaped sequences are all collapsed."""
+    assert unescape("$${a}_$${b}") == "${a}_${b}"
+
+
+def test_unescape_dollar_quote_preserved():
+    """Bare `$$` not followed by `{` is preserved (SQL dollar-quote)."""
+    assert unescape("$$body$$") == "$$body$$"
+
+
+def test_unescape_dollar_quote_with_dollar_brace_escape():
+    """Both SQL dollar-quote and dollar-brace escape coexist."""
+    assert unescape("$$body$$ AND col = $${id}") == "$$body$$ AND col = ${id}"
+
+
+# ---
+
+
+def test_finalise_dollar_brace_unbound_raises():
+    """An unbound `${env}` in finalise raises Unbound error."""
+    with pytest.raises(TemplateVariableError, match="[Uu]nbound"):
+        finalise({"name": "ingestion_${env}"})
+
+
+def test_finalise_dollar_brace_malformed_hyphen_raises():
+    """A malformed `${my-var}` in finalise raises Malformed error."""
+    with pytest.raises(TemplateVariableError, match="[Mm]alformed"):
+        finalise({"name": "ingestion_${my-var}"})
+
+
+def test_finalise_dollar_brace_malformed_spaced_raises():
+    """A spaced `${ env }` in finalise raises Malformed error."""
+    with pytest.raises(TemplateVariableError, match="[Mm]alformed"):
+        finalise({"name": "prefix_${ env }"})
+
+
+def test_finalise_dollar_brace_escaped_allowed():
+    """An escaped `$${env}` is collapsed to literal without error."""
+    assert finalise("a_$${env}_b") == "a_${env}_b"
+
+
+def test_finalise_dollar_quote_preserved():
+    """Bare `$$` not followed by `{` is preserved through finalise."""
+    assert finalise("$$body$$") == "$$body$$"
+
+
+def test_finalise_dollar_brace_escaped_malformed_allowed():
+    """An escaped `$${my-var}` is literal and allowed (never validated as identifier)."""
+    assert finalise("$${my-var}") == "${my-var}"
+
+
+def test_finalise_dollar_brace_tree_with_escapes():
+    """Escaped `$${...}` sequences are collapsed in a nested tree."""
+    result = finalise({"return": "CONCAT('$${', v, '}}')"})
+    assert result == {"return": "CONCAT('${', v, '}}')"}
+
+
+# ---
+
+
+def test_placeholder_wildcard_pattern_dollar_brace():
+    """A `${suffix}` becomes a wildcard matching any value, including empty."""
+    pattern = re.compile(placeholder_wildcard_pattern("base_${suffix}"))
+    assert pattern.match("base_silver")
+    assert pattern.match("base_")  # empty value
+    assert not pattern.match("other")
+
+
+def test_placeholder_wildcard_pattern_mixed_delimiters():
+    """A pattern with both `${}` and `{{ }}` tokens generates a wildcard."""
+    pattern = re.compile(placeholder_wildcard_pattern("${env}_{{ layer }}"))
+    assert pattern.match("prod_bronze")
+    assert pattern.match("_")  # empty for both
+    assert not pattern.match("prod")  # missing layer
+
+
+# ---
+
+
+def test_collect_placeholders_dollar_brace_plain_values():
+    """Placeholders in `${}` form are collected from plain values."""
+    body = {"name": "s_${env}", "tags": {"tier": "${layer}"}}
+    assert collect_placeholders(body) == {"env", "layer"}
+
+
+def test_collect_placeholders_dollar_brace_tag_map_keys():
+    """A placeholder in `${}` form in a tag-map key counts as used."""
+    body = {"tags": {"uc_gov_${env}_owner": "platform"}}
+    assert collect_placeholders(body) == {"env"}
+
+
+def test_collect_placeholders_dollar_brace_ref_target():
+    """A placeholder in `${}` form in a $ref target is counted."""
+    body = {
+        "tables": [
+            {"$ref": "$defs/tables/${layer}", "name": "s_${env}"},
+        ],
+    }
+    assert collect_placeholders(body) == {"layer", "env"}
+
+
+def test_collect_placeholders_dollar_brace_mixed_with_double_brace():
+    """Both `${}` and `{{ }}` tokens are collected together."""
+    body = {
+        "name": "${env}_{{ region }}",
+        "tags": {"t_${layer}": "{{ tier }}"},
+    }
+    assert collect_placeholders(body) == {"env", "region", "layer", "tier"}
+
+
+def test_collect_placeholders_dollar_brace_nested_ref_vars():
+    """A `${}` placeholder in a nested $ref's $vars value is counted."""
+    body = {
+        "tables": [
+            {"$ref": "$defs/tables/x", "$vars": {"env": "${env}"}},
+        ],
+    }
+    assert collect_placeholders(body) == {"env"}
+
+
+# ---
+
+
+def test_substitute_in_body_dollar_brace_plain_values():
+    """Plain `${}` values are substituted."""
+    body = {"name": "s_${env}"}
+    assert substitute_in_body(body, {"env": "prod"}) == {"name": "s_prod"}
+
+
+def test_substitute_in_body_dollar_brace_tag_map_key():
+    """A `${}` in a tag-map key is substituted."""
+    body = {"tags": {"uc_gov_${env}_owner": "platform"}}
+    assert substitute_in_body(body, {"env": "test"}) == {
+        "tags": {"uc_gov_test_owner": "platform"}
+    }
+
+
+def test_substitute_in_body_dollar_brace_ref_target():
+    """A `${}` in a nested $ref target is substituted."""
+    body = {
+        "tables": [
+            {
+                "$ref": "$defs/tables/base_${layer}",
+                "name": "${env}",
+                "$vars": {"env": "${env}"},
+            },
+        ],
+    }
+    result = substitute_in_body(body, {"env": "prod", "layer": "silver"})
+    entry = result["tables"][0]
+    assert entry["$ref"] == "$defs/tables/base_silver"
+    assert entry["name"] == "prod"
+    assert entry["$vars"]["env"] == "prod"
+
+
+def test_substitute_in_body_dollar_brace_mixed_delimiters():
+    """Both `${}` and `{{ }}` tokens in a body are substituted."""
+    body = {"name": "${env}_{{ region }}", "tags": {"t_${layer}": "{{ tier }}"}}
+    result = substitute_in_body(
+        body, {"env": "prod", "region": "us", "layer": "bronze", "tier": "gold"}
+    )
+    assert result == {"name": "prod_us", "tags": {"t_bronze": "gold"}}
+
+
+def test_substitute_in_body_dollar_brace_escaped():
+    """Escaped `$${env}` is left intact (not substituted or unescaped)."""
+    body = {"name": "a_$${env}_b"}
+    assert substitute_in_body(body, {"env": "prod"}) == {"name": "a_$${env}_b"}
+
+
+# ---
+
+
+def test_check_string_vars_accepts_dollar_brace_forwarding():
+    """A forwarding `${env}` value in $vars is a valid string."""
+    check_string_vars({"env": "${env}"}, context="test")
+
+
+# ---
+
+
+def test_check_signature_complete_dollar_brace_placeholders():
+    """A body using `${}` placeholders matching declared `$vars` passes."""
+    body = {
+        "$vars": {"env": None, "layer": "silver"},
+        "name": "${env}",
+        "tags": {"e": "${layer}"},
+    }
+    check_signature_complete("s", body, body["$vars"])
+
+
+def test_check_signature_complete_dollar_brace_undeclared():
+    """A body placeholder `${}` missing from the declared signature raises."""
+    body = {"$vars": {"env": None}, "name": "${env}_${region}"}
+    with pytest.raises(
+        TemplateVariableError, match="undeclared placeholder\\(s\\) 'region'"
+    ):
+        check_signature_complete("s", body, body["$vars"])
+
+
+def test_check_signature_complete_dollar_brace_unused_declaration():
+    """A declared variable the body never uses (including `${}` form) raises."""
+    body = {"$vars": {"env": None, "extra": "x"}, "name": "${env}"}
+    with pytest.raises(TemplateVariableError, match="never uses"):
+        check_signature_complete("s", body, body["$vars"])
+
+
+def test_check_signature_complete_dollar_brace_ref_target_use():
+    """A variable used only inside a `${}` $ref target counts as used."""
+    body = {"$vars": {"layer": None}, "$ref": "$defs/tables/base_${layer}"}
+    check_signature_complete("t", body, body["$vars"])
+
+
+def test_check_signature_complete_mixed_delimiters():
+    """A body using both `${}` and `{{ }}` placeholders works."""
+    body = {
+        "$vars": {"env": None, "region": None},
+        "name": "${env}_{{ region }}",
+    }
+    check_signature_complete("s", body, body["$vars"])
+
+
+# ---
+
+
+def test_check_no_placeholders_in_resources_dollar_brace_raises():
+    """A `${}` placeholder in a resource value is rejected."""
+    resources = {"catalogs": {"c": {"name": "ingestion_${env}"}}}
+    with pytest.raises(TemplateVariableError, match="'env'"):
+        check_no_placeholders_in_resources(resources)
+
+
+def test_check_no_placeholders_in_resources_dollar_brace_tag_key_raises():
+    """A `${}` placeholder in a resource tag-map key is rejected."""
+    resources = {
+        "catalogs": {
+            "c": {"name": "c", "tags": {"uc_gov_${env}_owner": "platform"}},
+        },
+    }
+    with pytest.raises(TemplateVariableError, match="'env'"):
+        check_no_placeholders_in_resources(resources)
+
+
+def test_check_no_placeholders_in_resources_dollar_brace_escaped_allowed():
+    """An escaped `$${env}` in a resource value is allowed (it's literal)."""
+    resources = {
+        "catalogs": {
+            "c": {
+                "functions": [
+                    {"name": "f", "return": "CONCAT('$${', val, '}}')"},
+                ],
+            },
+        },
+    }
+    check_no_placeholders_in_resources(resources)  # no raise
+
+
+def test_check_no_placeholders_in_resources_mixed_delimiters_raises():
+    """Both `${}` and `{{ }}` placeholders in a resource are rejected."""
+    resources = {
+        "catalogs": {
+            "c": {"name": "ingestion_${env}_{{ region }}"},
+        },
+    }
+    with pytest.raises(TemplateVariableError, match="'env'|'region'"):
+        check_no_placeholders_in_resources(resources)

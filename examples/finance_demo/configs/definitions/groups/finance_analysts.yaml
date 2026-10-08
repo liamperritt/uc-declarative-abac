@@ -9,7 +9,7 @@ definitions:
     finance_analysts:
       $vars:
         env: ~
-      name: uc_abac_finance_analysts_{{ env }}
+      name: uc_abac_finance_analysts_${env}
       members:
         - uc_abac_region_amer
         - uc_abac_region_emea
