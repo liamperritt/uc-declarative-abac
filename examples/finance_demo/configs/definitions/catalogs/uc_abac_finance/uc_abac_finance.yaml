@@ -11,15 +11,15 @@ definitions:
         - $ref: $defs/policies/finance|grant_engineer_create
         - $ref: $defs/policies/finance|grant_domain_read
           $vars:
-            env: '{{ env }}'
+            env: ${env}
 
   catalogs:
     uc_abac_finance:
       $vars:
         env: ~
-      name: uc_abac_finance_{{ env }}
+      name: uc_abac_finance_${env}
       comment: Financial services governed catalog.
-      # location: s3://REPLACE-ME-uc-abac-finance/{{ env }}   # optional managed location; CREATE-only, needs a real bucket
+      # location: s3://REPLACE-ME-uc-abac-finance/${env}   # optional managed location; CREATE-only, needs a real bucket
       rfa_destinations:
         - data-access@example.com                            # an email destination
       tags:
@@ -28,7 +28,7 @@ definitions:
         # uc_abac_finance domain tag roots the finance Discovery domain: every
         # securable in the catalog inherits it, and the per-subject schemas add
         # their own uc_abac_finance/<subdomain> subdomain tag.
-        uc_abac_environment: '{{ env }}'
+        uc_abac_environment: ${env}
         uc_abac_managed_by: uc_declarative_abac
         uc_abac_finance: ~
       policies:
@@ -36,34 +36,34 @@ definitions:
         - $ref: $defs/policies/finance|grant_engineer_create
         - $ref: $defs/policies/managed_by|grant_use_catalog
           $vars:
-            env: '{{ env }}'
+            env: ${env}
       schemas:
         # Region-partitioned raw layer: one bronze schema per region.
         - $ref: $defs/schemas/uc_abac_finance|transactions_bronze
           $vars:
-            env: '{{ env }}'
+            env: ${env}
             region: amer
         - $ref: $defs/schemas/uc_abac_finance|transactions_bronze
           $vars:
-            env: '{{ env }}'
+            env: ${env}
             region: emea
         - $ref: $defs/schemas/uc_abac_finance|transactions_bronze
           $vars:
-            env: '{{ env }}'
+            env: ${env}
             region: apac
         # Curated + aggregated layers.
         - $ref: $defs/schemas/uc_abac_finance|transactions_silver
           $vars:
-            env: '{{ env }}'
+            env: ${env}
         - $ref: $defs/schemas/uc_abac_finance|transactions_gold
           $vars:
-            env: '{{ env }}'
+            env: ${env}
         - $ref: $defs/schemas/uc_abac_finance|customers_bronze
         - $ref: $defs/schemas/uc_abac_finance|customers_silver
           $vars:
-            env: '{{ env }}'
+            env: ${env}
         - $ref: $defs/schemas/uc_abac_finance|customers_gold
           $vars:
-            env: '{{ env }}'
+            env: ${env}
         # Utility schema hosting the shared governance functions.
         - $ref: $defs/schemas/uc_abac_finance|shared

@@ -15,14 +15,14 @@ real Unity Catalog setup. Every catalog, group, and governed tag is prefixed `uc
 ## What it deploys
 
 - **Two catalogs from one definition:** `uc_abac_finance_prod` and `uc_abac_finance_uat`,
-  both thin `$ref`s to a single catalog definition parameterised by `{{ env }}`.
+  both thin `$ref`s to a single catalog definition parameterised by `${env}`.
 - **A medallion layout per business sub-domain**, encoded in the schema name
   (`<sub_domain>_<medallion>`), never as a folder level:
   - **transactions** — a region-partitioned raw layer `transactions_bronze_amer` /
     `_emea` / `_apac` (one schema template instantiated three times) unioned into
     `transactions_silver` and rolled up into `transactions_gold`. Bronze and silver both
     extend a shared `base_transactions` schema whose tables `$ref` a layer-specific base
-    table selected by `{{ layer }}` — so the silver layer picks up a `region` column (for row
+    table selected by `${layer}` — so the silver layer picks up a `region` column (for row
     filtering) without overriding each table.
   - **customers** — `customers_bronze` → `customers_silver` (PII masking) →
     `customers_gold` (a high-sensitivity `customer_360` masked by default).
@@ -46,7 +46,7 @@ configs/
 │   │   ├── uc_abac_finance.yaml            # the one catalog definition (+ the reusable base_schema mixin)
 │   │   └── schemas/
 │   │       ├── transactions/               # base_transactions + the bronze/silver layers that extend it;
-│   │       │                               #   the base selects a layer-specific base table via {{ layer }}
+│   │       │                               #   the base selects a layer-specific base table via ${layer}
 │   │       ├── transactions_gold/          # inline aggregate tables
 │   │       ├── customers_bronze/ … _gold/
 │   │       └── shared/                      # reusable UDFs (+ one inline UDF)
@@ -127,10 +127,10 @@ Leaf groups (`uc_abac_platform_engineers`, `uc_abac_data_stewards`, `uc_abac_com
 ## Features exercised
 
 Definitions vs. resources · one catalog definition deployed to two environments · template
-variables (`$vars` defaults + required, `{{ env }}` / `{{ region }}` in values, templated
+variables (`$vars` defaults + required, `${env}` / `${region}` in values, templated
 principals, a schema template instantiated per region, a group template per environment) ·
 extending a base schema via a root `$ref` · a templated `$ref` target (each raw table `$ref`s
-a layer-specific base table selected by `{{ layer }}`, so silver gains a `region` column
+a layer-specific base table selected by `${layer}`, so silver gains a `region` column
 without per-table overrides) · `$ref` deep-merge overrides · reusable + inline
 table/function/policy definitions · columns with
 types, comments and tags · owners · RFA destinations (email + URL) · catalog vs. schema tags

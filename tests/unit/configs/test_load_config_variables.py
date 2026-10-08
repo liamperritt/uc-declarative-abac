@@ -164,3 +164,86 @@ def test_load_config_resolves_templated_ref_target_end_to_end(tmp_yaml_dir):
     assert "region" not in bronze_cols
     assert bronze_cols == {"payment_id"}
     assert silver_cols == {"region", "payment_id"}
+
+
+# ---------------------------------------------------------------------------
+# Dollar-brace `${}` syntax through the full pipeline
+# ---------------------------------------------------------------------------
+
+
+def _env_catalog_config_dollar_brace(env: str) -> dict:
+    """A catalog resource instantiating a parameterised schema definition for `env` using ${}.."""
+    return {
+        "definitions": {
+            "schemas": {
+                "ingestion|salesforce": {
+                    "$vars": {"env": None, "medallion": "bronze"},
+                    "name": "salesforce",
+                    "tags": {
+                        "environment": "${env}",
+                        "quality_tier": "${medallion}",
+                    },
+                },
+            },
+        },
+        "resources": {
+            "catalogs": {
+                f"ingestion_{env}": {
+                    "name": f"ingestion_{env}",
+                    "schemas": [
+                        {
+                            "$ref": "$defs/schemas/ingestion|salesforce",
+                            "$vars": {"env": env},
+                        },
+                    ],
+                },
+            },
+        },
+    }
+
+
+def test_load_config_resolves_vars_end_to_end_dollar_brace(tmp_yaml_dir):
+    """A ${} $vars config resolves to concrete objects through the whole pipeline."""
+    root = tmp_yaml_dir({"ingestion_uat.yaml": _env_catalog_config_dollar_brace("uat")})
+
+    config = load_config(root)
+
+    catalog = config.catalogs["ingestion_uat"]
+    schema = catalog.schemas[0]
+    assert schema.tags == {"environment": "uat", "quality_tier": "bronze"}
+
+
+def test_load_config_resolves_placeholder_in_tag_key_end_to_end_dollar_brace(
+    tmp_yaml_dir,
+):
+    """A ${} placeholder in a tag-name map key resolves to a concrete tag name through the pipeline."""
+    config = {
+        "definitions": {
+            "schemas": {
+                "ingestion|salesforce": {
+                    "$vars": {"env": None},
+                    "name": "salesforce",
+                    "tags": {"uc_gov_${env}_owner": "platform"},
+                },
+            },
+        },
+        "resources": {
+            "catalogs": {
+                "ingestion_prod": {
+                    "name": "ingestion_prod",
+                    "schemas": [
+                        {
+                            "$ref": "$defs/schemas/ingestion|salesforce",
+                            "$vars": {"env": "prod"},
+                        },
+                    ],
+                },
+            },
+        },
+    }
+    root = tmp_yaml_dir({"ingestion_prod.yaml": config})
+
+    resolved = load_config(root)
+
+    schema = resolved.catalogs["ingestion_prod"].schemas[0]
+    assert schema.tags == {"uc_gov_prod_owner": "platform"}

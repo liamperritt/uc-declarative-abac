@@ -2767,3 +2767,325 @@ def test_resolver_rejects_placeholder_in_non_tag_key():
 
     with pytest.raises(TemplateVariableError):
         resolve_refs(definitions, resources)
+
+
+# ---------------------------------------------------------------------------
+# Dollar-brace `${}` syntax
+# ---------------------------------------------------------------------------
+
+
+def test_resolver_substitutes_ref_vars_dollar_brace():
+    """A $ref's $vars values are substituted into a ${} template body."""
+    definitions = {
+        "schemas": {
+            "ingestion|salesforce": {
+                "$vars": {"env": None, "medallion": "bronze"},
+                "name": "salesforce",
+                "tags": {
+                    "environment": "${env}",
+                    "quality_tier": "${medallion}",
+                },
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "ingestion_prod": {
+                "name": "ingestion_prod",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ingestion|salesforce",
+                        "$vars": {"env": "prod", "medallion": "silver"},
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    schema = result["catalogs"]["ingestion_prod"]["schemas"][0]
+    assert schema["tags"] == {"environment": "prod", "quality_tier": "silver"}
+    assert "$vars" not in schema
+
+
+def test_resolver_forwards_vars_through_nested_ref_dollar_brace():
+    """A definition forwards a variable to a child $ref via a ${} $vars value."""
+    definitions = {
+        "tables": {
+            "ingestion|salesforce|account": {
+                "$vars": {"env": None},
+                "name": "account",
+                "tags": {"environment": "${env}"},
+            },
+        },
+        "schemas": {
+            "ingestion|salesforce": {
+                "$vars": {"env": None},
+                "name": "salesforce",
+                "tables": [
+                    {
+                        "$ref": "$defs/tables/ingestion|salesforce|account",
+                        "$vars": {"env": "${env}"},
+                    },
+                ],
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "ingestion_prod": {
+                "name": "ingestion_prod",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ingestion|salesforce",
+                        "$vars": {"env": "prod"},
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    table = result["catalogs"]["ingestion_prod"]["schemas"][0]["tables"][0]
+    assert table["tags"]["environment"] == "prod"
+
+
+def test_resolver_resolves_root_ref_with_templated_target_dollar_brace():
+    """A definition whose body root is a $ref with a ${} templated target extends the layer-specific base."""
+    definitions = {
+        "tables": {
+            "base_bronze": {"tags": {"layer": "bronze"}},
+            "base_silver": {
+                "tags": {"layer": "silver"},
+                "columns": [{"name": "region", "type": "string"}],
+            },
+            "payments": {
+                "$ref": "$defs/tables/base_${layer}",
+                "$vars": {"layer": None},
+                "name": "payments",
+                "columns": [{"name": "payment_id", "type": "long"}],
+            },
+        },
+        "schemas": {
+            "sch": {
+                "$vars": {"layer": None},
+                "name": "sch",
+                "tables": [
+                    {
+                        "$ref": "$defs/tables/payments",
+                        "$vars": {"layer": "${layer}"},
+                    },
+                ],
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {"$ref": "$defs/schemas/sch", "$vars": {"layer": "bronze"}},
+                    {"$ref": "$defs/schemas/sch", "$vars": {"layer": "silver"}},
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    schemas = result["catalogs"]["c"]["schemas"]
+    bronze_table = schemas[0]["tables"][0]
+    silver_table = schemas[1]["tables"][0]
+    bronze_cols = {c["name"] for c in bronze_table["columns"]}
+    silver_cols = {c["name"] for c in silver_table["columns"]}
+    assert "region" not in bronze_cols
+    assert bronze_cols == {"payment_id"}
+    assert silver_cols == {"region", "payment_id"}
+    assert silver_table["tags"]["layer"] == "silver"
+
+
+def test_resolver_substitutes_placeholder_in_tag_key_dollar_brace():
+    """A ${} placeholder in a tag-map key resolves to a concrete tag name.
+
+    `env` is used only in tag keys on the schema and has_any_of_tags key on the policy —
+    both keys resolve correctly.
+    """
+    definitions = {
+        "schemas": {
+            "s": {
+                "$vars": {"env": None},
+                "tags": {"uc_gov_${env}_owner": "platform"},
+            },
+        },
+        "policies": {
+            "p": {
+                "$vars": {"env": None},
+                "name": "grant",
+                "type": "grant",
+                "has_any_of_tags": {"finance_${env}": "*"},
+                "privileges": ["read"],
+                "to": ["x"],
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [{"$ref": "$defs/schemas/s", "$vars": {"env": "test"}}],
+                "policies": [{"$ref": "$defs/policies/p", "$vars": {"env": "test"}}],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    catalog = result["catalogs"]["c"]
+    assert catalog["schemas"][0]["tags"] == {"uc_gov_test_owner": "platform"}
+    assert catalog["policies"][0]["has_any_of_tags"] == {"finance_test": "*"}
+
+
+def test_resolver_rejects_placeholder_in_resource_override_dollar_brace():
+    """A ${} placeholder in a $ref override value at the resource level is an error.
+
+    Resources are concrete and carry no $vars scope to bind the placeholder.
+    """
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/ingestion|salesforce",
+                        "name": "${env}_salesforce_raw",
+                        "$vars": {"env": "prod"},
+                    },
+                ],
+            },
+        },
+    }
+
+    definitions = {
+        "schemas": {
+            "ingestion|salesforce": {
+                "$vars": {"env": None},
+                "name": "salesforce",
+            },
+        },
+    }
+
+    with pytest.raises(TemplateVariableError):
+        resolve_refs(definitions, resources)
+
+
+def test_resolver_raises_on_malformed_dollar_brace_placeholder_in_definition():
+    """A malformed ${my-var} placeholder in a referenced definition is an error."""
+    definitions = {
+        "schemas": {"s": {"name": "s", "tags": {"e": "${my-var}"}}},
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {"$ref": "$defs/schemas/s"},
+                ],
+            }
+        }
+    }
+
+    with pytest.raises(TemplateVariableError, match="[Mm]alformed"):
+        resolve_refs(definitions, resources)
+
+
+def test_resolver_raises_on_spaced_dollar_brace_placeholder():
+    """A spaced ${ env } placeholder in a definition value is malformed."""
+    definitions = {
+        "schemas": {"s": {"name": "s", "tags": {"e": "${ env }"}}},
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {"$ref": "$defs/schemas/s"},
+                ],
+            }
+        }
+    }
+
+    with pytest.raises(TemplateVariableError, match="[Mm]alformed"):
+        resolve_refs(definitions, resources)
+
+
+def test_resolver_escaped_dollar_brace_survives_substitution_and_guard():
+    """Escaped $${...} in a function body resolves to literal ${...} and is not flagged."""
+    definitions = {
+        "functions": {
+            "shared|mask_for_env": {
+                "$vars": {"env": None},
+                "name": "mask_for_${env}",
+                "return": "CASE WHEN '${env}' = 'prod' "
+                "THEN CONCAT('$${', val, '}') ELSE val END",
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "functions": [
+                    {
+                        "$ref": "$defs/functions/shared|mask_for_env",
+                        "$vars": {"env": "prod"},
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    fn = result["catalogs"]["c"]["functions"][0]
+    assert fn["name"] == "mask_for_prod"
+    # ${env} substituted; the escaped literal braces collapse to single dollar-brace.
+    assert fn["return"] == (
+        "CASE WHEN 'prod' = 'prod' THEN CONCAT('${', val, '}') ELSE val END"
+    )
+
+
+def test_resolver_mixed_delimiters_dollar_brace_and_double_brace():
+    """A definition using both ${env} and {{ region }} resolves both correctly."""
+    definitions = {
+        "schemas": {
+            "s": {
+                "$vars": {"env": None, "region": None},
+                "name": "salesforce_${env}_{{ region }}",
+                "tags": {
+                    "environment": "${env}",
+                    "region_tag": "{{ region }}",
+                },
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/s",
+                        "$vars": {"env": "prod", "region": "us"},
+                    },
+                ],
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    schema = result["catalogs"]["c"]["schemas"][0]
+    assert schema["name"] == "salesforce_prod_us"
+    assert schema["tags"] == {"environment": "prod", "region_tag": "us"}

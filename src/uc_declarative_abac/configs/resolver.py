@@ -189,9 +189,10 @@ def resolve_refs(
         )
 
     # Final template-variable pass over the fully-resolved tree: any surviving
-    # ``{{ placeholder }}`` had nothing to bind it (e.g. a placeholder in a plain
-    # resource value with no $ref) and is a hard error; escaped ``{{{{ }}}}`` braces
-    # are collapsed to their literals. Runs once, after all $ref expansion.
+    # ``${placeholder}`` (or legacy ``{{ placeholder }}``) had nothing to bind it (e.g. a
+    # placeholder in a plain resource value with no $ref) and is a hard error; escaped
+    # ``$${`` / ``{{{{`` / ``}}}}`` sequences are collapsed to their literals. Runs once,
+    # after all $ref expansion.
     return finalise(result)
 
 
@@ -281,7 +282,7 @@ def _resolve_inline_defs_strings(
     so the merge must see them before the ``$ref`` is expanded.
 
     A ``$vars`` block's values are also left untouched (copied through): they are literal
-    strings or forwarding ``{{ ... }}`` placeholders, never references, so a value that
+    strings or forwarding ``${...}`` / ``{{ ... }}`` placeholders, never references, so a value that
     happens to start with ``$defs/`` must reach ``check_string_vars`` as a raw string (to
     raise a clear "not a reference" error) instead of being silently expanded here.
     """
@@ -306,7 +307,7 @@ def _resolve_inline_defs_strings(
     if isinstance(node, str) and node.startswith("$defs/"):
         if find_placeholders(node):
             # A templated inline target is resolved only after $vars substitution (in
-            # ``_apply_vars``): looking it up now, with the literal ``{{ ... }}`` still present,
+            # ``_apply_vars``): looking it up now, with the literal ``${...}`` still present,
             # would fail. Defer it here so the post-substitution ``_resolve_node`` pass resolves
             # the concrete target. Consequence: unlike a concrete inline string, it is NOT a dict
             # at merge time, so a templated inline string in a list is not merge-aligned by
@@ -480,10 +481,10 @@ def _split_ref(ref: str) -> tuple[str, str]:
 def _candidate_bases_accepted_vars(definitions: dict, target: str) -> set[str]:
     """Union of ``accepted_vars`` over every definition a *templated* ``$ref`` target could select.
 
-    A target such as ``$defs/tables/base_{{ layer }}`` can only be resolved once its variables
+    A target such as ``$defs/tables/base_${layer}`` can only be resolved once its variables
     are substituted, which the upfront signature check cannot do (the values come from the
     caller). To still recognise a variable declared purely to forward into the selected base,
-    treat each ``{{ placeholder }}`` in the target's key as a wildcard, find every existing
+    treat each ``${placeholder}`` in the target's key as a wildcard, find every existing
     definition key of that type that matches, and union their accepted variables. Widening the
     accepted set never rejects valid config; its only cost is weaker (not eliminated) typo
     detection — if the wildcard coincidentally matches an unrelated definition that declares a
@@ -513,7 +514,7 @@ def _base_accepted_vars(definitions: dict, body: Any) -> set[str]:
     """The variables the base of a root-``$ref`` definition accepts, else an empty set.
 
     Returns ``accepted_vars`` of the definition ``body`` extends via a root ``$ref``. When the
-    target is **templated** (holds a ``{{ placeholder }}``, e.g. ``$defs/tables/base_{{ layer }}``)
+    target is **templated** (holds a ``${placeholder}``, e.g. ``$defs/tables/base_${layer}``)
     the concrete base is not yet known, so the union over every candidate base the pattern could
     select is returned instead (see ``_candidate_bases_accepted_vars``) — this lets a variable
     declared purely to forward into the selected base validate at the upfront signature check.
@@ -548,7 +549,7 @@ def _resolve_inline_defs_string(
     equivalent to the ``$ref``-dict form. A definition with a required (un-defaulted)
     variable therefore cannot be referenced by the bare string — there is nowhere to supply
     it — and must use the ``$ref`` + ``$vars`` form; that surfaces as a missing-variable
-    error here rather than leaking an unresolved ``{{ ... }}``.
+    error here rather than leaking an unresolved ``${...}``.
     """
     if ref_path in visited:
         raise ResolutionError(f"Circular $ref detected: {ref_path}")

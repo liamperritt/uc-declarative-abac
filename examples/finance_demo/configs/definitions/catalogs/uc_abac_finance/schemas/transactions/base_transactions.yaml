@@ -23,17 +23,17 @@ definitions:
       $vars:
         env: ~
         layer: ~
-      name: transactions_{{ layer }}
+      name: transactions_${layer}
       tags:
         uc_abac_finance/transaction: ~
-        uc_abac_layer: '{{ layer }}'
+        uc_abac_layer: ${layer}
       policies:
         # Volume grants for the platform team, and read for this region's analysts.
         - $ref: $defs/policies/finance|grant_volume_access
       tables:
-        # Each raw table extends the layer-specific base table selected by {{ layer }}, so the
+        # Each raw table extends the layer-specific base table selected by ${layer}, so the
         # silver instances resolve against the silver base_table and inherit its `region` column.
-        - $ref: $defs/tables/uc_abac_finance|transactions_{{ layer }}|base_table
+        - $ref: $defs/tables/uc_abac_finance|transactions_${layer}|base_table
           name: payments
           comment: Payments as landed from the payments gateway.
           columns:
@@ -51,7 +51,7 @@ definitions:
               comment: Payment rail (card, wire, ach, ...).
             - name: status
               type: string
-        - $ref: $defs/tables/uc_abac_finance|transactions_{{ layer }}|base_table
+        - $ref: $defs/tables/uc_abac_finance|transactions_${layer}|base_table
           name: settlements
           comment: Settlement records as landed from the clearing system.
           columns:
@@ -70,7 +70,7 @@ definitions:
             - name: settled_at
               type: timestamp
               comment: Time the settlement completed.
-        - $ref: $defs/tables/uc_abac_finance|transactions_{{ layer }}|base_table
+        - $ref: $defs/tables/uc_abac_finance|transactions_${layer}|base_table
           name: transactions
           comment: Raw transaction ledger as landed from the source system.
           columns:

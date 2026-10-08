@@ -7,7 +7,7 @@ definitions:
         - $ref: $defs/policies/managed_by|grant_use_catalog
         - $ref: $defs/policies/managed_by|grant_catalog_read
           $vars:
-            env: '{{ env }}'
+            env: ${env}
         - $ref: $defs/policies/team|grant_schema_access
         - $ref: $defs/policies/zone|grant_bronze_access
         - $ref: $defs/policies/zone|grant_landing_read
