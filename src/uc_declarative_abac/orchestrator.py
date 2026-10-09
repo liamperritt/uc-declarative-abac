@@ -16,12 +16,14 @@ from uc_declarative_abac.configs import (
     resolve_refs,
 )
 from uc_declarative_abac.domains import (
+    Domain,
     DomainDiff,
     compile_desired_domains,
     compute_domain_diff,
     execute_domain_diff,
 )
 from uc_declarative_abac.governed_tags import (
+    GovernedTag,
     GovernedTagDiff,
     compile_desired_governed_tags,
     compute_governed_tag_diff,
@@ -33,13 +35,16 @@ from uc_declarative_abac.helpers import (
 )
 from uc_declarative_abac.logger import ChangeLogger
 from uc_declarative_abac.policies import (
+    Policy,
     PolicyDiff,
     compile_desired_policies,
     compute_policy_diff,
     execute_policy_diff,
 )
 from uc_declarative_abac.principals import (
+    Group,
     GroupDiff,
+    Principal,
     PrincipalResolver,
     compile_desired_groups,
     compute_group_diff,
@@ -48,11 +53,13 @@ from uc_declarative_abac.principals import (
 )
 from uc_declarative_abac.privileges import (
     PrivilegeDiff,
+    SecurablePrivilege,
     compile_desired_privileges,
     compute_privilege_diff,
     execute_privilege_diff,
 )
 from uc_declarative_abac.securables import (
+    Securable,
     SecurableAttributes,
     SecurableDiff,
     compile_desired_attributes,
@@ -61,6 +68,7 @@ from uc_declarative_abac.securables import (
     execute_securable_diff,
 )
 from uc_declarative_abac.tags import (
+    SecurableTag,
     TagDiff,
     compile_desired_tags,
     compute_tag_diff,
@@ -71,6 +79,7 @@ from uc_declarative_abac.types import SecurableType
 from uc_declarative_abac.utils import (
     ExecutionBatchError,
     OrchestratorError,
+    RunContext,
     Scope,
     parse_flat_scope,
     parse_hierarchical_scope,
@@ -96,6 +105,36 @@ class OrchestratorDiffsResult:
     tag_diff: TagDiff
     policy_diff: PolicyDiff
     privilege_diff: PrivilegeDiff
+
+
+@dataclass(frozen=True)
+class ActualState:
+    """Fetched workspace/UC actual state — a pure "current state" view.
+
+    Every field is a fetched state set (plus ``principals``, the resolved
+    ``WorkspaceHelper.get_principals()`` snapshot). This carries **no** execution
+    handles: the live ``UnityCatalogHelper`` / ``WorkspaceHelper`` are built once by
+    ``run()`` and threaded separately into ``fetch_actual_state`` (which populates
+    their caches) and ``_execute_changes`` (which reuses the same instances), so a
+    downstream consumer can read this state view without touching the helpers.
+
+    Produced by ``fetch_actual_state``. When that function is called with
+    ``settings=None`` every field reflects a full, unscoped fetch of its domain;
+    when ``run()`` passes a ``RunContext`` the sets are scoped/gated exactly as the
+    deploy pipeline requires (so e.g. ``privileges`` is empty when privilege
+    management is off, and ``governed_tags`` covers only configured names).
+    """
+
+    groups: frozenset[Group]
+    all_account_groups: frozenset[Group]
+    governed_tags: frozenset[GovernedTag]
+    domains: frozenset[Domain]
+    securables: frozenset[Securable]
+    attributes: frozenset[SecurableAttributes]
+    tags: frozenset[SecurableTag]
+    policies: frozenset[Policy]
+    privileges: frozenset[SecurablePrivilege]
+    principals: dict[str, Principal]
 
 
 def _filter_taggable_attributes(
@@ -298,6 +337,758 @@ def _warn_deprecated_flags(
         )
 
 
+def _build_run_context(
+    config: ResourcesConfig,
+    *,
+    system_catalog: str,
+    timezone: str,
+    dry_run: bool,
+    use_workspace_scim: bool,
+    skip_users_fetch: bool,
+    enable_tag_management: bool,
+    enable_taggable_management: bool,
+    enable_taggable_creation: bool,
+    enable_privilege_management: bool,
+    enable_governed_tag_deletion: bool,
+    enable_policy_deletion: bool,
+    enable_group_creation: bool,
+    enable_group_management: bool,
+    enable_group_deletion: bool,
+    ignore_unresolvable_principals: str,
+    manage_tags_for_namespaces: str,
+    manage_privileges_for_namespaces: str,
+    manage_taggables_for_namespaces: str,
+    create_taggables_for_namespaces: str,
+    delete_policies_for_namespaces: str,
+    tag_management_scopes: str | None,
+    privilege_management_scopes: str | None,
+    taggable_management_scopes: str | None,
+    taggable_creation_scopes: str | None,
+    policy_deletion_scopes: str | None,
+    group_creation_scopes: str | None,
+    group_management_scopes: str | None,
+    group_deletion_scopes: str | None,
+    governed_tag_deletion_scopes: str | None,
+    domain_creation_scopes: str | None,
+    domain_management_scopes: str | None,
+    domain_deletion_scopes: str | None,
+    retain_tag_prefixes: str,
+    ref_override_strategy: str,
+    force: bool,
+    max_parallel_changes: int,
+) -> RunContext:
+    """Resolve raw ``run()`` keyword arguments into a frozen :class:`RunContext`.
+
+    Owns the whole settings-resolution step: deprecation warnings, resolving every
+    feature to a single ``Scope`` (a new-style ``*_scopes`` spec wins; otherwise the
+    deprecated ``enable_* `` + ``*_for_namespaces`` pair is honoured identically),
+    the unmatched-scope typo warnings, the fatal group/scim/skip-users and
+    group-deletion validations, the ``run_date`` (computed once in the configured
+    timezone), the retain-prefix / ignore-unresolvable frozensets, and
+    ``manage_domain_owners`` (which needs ``config.domains`` owner declarations).
+
+    The run date is computed here so both compilers (groups and grant policies)
+    evaluate every ``expiry_date`` against the same date, even across a midnight
+    boundary.
+    """
+    _warn_deprecated_flags(use_workspace_scim, skip_users_fetch, ref_override_strategy)
+
+    run_date = run_date_for_timezone(timezone)
+    configured_namespaces = _collect_configured_namespaces(config)
+    configured_full_names = _collect_configured_full_names(config)
+
+    tag_scope = _build_hierarchical_scope(
+        tag_management_scopes,
+        legacy_enabled=enable_tag_management,
+        legacy_namespaces=manage_tags_for_namespaces,
+        configured_namespaces=configured_namespaces,
+    )
+    privilege_scope = _build_hierarchical_scope(
+        privilege_management_scopes,
+        legacy_enabled=enable_privilege_management,
+        legacy_namespaces=manage_privileges_for_namespaces,
+        configured_namespaces=configured_namespaces,
+    )
+    taggable_management_scope = _build_hierarchical_scope(
+        taggable_management_scopes,
+        legacy_enabled=enable_taggable_management,
+        legacy_namespaces=manage_taggables_for_namespaces,
+        configured_namespaces=configured_namespaces,
+    )
+    taggable_creation_scope = _build_hierarchical_scope(
+        taggable_creation_scopes,
+        legacy_enabled=enable_taggable_creation,
+        legacy_namespaces=create_taggables_for_namespaces,
+        configured_namespaces=configured_namespaces,
+    )
+    policy_delete_scope = _build_hierarchical_scope(
+        policy_deletion_scopes,
+        legacy_enabled=enable_policy_deletion,
+        legacy_namespaces=delete_policies_for_namespaces,
+        configured_namespaces=configured_namespaces,
+    )
+    group_creation_scope = _build_flat_scope(
+        group_creation_scopes, legacy_enabled=enable_group_creation
+    )
+    group_management_scope = _build_flat_scope(
+        group_management_scopes, legacy_enabled=enable_group_management
+    )
+    group_deletion_scope = _build_flat_scope(
+        group_deletion_scopes, legacy_enabled=enable_group_deletion
+    )
+    governed_tag_deletion_scope = _build_flat_scope(
+        governed_tag_deletion_scopes, legacy_enabled=enable_governed_tag_deletion
+    )
+    domain_creation_scope = _build_flat_scope(
+        domain_creation_scopes, legacy_enabled=False
+    )
+    domain_management_scope = _build_flat_scope(
+        domain_management_scopes, legacy_enabled=False
+    )
+    domain_deletion_scope = _build_flat_scope(
+        domain_deletion_scopes, legacy_enabled=False
+    )
+
+    # Domain owners are stored as numeric principal ids, whose id maps are built only
+    # when the workspace helper is told to manage them (see WorkspaceHelper). Trigger
+    # that build whenever the domain workflow runs and any declared domain sets owners.
+    domain_workflow_active = (
+        domain_creation_scope.is_active()
+        or domain_management_scope.is_active()
+        or domain_deletion_scope.is_active()
+    )
+    manage_domain_owners = domain_workflow_active and any(
+        domain.business_owners is not None or domain.technical_owners is not None
+        for domain in (config.domains or {}).values()
+    )
+
+    # Warn (never fail) about new-style hierarchical scope entries that match no
+    # configured securable — a likely typo that would silently govern nothing.
+    _warn_unmatched_scopes(
+        [
+            ("--tag-management-scopes", tag_management_scopes, tag_scope),
+            (
+                "--privilege-management-scopes",
+                privilege_management_scopes,
+                privilege_scope,
+            ),
+            (
+                "--taggable-management-scopes",
+                taggable_management_scopes,
+                taggable_management_scope,
+            ),
+            (
+                "--taggable-creation-scopes",
+                taggable_creation_scopes,
+                taggable_creation_scope,
+            ),
+            ("--policy-deletion-scopes", policy_deletion_scopes, policy_delete_scope),
+        ],
+        configured_full_names,
+    )
+
+    # Group creation/management operate at the account level via the account SCIM
+    # proxy. The workspace SCIM API surfaces only workspace-level groups and cannot
+    # create or manage account groups, so enabling a group scope under
+    # --use-workspace-scim is unsupported. (Configuring groups without any group
+    # scope is inert and compatible with --use-workspace-scim.)
+    group_domain_active = (
+        group_creation_scope.is_active() or group_management_scope.is_active()
+    )
+    if config.groups and group_domain_active and use_workspace_scim:
+        raise OrchestratorError(
+            "Group creation/management requires the account SCIM proxy, but "
+            "--use-workspace-scim was set. Remove --use-workspace-scim to create or "
+            "manage the groups declared in config."
+        )
+    # Resolving user members of a managed group requires the account users list, so
+    # group management cannot run alongside --skip-users-fetch.
+    if config.groups and group_domain_active and skip_users_fetch:
+        raise OrchestratorError(
+            "Group creation/management requires the account users list to resolve "
+            "user members, but --skip-users-fetch was set. Remove --skip-users-fetch "
+            "to create or manage the groups declared in config."
+        )
+    # Group deletion makes config authoritative over group existence — it is only
+    # usable alongside group creation, and never against an empty config (a
+    # destructive account-wide sweep with no declared groups is disallowed outright).
+    if group_deletion_scope.is_active() and not config.groups:
+        raise OrchestratorError(
+            "Group deletion is enabled but no groups are declared under "
+            "resources.groups. Declare the groups config should own, or disable "
+            "group deletion."
+        )
+    if group_deletion_scope.is_active() and not group_creation_scope.is_active():
+        raise OrchestratorError(
+            "Group deletion requires group creation to also be active (config must "
+            "be authoritative over group existence). Enable group creation, or "
+            "disable group deletion."
+        )
+
+    # Tag-key prefixes whose tags are never removed (only added/updated). Empty
+    # string ⇒ no retention. Defaults to "class." to protect auto-classification.
+    retain_prefixes = frozenset(
+        p.strip() for p in retain_tag_prefixes.split(",") if p.strip()
+    )
+    # Actual-state (UC-side) identifiers whose resolution-failure warning is
+    # suppressed across the privileges, securables (owner), and governed-tags
+    # (assigners) domains. Matched by identifier only; resolvable principals are
+    # unaffected. Empty by default ⇒ all unresolvable-principal warnings emitted.
+    ignore_unresolvable = frozenset(
+        p.strip() for p in ignore_unresolvable_principals.split(",") if p.strip()
+    )
+
+    return RunContext(
+        tag_scope=tag_scope,
+        privilege_scope=privilege_scope,
+        taggable_management_scope=taggable_management_scope,
+        taggable_creation_scope=taggable_creation_scope,
+        policy_delete_scope=policy_delete_scope,
+        group_creation_scope=group_creation_scope,
+        group_management_scope=group_management_scope,
+        group_deletion_scope=group_deletion_scope,
+        governed_tag_deletion_scope=governed_tag_deletion_scope,
+        domain_creation_scope=domain_creation_scope,
+        domain_management_scope=domain_management_scope,
+        domain_deletion_scope=domain_deletion_scope,
+        run_date=run_date,
+        retain_prefixes=retain_prefixes,
+        ignore_unresolvable=ignore_unresolvable,
+        system_catalog=system_catalog,
+        use_workspace_scim=use_workspace_scim,
+        skip_users_fetch=skip_users_fetch,
+        dry_run=dry_run,
+        force=force,
+        max_parallel_changes=max_parallel_changes,
+        manage_domain_owners=manage_domain_owners,
+    )
+
+
+def _full_fetch_context() -> RunContext:
+    """A ``RunContext`` that makes ``fetch_actual_state`` fetch everything.
+
+    Used when ``fetch_actual_state`` is called with ``settings=None`` (a downstream
+    "current state" view): every scope is match-all so no domain is gated out and
+    all RFA / column-comment targets are fetched. The run date defaults to today in
+    UTC; the non-fetch fields (retain prefixes, force, …) are inert defaults.
+    """
+    all_hierarchical = parse_hierarchical_scope("*")
+    all_flat = parse_flat_scope("*")
+    return RunContext(
+        tag_scope=all_hierarchical,
+        privilege_scope=all_hierarchical,
+        taggable_management_scope=all_hierarchical,
+        taggable_creation_scope=all_hierarchical,
+        policy_delete_scope=all_hierarchical,
+        group_creation_scope=all_flat,
+        group_management_scope=all_flat,
+        group_deletion_scope=all_flat,
+        governed_tag_deletion_scope=all_flat,
+        domain_creation_scope=all_flat,
+        domain_management_scope=all_flat,
+        domain_deletion_scope=all_flat,
+        run_date=run_date_for_timezone("UTC"),
+        retain_prefixes=frozenset(),
+        ignore_unresolvable=frozenset(),
+        system_catalog="system",
+        use_workspace_scim=False,
+        skip_users_fetch=False,
+        dry_run=False,
+        force=False,
+        max_parallel_changes=8,
+        manage_domain_owners=True,
+    )
+
+
+def fetch_actual_state(
+    config: ResourcesConfig,
+    uc_helper: UnityCatalogHelper,
+    ws_helper: WorkspaceHelper,
+    settings: RunContext | None = None,
+) -> ActualState:
+    """Fetch the current workspace/UC state and return it as a pure ``ActualState``.
+
+    Populates the two passed-in helpers' caches in place (``fetch_principals``
+    builds the principal-id maps that ``_execute_changes`` later reuses for
+    resolution and execution — so the orchestrator threads the *same* helper
+    instances into both). The fetch is scoped from ``config`` plus ``settings``:
+    catalog names, configured governed-tag/group names, RFA targets, and
+    column-comment tables are derived from config (via the pure config-only
+    compilers), while ``settings`` gates which domains are fetched at all.
+
+    ``settings=None`` fetches the complete actual state for every domain — the
+    downstream "current state" view. Callers wanting that complete view should
+    build the helpers with ``manage_groups=True`` / ``manage_domain_owners=True``
+    so the group/domain-owner id maps are available.
+
+    Securable attributes, domains, and groups are read after the principal fetch
+    (``fetch_actual_domains`` / ``fetch_actual_groups`` map owner/member numeric ids
+    back to principals via the just-built caches), so running them concurrently
+    with the principal fetch would read owners/members as empty and re-add them on
+    every run.
+    """
+    ctx = settings if settings is not None else _full_fetch_context()
+
+    catalog_names = [c.full_name for c in config.catalogs.values()]
+    desired_groups = compile_desired_groups(config, run_date=ctx.run_date)
+    desired_group_names = {g.display_name for g in desired_groups}
+    desired_group_ids = {g.id for g in desired_groups if g.id}
+    desired_governed_tag_names = {
+        gt.name for gt in compile_desired_governed_tags(config)
+    }
+    desired_attributes = compile_desired_attributes(config)
+    # RFA targets restrict the attribute fetch to securables that declare
+    # ``rfa_destinations``. Non-function securables are gated by the taggable-
+    # management flag (RFA is a managed attribute), but FUNCTION targets are always
+    # fetched — functions are engine-managed independently of the flag. Without this
+    # a function's actual RFA state stays ``None`` when the flag is off, and an
+    # explicit empty list ("remove all") silently no-ops against a ``None`` actual.
+    rfa_targets: set[tuple[SecurableType, str]] = {
+        (a.securable_type, a.full_name)
+        for a in desired_attributes
+        if a.rfa_destinations is not None
+        and (
+            ctx.enable_taggable_management or a.securable_type == SecurableType.FUNCTION
+        )
+    }
+    # Parent tables of every in-scope column that declares a comment. Column comments
+    # are a managed (taggable) attribute, so — unlike rfa_targets, which has a FUNCTION
+    # exception — they are fetched only for tables in the taggable-management scope.
+    column_comment_tables: set[str] = {
+        a.full_name.rpartition(".")[0]
+        for a in desired_attributes
+        if a.securable_type == SecurableType.COLUMN
+        and a.comment is not None
+        and ctx.taggable_management_scope.matches(a.full_name)
+    }
+
+    # actual_tags is needed by either the tags domain (for the diff) or the privileges
+    # domain (for policy matching against on-disk tag state when tag management is off).
+    need_actual_tags = ctx.enable_tag_management or ctx.enable_privilege_management
+    with ThreadPoolExecutor() as pool:
+        actual_securables_f = pool.submit(
+            uc_helper.fetch_actual_securables,
+            catalog_names,
+            rfa_targets,
+            column_comment_tables,
+        )
+        actual_policies_f = pool.submit(uc_helper.fetch_actual_policies, catalog_names)
+        actual_governed_tags_f = pool.submit(
+            ws_helper.fetch_actual_governed_tags,
+            desired_governed_tag_names,
+        )
+        principals_f = pool.submit(ws_helper.fetch_principals)
+        actual_tags_f = (
+            pool.submit(uc_helper.fetch_actual_tags, catalog_names)
+            if need_actual_tags
+            else None
+        )
+        actual_privs_f = (
+            pool.submit(uc_helper.fetch_actual_privileges, catalog_names)
+            if ctx.enable_privilege_management
+            else None
+        )
+
+        actual_securables, actual_attributes = actual_securables_f.result()
+        actual_policies = actual_policies_f.result()
+        actual_governed_tags = actual_governed_tags_f.result()
+        principals_f.result()
+        actual_tags = actual_tags_f.result() if actual_tags_f is not None else set()
+        actual_privileges = (
+            actual_privs_f.result() if actual_privs_f is not None else set()
+        )
+    actual_domains = (
+        ws_helper.fetch_actual_domains() if ctx.domain_workflow_active else set()
+    )
+
+    # Membership and assumers are authoritative only when supplied, so each is
+    # fetched only for the groups whose field is non-None AND in the management scope
+    # (the only scope that reconciles them). Identity comes from the principal-fetch
+    # caches (no extra call). Empty when the group domain is inert.
+    members_fetch_names = {
+        g.display_name
+        for g in desired_groups
+        if g.members is not None and ctx.group_management_scope.matches(g.display_name)
+    }
+    members_fetch_ids = {
+        g.id
+        for g in desired_groups
+        if g.id
+        and g.members is not None
+        and ctx.group_management_scope.matches(g.display_name)
+    }
+    assumers_fetch_names = {
+        g.display_name
+        for g in desired_groups
+        if g.assumers is not None and ctx.group_management_scope.matches(g.display_name)
+    }
+    assumers_fetch_ids = {
+        g.id
+        for g in desired_groups
+        if g.id
+        and g.assumers is not None
+        and ctx.group_management_scope.matches(g.display_name)
+    }
+    actual_groups = (
+        ws_helper.fetch_actual_groups(
+            desired_group_names,
+            desired_group_ids,
+            member_fetch_names=members_fetch_names,
+            member_fetch_ids=members_fetch_ids,
+            assumer_fetch_names=assumers_fetch_names,
+            assumer_fetch_ids=assumers_fetch_ids,
+        )
+        if ctx.group_domain_active
+        else set()
+    )
+    # Group deletion needs the full account-group inventory (identity + provenance
+    # only) to find Databricks-managed groups absent from config. Cheap — built from
+    # caches populated during fetch_principals, no extra API calls.
+    all_account_groups = (
+        ws_helper.list_account_groups() if ctx.enable_group_deletion else set()
+    )
+
+    return ActualState(
+        groups=frozenset(actual_groups),
+        all_account_groups=frozenset(all_account_groups),
+        governed_tags=frozenset(actual_governed_tags),
+        domains=frozenset(actual_domains),
+        securables=frozenset(actual_securables),
+        attributes=frozenset(actual_attributes),
+        tags=frozenset(actual_tags),
+        policies=frozenset(actual_policies),
+        privileges=frozenset(actual_privileges),
+        principals=ws_helper.get_principals(),
+    )
+
+
+def _execute_changes(
+    config: ResourcesConfig,
+    actual_state: ActualState,
+    uc_helper: UnityCatalogHelper,
+    ws_helper: WorkspaceHelper,
+    settings: RunContext,
+    change_logger: ChangeLogger,
+) -> OrchestratorDiffsResult:
+    """Compile desired state, diff it against ``actual_state``, and execute changes.
+
+    Compilation stays inline here, in the same order as before: the governed-tag
+    diff is computed first so domains are compiled against the governed-tag union
+    *minus* tags selected for deletion, and privileges are matched against the tag
+    state that will be in effect (desired in-scope ∪ actual out-of-scope, or on-disk
+    actual tags when tag management is off). The shared ``PrincipalResolver`` is
+    built from the (cache-populated) ``ws_helper``; groups slated for creation and
+    rename are seeded into that cache before downstream domains resolve principals.
+
+    Returns the per-domain diffs. The caller (``run``) owns the error-summary /
+    ``ExecutionBatchError`` gating after this returns.
+    """
+    run_date = settings.run_date
+    ignore_unresolvable = settings.ignore_unresolvable
+    retain_prefixes = settings.retain_prefixes
+    dry_run = settings.dry_run
+    force = settings.force
+    max_parallel_changes = settings.max_parallel_changes
+
+    actual_securables = set(actual_state.securables)
+    actual_attributes = set(actual_state.attributes)
+    actual_policies = set(actual_state.policies)
+    actual_governed_tags = set(actual_state.governed_tags)
+    actual_tags = set(actual_state.tags)
+    actual_privileges = set(actual_state.privileges)
+    actual_domains = set(actual_state.domains)
+    actual_groups = set(actual_state.groups)
+    all_account_groups = set(actual_state.all_account_groups)
+
+    # Shared resolver over the already-populated ws_helper cache.
+    resolver = PrincipalResolver(ws_helper)
+
+    # Seed the display names of groups this run will create into the principal cache
+    # *before* the diff, so a configured group's members that are themselves created
+    # this run resolve during member resolution (they don't exist in the account yet).
+    desired_groups = compile_desired_groups(config, run_date=run_date)
+    if settings.group_domain_active:
+        ws_helper.register_pending_groups(
+            groups_pending_creation(
+                desired_groups,
+                actual_groups,
+                settings.enable_group_creation,
+                settings.group_creation_scope,
+            )
+        )
+
+    # Group workflow (the first domain — runs before governed tags so that any groups
+    # referenced as policy/grant principals exist first). Inert unless a group flag is
+    # set.
+    group_diff = (
+        compute_group_diff(
+            desired_groups,
+            actual_groups,
+            resolver,
+            change_logger,
+            enable_group_creation=settings.enable_group_creation,
+            enable_group_management=settings.enable_group_management,
+            enable_group_deletion=settings.enable_group_deletion,
+            ignore_unresolvable=ignore_unresolvable,
+            all_account_groups=all_account_groups,
+            creation_scope=settings.group_creation_scope,
+            management_scope=settings.group_management_scope,
+            deletion_scope=settings.group_deletion_scope,
+        )
+        if settings.group_domain_active
+        else GroupDiff()
+    )
+    # Renames are reflected in the principal cache before downstream domains resolve:
+    # the new display name becomes resolvable and the old one becomes unknown (even in
+    # dry-run, where the SCIM PATCH itself is skipped).
+    ws_helper.register_pending_renames(group_diff.groups_to_rename)
+
+    # Governed tags workflow (account-level tag policies — must run before
+    # catalog-scoped tag assignments, so new tag keys exist before SET TAGS).
+    desired_governed_tags = compile_desired_governed_tags(config)
+    governed_tag_diff = compute_governed_tag_diff(
+        desired_governed_tags,
+        actual_governed_tags,
+        resolver,
+        change_logger,
+        enable_deletion=settings.enable_governed_tag_deletion,
+        ignore_unresolvable=ignore_unresolvable,
+        deletion_scope=settings.governed_tag_deletion_scope,
+    )
+    # Union of declared governed tags (desired from config + actual on UC). The names
+    # gate policy/privilege tag references; the full objects validate securable tag
+    # values against allowed_values. Domains are compiled against the union minus the
+    # tags selected for deletion this run.
+    governed_tags_by_name = {tag.name: tag for tag in actual_governed_tags}
+    governed_tags_by_name.update({tag.name: tag for tag in desired_governed_tags})
+    governed_tags = set(governed_tags_by_name.values())
+    governed_tag_names = {t.name for t in governed_tags}
+    deleted_governed_tag_names = {tag.name for tag in governed_tag_diff.to_delete}
+    domain_source_governed_tags = {
+        tag for tag in governed_tags if tag.name not in deleted_governed_tag_names
+    }
+    desired_domains = (
+        compile_desired_domains(config, domain_source_governed_tags)
+        if settings.domain_workflow_active
+        else set()
+    )
+    computed_domain_diff = (
+        compute_domain_diff(
+            desired_domains,
+            actual_domains,
+            change_logger,
+            resolver,
+            deletion_scope=settings.domain_deletion_scope,
+            ignore_unresolvable=ignore_unresolvable,
+        )
+        if settings.domain_workflow_active
+        else DomainDiff()
+    )
+    domain_diff = _scope_domain_changes(
+        computed_domain_diff,
+        settings.domain_creation_scope,
+        settings.domain_management_scope,
+    )
+
+    # Securables workflow (before tags and privileges). Drop non-function attribute
+    # updates whose namespace isn't in the taggable-management scope; function
+    # attributes always flow through (FUNCTION creation/replacement is always
+    # engine-managed).
+    desired_attributes = _filter_taggable_attributes(
+        compile_desired_attributes(config), settings.taggable_management_scope
+    )
+    in_scope_actual_attributes = _filter_taggable_attributes(
+        actual_attributes, settings.taggable_management_scope
+    )
+    securable_diff = compute_securable_diff(
+        desired_attributes,
+        in_scope_actual_attributes,
+        compile_desired_securables(config),
+        actual_securables,
+        resolver,
+        change_logger,
+        creation_in_scope_namespaces=settings.taggable_creation_scope,
+        ignore_unresolvable=ignore_unresolvable,
+    )
+
+    # Tags workflow.
+    if settings.enable_tag_management:
+        desired_tags = compile_desired_tags(config, governed_tags, change_logger)
+        in_scope_desired_tags = {
+            t for t in desired_tags if settings.tag_scope.matches(t.securable_full_name)
+        }
+        in_scope_actual_tags = {
+            t for t in actual_tags if settings.tag_scope.matches(t.securable_full_name)
+        }
+        out_of_scope_actual_tags = {
+            t
+            for t in actual_tags
+            if not settings.tag_scope.matches(t.securable_full_name)
+        }
+        tag_diff = compute_tag_diff(in_scope_desired_tags, in_scope_actual_tags)
+        tag_diff, retained_tags = filter_retained_removals(tag_diff, retain_prefixes)
+        if retained_tags:
+            _logger.info(
+                f"  Retaining {len(retained_tags)} unconfigured tag(s) matching "
+                f"prefix(es) {sorted(retain_prefixes)} — these will not be removed"
+            )
+        # Post-run tag state used by the privileges compiler: in-scope catalogs
+        # reflect the desired (about to be applied); out-of-scope reflect actual.
+        tags_for_privilege_matching = in_scope_desired_tags | out_of_scope_actual_tags
+    else:
+        tag_diff = TagDiff()
+        # When tag management is off the engine will not reconcile the config's desired
+        # tags onto UC this run, so the privileges compiler must match its policies
+        # against the on-disk tag state to stay honest.
+        tags_for_privilege_matching = actual_tags
+
+    # Policies workflow (mask/filter).
+    desired_policies = compile_desired_policies(
+        config,
+        governed_tag_names,
+        change_logger,
+    )
+    policy_diff = compute_policy_diff(
+        desired_policies,
+        actual_policies,
+        resolver,
+        change_logger,
+        ignore_unresolvable=ignore_unresolvable,
+        delete_scope=settings.policy_delete_scope,
+    )
+
+    # Privileges workflow.
+    if settings.enable_privilege_management:
+        compiled_privileges = compile_desired_privileges(
+            config,
+            tags_for_privilege_matching,
+            governed_tag_names,
+            change_logger,
+            run_date=run_date,
+        )
+        in_scope_compiled_privileges = {
+            p
+            for p in compiled_privileges
+            if settings.privilege_scope.matches(p.securable_full_name)
+        }
+        in_scope_actual_privileges = {
+            p
+            for p in actual_privileges
+            if settings.privilege_scope.matches(p.securable_full_name)
+        }
+        privilege_diff = compute_privilege_diff(
+            in_scope_compiled_privileges,
+            in_scope_actual_privileges,
+            resolver,
+            change_logger,
+            ignore_unresolvable=ignore_unresolvable,
+        )
+    else:
+        privilege_diff = PrivilegeDiff()
+
+    # Log and execute (or dry-run) — group management runs first.
+    if (
+        group_diff.groups_to_create
+        or group_diff.members_to_add
+        or group_diff.members_to_remove
+        or group_diff.assumers_to_set
+        or group_diff.groups_to_rename
+        or group_diff.groups_to_delete
+    ):
+        change_logger.log_section_header("Groups")
+    execute_group_diff(
+        ws_helper,
+        group_diff,
+        change_logger,
+        dry_run=dry_run,
+        force=force,
+        max_parallel_changes=max_parallel_changes,
+    )
+
+    if (
+        governed_tag_diff.to_create
+        or governed_tag_diff.to_update
+        or governed_tag_diff.to_delete
+    ):
+        change_logger.log_section_header("Governed tags")
+    execute_governed_tag_diff(
+        ws_helper,
+        governed_tag_diff,
+        change_logger,
+        dry_run=dry_run,
+        force=force,
+        # max_parallel_changes not currently supported for governed tags
+    )
+
+    if domain_diff.to_create or domain_diff.to_update or domain_diff.to_delete:
+        change_logger.log_section_header("Domains")
+    execute_domain_diff(
+        ws_helper,
+        domain_diff,
+        change_logger,
+        dry_run=dry_run,
+        force=force,
+    )
+
+    if (
+        securable_diff.securables_to_create
+        or securable_diff.securables_to_replace
+        or securable_diff.attributes_to_update
+    ):
+        change_logger.log_section_header("Securables")
+    execute_securable_diff(
+        uc_helper,
+        securable_diff,
+        change_logger,
+        dry_run=dry_run,
+        max_parallel_changes=max_parallel_changes,
+        actual_securables=actual_securables,
+    )
+
+    if tag_diff.to_add or tag_diff.to_update or tag_diff.to_remove:
+        change_logger.log_section_header("Tags")
+    execute_tag_diff(
+        uc_helper,
+        tag_diff,
+        change_logger,
+        governed_tag_names=governed_tag_names,
+        dry_run=dry_run,
+        force=force,
+        max_parallel_changes=max_parallel_changes,
+    )
+
+    if policy_diff.to_create or policy_diff.to_replace or policy_diff.to_delete:
+        change_logger.log_section_header("Policies")
+    execute_policy_diff(
+        uc_helper,
+        policy_diff,
+        change_logger,
+        dry_run=dry_run,
+        force=force,
+        max_parallel_changes=max_parallel_changes,
+    )
+
+    if privilege_diff.to_grant or privilege_diff.to_revoke:
+        change_logger.log_section_header("Privileges")
+    execute_privilege_diff(
+        uc_helper,
+        privilege_diff,
+        change_logger,
+        dry_run=dry_run,
+        max_parallel_changes=max_parallel_changes,
+    )
+
+    return OrchestratorDiffsResult(
+        group_diff=group_diff,
+        securable_diff=securable_diff,
+        governed_tag_diff=governed_tag_diff,
+        domain_diff=domain_diff,
+        tag_diff=tag_diff,
+        policy_diff=policy_diff,
+        privilege_diff=privilege_diff,
+    )
+
+
 def run(
     config_dir: Path,
     workspace_client: WorkspaceClient,
@@ -406,617 +1197,77 @@ def run(
     Databricks-managed system service principals that appear in system tables but
     aren't resolvable via SCIM. Empty by default.
     """
-    _warn_deprecated_flags(use_workspace_scim, skip_users_fetch, ref_override_strategy)
-
-    # The run date used to evaluate every expiry_date (groups and grant policies)
-    # is computed once, in the configured timezone, so both compilers agree even
-    # across a midnight boundary.
-    run_date = run_date_for_timezone(timezone)
-
-    # 1. Discover + load + resolve YAML
     config = load_config(config_dir, ref_override_strategy)
-    catalog_names = [c.full_name for c in config.catalogs.values()]
-    configured_namespaces = _collect_configured_namespaces(config)
-    configured_full_names = _collect_configured_full_names(config)
-
-    # Resolve every feature to a single Scope (empty ⇒ inert). A new-style
-    # --*-scopes spec wins; otherwise the deprecated enable_* + *_for_namespaces
-    # pair is honoured with identical behaviour. Effective enablement then derives
-    # from scope activeness, so the rest of the pipeline is scope-driven.
-    tag_scope = _build_hierarchical_scope(
-        tag_management_scopes,
-        legacy_enabled=enable_tag_management,
-        legacy_namespaces=manage_tags_for_namespaces,
-        configured_namespaces=configured_namespaces,
-    )
-    privilege_scope = _build_hierarchical_scope(
-        privilege_management_scopes,
-        legacy_enabled=enable_privilege_management,
-        legacy_namespaces=manage_privileges_for_namespaces,
-        configured_namespaces=configured_namespaces,
-    )
-    taggable_management_scope = _build_hierarchical_scope(
-        taggable_management_scopes,
-        legacy_enabled=enable_taggable_management,
-        legacy_namespaces=manage_taggables_for_namespaces,
-        configured_namespaces=configured_namespaces,
-    )
-    taggable_creation_scope = _build_hierarchical_scope(
-        taggable_creation_scopes,
-        legacy_enabled=enable_taggable_creation,
-        legacy_namespaces=create_taggables_for_namespaces,
-        configured_namespaces=configured_namespaces,
-    )
-    policy_delete_scope = _build_hierarchical_scope(
-        policy_deletion_scopes,
-        legacy_enabled=enable_policy_deletion,
-        legacy_namespaces=delete_policies_for_namespaces,
-        configured_namespaces=configured_namespaces,
-    )
-    group_creation_scope = _build_flat_scope(
-        group_creation_scopes, legacy_enabled=enable_group_creation
-    )
-    group_management_scope = _build_flat_scope(
-        group_management_scopes, legacy_enabled=enable_group_management
-    )
-    group_deletion_scope = _build_flat_scope(
-        group_deletion_scopes, legacy_enabled=enable_group_deletion
-    )
-    governed_tag_deletion_scope = _build_flat_scope(
-        governed_tag_deletion_scopes, legacy_enabled=enable_governed_tag_deletion
-    )
-    domain_creation_scope = _build_flat_scope(
-        domain_creation_scopes, legacy_enabled=False
-    )
-    domain_management_scope = _build_flat_scope(
-        domain_management_scopes, legacy_enabled=False
-    )
-    domain_deletion_scope = _build_flat_scope(
-        domain_deletion_scopes, legacy_enabled=False
-    )
-    # Effective enablement: a feature is on iff its scope has any entry.
-    enable_tag_management = tag_scope.is_active()
-    enable_privilege_management = privilege_scope.is_active()
-    enable_taggable_management = taggable_management_scope.is_active()
-    enable_taggable_creation = taggable_creation_scope.is_active()
-    enable_policy_deletion = policy_delete_scope.is_active()
-    enable_group_creation = group_creation_scope.is_active()
-    enable_group_management = group_management_scope.is_active()
-    enable_group_deletion = group_deletion_scope.is_active()
-    enable_governed_tag_deletion = governed_tag_deletion_scope.is_active()
-    domain_workflow_active = (
-        domain_creation_scope.is_active()
-        or domain_management_scope.is_active()
-        or domain_deletion_scope.is_active()
-    )
-    # Domain owners are stored as numeric principal ids, whose id maps are built only
-    # when the workspace helper is told to manage them (see WorkspaceHelper). Trigger
-    # that build whenever the domain workflow runs and any declared domain sets owners.
-    manage_domain_owners = domain_workflow_active and any(
-        domain.business_owners is not None or domain.technical_owners is not None
-        for domain in (config.domains or {}).values()
+    settings = _build_run_context(
+        config,
+        system_catalog=system_catalog,
+        timezone=timezone,
+        dry_run=dry_run,
+        use_workspace_scim=use_workspace_scim,
+        skip_users_fetch=skip_users_fetch,
+        enable_tag_management=enable_tag_management,
+        enable_taggable_management=enable_taggable_management,
+        enable_taggable_creation=enable_taggable_creation,
+        enable_privilege_management=enable_privilege_management,
+        enable_governed_tag_deletion=enable_governed_tag_deletion,
+        enable_policy_deletion=enable_policy_deletion,
+        enable_group_creation=enable_group_creation,
+        enable_group_management=enable_group_management,
+        enable_group_deletion=enable_group_deletion,
+        ignore_unresolvable_principals=ignore_unresolvable_principals,
+        manage_tags_for_namespaces=manage_tags_for_namespaces,
+        manage_privileges_for_namespaces=manage_privileges_for_namespaces,
+        manage_taggables_for_namespaces=manage_taggables_for_namespaces,
+        create_taggables_for_namespaces=create_taggables_for_namespaces,
+        delete_policies_for_namespaces=delete_policies_for_namespaces,
+        tag_management_scopes=tag_management_scopes,
+        privilege_management_scopes=privilege_management_scopes,
+        taggable_management_scopes=taggable_management_scopes,
+        taggable_creation_scopes=taggable_creation_scopes,
+        policy_deletion_scopes=policy_deletion_scopes,
+        group_creation_scopes=group_creation_scopes,
+        group_management_scopes=group_management_scopes,
+        group_deletion_scopes=group_deletion_scopes,
+        governed_tag_deletion_scopes=governed_tag_deletion_scopes,
+        domain_creation_scopes=domain_creation_scopes,
+        domain_management_scopes=domain_management_scopes,
+        domain_deletion_scopes=domain_deletion_scopes,
+        retain_tag_prefixes=retain_tag_prefixes,
+        ref_override_strategy=ref_override_strategy,
+        force=force,
+        max_parallel_changes=max_parallel_changes,
     )
 
-    # Warn (never fail) about new-style hierarchical scope entries that match no
-    # configured securable — a likely typo that would silently govern nothing.
-    _warn_unmatched_scopes(
-        [
-            ("--tag-management-scopes", tag_management_scopes, tag_scope),
-            (
-                "--privilege-management-scopes",
-                privilege_management_scopes,
-                privilege_scope,
-            ),
-            (
-                "--taggable-management-scopes",
-                taggable_management_scopes,
-                taggable_management_scope,
-            ),
-            (
-                "--taggable-creation-scopes",
-                taggable_creation_scopes,
-                taggable_creation_scope,
-            ),
-            ("--policy-deletion-scopes", policy_deletion_scopes, policy_delete_scope),
-        ],
-        configured_full_names,
-    )
-
-    # Group creation/management operate at the account level via the account SCIM
-    # proxy. The workspace SCIM API surfaces only workspace-level groups and cannot
-    # create or manage account groups, so enabling a group scope under
-    # --use-workspace-scim is unsupported. (Configuring groups without any group
-    # scope is inert and compatible with --use-workspace-scim.)
-    group_domain_active = enable_group_creation or enable_group_management
-    if config.groups and group_domain_active and use_workspace_scim:
-        raise OrchestratorError(
-            "Group creation/management requires the account SCIM proxy, but "
-            "--use-workspace-scim was set. Remove --use-workspace-scim to create or "
-            "manage the groups declared in config."
-        )
-    # Resolving user members of a managed group requires the account users list, so
-    # group management cannot run alongside --skip-users-fetch.
-    if config.groups and group_domain_active and skip_users_fetch:
-        raise OrchestratorError(
-            "Group creation/management requires the account users list to resolve "
-            "user members, but --skip-users-fetch was set. Remove --skip-users-fetch "
-            "to create or manage the groups declared in config."
-        )
-    # Group deletion makes config authoritative over group existence — it is only
-    # usable alongside group creation, and never against an empty config (a
-    # destructive account-wide sweep with no declared groups is disallowed outright).
-    if enable_group_deletion and not config.groups:
-        raise OrchestratorError(
-            "Group deletion is enabled but no groups are declared under "
-            "resources.groups. Declare the groups config should own, or disable "
-            "group deletion."
-        )
-    if enable_group_deletion and not enable_group_creation:
-        raise OrchestratorError(
-            "Group deletion requires group creation to also be active (config must "
-            "be authoritative over group existence). Enable group creation, or "
-            "disable group deletion."
-        )
-
-    # Tag-key prefixes whose tags are never removed (only added/updated). Empty
-    # string ⇒ no retention. Defaults to "class." to protect auto-classification.
-    retain_prefixes = frozenset(
-        p.strip() for p in retain_tag_prefixes.split(",") if p.strip()
-    )
-    # Actual-state (UC-side) identifiers whose resolution-failure warning is
-    # suppressed across the privileges, securables (owner), and governed-tags
-    # (assigners) domains. Matched by identifier only; resolvable principals are
-    # unaffected. Empty by default ⇒ all unresolvable-principal warnings emitted.
-    ignore_unresolvable = frozenset(
-        p.strip() for p in ignore_unresolvable_principals.split(",") if p.strip()
-    )
-
-    # 2. Compile desired up-front so we can scope downstream fetches:
-    #    - governed tags name set → rule-set fetches restricted to (actual ∩ desired)
-    #    - securable attributes/securables → rfa_targets restricted to securables that
-    #      actually declare ``rfa_destinations`` in config. Non-function securables are
-    #      gated by the taggable-management flag (RFA is a managed attribute), but
-    #      FUNCTION targets are always fetched — functions are engine-managed
-    #      independently of the flag (mirroring ``_filter_taggable_attributes``). Without
-    #      this the function's actual RFA state stays ``None`` when the flag is off, and an
-    #      explicit empty list ("remove all") silently no-ops against a ``None`` actual.
-    desired_groups = compile_desired_groups(config, run_date=run_date)
-    desired_group_names = {g.display_name for g in desired_groups}
-    desired_group_ids = {g.id for g in desired_groups if g.id}
-    desired_governed_tags = compile_desired_governed_tags(config)
-    desired_governed_tag_names = {gt.name for gt in desired_governed_tags}
-    desired_attributes = compile_desired_attributes(config)
-    desired_securables = compile_desired_securables(config)
-    rfa_targets: set[tuple[SecurableType, str]] = {
-        (a.securable_type, a.full_name)
-        for a in desired_attributes
-        if a.rfa_destinations is not None
-        and (enable_taggable_management or a.securable_type == SecurableType.FUNCTION)
-    }
-    # Parent tables of every in-scope column that declares a comment. Column comments
-    # are a managed (taggable) attribute, so — unlike rfa_targets, which has a FUNCTION
-    # exception — they are fetched only for tables in the taggable-management scope.
-    # When taggable management is off the scope matches nothing, this set is empty, and
-    # no column-comment query is ever issued (zero added state-fetch cost).
-    column_comment_tables: set[str] = {
-        a.full_name.rpartition(".")[0]
-        for a in desired_attributes
-        if a.securable_type == SecurableType.COLUMN
-        and a.comment is not None
-        and taggable_management_scope.matches(a.full_name)
-    }
-
-    # 3. Parallel initial fetch (securables, tags, privileges, and principals concurrently)
+    # Build the two live helpers once; they are threaded into both fetch_actual_state
+    # (which populates their caches) and _execute_changes (which reuses the same
+    # instances, so the resolver and SQL/API execution see the already-seeded caches).
     uc_helper = UnityCatalogHelper(
         workspace_client,
         warehouse_id,
-        system_catalog=system_catalog,
+        system_catalog=settings.system_catalog,
     )
     ws_helper = WorkspaceHelper(
         workspace_client,
-        use_workspace_scim=use_workspace_scim,
-        manage_groups=group_domain_active and bool(desired_groups),
-        manage_domain_owners=manage_domain_owners,
-        skip_users_fetch=skip_users_fetch,
+        use_workspace_scim=settings.use_workspace_scim,
+        manage_groups=settings.group_domain_active and bool(config.groups),
+        manage_domain_owners=settings.manage_domain_owners,
+        skip_users_fetch=settings.skip_users_fetch,
     )
+
     change_logger = ChangeLogger(dry_run=dry_run, logger=_logger)
     change_logger.log_banner()
     _logger.info(
         "  Fetching current state from workspace (this can take several minutes)..."
     )
-    # actual_tags is needed by either the tags domain (for the diff) or the privileges
-    # domain (for policy matching against on-disk tag state when tag management is off).
-    need_actual_tags = enable_tag_management or enable_privilege_management
-    with ThreadPoolExecutor() as pool:
-        actual_securables_f = pool.submit(
-            uc_helper.fetch_actual_securables,
-            catalog_names,
-            rfa_targets,
-            column_comment_tables,
-        )
-        actual_policies_f = pool.submit(uc_helper.fetch_actual_policies, catalog_names)
-        actual_governed_tags_f = pool.submit(
-            ws_helper.fetch_actual_governed_tags,
-            desired_governed_tag_names,
-        )
-        principals_f = pool.submit(ws_helper.fetch_principals)
-        actual_tags_f = (
-            pool.submit(uc_helper.fetch_actual_tags, catalog_names)
-            if need_actual_tags
-            else None
-        )
-        actual_privs_f = (
-            pool.submit(uc_helper.fetch_actual_privileges, catalog_names)
-            if enable_privilege_management
-            else None
-        )
-
-        actual_securables, actual_attributes = actual_securables_f.result()
-        actual_policies = actual_policies_f.result()
-        actual_governed_tags = actual_governed_tags_f.result()
-        principals_f.result()
-        actual_tags = actual_tags_f.result() if actual_tags_f is not None else set()
-        actual_privileges = (
-            actual_privs_f.result() if actual_privs_f is not None else set()
-        )
-    # Domains are fetched after the pool, once fetch_principals has built the
-    # principal id maps: fetch_actual_domains maps each owner's numeric id back to a
-    # principal via those maps, so running it concurrently with the principal fetch
-    # would read owners as empty and make the diff re-add them on every run. Mirrors
-    # fetch_actual_groups, which is sequenced after principals for the same reason.
-    actual_domains = (
-        ws_helper.fetch_actual_domains() if domain_workflow_active else set()
-    )
+    actual_state = fetch_actual_state(config, uc_helper, ws_helper, settings)
     _logger.info("  Successfully fetched current state")
 
-    # Fetch actual state for the configured groups. Membership and assumers are
-    # authoritative only when supplied, so each is fetched only for the groups whose
-    # field is non-None AND in the management scope (the only scope that reconciles
-    # them) — a group with members/assumers omitted is never fetched. Identity comes
-    # from the principal-fetch caches (no extra call). Empty when the domain is inert.
-    members_fetch_names = {
-        g.display_name
-        for g in desired_groups
-        if g.members is not None and group_management_scope.matches(g.display_name)
-    }
-    members_fetch_ids = {
-        g.id
-        for g in desired_groups
-        if g.id
-        and g.members is not None
-        and group_management_scope.matches(g.display_name)
-    }
-    assumers_fetch_names = {
-        g.display_name
-        for g in desired_groups
-        if g.assumers is not None and group_management_scope.matches(g.display_name)
-    }
-    assumers_fetch_ids = {
-        g.id
-        for g in desired_groups
-        if g.id
-        and g.assumers is not None
-        and group_management_scope.matches(g.display_name)
-    }
-    actual_groups = (
-        ws_helper.fetch_actual_groups(
-            desired_group_names,
-            desired_group_ids,
-            member_fetch_names=members_fetch_names,
-            member_fetch_ids=members_fetch_ids,
-            assumer_fetch_names=assumers_fetch_names,
-            assumer_fetch_ids=assumers_fetch_ids,
-        )
-        if group_domain_active
-        else set()
-    )
-    # Group deletion needs the full account-group inventory (identity + provenance only,
-    # no membership) to find Databricks-managed groups absent from config. Cheap — built
-    # from caches populated during fetch_principals, no extra API calls.
-    all_account_groups = (
-        ws_helper.list_account_groups() if enable_group_deletion else set()
-    )
-
-    # 3. Construct the shared PrincipalResolver now that ws_helper cache is populated.
-    resolver = PrincipalResolver(ws_helper)
-
-    # Seed the display names of groups this run will create into the principal cache
-    # *before* the diff, so a configured group's members that are themselves created
-    # this run resolve during member resolution (they don't exist in the account yet).
-    # The set is computed the same way the differ decides what to create.
-    if group_domain_active:
-        ws_helper.register_pending_groups(
-            groups_pending_creation(
-                desired_groups,
-                actual_groups,
-                enable_group_creation,
-                group_creation_scope,
-            )
-        )
-
-    # 3a. Group workflow (the first domain — runs before governed tags so that any
-    # groups referenced as policy/grant principals exist first). Inert unless a
-    # group flag is set.
-    group_diff = (
-        compute_group_diff(
-            desired_groups,
-            actual_groups,
-            resolver,
-            change_logger,
-            enable_group_creation=enable_group_creation,
-            enable_group_management=enable_group_management,
-            enable_group_deletion=enable_group_deletion,
-            ignore_unresolvable=ignore_unresolvable,
-            all_account_groups=all_account_groups,
-            creation_scope=group_creation_scope,
-            management_scope=group_management_scope,
-            deletion_scope=group_deletion_scope,
-        )
-        if group_domain_active
-        else GroupDiff()
-    )
-    # Groups slated for creation were already seeded into the principal cache before
-    # the diff (see above), so downstream domains (governed-tag assigners, policies,
-    # privileges, securable owners) can resolve them — group creation runs first, so
-    # they exist before any grant applies.
-    # Renames are reflected in the principal cache before downstream domains resolve:
-    # the new display name becomes resolvable and the old one becomes unknown, so
-    # references to the new name succeed and references to the old name fail (even in
-    # dry-run, where the SCIM PATCH itself is skipped).
-    ws_helper.register_pending_renames(group_diff.groups_to_rename)
-
-    # 4. Governed tags workflow (account-level tag policies — must run before
-    # catalog-scoped tag assignments, so new tag keys exist before SET TAGS).
-    # desired_governed_tags was compiled at the start to scope the rule-set fetch.
-    governed_tag_diff = compute_governed_tag_diff(
-        desired_governed_tags,
-        actual_governed_tags,
-        resolver,
-        change_logger,
-        enable_deletion=enable_governed_tag_deletion,
-        ignore_unresolvable=ignore_unresolvable,
-        deletion_scope=governed_tag_deletion_scope,
-    )
-    # Union of declared governed tags (desired from config + actual on UC).
-    # The names are used by the policies/privileges compilers to reject references
-    # to tag keys that aren't governed; the full objects are used by the tags
-    # compiler to validate that each securable tag's value is in the governed
-    # tag's allowed_values. Desired-only covers in-flight creations, actual-only
-    # covers already-deployed tags the config doesn't redeclare.
-    governed_tags_by_name = {tag.name: tag for tag in actual_governed_tags}
-    governed_tags_by_name.update({tag.name: tag for tag in desired_governed_tags})
-    governed_tags = set(governed_tags_by_name.values())
-    governed_tag_names = {t.name for t in governed_tags}
-    deleted_governed_tag_names = {tag.name for tag in governed_tag_diff.to_delete}
-    domain_source_governed_tags = {
-        tag for tag in governed_tags if tag.name not in deleted_governed_tag_names
-    }
-    desired_domains = (
-        compile_desired_domains(config, domain_source_governed_tags)
-        if domain_workflow_active
-        else set()
-    )
-    computed_domain_diff = (
-        compute_domain_diff(
-            desired_domains,
-            actual_domains,
-            change_logger,
-            resolver,
-            deletion_scope=domain_deletion_scope,
-            ignore_unresolvable=ignore_unresolvable,
-        )
-        if domain_workflow_active
-        else DomainDiff()
-    )
-    domain_diff = _scope_domain_changes(
-        computed_domain_diff,
-        domain_creation_scope,
-        domain_management_scope,
-    )
-
-    # 5. Securables workflow (before tags and privileges) — desired sides were
-    # compiled up-front; here we apply taggable-management scoping.
-    # Drop non-function attribute updates whose catalog isn't in scope — the
-    # engine must not touch catalog/schema/table/volume owners outside the
-    # taggable-management scope. Function attributes flow through because
-    # FUNCTION creation / replacement is always engine-managed. When the
-    # taggable-management gate is off entirely, ``taggable_management_scope``
-    # is empty and this collapses to "function attributes only".
-    desired_attributes = _filter_taggable_attributes(
-        desired_attributes, taggable_management_scope
-    )
-    actual_attributes = _filter_taggable_attributes(
-        actual_attributes, taggable_management_scope
-    )
-    securable_diff = compute_securable_diff(
-        desired_attributes,
-        actual_attributes,
-        desired_securables,
-        actual_securables,
-        resolver,
-        change_logger,
-        creation_in_scope_namespaces=taggable_creation_scope,
-        ignore_unresolvable=ignore_unresolvable,
-    )
-
-    # 6. Tags workflow
-    if enable_tag_management:
-        desired_tags = compile_desired_tags(config, governed_tags, change_logger)
-        in_scope_desired_tags = {
-            t for t in desired_tags if tag_scope.matches(t.securable_full_name)
-        }
-        in_scope_actual_tags = {
-            t for t in actual_tags if tag_scope.matches(t.securable_full_name)
-        }
-        out_of_scope_actual_tags = {
-            t for t in actual_tags if not tag_scope.matches(t.securable_full_name)
-        }
-        tag_diff = compute_tag_diff(in_scope_desired_tags, in_scope_actual_tags)
-        tag_diff, retained_tags = filter_retained_removals(tag_diff, retain_prefixes)
-        if retained_tags:
-            _logger.info(
-                f"  Retaining {len(retained_tags)} unconfigured tag(s) matching "
-                f"prefix(es) {sorted(retain_prefixes)} — these will not be removed"
-            )
-        # Post-run tag state used by the privileges compiler: in-scope catalogs
-        # reflect the desired (about to be applied); out-of-scope reflect actual
-        # (left untouched this run).
-        tags_for_privilege_matching = in_scope_desired_tags | out_of_scope_actual_tags
-    else:
-        tag_diff = TagDiff()
-        # When tag management is off the engine will not reconcile the config's
-        # desired tags onto UC this run, so the privileges compiler must match
-        # its policies against the on-disk tag state to stay honest.
-        tags_for_privilege_matching = actual_tags
-
-    # 7. Policies workflow (mask/filter)
-    desired_policies = compile_desired_policies(
-        config,
-        governed_tag_names,
-        change_logger,
-    )
-    policy_diff = compute_policy_diff(
-        desired_policies,
-        actual_policies,
-        resolver,
-        change_logger,
-        ignore_unresolvable=ignore_unresolvable,
-        delete_scope=policy_delete_scope,
-    )
-
-    # 8. Privileges workflow
-    if enable_privilege_management:
-        compiled_privileges = compile_desired_privileges(
-            config,
-            tags_for_privilege_matching,
-            governed_tag_names,
-            change_logger,
-            run_date=run_date,
-        )
-        in_scope_compiled_privileges = {
-            p
-            for p in compiled_privileges
-            if privilege_scope.matches(p.securable_full_name)
-        }
-        in_scope_actual_privileges = {
-            p
-            for p in actual_privileges
-            if privilege_scope.matches(p.securable_full_name)
-        }
-        privilege_diff = compute_privilege_diff(
-            in_scope_compiled_privileges,
-            in_scope_actual_privileges,
-            resolver,
-            change_logger,
-            ignore_unresolvable=ignore_unresolvable,
-        )
-    else:
-        privilege_diff = PrivilegeDiff()
-
-    # 9. Log and execute (or dry-run) — group management runs first.
-    if (
-        group_diff.groups_to_create
-        or group_diff.members_to_add
-        or group_diff.members_to_remove
-        or group_diff.assumers_to_set
-        or group_diff.groups_to_rename
-        or group_diff.groups_to_delete
-    ):
-        change_logger.log_section_header("Groups")
-    execute_group_diff(
-        ws_helper,
-        group_diff,
-        change_logger,
-        dry_run=dry_run,
-        force=force,
-        max_parallel_changes=max_parallel_changes,
-    )
-
-    if (
-        governed_tag_diff.to_create
-        or governed_tag_diff.to_update
-        or governed_tag_diff.to_delete
-    ):
-        change_logger.log_section_header("Governed tags")
-    execute_governed_tag_diff(
-        ws_helper,
-        governed_tag_diff,
-        change_logger,
-        dry_run=dry_run,
-        force=force,
-        # max_parallel_changes not currently supported for governed tags
-    )
-
-    if domain_diff.to_create or domain_diff.to_update or domain_diff.to_delete:
-        change_logger.log_section_header("Domains")
-    execute_domain_diff(
-        ws_helper,
-        domain_diff,
-        change_logger,
-        dry_run=dry_run,
-        force=force,
-    )
-
-    if (
-        securable_diff.securables_to_create
-        or securable_diff.securables_to_replace
-        or securable_diff.attributes_to_update
-    ):
-        change_logger.log_section_header("Securables")
-    execute_securable_diff(
-        uc_helper,
-        securable_diff,
-        change_logger,
-        dry_run=dry_run,
-        max_parallel_changes=max_parallel_changes,
-        actual_securables=actual_securables,
-    )
-
-    if tag_diff.to_add or tag_diff.to_update or tag_diff.to_remove:
-        change_logger.log_section_header("Tags")
-    execute_tag_diff(
-        uc_helper,
-        tag_diff,
-        change_logger,
-        governed_tag_names=governed_tag_names,
-        dry_run=dry_run,
-        force=force,
-        max_parallel_changes=max_parallel_changes,
-    )
-
-    if policy_diff.to_create or policy_diff.to_replace or policy_diff.to_delete:
-        change_logger.log_section_header("Policies")
-    execute_policy_diff(
-        uc_helper,
-        policy_diff,
-        change_logger,
-        dry_run=dry_run,
-        force=force,
-        max_parallel_changes=max_parallel_changes,
-    )
-
-    if privilege_diff.to_grant or privilege_diff.to_revoke:
-        change_logger.log_section_header("Privileges")
-    execute_privilege_diff(
-        uc_helper,
-        privilege_diff,
-        change_logger,
-        dry_run=dry_run,
-        max_parallel_changes=max_parallel_changes,
+    result = _execute_changes(
+        config, actual_state, uc_helper, ws_helper, settings, change_logger
     )
 
     change_logger.log_errors_section()
     change_logger.log_summary()
-
     if change_logger.has_errors:
         raise ExecutionBatchError(change_logger.errors)
-
-    return OrchestratorDiffsResult(
-        group_diff=group_diff,
-        securable_diff=securable_diff,
-        governed_tag_diff=governed_tag_diff,
-        domain_diff=domain_diff,
-        tag_diff=tag_diff,
-        policy_diff=policy_diff,
-        privilege_diff=privilege_diff,
-    )
+    return result

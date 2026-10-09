@@ -305,6 +305,98 @@ def run_date_for_timezone(timezone: str) -> date:
     return datetime.now(ZoneInfo(timezone)).date()
 
 
+@dataclass(frozen=True)
+class RunContext:
+    """Resolved per-run settings and feature scopes for one orchestrator run.
+
+    Produced once by ``orchestrator._build_run_context`` from the raw ``run()``
+    keyword arguments (scope resolution, deprecation warnings, and fatal
+    validations happen there), then threaded through ``fetch_actual_state`` and
+    ``_execute_changes`` so the rest of the pipeline is pure data + logic.
+
+    Each feature resolves to a single :class:`Scope` (empty ⇒ inert). Effective
+    enablement is a property derived from ``scope.is_active()`` so there is one
+    source of truth and the context stays immutable. ``manage_domain_owners`` is a
+    stored field because it depends on ``config.domains`` owner declarations, which
+    this context does not hold.
+
+    Lives in ``utils`` (not ``orchestrator``) so it has no dependency on the
+    orchestrator or cli layers — ``utils`` is the shared low-level module both can
+    import, leaving the door open for the cli settings layer to converge on it.
+    """
+
+    tag_scope: Scope
+    privilege_scope: Scope
+    taggable_management_scope: Scope
+    taggable_creation_scope: Scope
+    policy_delete_scope: Scope
+    group_creation_scope: Scope
+    group_management_scope: Scope
+    group_deletion_scope: Scope
+    governed_tag_deletion_scope: Scope
+    domain_creation_scope: Scope
+    domain_management_scope: Scope
+    domain_deletion_scope: Scope
+    run_date: date
+    retain_prefixes: frozenset[str]
+    ignore_unresolvable: frozenset[str]
+    system_catalog: str
+    use_workspace_scim: bool
+    skip_users_fetch: bool
+    dry_run: bool
+    force: bool
+    max_parallel_changes: int
+    manage_domain_owners: bool
+
+    @property
+    def enable_tag_management(self) -> bool:
+        return self.tag_scope.is_active()
+
+    @property
+    def enable_privilege_management(self) -> bool:
+        return self.privilege_scope.is_active()
+
+    @property
+    def enable_taggable_management(self) -> bool:
+        return self.taggable_management_scope.is_active()
+
+    @property
+    def enable_taggable_creation(self) -> bool:
+        return self.taggable_creation_scope.is_active()
+
+    @property
+    def enable_policy_deletion(self) -> bool:
+        return self.policy_delete_scope.is_active()
+
+    @property
+    def enable_group_creation(self) -> bool:
+        return self.group_creation_scope.is_active()
+
+    @property
+    def enable_group_management(self) -> bool:
+        return self.group_management_scope.is_active()
+
+    @property
+    def enable_group_deletion(self) -> bool:
+        return self.group_deletion_scope.is_active()
+
+    @property
+    def enable_governed_tag_deletion(self) -> bool:
+        return self.governed_tag_deletion_scope.is_active()
+
+    @property
+    def group_domain_active(self) -> bool:
+        return self.enable_group_creation or self.enable_group_management
+
+    @property
+    def domain_workflow_active(self) -> bool:
+        return (
+            self.domain_creation_scope.is_active()
+            or self.domain_management_scope.is_active()
+            or self.domain_deletion_scope.is_active()
+        )
+
+
 def _match_rfa_destination(value: str) -> RfaDestinationKind | None:
     """Return the kind of RFA destination, or None if no regex matches."""
     if _RFA_EMAIL_RE.match(value):
