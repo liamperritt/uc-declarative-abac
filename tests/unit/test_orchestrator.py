@@ -4745,3 +4745,137 @@ def test_orchestrator_creates_nested_groups_before_linking_membership(
     assert len(create_indices) == 2  # both groups created empty
     assert link_indices  # the parent's membership is linked
     assert max(create_indices) < min(link_indices)  # creates precede any linking
+
+
+# ---------------------------------------------------------------------------
+# fetch_actual_state (public current-state fetch seam)
+# ---------------------------------------------------------------------------
+
+
+def _inert_run_context() -> orchestrator.RunContext:
+    """A RunContext with every feature scope empty — nothing is fetched/gated on."""
+    empty = orchestrator.Scope()
+    return orchestrator.RunContext(
+        tag_scope=empty,
+        privilege_scope=empty,
+        taggable_management_scope=empty,
+        taggable_creation_scope=empty,
+        policy_delete_scope=empty,
+        group_creation_scope=empty,
+        group_management_scope=empty,
+        group_deletion_scope=empty,
+        governed_tag_deletion_scope=empty,
+        domain_creation_scope=empty,
+        domain_management_scope=empty,
+        domain_deletion_scope=empty,
+        run_date=orchestrator.run_date_for_timezone("UTC"),
+        retain_prefixes=frozenset(),
+        ignore_unresolvable=frozenset(),
+        system_catalog="system",
+        use_workspace_scim=False,
+        skip_users_fetch=False,
+        dry_run=False,
+        force=False,
+        max_parallel_changes=8,
+        manage_domain_owners=False,
+    )
+
+
+def _build_helpers(mock_workspace_client: MagicMock):
+    """Construct the two live helpers the fetch/execute functions are threaded."""
+    uc_helper = orchestrator.UnityCatalogHelper(
+        mock_workspace_client, "test-warehouse-id", system_catalog="system"
+    )
+    ws_helper = orchestrator.WorkspaceHelper(
+        mock_workspace_client,
+        use_workspace_scim=False,
+        manage_groups=True,
+        manage_domain_owners=True,
+        skip_users_fetch=False,
+    )
+    return uc_helper, ws_helper
+
+
+def test_orchestrator_fetch_actual_state_fetches_every_domain_when_settings_omitted(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    config_dict = _catalog_with_tags_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config_dict})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config_dict)
+    _setup_mock_empty_principals(mock_workspace_client)
+    mock_workspace_client.domains.list_domains.return_value = iter([])
+    config = orchestrator.load_config(root)
+    uc_helper, ws_helper = _build_helpers(mock_workspace_client)
+
+    actual_state = orchestrator.fetch_actual_state(config, uc_helper, ws_helper)
+
+    # With no settings the fetch is unscoped: domains are read and the privileges
+    # system-table query is issued even though no management flag is set.
+    assert isinstance(actual_state, orchestrator.ActualState)
+    assert mock_workspace_client.domains.list_domains.called
+    assert any(
+        "_privileges" in sql.lower() for sql in mock_workspace_client.executed_sql
+    )
+
+
+def test_orchestrator_fetch_actual_state_scopes_fetch_when_settings_provided(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    config_dict = _catalog_with_tags_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config_dict})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config_dict)
+    _setup_mock_empty_principals(mock_workspace_client)
+    mock_workspace_client.domains.list_domains.return_value = iter([])
+    config = orchestrator.load_config(root)
+    uc_helper, ws_helper = _build_helpers(mock_workspace_client)
+
+    orchestrator.fetch_actual_state(config, uc_helper, ws_helper, _inert_run_context())
+
+    # An inert context gates out the optional domains: the privilege query is never
+    # issued and the domains API is never called.
+    assert not mock_workspace_client.domains.list_domains.called
+    assert not any(
+        "_privileges" in sql.lower() for sql in mock_workspace_client.executed_sql
+    )
+
+
+def test_orchestrator_fetch_actual_state_returns_pure_state_without_helpers(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    config_dict = _catalog_with_tags_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config_dict})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config_dict)
+    _setup_mock_empty_principals(mock_workspace_client)
+    mock_workspace_client.domains.list_domains.return_value = iter([])
+    config = orchestrator.load_config(root)
+    uc_helper, ws_helper = _build_helpers(mock_workspace_client)
+
+    actual_state = orchestrator.fetch_actual_state(config, uc_helper, ws_helper)
+
+    # ActualState is a pure state view — it carries no execution handles.
+    assert not hasattr(actual_state, "ws_helper")
+    assert not hasattr(actual_state, "uc_helper")
+    assert isinstance(actual_state.principals, dict)
+
+
+def test_orchestrator_fetch_actual_state_populates_helper_caches_for_reuse(
+    tmp_yaml_dir, mock_workspace_client, monkeypatch
+):
+    config_dict = _catalog_with_tags_config()
+    root = tmp_yaml_dir({"resources/catalog.yaml": config_dict})
+    _setup_mock_workspace_empty_state(mock_workspace_client)
+    _install_fetch_router(monkeypatch, config_dict)
+    _setup_mock_principals(mock_workspace_client, "data_engineers")
+    mock_workspace_client.domains.list_domains.return_value = iter([])
+    config = orchestrator.load_config(root)
+    uc_helper, ws_helper = _build_helpers(mock_workspace_client)
+
+    actual_state = orchestrator.fetch_actual_state(config, uc_helper, ws_helper)
+
+    # The fetch populated the ws_helper principal cache; the returned snapshot and a
+    # fresh read of the (same) helper agree, and the fetched group is present.
+    assert "data_engineers" in actual_state.principals
+    assert ws_helper.get_principals() == actual_state.principals
