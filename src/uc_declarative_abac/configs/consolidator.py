@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from pathlib import Path
 
+from uc_declarative_abac.configs.models import (
+    stamped_file_path,
+    with_file_path,
+)
 from uc_declarative_abac.utils import OrchestratorError
 
 _DEFAULT_SCHEMA_NAME = "default"
@@ -60,6 +65,7 @@ def _resolve_inline_function_target(
     policy_catalog_name: str,
     default_schema_name: str,
     function: dict,
+    file_path: Path | None,
 ) -> tuple[str, dict]:
     """Resolve the catalog name and schema dict where an inline function should
     be created. Optional ``catalog_name`` / ``schema_name`` fields on the function
@@ -67,12 +73,12 @@ def _resolve_inline_function_target(
     unspecified field falling back to the policy's catalog and the default target
     schema name respectively. The catalog/schema (whether default or overridden)
     is auto-created if not declared elsewhere, mirroring standalone-resource
-    consolidation."""
+    consolidation. Auto-created parents inherit the policy's file_path."""
     target_catalog_name = function.get("catalog_name") or policy_catalog_name
     target_schema_name = function.get("schema_name") or default_schema_name
-    _ensure_catalog(catalogs, target_catalog_name)
+    _ensure_catalog(catalogs, target_catalog_name, file_path)
     target_schema = _find_or_create_schema(
-        catalogs[target_catalog_name], target_schema_name
+        catalogs[target_catalog_name], target_schema_name, file_path
     )
     return target_catalog_name, target_schema
 
@@ -98,10 +104,16 @@ def _rewrite_policy_function_to_full_name(
     _resolve_inline_function_target). The resolved catalog_name / schema_name are
     stamped on the function dict so its full name is correct regardless of where
     it sits structurally; SchemaConfig._inject_parent_names only setdefaults them.
+
+    A function written inline in the policy is attributed to the policy's file — where it was
+    written — not the target schema's; one referenced via ``$defs``/``$ref`` already carries its
+    definition's stamp, which is kept. Any catalog/schema auto-created to hold the function is
+    attributed to the policy's file.
     """
     function = policy.get("function")
     if not isinstance(function, dict):
         return
+    file_path = stamped_file_path(policy)
     fn_name = _inline_function_name(policy, function)
     function["name"] = fn_name
     target_catalog_name, target_schema = _resolve_inline_function_target(
@@ -109,9 +121,11 @@ def _rewrite_policy_function_to_full_name(
         policy_catalog_name,
         default_schema_name,
         function,
+        file_path,
     )
     function["catalog_name"] = target_catalog_name
     function["schema_name"] = target_schema.get("name")
+    function = with_file_path(function, file_path)
     target_schema.setdefault("functions", []).append(function)
     policy["function"] = f"{target_catalog_name}.{target_schema.get('name')}.{fn_name}"
 
@@ -152,7 +166,7 @@ def consolidate_resources(resolved: dict) -> dict:
             raise OrchestratorError(
                 f"Standalone schema '{key}' is missing required 'catalog_name'"
             )
-        _ensure_catalog(catalogs, cat_name)
+        _ensure_catalog(catalogs, cat_name, stamped_file_path(schema))
         catalogs[cat_name].setdefault("schemas", []).append(schema)
 
     for key, table in resolved.pop("tables", {}).items():
@@ -166,8 +180,9 @@ def consolidate_resources(resolved: dict) -> dict:
             raise OrchestratorError(
                 f"Standalone table '{key}' is missing required 'schema_name'"
             )
-        _ensure_catalog(catalogs, cat_name)
-        schema = _find_or_create_schema(catalogs[cat_name], schema_name)
+        file_path = stamped_file_path(table)
+        _ensure_catalog(catalogs, cat_name, file_path)
+        schema = _find_or_create_schema(catalogs[cat_name], schema_name, file_path)
         schema.setdefault("tables", []).append(table)
 
     for key, volume in resolved.pop("volumes", {}).items():
@@ -181,8 +196,9 @@ def consolidate_resources(resolved: dict) -> dict:
             raise OrchestratorError(
                 f"Standalone volume '{key}' is missing required 'schema_name'"
             )
-        _ensure_catalog(catalogs, cat_name)
-        schema = _find_or_create_schema(catalogs[cat_name], schema_name)
+        file_path = stamped_file_path(volume)
+        _ensure_catalog(catalogs, cat_name, file_path)
+        schema = _find_or_create_schema(catalogs[cat_name], schema_name, file_path)
         schema.setdefault("volumes", []).append(volume)
 
     for key, policy in resolved.pop("policies", {}).items():
@@ -193,14 +209,15 @@ def consolidate_resources(resolved: dict) -> dict:
             )
         schema_name = policy.get("schema_name")
         table_name = policy.get("table_name")
-        _ensure_catalog(catalogs, cat_name)
+        file_path = stamped_file_path(policy)
+        _ensure_catalog(catalogs, cat_name, file_path)
 
         if table_name and schema_name:
-            schema = _find_or_create_schema(catalogs[cat_name], schema_name)
-            table = _find_or_create_table(schema, table_name)
+            schema = _find_or_create_schema(catalogs[cat_name], schema_name, file_path)
+            table = _find_or_create_table(schema, table_name, file_path)
             table.setdefault("policies", []).append(policy)
         elif schema_name:
-            schema = _find_or_create_schema(catalogs[cat_name], schema_name)
+            schema = _find_or_create_schema(catalogs[cat_name], schema_name, file_path)
             schema.setdefault("policies", []).append(policy)
         else:
             catalogs[cat_name].setdefault("policies", []).append(policy)
@@ -210,29 +227,39 @@ def consolidate_resources(resolved: dict) -> dict:
     return resolved
 
 
-def _ensure_catalog(catalogs: dict, cat_name: str) -> None:
+def _new_entry(name: str, file_path: Path | None) -> dict:
+    """Return a minimal auto-created catalog/schema/table dict, attributed to the file of
+    the standalone child that caused its creation (when known)."""
+    return with_file_path({"name": name}, file_path)
+
+
+def _ensure_catalog(catalogs: dict, cat_name: str, file_path: Path | None) -> None:
     """Ensure a catalog entry exists, creating a minimal one if needed."""
     if cat_name not in catalogs:
-        catalogs[cat_name] = {"name": cat_name}
+        catalogs[cat_name] = _new_entry(cat_name, file_path)
 
 
-def _find_or_create_schema(catalog: dict, schema_name: str) -> dict:
+def _find_or_create_schema(
+    catalog: dict, schema_name: str, file_path: Path | None
+) -> dict:
     """Find a schema by name within a catalog, or create and append one."""
     schemas = catalog.setdefault("schemas", [])
     for schema in schemas:
         if isinstance(schema, dict) and schema.get("name") == schema_name:
             return schema
-    new_schema = {"name": schema_name}
+    new_schema = _new_entry(schema_name, file_path)
     schemas.append(new_schema)
     return new_schema
 
 
-def _find_or_create_table(schema: dict, table_name: str) -> dict:
+def _find_or_create_table(
+    schema: dict, table_name: str, file_path: Path | None
+) -> dict:
     """Find a table by name within a schema, or create and append one."""
     tables = schema.setdefault("tables", [])
     for table in tables:
         if isinstance(table, dict) and table.get("name") == table_name:
             return table
-    new_table = {"name": table_name}
+    new_table = _new_entry(table_name, file_path)
     tables.append(new_table)
     return new_table

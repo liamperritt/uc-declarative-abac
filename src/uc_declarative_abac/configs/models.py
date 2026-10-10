@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import functools
 import re
 from abc import ABC, abstractmethod
 from datetime import date, datetime
-from typing import Annotated, Literal
+from pathlib import Path
+from typing import Annotated, Literal, get_args
 
 from databricks.sdk.service.catalog import ColumnTypeName
 from databricks.sdk.service.domains import DomainIconName
@@ -210,6 +212,86 @@ PolicyColumnConstantValue = (
 )
 
 
+# The raw-dict key (and BaseConfig field) recording a config's source file. Owned here, by the
+# models that validate it; discovery, the resolver and the consolidator stamp it on raw dicts.
+FILE_PATH_KEY = "file_path"
+
+
+def stamped_file_path(node: object) -> Path | None:
+    """The engine's source-file stamp on a raw config dict, else None.
+
+    Only a ``Path`` under ``FILE_PATH_KEY`` counts as a stamp: YAML can only produce strings,
+    so a string (or null) there is user-written — either a ``file_path`` the model will reject
+    or, inside a plain data map such as ``tags``, an ordinary key that must be left alone.
+    """
+    value = node.get(FILE_PATH_KEY) if isinstance(node, dict) else None
+    return value if isinstance(value, Path) else None
+
+
+def with_file_path(node: dict, path: Path | None) -> dict:
+    """Return a copy of ``node`` stamped with ``path``, keeping any value already under
+    ``FILE_PATH_KEY`` (a no-op copy when ``path`` is None)."""
+    if path is None or FILE_PATH_KEY in node:
+        return {**node}
+    return {**node, FILE_PATH_KEY: path}
+
+
+def _is_config_class(tp: object) -> bool:
+    """Whether ``tp`` is a config model class (``BaseConfig`` is resolved at call time)."""
+    return isinstance(tp, type) and issubclass(tp, BaseConfig)
+
+
+def _holds_config(annotation: object) -> bool:
+    """Whether a field annotation mentions a config model anywhere (through Optional, unions,
+    ``list[...]``, ``dict[...]`` or ``Annotated``) — i.e. the field holds child configs rather
+    than plain data such as ``tags: dict[str, str] | None``."""
+    return _is_config_class(annotation) or any(
+        _holds_config(arg) for arg in get_args(annotation)
+    )
+
+
+@functools.cache
+def _child_config_fields(cls: type) -> frozenset[str]:
+    """The input keys of ``cls``'s fields that hold child configs, derived from annotations so
+    a new child field needs no registration. Computed lazily, once forward refs resolve."""
+    return frozenset(
+        info.alias or name
+        for name, info in cls.model_fields.items()
+        if _holds_config(info.annotation)
+    )
+
+
+def _push_down_file_path(data: dict, cls: type) -> None:
+    """Set the parent's ``file_path`` stamp on each child config dict (a single dict value or
+    each dict in a list) that lacks its own. Mutates the child dicts in place, matching the
+    ``setdefault`` idiom of ``_inject_parent_names``. A no-op when the parent has no stamp."""
+    parent_path = stamped_file_path(data)
+    if parent_path is None:
+        return
+    for key in _child_config_fields(cls):
+        value = data.get(key)
+        for child in value if isinstance(value, list) else [value]:
+            if isinstance(child, dict):
+                child.setdefault(FILE_PATH_KEY, parent_path)
+
+
+def _strip_leaked_stamps(data: dict, cls: type) -> dict:
+    """Return ``data`` with the engine's ``file_path`` stamp removed from every plain data-map
+    field (one holding no child configs, e.g. ``tags``/``has_tags``).
+
+    Discovery stamps every top-level definition, and the resolver cannot tell a config from a
+    data fragment, so a tag map shared via ``$defs/tags/...`` arrives carrying the stamp. Only a
+    ``Path`` counts (``stamped_file_path``), so a real user tag named ``file_path`` is kept.
+    """
+    children = _child_config_fields(cls)
+    return {
+        key: {k: v for k, v in value.items() if k != FILE_PATH_KEY}
+        if key not in children and stamped_file_path(value) is not None
+        else value
+        for key, value in data.items()
+    }
+
+
 class BaseConfig(BaseModel, ABC):
     """Shared base for every config model.
 
@@ -219,9 +301,38 @@ class BaseConfig(BaseModel, ABC):
     ``$vars``) would mean a wrong-but-silent deployment; forbidding extras makes it fail
     loudly at load time. Pydantic merges ``model_config`` down the MRO, so defining it here
     once applies it to every subclass.
+
+    ``file_path`` is engine-owned attribution metadata (the YAML file the model's content
+    was written in). Discovery, ``$ref`` resolution, and consolidation stamp it as a ``Path``.
+    Any user-written ``file_path:`` is rejected by the before-validator. As metadata rather than
+    config, it is excluded from ``model_dump()`` and ``repr()``. Child config fields are
+    derived from the annotations (``_holds_config``), and the parent's ``file_path`` is pushed
+    down to each child that lacks its own; a stamp that leaked into a plain data map like
+    ``tags`` is dropped.
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    file_path: Path | None = Field(default=None, exclude=True, repr=False)
+
+    @field_validator("file_path", mode="before")
+    @classmethod
+    def _reject_user_written_file_path(cls, v):
+        """Reject any value that isn't an engine ``Path`` stamp — i.e. a user-written string or
+        null — with a clear "engine-owned" message. Omitting the field is fine (default None)."""
+        if not isinstance(v, Path):
+            raise ValueError("file_path is engine-owned and cannot be set in config")  # noqa: TRY004 — pydantic wraps ValueError
+        return v
+
+    @model_validator(mode="before")
+    @classmethod
+    def _attribute_file_path(cls, data: dict) -> dict:
+        """Hand this model's ``file_path`` down to its child configs and drop any stamp that
+        leaked into a plain data-map field (see ``_strip_leaked_stamps``)."""
+        if not isinstance(data, dict):
+            return data
+        _push_down_file_path(data, cls)
+        return _strip_leaked_stamps(data, cls)
 
 
 class PolicyColumnAliasConfig(BaseConfig):

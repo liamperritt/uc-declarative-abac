@@ -4,6 +4,7 @@ import copy
 import re
 from typing import Any, Literal
 
+from uc_declarative_abac.configs.models import FILE_PATH_KEY, stamped_file_path
 from uc_declarative_abac.configs.variables import (
     accepted_vars,
     check_no_placeholders_in_resources,
@@ -107,12 +108,28 @@ def _merge_lists(definition: list, override: list) -> list:
     return copy.deepcopy(override)
 
 
+def _definition_keeps_file_path(definition: dict, override: dict) -> bool:
+    """Whether a merge keeps the definition's ``file_path`` over the override's.
+
+    It does whenever both sides carry the key and the override's is an engine stamp: the
+    definition's value is then normally its own stamp (the file the content was written in),
+    or else a user-written value, which must survive the merge for validation to reject.
+    """
+    return FILE_PATH_KEY in definition and stamped_file_path(override) is not None
+
+
 def _merge_dicts(definition: dict, override: dict) -> dict:
-    """Recursively merge two dicts. Override keys win; definition-only keys are preserved."""
+    """Recursively merge two dicts. Override keys win; definition-only keys are preserved,
+    except that ``file_path`` follows ``_definition_keeps_file_path``."""
+    keep_file_path = _definition_keeps_file_path(definition, override)
     result: dict = {}
     for key, def_value in definition.items():
         if key in override:
-            result[key] = _deep_merge(def_value, override[key])
+            result[key] = (
+                def_value
+                if key == FILE_PATH_KEY and keep_file_path
+                else _deep_merge(def_value, override[key])
+            )
         else:
             result[key] = copy.deepcopy(def_value)
     for key, ov_value in override.items():
@@ -353,7 +370,11 @@ def _resolve_ref(
     )
 
     if override_strategy == "replace":
+        keep_file_path = _definition_keeps_file_path(resolved, overrides)
+        def_file_path = resolved.get(FILE_PATH_KEY)
         resolved.update(overrides)
+        if keep_file_path:
+            resolved[FILE_PATH_KEY] = def_file_path
     else:
         resolved = _merge_dicts(resolved, overrides)
 
