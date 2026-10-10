@@ -1102,3 +1102,110 @@ def test_workspace_helper_get_tag_policy_rule_set_by_name_uses_cached_id() -> No
     call = client.account_access_control_proxy.get_rule_set.call_args
     name = call.kwargs.get("name", call.args[0] if call.args else None)
     assert name.endswith("/tagPolicies/tp-pii/ruleSets/default")
+
+
+# ---------------------------------------------------------------------------
+# internal_id
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_helper_resolves_by_name_with_internal_id() -> None:
+    """When resolved by name, user, group, and SP principals carry their internal ids."""
+    client = _make_workspace_client(
+        users=[_make_user("jane@co.com", "1")],
+        groups=[_make_group("data_engineers", "10")],
+        service_principals=[_make_sp("my-sp", "app-123", "100")],
+    )
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    user = helper.resolve_by_name("jane@co.com")
+    group = helper.resolve_by_name("data_engineers")
+    sp = helper.resolve_by_name("my-sp")
+
+    assert user.internal_id == "1"
+    assert group.internal_id == "10"
+    assert sp.internal_id == "100"
+
+
+def test_workspace_helper_resolves_by_identifier_with_internal_id() -> None:
+    """When resolved by identifier, user and SP principals carry their internal ids."""
+    client = _make_workspace_client(
+        users=[_make_user("jane@co.com", "1")],
+        service_principals=[_make_sp("my-sp", "app-123", "100")],
+    )
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    user = helper.resolve_by_identifier("jane@co.com")
+    sp = helper.resolve_by_identifier("app-123")
+
+    assert user.internal_id == "1"
+    assert sp.internal_id == "100"
+
+
+def test_workspace_helper_get_principals_sets_internal_id() -> None:
+    """get_principals returns principals with internal_id set."""
+    client = _make_workspace_client(
+        users=[_make_user("jane@co.com", "1")],
+        groups=[_make_group("data_engineers", "10")],
+        service_principals=[_make_sp("my-sp", "app-123", "100")],
+    )
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    principals = helper.get_principals()
+
+    assert principals["jane@co.com"].internal_id == "1"
+    assert principals["data_engineers"].internal_id == "10"
+    assert principals["my-sp"].internal_id == "100"
+
+
+def test_workspace_helper_sets_internal_id_when_group_management_disabled() -> None:
+    """Even with manage_groups=False, resolved principals carry internal_id."""
+    client = _make_workspace_client(
+        groups=[_make_group("data_engineers", "10")],
+    )
+    helper = WorkspaceHelper(client, manage_groups=False, manage_domain_owners=False)
+    helper.fetch_principals()
+
+    group = helper.resolve_by_name("data_engineers")
+
+    assert group.internal_id == "10"
+
+
+def test_workspace_helper_leaves_internal_id_none_for_system_groups() -> None:
+    """System groups like 'account users' resolve with internal_id=None (not in list response)."""
+    client = _make_workspace_client(
+        groups=[_make_group("data_engineers", "10")],
+    )
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    system_group = helper.resolve_by_name("account users")
+
+    assert system_group.internal_id is None
+
+
+def test_workspace_helper_leaves_internal_id_none_when_workspace_scim() -> None:
+    """In workspace-SCIM mode, all resolved principals have internal_id=None."""
+    client = MagicMock()
+
+    user = MagicMock()
+    user.user_name = "jane@co.com"
+    client.users.list.return_value = [user]
+
+    group = MagicMock()
+    group.display_name = "data_engineers"
+    client.groups.list.return_value = [group]
+
+    client.service_principals.list.return_value = []
+
+    helper = WorkspaceHelper(client, use_workspace_scim=True)
+    helper.fetch_principals()
+
+    user_principal = helper.resolve_by_name("jane@co.com")
+    group_principal = helper.resolve_by_name("data_engineers")
+
+    assert user_principal.internal_id is None
+    assert group_principal.internal_id is None

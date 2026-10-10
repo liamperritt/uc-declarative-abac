@@ -449,9 +449,8 @@ def _build_run_context(
         domain_deletion_scopes, legacy_enabled=False
     )
 
-    # Domain owners are stored as numeric principal ids, whose id maps are built only
-    # when the workspace helper is told to manage them (see WorkspaceHelper). Trigger
-    # that build whenever the domain workflow runs and any declared domain sets owners.
+    # Fetch and compare domain owners only when the domain workflow runs and any
+    # declared domain sets owners.
     domain_workflow_active = (
         domain_creation_scope.is_active()
         or domain_management_scope.is_active()
@@ -619,7 +618,7 @@ def fetch_actual_state(
     ``settings=None`` fetches the complete actual state for every domain — the
     downstream "current state" view. Callers wanting that complete view should
     build the helpers with ``manage_groups=True`` / ``manage_domain_owners=True``
-    so the group/domain-owner id maps are available.
+    so groups and domain owners are fetched too.
 
     Securable attributes, domains, and groups are read after the principal fetch
     (``fetch_actual_domains`` / ``fetch_actual_groups`` map owner/member numeric ids

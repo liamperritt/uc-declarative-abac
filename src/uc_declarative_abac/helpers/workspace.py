@@ -120,6 +120,18 @@ def _direct_member_to_principal(
     return Principal(PrincipalType.UNKNOWN, identifier=identifier)
 
 
+def _principal_internal_id(
+    principal: Principal,
+    scim_id_by_identifier: dict[str, str],
+) -> str | None:
+    """Return a resolved principal's internal id, falling back to the id cache.
+
+    The fallback covers a group created this run that was resolved while still pending
+    (``internal_id`` None): ``register_created_group`` caches its id afterwards, so the
+    cache knows it even though the earlier-resolved principal does not."""
+    return principal.internal_id or scim_id_by_identifier.get(principal.identifier)
+
+
 def _principal_to_member_dict(
     principal: Principal,
     scim_id_by_identifier: dict[str, str],
@@ -127,12 +139,13 @@ def _principal_to_member_dict(
     """Convert a resolved Principal to a SCIM group-member dict ({"value": <id>}) for
     the account SCIM proxy write path.
 
-    The Principal must be resolved; its canonical identifier is looked up in the id
-    map (populated from the V2 read path — the V2 internal id doubles as the SCIM
-    member value)."""
+    The Principal must be resolved. Its internal_id (set by WorkspaceHelper at resolution)
+    is used; the id cache is consulted as a fallback. The identifier is used as a last
+    resort (for principals resolved without a cached id)."""
     ensure_resolved(principal)
     return {
-        "value": scim_id_by_identifier.get(principal.identifier, principal.identifier)
+        "value": _principal_internal_id(principal, scim_id_by_identifier)
+        or principal.identifier
     }
 
 
@@ -142,17 +155,16 @@ def _owner_ids(
 ) -> list[int] | None:
     """Convert a resolved owner principal set to the SDK's numeric id list.
 
-    ``None`` (unmanaged) is returned unchanged. Each resolved principal's canonical
-    identifier is mapped to its numeric internal id via the id map; ids are returned
-    sorted for a deterministic request body. A principal with no known id is skipped
-    (it can only happen for a principal absent from the account, which resolution
-    would already have dropped)."""
+    ``None`` (unmanaged) is returned unchanged. Each resolved principal's internal_id
+    (set by WorkspaceHelper at resolution) is used; the id cache is consulted as a
+    fallback. Ids are returned sorted for a deterministic request body. A principal
+    with no known id is skipped."""
     if owners is None:
         return None
     ids: list[int] = []
     for principal in owners:
         ensure_resolved(principal)
-        scim_id = scim_id_by_identifier.get(principal.identifier)
+        scim_id = _principal_internal_id(principal, scim_id_by_identifier)
         if scim_id:
             ids.append(int(scim_id))
     return sorted(ids)
@@ -204,8 +216,6 @@ class WorkspaceHelper:
         self._use_workspace_scim = use_workspace_scim
         self._manage_groups = manage_groups
         self._skip_users_fetch = skip_users_fetch
-        # Domain owners are set as numeric principal ids, so an owner-managing run needs
-        # the id maps built even when it manages no groups (see _build_group_id_maps).
         self._manage_domain_owners = manage_domain_owners
         self._users: set[str] | None = None
         self._groups: set[str] | None = None
@@ -213,10 +223,10 @@ class WorkspaceHelper:
             None  # display_name -> application_id
         )
         self._duplicate_sps: set[str] = set()
-        # Group-management caches, populated by _fetch_account_principals when
-        # manage_groups is enabled (otherwise left empty). Membership is NOT cached
-        # here — it is fetched per-group on demand in fetch_actual_groups. Ids are the
-        # numeric internal principal ids the V2 API exposes as strings (str(int)).
+        # Id maps and group-management caches, populated by _fetch_account_principals
+        # in account mode. Membership is NOT cached here — it is fetched per-group on
+        # demand in fetch_actual_groups. Ids are the numeric internal principal ids the
+        # V2 API exposes as strings (str(int)).
         self._group_id_by_name: dict[str, str] = {}  # display_name -> group id
         self._group_name_by_id: dict[str, str] = {}  # group id -> display_name
         self._external_id_by_group_name: dict[
@@ -287,23 +297,23 @@ class WorkspaceHelper:
                 for sp in sps_data
             ]
         )
-        if self._manage_groups or self._manage_domain_owners:
-            self._build_group_id_maps(users_data, groups_data, sps_data)
+        self._build_id_maps(users_data, groups_data, sps_data)
 
-    def _build_group_id_maps(
+    def _build_id_maps(
         self,
         users_data: list,
         groups_data: list,
         sps_data: list,
     ) -> None:
-        """Build the id ↔ canonical-identifier maps and the group-name → id index from
-        the V2 list responses.
+        """Build the id ↔ canonical-identifier maps used to set each resolved principal's
+        internal_id, plus the group-name/id/external-id indexes.
 
-        Group *membership* is not read here — the V2 group list has no inline members.
-        Membership is fetched per-group in fetch_actual_groups (scoped to configured
-        groups). The maps built here translate a member's numeric principal id back to
-        its canonical identifier (username / display name / application_id) once those
-        fetches return; ids are stored as strings (the V2 ``*_id`` field type)."""
+        The maps translate each principal's numeric id (internal, account-level id returned
+        by V2 list endpoints and used by SCIM write paths) to/from its canonical identifier
+        (username / display name / application_id). Group *membership* is not read here —
+        the V2 group list has no inline members. Membership is fetched per-group in
+        fetch_actual_groups (scoped to configured groups). Ids are stored as strings
+        (the V2 ``*_id`` field type)."""
         for user in users_data:
             id_, identifier = user.user_id, user.username
             if id_ and identifier:
@@ -378,6 +388,21 @@ class WorkspaceHelper:
         self._service_principals = sp_map
         self._sp_app_id_to_name: dict[str, str] = {v: k for k, v in sp_map.items()}
 
+    def _resolved_principal(
+        self, principal_type: PrincipalType, identifier: str, name: str
+    ) -> Principal:
+        """Build a resolved Principal with internal_id set from the cache if available.
+
+        The internal_id is set best-effort: it is known for all principals fetched via
+        the V2 account identity API, but is None for system groups (not in the list
+        response), groups pending creation, and principals in workspace-SCIM mode."""
+        return Principal(
+            principal_type,
+            identifier,
+            name,
+            internal_id=self._scim_id_by_identifier.get(identifier),
+        )
+
     def get_principals(self) -> dict[str, Principal]:
         """Return a mapping of principal names to Principal objects.
 
@@ -386,11 +411,15 @@ class WorkspaceHelper:
         """
         result: dict[str, Principal] = {}
         for username in self._users or set():
-            result[username] = Principal(PrincipalType.USER, username, username)
+            result[username] = self._resolved_principal(
+                PrincipalType.USER, username, username
+            )
         for group_name in self._groups or set():
-            result[group_name] = Principal(PrincipalType.GROUP, group_name, group_name)
+            result[group_name] = self._resolved_principal(
+                PrincipalType.GROUP, group_name, group_name
+            )
         for sp_name, app_id in (self._service_principals or {}).items():
-            result[sp_name] = Principal(
+            result[sp_name] = self._resolved_principal(
                 PrincipalType.SERVICE_PRINCIPAL, app_id, sp_name
             )
         return result
@@ -434,11 +463,11 @@ class WorkspaceHelper:
         Raises PrincipalValidationError if the name is not found.
         """
         if self._users and name in self._users:
-            return Principal(PrincipalType.USER, name, name)
+            return self._resolved_principal(PrincipalType.USER, name, name)
         if self._groups and name in self._groups:
-            return Principal(PrincipalType.GROUP, name, name)
+            return self._resolved_principal(PrincipalType.GROUP, name, name)
         if self._service_principals and name in self._service_principals:
-            return Principal(
+            return self._resolved_principal(
                 PrincipalType.SERVICE_PRINCIPAL,
                 self._service_principals[name],
                 name,
@@ -458,15 +487,15 @@ class WorkspaceHelper:
         (new-name) references and yields no spurious diff.
         """
         if self._users and identifier in self._users:
-            return Principal(PrincipalType.USER, identifier, identifier)
+            return self._resolved_principal(PrincipalType.USER, identifier, identifier)
         new_name = self._renamed_group_new_by_old.get(identifier)
         if new_name is not None:
-            return Principal(PrincipalType.GROUP, new_name, new_name)
+            return self._resolved_principal(PrincipalType.GROUP, new_name, new_name)
         if self._groups and identifier in self._groups:
-            return Principal(PrincipalType.GROUP, identifier, identifier)
+            return self._resolved_principal(PrincipalType.GROUP, identifier, identifier)
         sp_reverse = getattr(self, "_sp_app_id_to_name", {})
         if identifier in sp_reverse:
-            return Principal(
+            return self._resolved_principal(
                 PrincipalType.SERVICE_PRINCIPAL,
                 identifier,
                 sp_reverse[identifier],
@@ -995,8 +1024,8 @@ class WorkspaceHelper:
         """Fetch all readable domains.
 
         Owners are mapped from the SDK's numeric ids back to unresolved principals
-        (by identifier) only when ``manage_domain_owners`` is set — that is the run
-        that built the id maps and the only run that compares owners. Otherwise owners
+        (by identifier) only when ``manage_domain_owners`` is set — the only run that
+        compares owners. Otherwise owners
         stay ``None`` (unmanaged), leaving the server's owners untouched."""
         domains = list(self._client.domains.list_domains())
         tag_key_by_domain_id = {
