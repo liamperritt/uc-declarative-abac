@@ -23,6 +23,7 @@ from uc_declarative_abac.utils import (
     InteractiveConfirmationRequiredError,
     parallel_for_each,
     quote_securable,
+    sql_string_literal,
 )
 
 _logger = logging.getLogger("uc_declarative_abac")
@@ -46,8 +47,7 @@ def _build_policy_sql(policy: Policy, or_replace: bool) -> str:
         f"ON {policy.securable_type.value} {quote_securable(policy.securable_full_name)}",
     ]
     if policy.comment:
-        escaped = policy.comment.replace("'", "\\'")
-        lines.append(f'COMMENT "{escaped}"')
+        lines.append("COMMENT " + sql_string_literal(policy.comment, quote='"'))
     lines.extend(
         [
             f"{body_type} {quote_securable(policy.function_name)}",

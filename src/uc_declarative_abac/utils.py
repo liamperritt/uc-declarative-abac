@@ -86,6 +86,24 @@ def quote_securable(full_name: str) -> str:
     return ".".join(f"`{seg}`" for seg in full_name.split("."))
 
 
+def sql_string_literal(value: str, *, quote: str = "'") -> str:
+    """Render ``value`` as a quoted Databricks SQL string literal.
+
+    The single source of truth for embedding arbitrary text in a SQL string literal.
+    Databricks SQL literals interpret backslash escapes, so backslashes are escaped
+    first (so they round-trip literally and can't swallow the following quote), then
+    both ``'`` and ``"`` are backslash-escaped. Escaping both regardless of delimiter
+    makes the result safe with either; ``quote`` lets callers keep their existing
+    delimiter (e.g. ``COMMENT "..."`` vs ``LOCATION '...'``).
+
+    Not used by the policy WHEN-clause / USING renderers in ``policies/compiler.py``:
+    they deliberately use standard-SQL ``''`` doubling, because their output must be
+    byte-identical to the fetched policy text for the policy diff to converge.
+    """
+    escaped = value.replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"')
+    return f"{quote}{escaped}{quote}"
+
+
 def _strip_default_collation(data_type: str) -> str:
     return re.sub(r"\s+COLLATE\s+UTF8_BINARY\b", "", data_type, flags=re.IGNORECASE)
 
@@ -458,7 +476,8 @@ def is_system_governed_tag(name: str) -> bool:
 # this engine (and are near-universally useful as policy targets). Single source of
 # truth, shared by the workspace helper (which surfaces them in workspace-SCIM mode)
 # and the group differ (which excludes them from deletion candidates).
-SYSTEM_ACCOUNT_GROUPS = frozenset({"account users", "account admins"})
+ACCOUNT_USERS_GROUP = "account users"
+SYSTEM_ACCOUNT_GROUPS = frozenset({ACCOUNT_USERS_GROUP, "account admins"})
 
 
 def is_system_account_group(name: str) -> bool:
@@ -469,6 +488,16 @@ def is_system_account_group(name: str) -> bool:
     are never group-deletion candidates. Matched case-insensitively.
     """
     return name.lower() in SYSTEM_ACCOUNT_GROUPS
+
+
+def is_account_users_group(name: str) -> bool:
+    """Return True if ``name`` is the ``account users`` system group (case-insensitive).
+
+    ``account users`` implicitly contains every user in the account, so expanding its
+    membership is never useful and would pull the whole user directory; full-state
+    fetches and dumps always skip it.
+    """
+    return name.lower() == ACCOUNT_USERS_GROUP
 
 
 def prompt_delete_confirmation(names: list[str], noun: str, warning: str) -> bool:

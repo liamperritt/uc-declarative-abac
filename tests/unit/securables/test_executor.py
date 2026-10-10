@@ -388,6 +388,68 @@ def test_securable_executor_escapes_single_quotes_in_comment():
     assert '''COMMENT "It\\'s a comment"''' in sql
 
 
+def test_securable_executor_escapes_quotes_in_create_comment():
+    """CREATE with a comment containing both single and double quotes escapes both."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        securables_to_create=[
+            Function(
+                securable_type=SecurableType.FUNCTION,
+                full_name="cat.s.f",
+                parameters=(),
+                definition="1",
+                comment='She said "It\'s done"',
+            ),
+        ],
+    )
+
+    (sql,) = execute_securable_diff(uc_helper, diff, ChangeLogger())
+    # Both quotes should be escaped inside the double-quoted COMMENT string
+    assert '''COMMENT "She said \\"It\\'s done\\""''' in sql
+
+
+def test_securable_executor_escapes_quotes_in_comment_update():
+    """Comment attribute update with quotes escapes them."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        attributes_to_update=[
+            AttributeUpdate(
+                securable_type=SecurableType.TABLE,
+                full_name="cat.s.t",
+                attribute="comment",
+                old_value=frozenset({"old"}),
+                new_value=frozenset({'They said "hello"'}),
+            ),
+        ],
+    )
+
+    stmts = execute_securable_diff(uc_helper, diff, ChangeLogger())
+    # Should have COMMENT ON TABLE with escaped double quotes
+    assert len(stmts) == 1
+    assert "COMMENT ON TABLE" in stmts[0]
+    assert r"""They said \"hello\"""" in stmts[0]
+
+
+def test_securable_executor_escapes_backslashes_in_comment():
+    """Backslashes in comments are doubled (escaped) so they appear as literals in SQL."""
+    uc_helper = MagicMock()
+    diff = SecurableDiff(
+        securables_to_create=[
+            Function(
+                securable_type=SecurableType.FUNCTION,
+                full_name="cat.s.f",
+                parameters=(),
+                definition="1",
+                comment="Path: C:\\data\\files",
+            ),
+        ],
+    )
+
+    (sql,) = execute_securable_diff(uc_helper, diff, ChangeLogger())
+    # Backslashes should be doubled: \ -> \\
+    assert '''COMMENT "Path: C:\\\\data\\\\files"''' in sql
+
+
 # ---------------------------------------------------------------------------
 # Taggable creation: catalog / schema / table / volume
 # ---------------------------------------------------------------------------

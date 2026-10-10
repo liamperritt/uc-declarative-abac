@@ -86,8 +86,7 @@ def _drop_policies_with_ungoverned_tags(
     For each dropped policy, log one error per ungoverned key."""
     kept: list[GrantPolicyConfig] = []
     for policy in policies:
-        referenced = set(policy.has_tags or {}) | set(policy.has_any_of_tags or {})
-        ungoverned = sorted(referenced - governed_tag_names)
+        ungoverned = sorted(policy.referenced_tag_keys() - governed_tag_names)
         if not ungoverned:
             kept.append(policy)
             continue

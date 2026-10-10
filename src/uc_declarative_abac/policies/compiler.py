@@ -115,26 +115,7 @@ def _ungoverned_tag_keys(
 ) -> set[str]:
     """Collect every tag key the policy references (policy-level + per-column)
     that is not in ``governed_tag_names``."""
-    referenced: set[str] = set()
-    referenced |= set(policy.has_tags or {})
-    referenced |= set(policy.has_any_of_tags or {})
-    referenced |= set(policy.has_none_of_tags or {})
-    # For identity-attribute tag-matches the dict VALUES are governed tag keys on
-    # the resource (the keys are identity-attribute names, not tags).
-    referenced |= set((policy.has_identity_attribute_tag_matches or {}).values())
-    referenced |= set((policy.has_any_of_identity_attribute_tag_matches or {}).values())
-    referenced |= set(
-        (policy.has_none_of_identity_attribute_tag_matches or {}).values()
-    )
-    for col in policy.columns or []:
-        if isinstance(col, PolicyColumnAliasConfig):
-            referenced |= set(col.has_tags or {})
-            referenced |= set(col.has_any_of_tags or {})
-            referenced |= set(col.has_none_of_tags or {})
-        elif isinstance(col, PolicyColumnExpressionConfig):
-            # A tag-introspection expression reads a governed tag key at query time.
-            referenced.add(col.arguments.tag)
-    return referenced - governed_tag_names
+    return set(policy.referenced_tag_keys()) - governed_tag_names
 
 
 def _build_policy(

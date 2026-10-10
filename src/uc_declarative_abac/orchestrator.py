@@ -25,6 +25,7 @@ from uc_declarative_abac.domains import (
 from uc_declarative_abac.governed_tags import (
     GovernedTag,
     GovernedTagDiff,
+    collect_referenced_tag_keys,
     compile_desired_governed_tags,
     compute_governed_tag_diff,
     execute_governed_tag_diff,
@@ -46,6 +47,7 @@ from uc_declarative_abac.principals import (
     GroupDiff,
     Principal,
     PrincipalResolver,
+    collect_referenced_principal_names,
     compile_desired_groups,
     compute_group_diff,
     execute_group_diff,
@@ -81,6 +83,7 @@ from uc_declarative_abac.utils import (
     OrchestratorError,
     RunContext,
     Scope,
+    is_account_users_group,
     parse_flat_scope,
     parse_hierarchical_scope,
     parse_namespace_filter,
@@ -599,6 +602,77 @@ def _full_fetch_context() -> RunContext:
     )
 
 
+@dataclass(frozen=True)
+class _GroupFetchSets:
+    """The name/id sets ``WorkspaceHelper.fetch_actual_groups`` takes: which groups to
+    return (identity), and which of those to fetch members and assumers for."""
+
+    names: frozenset[str]
+    ids: frozenset[str]
+    member_names: frozenset[str]
+    member_ids: frozenset[str]
+    assumer_names: frozenset[str]
+    assumer_ids: frozenset[str]
+
+
+def _groups_managing(field: str, groups: set[Group], scope: Scope) -> list[Group]:
+    """The in-``scope`` groups whose ``field`` (``members``/``assumers``) is supplied."""
+    return [
+        g
+        for g in groups
+        if getattr(g, field) is not None and scope.matches(g.display_name)
+    ]
+
+
+def _deploy_group_fetch_sets(
+    desired_groups: set[Group], ctx: RunContext
+) -> _GroupFetchSets:
+    """Group fetch sets for a deploy: declared groups only.
+
+    Membership and assumers are authoritative only when supplied, so each is fetched
+    only for the groups whose field is non-None AND in the management scope (the only
+    scope that reconciles them). Identity comes from the principal-fetch caches (no
+    extra call).
+    """
+    scope = ctx.group_management_scope
+    members = _groups_managing("members", desired_groups, scope)
+    assumers = _groups_managing("assumers", desired_groups, scope)
+    return _GroupFetchSets(
+        names=frozenset(g.display_name for g in desired_groups),
+        ids=frozenset(g.id for g in desired_groups if g.id),
+        member_names=frozenset(g.display_name for g in members),
+        member_ids=frozenset(g.id for g in members if g.id),
+        assumer_names=frozenset(g.display_name for g in assumers),
+        assumer_ids=frozenset(g.id for g in assumers if g.id),
+    )
+
+
+def _full_group_fetch_sets(
+    config: ResourcesConfig, desired_groups: set[Group]
+) -> _GroupFetchSets:
+    """Group fetch sets for a full fetch: every group referenced anywhere in config.
+
+    Declared groups plus every principal name config references (owners, policy
+    recipients, domain owners, assigners, members, assumers) — the helper keeps only
+    names that are real account groups, so users/SPs in the set are harmless. Members
+    and assumers are fetched for all of them. ``account users`` is always excluded
+    (see ``is_account_users_group``). Declared ids are kept so an id-declared group
+    whose display name has drifted is still matched.
+    """
+    names = frozenset(
+        name
+        for name in {g.display_name for g in desired_groups}
+        | collect_referenced_principal_names(config)
+        if not is_account_users_group(name)
+    )
+    ids = frozenset(
+        g.id
+        for g in desired_groups
+        if g.id and not is_account_users_group(g.display_name)
+    )
+    return _GroupFetchSets(names, ids, names, ids, names, ids)
+
+
 def fetch_actual_state(
     config: ResourcesConfig,
     uc_helper: UnityCatalogHelper,
@@ -616,9 +690,14 @@ def fetch_actual_state(
     compilers), while ``settings`` gates which domains are fetched at all.
 
     ``settings=None`` fetches the complete actual state for every domain — the
-    downstream "current state" view. Callers wanting that complete view should
-    build the helpers with ``manage_groups=True`` / ``manage_domain_owners=True``
-    so groups and domain owners are fetched too.
+    downstream "current state" view. It also widens two config-scoped fetches from
+    "what config declares" to "what config references": group members and assumers
+    are fetched for every group referenced anywhere in config (except ``account
+    users``; see ``_full_group_fetch_sets``), and governed-tag assigners for every
+    tag key referenced anywhere in config (``collect_referenced_tag_keys``). Callers
+    wanting that complete view must build the helpers with ``manage_groups=True`` /
+    ``manage_domain_owners=True`` — even when config declares no groups — so the
+    group and domain-owner id maps exist.
 
     Securable attributes, domains, and groups are read after the principal fetch
     (``fetch_actual_domains`` / ``fetch_actual_groups`` map owner/member numeric ids
@@ -626,15 +705,14 @@ def fetch_actual_state(
     with the principal fetch would read owners/members as empty and re-add them on
     every run.
     """
-    ctx = settings if settings is not None else _full_fetch_context()
+    full_fetch = settings is None
+    ctx = _full_fetch_context() if full_fetch else settings
 
     catalog_names = [c.full_name for c in config.catalogs.values()]
     desired_groups = compile_desired_groups(config, run_date=ctx.run_date)
-    desired_group_names = {g.display_name for g in desired_groups}
-    desired_group_ids = {g.id for g in desired_groups if g.id}
-    desired_governed_tag_names = {
-        gt.name for gt in compile_desired_governed_tags(config)
-    }
+    governed_tag_fetch_names = {gt.name for gt in compile_desired_governed_tags(config)}
+    if full_fetch:
+        governed_tag_fetch_names |= collect_referenced_tag_keys(config)
     desired_attributes = compile_desired_attributes(config)
     # RFA targets restrict the attribute fetch to securables that declare
     # ``rfa_destinations``. Non-function securables are gated by the taggable-
@@ -674,7 +752,7 @@ def fetch_actual_state(
         actual_policies_f = pool.submit(uc_helper.fetch_actual_policies, catalog_names)
         actual_governed_tags_f = pool.submit(
             ws_helper.fetch_actual_governed_tags,
-            desired_governed_tag_names,
+            governed_tag_fetch_names,
         )
         principals_f = pool.submit(ws_helper.fetch_principals)
         actual_tags_f = (
@@ -700,42 +778,19 @@ def fetch_actual_state(
         ws_helper.fetch_actual_domains() if ctx.domain_workflow_active else set()
     )
 
-    # Membership and assumers are authoritative only when supplied, so each is
-    # fetched only for the groups whose field is non-None AND in the management scope
-    # (the only scope that reconciles them). Identity comes from the principal-fetch
-    # caches (no extra call). Empty when the group domain is inert.
-    members_fetch_names = {
-        g.display_name
-        for g in desired_groups
-        if g.members is not None and ctx.group_management_scope.matches(g.display_name)
-    }
-    members_fetch_ids = {
-        g.id
-        for g in desired_groups
-        if g.id
-        and g.members is not None
-        and ctx.group_management_scope.matches(g.display_name)
-    }
-    assumers_fetch_names = {
-        g.display_name
-        for g in desired_groups
-        if g.assumers is not None and ctx.group_management_scope.matches(g.display_name)
-    }
-    assumers_fetch_ids = {
-        g.id
-        for g in desired_groups
-        if g.id
-        and g.assumers is not None
-        and ctx.group_management_scope.matches(g.display_name)
-    }
+    group_fetch = (
+        _full_group_fetch_sets(config, desired_groups)
+        if full_fetch
+        else _deploy_group_fetch_sets(desired_groups, ctx)
+    )
     actual_groups = (
         ws_helper.fetch_actual_groups(
-            desired_group_names,
-            desired_group_ids,
-            member_fetch_names=members_fetch_names,
-            member_fetch_ids=members_fetch_ids,
-            assumer_fetch_names=assumers_fetch_names,
-            assumer_fetch_ids=assumers_fetch_ids,
+            group_fetch.names,
+            group_fetch.ids,
+            member_fetch_names=group_fetch.member_names,
+            member_fetch_ids=group_fetch.member_ids,
+            assumer_fetch_names=group_fetch.assumer_names,
+            assumer_fetch_ids=group_fetch.assumer_ids,
         )
         if ctx.group_domain_active
         else set()

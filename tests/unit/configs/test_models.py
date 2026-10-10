@@ -3727,6 +3727,348 @@ def test_alias_spellings_still_validate_under_forbid():
 
 
 # ---------------------------------------------------------------------------
+# referenced_tag_keys()
+# ---------------------------------------------------------------------------
+
+
+def test_grant_policy_config_referenced_tag_keys_combines_has_tags_and_has_any_of_tags():
+    """A grant policy's referenced_tag_keys combines keys from both has_tags and
+    has_any_of_tags."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "name": "g1",
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["team"],
+                            "has_tags": {"domain": "analytics"},
+                            "has_any_of_tags": {"zone": "landing", "tier": "staging"},
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    policy = config.catalogs["cat"].policies[0]
+    assert policy.referenced_tag_keys() == {"domain", "zone", "tier"}
+
+
+def test_grant_policy_config_referenced_tag_keys_empty_when_no_tags():
+    """A grant policy with no tag conditions references no tags."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "policies": [
+                        {
+                            "name": "g1",
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["team"],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    policy = config.catalogs["cat"].policies[0]
+    assert policy.referenced_tag_keys() == frozenset()
+
+
+def test_mask_policy_config_referenced_tag_keys_includes_has_none_of_tags():
+    """A mask policy's referenced_tag_keys includes keys from has_none_of_tags
+    (which grant policies don't support)."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "schemas": [
+                        {
+                            "name": "s",
+                            "tables": [
+                                {
+                                    "name": "t",
+                                    "policies": [
+                                        {
+                                            "name": "p",
+                                            "type": "mask",
+                                            "function": "cat.s.fn",
+                                            "has_tags": {"pii": "true"},
+                                            "has_none_of_tags": {"geo": "us"},
+                                            "columns": [
+                                                {
+                                                    "alias": "c",
+                                                    "has_tags": {"pii": "email"},
+                                                }
+                                            ],
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    # Should include 'pii' and 'geo' from policy level, 'pii' from column
+    assert policy.referenced_tag_keys() == {"pii", "geo"}
+
+
+def test_mask_policy_config_referenced_tag_keys_from_alias_columns():
+    """A mask policy's referenced_tag_keys includes tag keys from alias columns."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "schemas": [
+                        {
+                            "name": "s",
+                            "tables": [
+                                {
+                                    "name": "t",
+                                    "policies": [
+                                        {
+                                            "name": "p",
+                                            "type": "mask",
+                                            "function": "cat.s.fn",
+                                            "columns": [
+                                                {
+                                                    "alias": "c",
+                                                    "has_tags": {
+                                                        "pii": "email",
+                                                        "classification": "high",
+                                                    },
+                                                }
+                                            ],
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert policy.referenced_tag_keys() == {"pii", "classification"}
+
+
+def test_mask_policy_config_referenced_tag_keys_from_expression_columns():
+    """A mask policy's referenced_tag_keys includes the tag name from expression
+    columns (tag-introspection expressions)."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "schemas": [
+                        {
+                            "name": "s",
+                            "tables": [
+                                {
+                                    "name": "t",
+                                    "policies": [
+                                        {
+                                            "name": "p",
+                                            "type": "mask",
+                                            "function": "cat.s.fn",
+                                            "columns": [
+                                                {
+                                                    "alias": "email",
+                                                    "has_tags": {"pii": "email"},
+                                                },
+                                                {
+                                                    "expression": "get_tag_value",
+                                                    "arguments": {
+                                                        "tag": "access_level"
+                                                    },
+                                                },
+                                            ],
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert policy.referenced_tag_keys() == {"pii", "access_level"}
+
+
+def test_mask_policy_config_referenced_tag_keys_from_column_tag_value_extraction():
+    """A mask policy's referenced_tag_keys includes the tag from column
+    tag-value-extraction expressions (get_column_tag_value)."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "schemas": [
+                        {
+                            "name": "s",
+                            "tables": [
+                                {
+                                    "name": "t",
+                                    "policies": [
+                                        {
+                                            "name": "p",
+                                            "type": "mask",
+                                            "function": "cat.s.fn",
+                                            "columns": [
+                                                {
+                                                    "alias": "email",
+                                                    "has_tags": {"pii": "email"},
+                                                },
+                                                {
+                                                    "expression": "get_column_tag_value",
+                                                    "arguments": {
+                                                        "alias": "email",
+                                                        "tag": "format",
+                                                    },
+                                                },
+                                            ],
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert policy.referenced_tag_keys() == {"pii", "format"}
+
+
+def test_mask_policy_config_referenced_tag_keys_constant_column_ignored():
+    """A mask policy's referenced_tag_keys excludes constant columns (which
+    reference no tags)."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "schemas": [
+                        {
+                            "name": "s",
+                            "tables": [
+                                {
+                                    "name": "t",
+                                    "policies": [
+                                        {
+                                            "name": "p",
+                                            "type": "mask",
+                                            "function": "cat.s.fn",
+                                            "columns": [
+                                                {
+                                                    "alias": "email",
+                                                    "has_tags": {"pii": "email"},
+                                                },
+                                                {"constant": "***"},
+                                            ],
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert policy.referenced_tag_keys() == {"pii"}
+
+
+def test_mask_policy_config_referenced_tag_keys_identity_attribute_tag_matches():
+    """A mask policy's referenced_tag_keys includes the VALUES (not keys) of
+    identity-attribute tag-match maps."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "schemas": [
+                        {
+                            "name": "s",
+                            "tables": [
+                                {
+                                    "name": "t",
+                                    "policies": [
+                                        {
+                                            "name": "p",
+                                            "type": "mask",
+                                            "function": "cat.s.fn",
+                                            "has_identity_attribute_tag_matches": {
+                                                "department": "dept_level",
+                                                "role": "role_classification",
+                                            },
+                                            "columns": [
+                                                {
+                                                    "alias": "c",
+                                                    "has_tags": {"pii": "email"},
+                                                }
+                                            ],
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    # Identity attribute keys are 'department', 'role', but we want the tag values
+    assert policy.referenced_tag_keys() == {
+        "pii",
+        "dept_level",
+        "role_classification",
+    }
+
+
+def test_filter_policy_config_referenced_tag_keys():
+    """A filter policy's referenced_tag_keys works like mask (including
+    has_none_of_tags and identity attributes)."""
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "cat": {
+                    "schemas": [
+                        {
+                            "name": "s",
+                            "tables": [
+                                {
+                                    "name": "t",
+                                    "policies": [
+                                        {
+                                            "name": "p",
+                                            "type": "filter",
+                                            "function": "cat.s.fn",
+                                            "has_tags": {"classification": "sensitive"},
+                                            "has_none_of_tags": {"public": "true"},
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    policy = config.catalogs["cat"].schemas[0].tables[0].policies[0]
+    assert policy.referenced_tag_keys() == {"classification", "public"}
+
+
+# ---------------------------------------------------------------------------
 # file_path
 # ---------------------------------------------------------------------------
 
