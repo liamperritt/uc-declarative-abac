@@ -11,6 +11,7 @@ from uc_declarative_abac.utils import (
     Scope,
     catalog_of,
     classify_rfa_destination,
+    is_account_users_group,
     is_system_governed_tag,
     normalise_data_type,
     parallel_for_each,
@@ -19,8 +20,25 @@ from uc_declarative_abac.utils import (
     parse_namespace_filter,
     run_date_for_timezone,
     scope_from_namespace_tokens,
+    sql_string_literal,
     validate_rfa_destinations,
 )
+
+# ---------------------------------------------------------------------------
+# is_account_users_group
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["account users", "Account Users", "ACCOUNT USERS"])
+def test_utils_is_account_users_group_true_for_account_users_in_any_case(name: str):
+    assert is_account_users_group(name)
+
+
+@pytest.mark.parametrize("name", ["account admins", "data-engineers", "users"])
+def test_utils_is_account_users_group_false_for_other_groups(name: str):
+    """Only ``account users`` matches — not the other system group."""
+    assert not is_account_users_group(name)
+
 
 # ---------------------------------------------------------------------------
 # is_system_governed_tag
@@ -541,6 +559,33 @@ def test_utils_parallel_for_each_on_complete_receives_exceptions():
         and isinstance(by_item[2][2], RuntimeError)
     )
     assert by_item[3] == (3, 30, None)
+
+
+# ---------------------------------------------------------------------------
+# sql_string_literal
+# ---------------------------------------------------------------------------
+
+
+def test_utils_sql_string_literal_wraps_value_in_single_quotes_by_default():
+    assert sql_string_literal("abc") == "'abc'"
+
+
+def test_utils_sql_string_literal_uses_requested_quote_delimiter():
+    assert sql_string_literal("abc", quote='"') == '"abc"'
+
+
+def test_utils_sql_string_literal_escapes_single_and_double_quotes():
+    assert sql_string_literal("O'Brien") == "'O\\'Brien'"
+    assert sql_string_literal('say "hi"', quote='"') == '"say \\"hi\\""'
+
+
+def test_utils_sql_string_literal_escapes_backslashes():
+    assert sql_string_literal("a\\b") == "'a\\\\b'"
+
+
+def test_utils_sql_string_literal_escapes_backslash_before_quotes():
+    """Backslash must be escaped first; value `\'` becomes `\\\'` inside delimiters."""
+    assert sql_string_literal("\\'") == "'\\\\\\''"
 
 
 # ---------------------------------------------------------------------------

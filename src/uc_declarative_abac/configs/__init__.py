@@ -33,6 +33,10 @@ from uc_declarative_abac.configs.models import (
     VolumeConfig,
 )
 from uc_declarative_abac.configs.resolver import resolve_refs
+from uc_declarative_abac.configs.traversal import (
+    iter_policy_configs,
+    iter_securable_configs,
+)
 
 __all__ = [
     "BaseFgacPolicyConfig",
@@ -62,6 +66,8 @@ __all__ = [
     "VolumeConfig",
     "consolidate_resources",
     "discover_yaml_files",
+    "iter_policy_configs",
+    "iter_securable_configs",
     "load_raw_configs",
     "resolve_refs",
 ]

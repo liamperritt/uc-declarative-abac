@@ -407,6 +407,19 @@ PolicyColumnConfig = (
 )
 
 
+def _column_tag_keys(col: PolicyColumnConfig) -> frozenset[str]:
+    """The tag keys one policy column references (none for a constant column)."""
+    if isinstance(col, PolicyColumnAliasConfig):
+        return (
+            frozenset(col.has_tags or {})
+            | frozenset(col.has_any_of_tags or {})
+            | frozenset(col.has_none_of_tags or {})
+        )
+    if isinstance(col, (ColumnTagValueExtractionConfig, TagValueExtractionConfig)):
+        return frozenset({col.arguments.tag})
+    return frozenset()
+
+
 class BasePolicyConfig(BaseConfig, ABC):
     """Base model for all policy configs. Not intended to be instantiated directly."""
 
@@ -457,6 +470,16 @@ class BasePolicyConfig(BaseConfig, ABC):
         if self.schema_name:
             return f"{self.catalog_name}.{self.schema_name}"
         return self.catalog_name
+
+    def referenced_tag_keys(self) -> frozenset[str]:
+        """Every tag key this policy's match conditions reference.
+
+        Single source of truth for "which tags does a policy depend on", shared by
+        the compilers' ungoverned-tag checks and the referenced-tag-key collector.
+        Grant policies match on ``has_tags`` / ``has_any_of_tags`` only; FGAC
+        policies extend this (see ``BaseFgacPolicyConfig.referenced_tag_keys``).
+        """
+        return frozenset(self.has_tags or {}) | frozenset(self.has_any_of_tags or {})
 
 
 def _flatten_legacy_expression_column(col):
@@ -519,6 +542,27 @@ class BaseFgacPolicyConfig(BasePolicyConfig, ABC):
         """Coerce null values to empty strings, matching has_tags/has_any_of_tags.
         Like them, has_none_of_tags supports the '*' wildcard (presence check)."""
         return _coerce_null_tag_values(v)
+
+    def referenced_tag_keys(self) -> frozenset[str]:
+        """Every tag key this policy references — policy-level and per-column.
+
+        Adds to the base ``has_tags`` / ``has_any_of_tags`` keys: ``has_none_of_tags``
+        keys; the **values** of the identity-attribute tag-match maps (their keys are
+        identity-attribute names, their values governed tag keys on the resource);
+        each alias column's ``has_*_tags`` keys; and the tag a tag-introspection
+        expression column reads at query time. Constant columns reference no tags.
+        """
+        tag_match_maps = (
+            self.has_identity_attribute_tag_matches,
+            self.has_any_of_identity_attribute_tag_matches,
+            self.has_none_of_identity_attribute_tag_matches,
+        )
+        return (
+            super().referenced_tag_keys()
+            | frozenset(self.has_none_of_tags or {})
+            | frozenset(v for m in tag_match_maps for v in (m or {}).values())
+            | frozenset(k for col in self.columns or [] for k in _column_tag_keys(col))
+        )
 
     @field_validator(*_IDENTITY_ATTRIBUTE_FIELDS, mode="before")
     @classmethod

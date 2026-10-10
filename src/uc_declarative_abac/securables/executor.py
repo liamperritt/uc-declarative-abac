@@ -25,6 +25,7 @@ from uc_declarative_abac.utils import (
     OrchestratorError,
     parallel_for_each,
     quote_securable,
+    sql_string_literal,
 )
 
 # UC hierarchy depth: catalogs at the top, then schemas, then leaf types
@@ -49,30 +50,25 @@ _ALTER_COLUMN_UNSUPPORTED_TABLE_TYPES = frozenset(
 )
 
 
-def _escape_sql_string_literal(value: str) -> str:
-    """Escape single quotes for embedding in a SQL string literal."""
-    return value.replace("'", "\\'").replace('"', '\\"')
-
-
 def _build_comment_clause(comment: str | None) -> str:
     """Return a `` COMMENT '<escaped>''`` suffix, or empty string if no comment."""
     if not comment:
         return ""
-    return f' COMMENT "{_escape_sql_string_literal(comment)}"'
+    return " COMMENT " + sql_string_literal(comment, quote='"')
 
 
 def _build_managed_location_clause(location: str | None) -> str:
     """Return a `` MANAGED LOCATION '<escaped>''`` suffix for catalogs/schemas, or empty string."""
     if not location:
         return ""
-    return f" MANAGED LOCATION '{_escape_sql_string_literal(location)}'"
+    return " MANAGED LOCATION " + sql_string_literal(location, quote="'")
 
 
 def _build_external_location_clause(location: str | None) -> str:
     """Return a `` LOCATION '<escaped>''`` suffix for tables/volumes, or empty string."""
     if not location:
         return ""
-    return f" LOCATION '{_escape_sql_string_literal(location)}'"
+    return " LOCATION " + sql_string_literal(location, quote="'")
 
 
 def _creation_sort_key(info: Securable) -> tuple[int, str]:
@@ -258,12 +254,13 @@ def _build_comment_update_sql(
     guarded against comment changes on views (table-level).
     """
     quoted = quote_securable(full_name)
-    escaped = _escape_sql_string_literal(comment)
     if securable_type == SecurableType.FUNCTION:
         raise OrchestratorError(
             f"Comment updates not supported for {securable_type.value}."
         )
-    return f'COMMENT ON {securable_type.name} {quoted} IS "{escaped}"'
+    return f"COMMENT ON {securable_type.name} {quoted} IS " + sql_string_literal(
+        comment, quote='"'
+    )
 
 
 def _column_comment_value(update: AttributeUpdate) -> str:
@@ -286,8 +283,8 @@ def _build_alter_table_column_comments_sql(
     column. Used for base tables (types that support ``ALTER TABLE … ALTER COLUMN``).
     """
     clauses = ", ".join(
-        f"`{u.full_name.rpartition('.')[-1]}` "
-        f'COMMENT "{_escape_sql_string_literal(_column_comment_value(u))}"'
+        f"`{u.full_name.rpartition('.')[-1]}` COMMENT "
+        + sql_string_literal(_column_comment_value(u), quote='"')
         for u in updates
     )
     return f"ALTER TABLE {quote_securable(parent_full_name)} ALTER COLUMN {clauses}"

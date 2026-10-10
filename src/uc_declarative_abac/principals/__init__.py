@@ -9,6 +9,9 @@ from uc_declarative_abac.principals.differ import (
     groups_pending_creation,
 )
 from uc_declarative_abac.principals.executor import execute_group_diff
+from uc_declarative_abac.principals.references import (
+    collect_referenced_principal_names,
+)
 from uc_declarative_abac.principals.resolver import (
     PrincipalResolver,
     ensure_all_resolved,
@@ -29,6 +32,7 @@ __all__ = [
     "GroupRename",
     "Principal",
     "PrincipalResolver",
+    "collect_referenced_principal_names",
     "compile_desired_groups",
     "compile_principal_names",
     "compute_group_diff",

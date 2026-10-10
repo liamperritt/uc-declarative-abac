@@ -407,6 +407,15 @@ def test_policy_executor_comment_appears_between_on_and_body():
     assert on_idx < comment_idx < mask_idx
 
 
+def test_policy_executor_escapes_double_quotes_in_comment():
+    """A double quote can't break out of the double-quoted COMMENT literal."""
+    uc_helper = MagicMock()
+    diff = PolicyDiff(to_create={_make_policy(comment='Mask "PII" data')})
+
+    (sql,) = execute_policy_diff(uc_helper, diff, ChangeLogger())
+    assert '''COMMENT "Mask \\"PII\\" data"''' in sql
+
+
 # ---------------------------------------------------------------------------
 # Parallel execution
 # ---------------------------------------------------------------------------
