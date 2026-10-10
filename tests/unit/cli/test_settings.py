@@ -213,3 +213,45 @@ def test_settings_rejects_unknown_timezone(monkeypatch, tmp_path: Path):
     monkeypatch.delenv("UC_ABAC_TIMEZONE", raising=False)
     with pytest.raises(ValidationError):
         resolve_settings({"timezone": "Not/AZone"}, settings_file=None)
+
+
+# ---------------------------------------------------------------------------
+# dump subcommand settings: target_schema
+# ---------------------------------------------------------------------------
+
+
+def test_settings_target_schema_from_env(monkeypatch, tmp_path: Path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("UC_ABAC_TARGET_SCHEMA", "main.state")
+    settings = resolve_settings({}, settings_file=None)
+    assert settings.target_schema == "main.state"
+
+
+def test_settings_target_schema_from_file(tmp_path: Path):
+    settings_path = tmp_path / "uc_abac.yml"
+    settings_path.write_text(
+        yaml.dump({"target_schema": "main.state"}), encoding="utf-8"
+    )
+    settings = resolve_settings({}, settings_file=settings_path)
+    assert settings.target_schema == "main.state"
+
+
+def test_settings_cli_target_schema_overrides_env(monkeypatch, tmp_path: Path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("UC_ABAC_TARGET_SCHEMA", "main.env_schema")
+    settings = resolve_settings(
+        {"target_schema": "main.cli_schema"},
+        settings_file=None,
+    )
+    assert settings.target_schema == "main.cli_schema"
+
+
+def test_settings_env_target_schema_overrides_file(monkeypatch, tmp_path: Path):
+    monkeypatch.chdir(tmp_path)
+    settings_path = tmp_path / "uc_abac.yml"
+    settings_path.write_text(
+        yaml.dump({"target_schema": "main.file_schema"}), encoding="utf-8"
+    )
+    monkeypatch.setenv("UC_ABAC_TARGET_SCHEMA", "main.env_schema")
+    settings = resolve_settings({}, settings_file=None)
+    assert settings.target_schema == "main.env_schema"

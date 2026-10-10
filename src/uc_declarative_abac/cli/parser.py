@@ -7,7 +7,7 @@ from pathlib import Path
 from uc_declarative_abac.cli import __version__
 from uc_declarative_abac.cli.presentation import CliArgumentParser, HelpExample
 
-_SUBCOMMANDS = frozenset({"validate", "deploy"})
+_SUBCOMMANDS = frozenset({"validate", "deploy", "dump"})
 _DESCRIPTION = "UC Declarative ABAC — declarative ABAC governance for Unity Catalog"
 _VALIDATE_EXAMPLE = "uc-abac validate --config-dir ./configs"
 _VALIDATE_PROFILE_EXAMPLE = "uc-abac validate --config-dir ./configs --profile staging"
@@ -15,22 +15,52 @@ _DEPLOY_DRY_RUN_EXAMPLE = (
     "uc-abac deploy --config-dir ./configs --warehouse-id <id> --dry-run"
 )
 _DEPLOY_EXAMPLE = "uc-abac deploy --config-dir ./configs --warehouse-id <id>"
+_DUMP_EXAMPLE = (
+    "uc-abac dump --config-dir ./configs --warehouse-id <id> "
+    "--target-schema main.uc_abac_state"
+)
 
 
-def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
-    """Register optional run flags shared by validate, deploy, and legacy mode."""
+def _add_profile(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--profile",
         type=str,
         default=argparse.SUPPRESS,
         help="Databricks CLI profile name (from ~/.databrickscfg)",
     )
+
+
+def _add_system_catalog(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--system-catalog",
         type=str,
         default=argparse.SUPPRESS,
         help="Catalog containing Unity Catalog system tables [default: system].",
     )
+
+
+def _add_max_parallel_changes(parser: argparse.ArgumentParser, help_text: str) -> None:
+    parser.add_argument(
+        "--max-parallel-changes",
+        type=int,
+        default=argparse.SUPPRESS,
+        help=help_text,
+    )
+
+
+def _add_warehouse_id(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--warehouse-id",
+        type=str,
+        default=argparse.SUPPRESS,
+        help="SQL warehouse ID for executing queries",
+    )
+
+
+def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
+    """Register optional run flags shared by validate, deploy, and legacy mode."""
+    _add_profile(parser)
+    _add_system_catalog(parser)
     parser.add_argument(
         "--timezone",
         type=str,
@@ -441,14 +471,10 @@ def _add_common_run_arguments(parser: argparse.ArgumentParser) -> None:
             "[default: merge]."
         ),
     )
-    parser.add_argument(
-        "--max-parallel-changes",
-        type=int,
-        default=argparse.SUPPRESS,
-        help=(
-            "Worker threads per execution batch [default: 8]. Set to 1 to disable "
-            "parallelism and force sequential execution."
-        ),
+    _add_max_parallel_changes(
+        parser,
+        "Worker threads per execution batch [default: 8]. Set to 1 to disable "
+        "parallelism and force sequential execution.",
     )
 
 
@@ -505,6 +531,39 @@ def _cli_parser(**kwargs) -> CliArgumentParser:
     )
 
 
+def _add_dump_arguments(parser: argparse.ArgumentParser) -> None:
+    """Register the dump subcommand's flags.
+
+    Dump only reads state and writes snapshot tables, so it takes the connection and
+    fetch flags rather than inheriting every deploy-only flag from the common parser.
+    Deprecated flags are deliberately not offered on this new command."""
+    _add_config_dir(parser)
+    _add_warehouse_id(parser)
+    parser.add_argument(
+        "--target-schema",
+        type=str,
+        metavar="CATALOG.SCHEMA",
+        default=argparse.SUPPRESS,
+        help=(
+            "Schema to write the snapshot tables into, as <catalog>.<schema>. Created "
+            "when it does not exist."
+        ),
+    )
+    _add_profile(parser)
+    _add_system_catalog(parser)
+    _add_max_parallel_changes(
+        parser,
+        "Maximum number of tables written concurrently [default: 8]. Set to 1 to "
+        "write tables sequentially.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Print the statements that would be executed without executing them.",
+    )
+
+
 def _build_modern_parser() -> argparse.ArgumentParser:
     common = _build_common_parser()
     parser = _cli_parser(
@@ -555,12 +614,7 @@ def _build_modern_parser() -> argparse.ArgumentParser:
         ),
     )
     _add_config_dir(deploy_parser)
-    deploy_parser.add_argument(
-        "--warehouse-id",
-        type=str,
-        default=argparse.SUPPRESS,
-        help="SQL warehouse ID for executing queries",
-    )
+    _add_warehouse_id(deploy_parser)
     deploy_parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -568,6 +622,21 @@ def _build_modern_parser() -> argparse.ArgumentParser:
         help="Print the planned changes without executing them.",
     )
     deploy_parser.set_defaults(command="deploy")
+
+    dump_parser = subparsers.add_parser(
+        "dump",
+        help="Write the current governance state behind a config to tables.",
+        description=(
+            "Snapshot the current Unity Catalog governance state behind a config "
+            "into tables in a target schema."
+        ),
+        options_title="FLAGS:",
+        examples=(
+            HelpExample(_DUMP_EXAMPLE, "Write the current state to snapshot tables."),
+        ),
+    )
+    _add_dump_arguments(dump_parser)
+    dump_parser.set_defaults(command="dump")
 
     return parser
 
@@ -588,12 +657,7 @@ def _build_legacy_parser() -> argparse.ArgumentParser:
     # caught after settings resolution (_require_config_dir / _require_warehouse_id
     # -> OrchestratorError -> exit 3), matching the deploy subcommand's behaviour.
     _add_config_dir(parser)
-    parser.add_argument(
-        "--warehouse-id",
-        type=str,
-        default=argparse.SUPPRESS,
-        help="SQL warehouse ID for executing queries",
-    )
+    _add_warehouse_id(parser)
     return parser
 
 
@@ -635,7 +699,7 @@ def _is_legacy_invocation(argv: list[str]) -> bool:
 
 
 def parse_cli_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """Parse argv into a namespace with ``command`` set to validate/deploy."""
+    """Parse argv into a namespace with ``command`` set to validate/deploy/dump."""
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     if _is_legacy_invocation(raw_argv):
         namespace = _build_legacy_parser().parse_args(raw_argv)

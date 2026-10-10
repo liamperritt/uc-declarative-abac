@@ -27,6 +27,7 @@ _ENV_FIELD_MAP: dict[str, str] = {
     "config_dir": "CONFIG_DIR",
     "system_catalog": "SYSTEM_CATALOG",
     "warehouse_id": "WAREHOUSE_ID",
+    "target_schema": "TARGET_SCHEMA",
     "profile": "PROFILE",
     "timezone": "TIMEZONE",
     "use_workspace_scim": "USE_WORKSPACE_SCIM",
@@ -67,13 +68,14 @@ _ENV_FIELD_MAP: dict[str, str] = {
 
 
 class RunSettings(BaseModel):
-    """Resolved runtime settings for validate / deploy."""
+    """Resolved runtime settings for validate / deploy / dump."""
 
     model_config = ConfigDict(extra="forbid")
 
     config_dir: Path | None = None
     system_catalog: str = "system"
     warehouse_id: str | None = None
+    target_schema: str | None = None
     profile: str | None = None
     timezone: str = "UTC"
     use_workspace_scim: bool = False

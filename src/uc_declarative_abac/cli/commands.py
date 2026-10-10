@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from uc_declarative_abac.cli.parser import parse_cli_args
 from uc_declarative_abac.cli.presentation import format_error, format_status
 from uc_declarative_abac.cli.settings import RunSettings, resolve_settings
+from uc_declarative_abac.dumper import dump_state
 from uc_declarative_abac.orchestrator import load_config, run
 from uc_declarative_abac.utils import (
     ExecutionBatchError,
@@ -315,6 +316,19 @@ def _require_warehouse_id(settings: RunSettings) -> str:
     return settings.warehouse_id
 
 
+def _require_target_schema(settings: RunSettings) -> str:
+    if settings.target_schema is None:
+        raise OrchestratorError("--target-schema is required.")
+    target_schema = settings.target_schema
+    parts = target_schema.split(".")
+    if len(parts) != 2 or not all(parts):
+        raise CliUsageError(
+            f"--target-schema must be a two-part <catalog>.<schema> name, "
+            f"got '{target_schema}'."
+        )
+    return target_schema
+
+
 def _run_kwargs(
     settings: RunSettings, namespaces: dict[str, str], *, dry_run: bool
 ) -> dict:
@@ -386,11 +400,35 @@ def cmd_deploy(
     return EXIT_SUCCESS
 
 
+def cmd_dump(settings: RunSettings, namespace: argparse.Namespace) -> int:
+    dry_run = getattr(namespace, "dry_run", False)
+    config_dir = _require_config_dir(settings)
+    warehouse_id = _require_warehouse_id(settings)
+    target_schema = _require_target_schema(settings)
+    workspace_client = WorkspaceClient(profile=settings.profile)
+    dump_state(
+        workspace_client,
+        config_dir=config_dir,
+        warehouse_id=warehouse_id,
+        target_schema=target_schema,
+        system_catalog=settings.system_catalog,
+        ref_override_strategy=settings.ref_override_strategy,
+        max_parallel_tables=settings.max_parallel_changes,
+        dry_run=dry_run,
+    )
+    return EXIT_SUCCESS
+
+
 def _error_hint(message: str) -> str | None:
     if "--warehouse-id is required" in message:
         return (
             "Pass `--warehouse-id <id>`, set `UC_ABAC_WAREHOUSE_ID`, "
             "or add `warehouse_id` to the settings file."
+        )
+    if "--target-schema is required" in message:
+        return (
+            "Pass `--target-schema <catalog>.<schema>`, set `UC_ABAC_TARGET_SCHEMA`, "
+            "or add `target_schema` to the settings file."
         )
     return None
 
@@ -450,6 +488,8 @@ def run_cli(argv: list[str] | None = None) -> int:
         namespaces = _resolve_namespace_values(settings, namespace)
         if namespace.command == "validate":
             return cmd_validate(settings)
+        if namespace.command == "dump":
+            return cmd_dump(settings, namespace)
         return cmd_deploy(settings, namespace, namespaces)
     except KeyboardInterrupt:
         return EXIT_INTERRUPTED
@@ -472,4 +512,4 @@ def main() -> None:
 
 
 # Re-exported for tests that monkeypatch the CLI boundary.
-__all__ = ["WorkspaceClient", "main", "run", "run_cli"]
+__all__ = ["WorkspaceClient", "dump_state", "main", "run", "run_cli"]
