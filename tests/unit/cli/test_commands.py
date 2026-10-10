@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import pytest
+
 import uc_declarative_abac.cli.commands as cli
 from uc_declarative_abac.cli.settings import RunSettings
 
@@ -419,3 +421,263 @@ def test_main_fails_on_malformed_domain_deletion_scope():
 def test_main_passes_domain_creation_scopes_through_to_run(monkeypatch):
     captured = _run_legacy(monkeypatch, ["--domain-creation-scopes", "finance*"])
     assert captured["domain_creation_scopes"] == "finance*"
+
+
+# ---------------------------------------------------------------------------
+# dump subcommand
+# ---------------------------------------------------------------------------
+
+
+def test_commands_dump_calls_dump_state_with_correct_args(monkeypatch, tmp_path: Path):
+    captured: dict = {}
+
+    def _fake_dump_state(ws_client, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "dump_state", _fake_dump_state)
+    monkeypatch.setattr(cli, "WorkspaceClient", lambda **_: object())
+
+    exit_code = cli.run_cli(
+        [
+            "dump",
+            "--config-dir",
+            "cfg",
+            "--warehouse-id",
+            "wh",
+            "--target-schema",
+            "main.state",
+        ],
+    )
+
+    assert exit_code == 0
+    assert captured["config_dir"] == Path("cfg")
+    assert captured["warehouse_id"] == "wh"
+    assert captured["target_schema"] == "main.state"
+    assert captured["system_catalog"] == "system"
+    assert captured["ref_override_strategy"] == "merge"
+    assert captured["max_parallel_tables"] == 8
+    assert captured["dry_run"] is False
+
+
+def test_commands_dump_passes_dry_run_true(monkeypatch, tmp_path: Path):
+    captured: dict = {}
+
+    def _fake_dump_state(ws_client, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "dump_state", _fake_dump_state)
+    monkeypatch.setattr(cli, "WorkspaceClient", lambda **_: object())
+
+    exit_code = cli.run_cli(
+        [
+            "dump",
+            "--config-dir",
+            "cfg",
+            "--warehouse-id",
+            "wh",
+            "--target-schema",
+            "main.state",
+            "--dry-run",
+        ],
+    )
+
+    assert exit_code == 0
+    assert captured["dry_run"] is True
+
+
+def test_commands_dump_passes_max_parallel_changes(monkeypatch, tmp_path: Path):
+    captured: dict = {}
+
+    def _fake_dump_state(ws_client, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "dump_state", _fake_dump_state)
+    monkeypatch.setattr(cli, "WorkspaceClient", lambda **_: object())
+
+    exit_code = cli.run_cli(
+        [
+            "dump",
+            "--config-dir",
+            "cfg",
+            "--warehouse-id",
+            "wh",
+            "--target-schema",
+            "main.state",
+            "--max-parallel-changes",
+            "3",
+        ],
+    )
+
+    assert exit_code == 0
+    assert captured["max_parallel_tables"] == 3
+
+
+def test_commands_dump_constructs_workspace_client_with_profile(
+    monkeypatch, tmp_path: Path
+):
+    captured_profile: dict = {}
+
+    def _fake_workspace_client(**kwargs):
+        captured_profile.update(kwargs)
+        return object()
+
+    def _fake_dump_state(ws_client, **kwargs):
+        pass
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "dump_state", _fake_dump_state)
+    monkeypatch.setattr(cli, "WorkspaceClient", _fake_workspace_client)
+
+    exit_code = cli.run_cli(
+        [
+            "dump",
+            "--config-dir",
+            "cfg",
+            "--warehouse-id",
+            "wh",
+            "--target-schema",
+            "main.state",
+            "--profile",
+            "staging",
+        ],
+    )
+
+    assert exit_code == 0
+    assert captured_profile["profile"] == "staging"
+
+
+def test_commands_dump_missing_target_schema_returns_config_error(
+    monkeypatch, tmp_path: Path
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "WorkspaceClient", lambda **_: object())
+
+    exit_code = cli.run_cli(
+        [
+            "dump",
+            "--config-dir",
+            "cfg",
+            "--warehouse-id",
+            "wh",
+        ],
+    )
+
+    assert exit_code == 3
+
+
+def test_commands_dump_missing_warehouse_id_returns_config_error(
+    monkeypatch, tmp_path: Path
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "WorkspaceClient", lambda **_: object())
+
+    exit_code = cli.run_cli(
+        [
+            "dump",
+            "--config-dir",
+            "cfg",
+            "--target-schema",
+            "main.state",
+        ],
+    )
+
+    assert exit_code == 3
+
+
+def test_commands_dump_target_schema_via_env_var(monkeypatch, tmp_path: Path):
+    captured: dict = {}
+
+    def _fake_dump_state(ws_client, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("UC_ABAC_TARGET_SCHEMA", "main.env_state")
+    monkeypatch.setattr(cli, "dump_state", _fake_dump_state)
+    monkeypatch.setattr(cli, "WorkspaceClient", lambda **_: object())
+
+    exit_code = cli.run_cli(
+        [
+            "dump",
+            "--config-dir",
+            "cfg",
+            "--warehouse-id",
+            "wh",
+        ],
+    )
+
+    assert exit_code == 0
+    assert captured["target_schema"] == "main.env_state"
+
+
+def test_commands_dump_execution_batch_error_returns_error_code(
+    monkeypatch, tmp_path: Path
+):
+    def _fake_dump_state(ws_client, **kwargs):
+        from uc_declarative_abac.utils import ExecutionBatchError, ExecutionError
+
+        raise ExecutionBatchError(
+            [
+                ExecutionError(
+                    context="main.state.securables", exception=RuntimeError("boom")
+                )
+            ]
+        )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "dump_state", _fake_dump_state)
+    monkeypatch.setattr(cli, "WorkspaceClient", lambda **_: object())
+
+    exit_code = cli.run_cli(
+        [
+            "dump",
+            "--config-dir",
+            "cfg",
+            "--warehouse-id",
+            "wh",
+            "--target-schema",
+            "main.state",
+        ],
+    )
+
+    assert exit_code == 1
+
+
+@pytest.mark.parametrize(
+    "target_schema",
+    [
+        "main",
+        "a.b.c",
+        ".state",
+        "main.",
+        "main.state.extra",
+    ],
+    ids=[
+        "single-segment",
+        "three-segments",
+        "leading-dot",
+        "trailing-dot",
+        "four-segments",
+    ],
+)
+def test_commands_dump_malformed_target_schema_returns_usage_error(
+    monkeypatch, tmp_path: Path, target_schema: str
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "WorkspaceClient", lambda **_: object())
+
+    exit_code = cli.run_cli(
+        [
+            "dump",
+            "--config-dir",
+            "cfg",
+            "--warehouse-id",
+            "wh",
+            "--target-schema",
+            target_schema,
+        ],
+    )
+
+    assert exit_code == 2

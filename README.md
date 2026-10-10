@@ -63,14 +63,39 @@ uc-abac deploy --config-dir examples/finance_demo/configs --warehouse-id <wareho
 
 ### CLI
 
-The CLI has two subcommands:
+The CLI has three subcommands:
 
 | Subcommand | Description |
 |------------|-------------|
 | `validate` | Parse, resolve, and validate YAML configs locally. No `--warehouse-id` or Databricks credentials required. |
 | `deploy` | Apply governance changes to Unity Catalog. Add `--dry-run` to compute and print the planned changes without executing them. |
+| `dump` | Write the current governance state behind a config to snapshot tables in a target schema (see [Dumping current state](#dumping-current-state)). |
 
 Global flags: `--version`, `--verbose`, `--quiet`, `--settings-file <path>`.
+
+### Dumping current state
+
+`uc-abac dump` reads the current Unity Catalog governance state behind a config and writes it as queryable tables into a target schema, so you can report on or audit what is deployed without running a deploy:
+
+```bash
+uc-abac dump --config-dir ./configs --warehouse-id <warehouse-id> --target-schema main.uc_abac_state
+```
+
+Flags: `--config-dir`, `--warehouse-id`, `--target-schema <catalog>.<schema>` (also `UC_ABAC_TARGET_SCHEMA` or `target_schema` in `uc_abac.yml`), plus the optional `--profile`, `--system-catalog`, `--max-parallel-changes` (tables written concurrently, default 8), and `--dry-run` (log what would be written without executing anything). The target schema is created if it doesn't exist. Every run fully replaces each table, and each table and column carries a comment describing it. A table that fails to load part-way is left empty rather than partially filled, and the run exits non-zero.
+
+| Table | Contents | Based on |
+|---|---|---|
+| `securables` | One row per catalog, schema, table, volume, and function in the config, with owner, comment, a table's columns, and a function's definition and parameters | `information_schema` catalogs / schemata / tables / volumes / routines |
+| `securable_tags` | Tags assigned to securables (including columns) in the config's catalogs | `information_schema.*_tags` |
+| `securable_privileges` | Privileges granted on securables in the config's catalogs | `information_schema.*_privileges` |
+| `abac_policies` | Row filter and column mask policies in the config's catalogs | `information_schema.abac_policy_definitions` |
+| `governed_tags` | The account's governed tags and their allowed values; assigners for the tags the config references | Tag Policies API |
+| `domains` | The workspace's Discovery domains | Domains API |
+| `principals` | The account's users, groups, and service principals | `system.access.principals_latest` |
+| `group_members` | Direct members of every group the config references (except `account users`) | `system.access.parent_groups_latest` |
+| `group_assumers` | Principals permitted to assume every group the config references (except `account users`) | Group access-control rule sets |
+
+Principals are written by their canonical identifier (username, group name, or service principal application ID), matching the system tables, so the tables join directly to them.
 
 ### Feature scopes
 
@@ -241,7 +266,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: liamperritt/uc-declarative-abac/deploy@v0.11.6
+      - uses: liamperritt/uc-declarative-abac/deploy@v0.12.0
         with:
           config-dir: configs/
           warehouse-id: ${{ vars.DATABRICKS_WAREHOUSE_ID }}
@@ -282,9 +307,52 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: liamperritt/uc-declarative-abac/validate@v0.11.6
+      - uses: liamperritt/uc-declarative-abac/validate@v0.12.0
         with:
           config-dir: configs/
+```
+
+#### Dump action
+
+A third companion action at `dump/action.yml` runs `uc-abac dump` (see [Dumping current state](#dumping-current-state)) — e.g. on a schedule, to keep snapshot tables of your deployed governance fresh for reporting. Reference it as `liamperritt/uc-declarative-abac/dump@<ref>`. The identity needs `USE CATALOG` + `CREATE SCHEMA` on the target catalog when the schema doesn't exist yet, or `USE SCHEMA` + `CREATE TABLE` (and `MODIFY` on the tables after the first run) when it does, plus the read access `deploy` needs.
+
+**Inputs:**
+
+| Input | Required | Default | Description |
+|---|---|---|---|
+| `config-dir` | yes | — | Path to the YAML config directory, relative to the caller's repo root |
+| `warehouse-id` | yes | — | SQL warehouse ID used to read state and write the tables |
+| `target-schema` | yes | — | Schema to write the tables into, as `<catalog>.<schema>`; created when it doesn't exist |
+| `system-catalog` | no | `system` | Catalog containing the `information_schema` views used for state queries |
+| `profile` | no | `''` | Databricks CLI profile; omit to use unified auth via the step's `env` |
+| `dry-run` | no | `'false'` | Log the statements that would run without executing them |
+| `max-parallel-changes` | no | `'8'` | Maximum number of tables written concurrently |
+
+**Example** (`.github/workflows/dump-uc-abac-state.yml`):
+
+```yaml
+name: Dump UC ABAC state
+
+on:
+  schedule:
+    - cron: '0 20 * * *'
+  workflow_dispatch:
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: liamperritt/uc-declarative-abac/dump@v0.11.6
+        with:
+          config-dir: configs/
+          warehouse-id: ${{ vars.DATABRICKS_WAREHOUSE_ID }}
+          target-schema: main.uc_abac_state
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
 ```
 
 ## What You Can Define in YAML
@@ -1340,8 +1408,8 @@ Mask and filter policies are additive by default (create/update, never delete). 
 - **Structured logging** — `Securables` / `Governed tags` / `Tags` / `Policies` / `Privileges` section headers, ordered by securable type then name, with dry-run prefix support and summary counts
 
 #### Infrastructure
-- **CLI** (`uc-abac` / `uc-declarative-abac`) — subcommands: `validate` (local YAML check), `deploy` (execute; add `--dry-run` to preview). Required for `deploy`: `--config-dir`, `--warehouse-id`. Optional: `--profile` (CLI profile name from `~/.databrickscfg`; omit to use unified auth via env vars / default profile / metadata service — see the [Authentication](#authentication) section), `--timezone` (IANA timezone for the expiry run date; UTC by default), `--use-workspace-scim`, `--skip-users-fetch`, the per-feature scope flags (`--tag-management-scopes`, `--privilege-management-scopes`, `--taggable-management-scopes`, `--taggable-creation-scopes`, `--policy-deletion-scopes`, `--group-creation-scopes`, `--group-management-scopes`, `--group-deletion-scopes`, `--governed-tag-deletion-scopes`, `--domain-creation-scopes`, `--domain-management-scopes`, `--domain-deletion-scopes` — each empty by default, disabling that feature; see [Feature scopes](#feature-scopes)), and `--force` (skip interactive confirmations) — all described below. Settings can also be supplied via `uc_abac.yml` or `UC_ABAC_*` environment variables.
-- **GitHub Actions** — two reusable composite actions: `deploy/action.yml` (invoked as `liamperritt/uc-declarative-abac/deploy@<ref>`) to reconcile YAML configs against UC on push / PR / schedule, and `validate/action.yml` (invoked as `liamperritt/uc-declarative-abac/validate@<ref>`) for offline config validation with no warehouse or credentials (see the [GitHub Action](#github-action) section)
+- **CLI** (`uc-abac` / `uc-declarative-abac`) — subcommands: `validate` (local YAML check), `deploy` (execute; add `--dry-run` to preview), `dump` (write the current state to snapshot tables; see [Dumping current state](#dumping-current-state)). Required for `deploy`: `--config-dir`, `--warehouse-id`. Optional: `--profile` (CLI profile name from `~/.databrickscfg`; omit to use unified auth via env vars / default profile / metadata service — see the [Authentication](#authentication) section), `--timezone` (IANA timezone for the expiry run date; UTC by default), `--use-workspace-scim`, `--skip-users-fetch`, the per-feature scope flags (`--tag-management-scopes`, `--privilege-management-scopes`, `--taggable-management-scopes`, `--taggable-creation-scopes`, `--policy-deletion-scopes`, `--group-creation-scopes`, `--group-management-scopes`, `--group-deletion-scopes`, `--governed-tag-deletion-scopes`, `--domain-creation-scopes`, `--domain-management-scopes`, `--domain-deletion-scopes` — each empty by default, disabling that feature; see [Feature scopes](#feature-scopes)), and `--force` (skip interactive confirmations) — all described below. Settings can also be supplied via `uc_abac.yml` or `UC_ABAC_*` environment variables.
+- **GitHub Actions** — three reusable composite actions: `deploy/action.yml` (invoked as `liamperritt/uc-declarative-abac/deploy@<ref>`) to reconcile YAML configs against UC on push / PR / schedule, `validate/action.yml` (invoked as `liamperritt/uc-declarative-abac/validate@<ref>`) for offline config validation with no warehouse or credentials, and `dump/action.yml` (invoked as `liamperritt/uc-declarative-abac/dump@<ref>`) to write the current state to snapshot tables (see the [GitHub Action](#github-action) section)
 - **Hybrid SQL polling** — `wait_timeout=50s` with `on_wait_timeout=CONTINUE` and 10s polling for long-running queries
 - **External links** — fetches SQL results via external link URLs for large result sets
 - **Parallel state fetch** — securables, tags, privileges, policies, governed tags, and principals are fetched concurrently

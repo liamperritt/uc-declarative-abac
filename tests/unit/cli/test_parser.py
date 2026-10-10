@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 
@@ -337,3 +338,67 @@ def test_cli_reports_version(capsys):
     with pytest.raises(SystemExit) as exc_info:
         parse_cli_args(["--version"])
     assert exc_info.value.code == 0
+
+
+# ---
+# dump subcommand
+# ---
+
+
+def test_parser_dump_routing_and_basic_flags():
+    namespace = parse_cli_args(
+        [
+            "dump",
+            "--config-dir",
+            "c",
+            "--warehouse-id",
+            "w",
+            "--target-schema",
+            "main.state",
+        ]
+    )
+    assert namespace.command == "dump"
+    assert namespace.config_dir == Path("c")
+    assert namespace.warehouse_id == "w"
+    assert namespace.target_schema == "main.state"
+    assert namespace.legacy is False
+
+
+def test_parser_dump_help_includes_required_flags(capsys):
+    output = _help_output(["dump", "--help"], capsys)
+
+    for flag in (
+        "--config-dir",
+        "--warehouse-id",
+        "--target-schema",
+        "--profile",
+        "--system-catalog",
+        "--max-parallel-changes",
+        "--dry-run",
+    ):
+        assert flag in output
+
+
+def test_parser_dump_help_excludes_deploy_only_flags(capsys):
+    output = _help_output(["dump", "--help"], capsys)
+
+    for flag in (
+        "--enable-tag-management",
+        "--tag-management-scopes",
+        "--force",
+        "--timezone",
+        "--retain-tag-prefixes",
+        "--use-workspace-scim",
+        "--skip-users-fetch",
+        "--ref-override-strategy",
+    ):
+        assert flag not in output
+
+
+def test_parser_root_help_mentions_dump(capsys):
+    output = _help_output(["--help"], capsys)
+    dump_lines = [
+        line for line in output.splitlines() if line.lstrip().startswith("dump ")
+    ]
+    assert len(dump_lines) >= 1
+    assert any("dump" in line.lower() for line in dump_lines)

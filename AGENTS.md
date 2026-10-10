@@ -84,6 +84,8 @@ plumbing and forget the Action, so treat this as a checklist and update every it
    `args+=(--enable-foo)` line in the args-building shell step. Grep the file for an
    existing sibling flag (e.g. `enable-group-management`) — it appears in all three
    places, so a flag that isn't in all three is under-wired.
+   A flag the `dump` subcommand also takes (it has its own narrower parser,
+   `_add_dump_arguments`) must be wired into **`dump/action.yml`** the same way.
 6. **`README.md`** — add the row to the GitHub Action input table (and any prose).
 7. **Tests** — parser help, settings env var, and commands passthrough at minimum.
 
