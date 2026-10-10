@@ -3089,3 +3089,270 @@ def test_resolver_mixed_delimiters_dollar_brace_and_double_brace():
     schema = result["catalogs"]["c"]["schemas"][0]
     assert schema["name"] == "salesforce_prod_us"
     assert schema["tags"] == {"environment": "prod", "region_tag": "us"}
+
+
+# ---------------------------------------------------------------------------
+# file_path attribution
+# ---------------------------------------------------------------------------
+
+
+def test_resolver_ref_takes_file_path_of_definition_file():
+    """When a resource refs a definition, the resolved file_path comes from the definition file."""
+    from pathlib import Path
+
+    definitions = {
+        "catalogs": {
+            "sales": {
+                "comment": "c",
+                "file_path": Path("defs/sales.yaml"),
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "sales_prod": {
+                "$ref": "$defs/catalogs/sales",
+                "file_path": Path("resources/prod.yaml"),
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    assert result["catalogs"]["sales_prod"]["file_path"] == Path("defs/sales.yaml")
+
+
+def test_resolver_keeps_each_list_items_own_file_path_through_a_ref_merge():
+    """Discovery stamps every list item with the file it was written in; a $ref merge keeps
+    each item's own stamp. A definition-only item keeps the definition's file, an
+    override-only item the referencing file, and an item present on both sides (matched by
+    name) keeps the definition's — as does the $ref root itself."""
+    from pathlib import Path
+
+    defs_file, prod_file = Path("defs/sales.yaml"), Path("resources/prod.yaml")
+    definitions = {
+        "catalogs": {
+            "sales": {
+                "schemas": [
+                    {"name": "orders", "file_path": defs_file},
+                    {"name": "shared", "file_path": defs_file},
+                ],
+                "file_path": defs_file,
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "sales_prod": {
+                "$ref": "$defs/catalogs/sales",
+                "schemas": [
+                    {"name": "returns", "file_path": prod_file},
+                    {"name": "shared", "comment": "c", "file_path": prod_file},
+                ],
+                "file_path": prod_file,
+            },
+        },
+    }
+
+    catalog = resolve_refs(definitions, resources)["catalogs"]["sales_prod"]
+
+    schemas = {s["name"]: s for s in catalog["schemas"]}
+    assert catalog["file_path"] == defs_file
+    assert schemas["orders"]["file_path"] == defs_file
+    assert schemas["returns"]["file_path"] == prod_file
+    assert schemas["shared"]["file_path"] == defs_file
+    assert schemas["shared"]["comment"] == "c"
+
+
+def test_resolver_nested_ref_takes_its_own_definition_file_path():
+    """A nested $ref within a definition keeps the nested definition's file path.
+
+    When a catalog definition (in file `defs/catalog.yaml`) references a schema definition
+    (in file `defs/schemas.yaml`), the resolved schema retains its own definition's file
+    path (`defs/schemas.yaml`), not the referencing catalog's path.
+    """
+    from pathlib import Path
+
+    definitions = {
+        "catalogs": {
+            "sales": {
+                "schemas": [
+                    {"$ref": "$defs/schemas/orders"},
+                ],
+                "file_path": Path("defs/catalog.yaml"),
+            },
+        },
+        "schemas": {
+            "orders": {
+                "name": "orders",
+                "file_path": Path("defs/schemas.yaml"),
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "sales_prod": {
+                "$ref": "$defs/catalogs/sales",
+                "file_path": Path("resources/prod.yaml"),
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    catalog = result["catalogs"]["sales_prod"]
+    assert catalog["file_path"] == Path("defs/catalog.yaml")
+    schema = catalog["schemas"][0]
+    assert schema["name"] == "orders"
+    # The schema's file_path comes from the schema definition, not the catalog
+    assert schema["file_path"] == Path("defs/schemas.yaml")
+
+
+def test_resolver_ref_takes_definition_file_path_when_strategy_is_replace():
+    """Under override_strategy='replace', a ref still takes the definition's file path.
+
+    The root ref's override fields are replaced wholesale, but file_path attribution
+    remains: the resolved entry keeps the definition's file, not the resource's file.
+    """
+    from pathlib import Path
+
+    definitions = {
+        "catalogs": {
+            "sales": {
+                "comment": "Sales catalog",
+                "file_path": Path("defs/sales.yaml"),
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "sales_prod": {
+                "$ref": "$defs/catalogs/sales",
+                "comment": "Production sales catalog",
+                "file_path": Path("resources/prod.yaml"),
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources, override_strategy="replace")
+
+    # The comment is overridden (from resources)
+    assert result["catalogs"]["sales_prod"]["comment"] == "Production sales catalog"
+    # But file_path stays from the definition
+    assert result["catalogs"]["sales_prod"]["file_path"] == Path("defs/sales.yaml")
+
+
+def test_resolver_does_not_stamp_tag_maps():
+    """Tags dicts (map values) never receive a file_path key, only list-item dicts do.
+
+    Tags are plain dicts — they hold user data as keys and values. They are never stamped
+    with file_path, even when they appear in list items or when overridden.
+    """
+    from pathlib import Path
+
+    definitions = {
+        "schemas": {
+            "orders": {
+                "name": "orders",
+                "tags": {"pii": "email"},
+                "file_path": Path("defs/schemas.yaml"),
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "main": {
+                "schemas": [
+                    {
+                        "$ref": "$defs/schemas/orders",
+                        "tags": {"env": "prod"},
+                    },
+                ],
+                "file_path": Path("resources/prod.yaml"),
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    schema = result["catalogs"]["main"]["schemas"][0]
+    # The schema list item gets a file_path
+    assert schema["file_path"] == Path("defs/schemas.yaml")
+    # But the tags dict does not
+    assert "file_path" not in schema["tags"]
+    # Tags are merged from both sides, but none of them have file_path
+    assert schema["tags"] == {"pii": "email", "env": "prod"}
+    for value in schema["tags"].values():
+        assert isinstance(value, str)  # tag values are scalars, not dicts
+
+
+def test_resolver_treats_string_file_path_as_ordinary_data():
+    """A string file_path value in user data is treated as ordinary merge data, not the engine stamp.
+
+    A user has a tag literally named 'file_path' (a string key in the tag map) with a string
+    value 'user-tag-value'. When merged with an override, the override value wins. The engine
+    stamp (Path object) is never confused with user data (string value).
+    """
+    from pathlib import Path
+
+    definitions = {
+        "tags": {
+            "base": {
+                "owner": "a",
+                "file_path": Path("defs/tags.yaml"),
+            },
+        },
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "tags": {
+                    "$ref": "$defs/tags/base",
+                    "file_path": "user-tag-value",
+                },
+                "file_path": Path("resources/c.yaml"),
+            },
+        },
+    }
+
+    result = resolve_refs(definitions, resources)
+
+    tags_dict = result["catalogs"]["c"]["tags"]
+    # The string file_path value (user data) is merged and the override wins
+    assert tags_dict["file_path"] == "user-tag-value"
+    # Other fields from definition are preserved
+    assert tags_dict["owner"] == "a"
+
+
+@pytest.mark.parametrize("override_strategy", ["merge", "replace"])
+def test_resolver_keeps_user_written_file_path_on_a_definition_for_validation_to_reject(
+    override_strategy,
+):
+    """User-written file_path (string or null) in a definition must survive resolution
+    so that model validation can reject it as engine-owned. When a resource refs a
+    definition with a user-written file_path, the resolver must preserve it (not override
+    it with the resource's engine-stamped file_path) so the validation error includes
+    the offending value."""
+    from pathlib import Path
+
+    definitions = {
+        "catalogs": {
+            "base": {
+                "file_path": "user/written.yml",
+                "comment": "hi",
+            }
+        }
+    }
+    resources = {
+        "catalogs": {
+            "c": {
+                "$ref": "$defs/catalogs/base",
+                "file_path": Path("resources/c.yaml"),
+            }
+        }
+    }
+
+    result = resolve_refs(definitions, resources, override_strategy=override_strategy)
+
+    # The user-written file_path value must survive so validation can reject it
+    assert result["catalogs"]["c"]["file_path"] == "user/written.yml"

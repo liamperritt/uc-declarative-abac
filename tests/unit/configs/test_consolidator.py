@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from uc_declarative_abac.configs import (
@@ -984,3 +986,111 @@ def test_consolidator_duplicate_inline_functions_in_overridden_schema_surface_at
     assert len(shared.get("functions", [])) == 2
     with pytest.raises(DuplicateResourceError, match="dup"):
         ResourcesConfig.model_validate(result)
+
+
+# --- file_path ---
+
+
+def test_consolidator_auto_created_parents_take_file_path_of_standalone_child():
+    """Standalone table with file_path whose parent catalog and schema don't exist
+    → auto-created catalog and schema dicts both inherit the file_path."""
+    data = {
+        "catalogs": {},
+        "tables": {
+            "my_table": {
+                "catalog_name": "new_cat",
+                "schema_name": "new_schema",
+                "name": "orders",
+                "file_path": Path("resources/orders.yaml"),
+            }
+        },
+    }
+    result = consolidate_resources(data)
+
+    # Auto-created catalog should have the file_path
+    assert "new_cat" in result["catalogs"]
+    assert result["catalogs"]["new_cat"]["file_path"] == Path("resources/orders.yaml")
+
+    # Auto-created schema should have the file_path
+    schema = result["catalogs"]["new_cat"]["schemas"][0]
+    assert schema["name"] == "new_schema"
+    assert schema["file_path"] == Path("resources/orders.yaml")
+
+
+def test_consolidator_inline_function_takes_file_path_of_its_policy():
+    """A standalone policy with file_path and an inline function → the extracted
+    function takes the file_path of the policy (not the target schema's file_path)."""
+    data = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "file_path": Path("resources/catalog.yaml"),
+                "schemas": [
+                    {
+                        "name": "s",
+                        "file_path": Path("resources/schema.yaml"),
+                    }
+                ],
+            }
+        },
+        "policies": {
+            "pol": {
+                "catalog_name": "c",
+                "schema_name": "s",
+                "name": "mask_email",
+                "type": "mask",
+                "to": ["analysts"],
+                "columns": [{"alias": "x", "has_tags": {"pii": "email"}}],
+                "function": _inline_fn_dict("mask_fn"),
+                "file_path": Path("resources/policy.yaml"),
+            }
+        },
+    }
+    result = consolidate_resources(data)
+
+    schema = result["catalogs"]["c"]["schemas"][0]
+    assert schema["name"] == "s"
+    assert len(schema.get("functions", [])) == 1
+    fn = schema["functions"][0]
+    assert fn["name"] == "mask_fn"
+    assert fn["file_path"] == Path("resources/policy.yaml")
+
+
+def test_consolidator_inline_function_target_parents_take_file_path_of_policy():
+    """When a catalog-level policy has an inline function with catalog_name/schema_name
+    overrides pointing to non-existent catalogs/schemas, the auto-created parents inherit
+    the policy's file_path."""
+    data = {
+        "catalogs": {
+            "c": {
+                "name": "c",
+                "file_path": Path("resources/c.yaml"),
+                "policies": [
+                    {
+                        "name": "mask_email",
+                        "type": "mask",
+                        "to": ["analysts"],
+                        "columns": [{"alias": "x", "has_tags": {"pii": "email"}}],
+                        "function": {
+                            **_inline_fn_dict("mask_fn"),
+                            "catalog_name": "shared_fns",
+                            "schema_name": "masks",
+                        },
+                        "file_path": Path("resources/policy.yaml"),
+                    }
+                ],
+            }
+        }
+    }
+    result = consolidate_resources(data)
+
+    # Auto-created catalog should inherit the policy's file_path
+    assert "shared_fns" in result["catalogs"]
+    assert result["catalogs"]["shared_fns"]["file_path"] == Path(
+        "resources/policy.yaml"
+    )
+
+    # Auto-created schema should inherit the policy's file_path
+    schemas = result["catalogs"]["shared_fns"]["schemas"]
+    masks_schema = next(s for s in schemas if s["name"] == "masks")
+    assert masks_schema["file_path"] == Path("resources/policy.yaml")

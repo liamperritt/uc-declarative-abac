@@ -3724,3 +3724,418 @@ def test_alias_spellings_still_validate_under_forbid():
     policy = config.catalogs["c"].schemas[0].tables[0].policies[0]
     assert policy.for_securable_type == SecurableType.TABLE
     assert policy.exceptions == ["svc"]
+
+
+# ---------------------------------------------------------------------------
+# file_path
+# ---------------------------------------------------------------------------
+
+
+def test_catalog_config_pushes_file_path_down_to_all_descendants():
+    """A catalog with file_path set pushes it down to all descendants that do not
+    have their own file_path: schema → table → column; schema → volume;
+    schema → function with parameter; table-level mask policy with alias column;
+    catalog-level grant policy."""
+    from pathlib import Path
+
+    file_path = Path("defs/c.yaml")
+
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "c": {
+                    "name": "c",
+                    "file_path": file_path,
+                    "schemas": [
+                        {
+                            "name": "s",
+                            "tables": [
+                                {
+                                    "name": "t",
+                                    "columns": [{"name": "col1"}],
+                                    "policies": [
+                                        {
+                                            "name": "mask_policy",
+                                            "type": "mask",
+                                            "function": "c.s.fn",
+                                            "columns": [
+                                                {
+                                                    "alias": "col1",
+                                                    "has_tags": {"pii": "email"},
+                                                }
+                                            ],
+                                        }
+                                    ],
+                                }
+                            ],
+                            "volumes": [{"name": "vol1"}],
+                            "functions": [
+                                {
+                                    "name": "fn",
+                                    "return": "STRING",
+                                    "parameters": [{"name": "p1", "type": "STRING"}],
+                                }
+                            ],
+                        }
+                    ],
+                    "policies": [
+                        {
+                            "name": "grant_policy",
+                            "type": "grant",
+                            "privileges": ["select"],
+                            "to": ["analysts"],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    # Verify catalog has the file_path
+    catalog = config.catalogs["c"]
+    assert catalog.file_path == file_path
+
+    # Verify schema inherits file_path
+    schema = catalog.schemas[0]
+    assert schema.file_path == file_path
+
+    # Verify table inherits file_path
+    table = schema.tables[0]
+    assert table.file_path == file_path
+
+    # Verify column inherits file_path
+    column = table.columns[0]
+    assert column.file_path == file_path
+
+    # Verify volume inherits file_path
+    volume = schema.volumes[0]
+    assert volume.file_path == file_path
+
+    # Verify function inherits file_path
+    function = schema.functions[0]
+    assert function.file_path == file_path
+
+    # Verify function parameter inherits file_path
+    parameter = function.parameters[0]
+    assert parameter.file_path == file_path
+
+    # Verify table-level mask policy inherits file_path
+    table_policy = table.policies[0]
+    assert table_policy.file_path == file_path
+
+    # Verify mask policy column inherits file_path
+    policy_column = table_policy.columns[0]
+    assert policy_column.file_path == file_path
+
+    # Verify catalog-level grant policy inherits file_path
+    catalog_policy = catalog.policies[0]
+    assert catalog_policy.file_path == file_path
+
+
+def test_schema_config_child_keeps_own_file_path_when_set():
+    """A child that has its own file_path keeps it instead of inheriting from parent.
+
+    When a catalog with file_path=A has a schema with file_path=B, and the schema
+    has a table without its own file_path, the schema keeps B and the table inherits B.
+    """
+    from pathlib import Path
+
+    catalog_file_path = Path("a.yaml")
+    schema_file_path = Path("b.yaml")
+
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "c": {
+                    "name": "c",
+                    "file_path": catalog_file_path,
+                    "schemas": [
+                        {
+                            "name": "s",
+                            "file_path": schema_file_path,
+                            "tables": [{"name": "t"}],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    catalog = config.catalogs["c"]
+    schema = catalog.schemas[0]
+    table = schema.tables[0]
+
+    assert catalog.file_path == catalog_file_path
+    assert schema.file_path == schema_file_path
+    assert table.file_path == schema_file_path
+
+
+def test_mask_policy_config_pushes_file_path_to_singular_column():
+    """A mask policy using singular 'column' shorthand pushes file_path to the column.
+
+    When a mask policy with file_path uses the singular 'column' dict form instead of
+    'columns' list, the column entry inherits the policy's file_path.
+    """
+    from pathlib import Path
+
+    file_path = Path("policies.yaml")
+
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "c": {
+                    "schemas": [
+                        {
+                            "name": "s",
+                            "tables": [
+                                {
+                                    "name": "t",
+                                    "policies": [
+                                        {
+                                            "name": "mask_policy",
+                                            "type": "mask",
+                                            "function": "c.s.fn",
+                                            "file_path": file_path,
+                                            "column": {
+                                                "alias": "x",
+                                                "has_tags": {"pii": "email"},
+                                            },
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+
+    policy = config.catalogs["c"].schemas[0].tables[0].policies[0]
+    assert policy.file_path == file_path
+    assert len(policy.columns) == 1
+    assert policy.columns[0].file_path == file_path
+
+
+def test_domain_config_pushes_file_path_to_icon():
+    """A DomainConfig with an icon and file_path pushes it to the icon child.
+
+    When a domain config declares both an icon and file_path, the icon inherits
+    the domain's file_path.
+    """
+    from pathlib import Path
+
+    file_path = Path("domains.yaml")
+
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {"c": {}},
+            "governed_tags": {"tag1": {"name": "tag1"}},
+            "domains": {
+                "d": {
+                    "governed_tag": "tag1",
+                    "file_path": file_path,
+                    "icon": {"name": "BANK", "color": "#1B5E20"},
+                }
+            },
+        }
+    )
+
+    domain = config.domains["d"]
+    assert domain.file_path == file_path
+    assert domain.icon is not None
+    assert domain.icon.file_path == file_path
+
+
+def test_base_config_rejects_string_file_path_from_yaml():
+    """A plain string value for file_path is rejected as a ValidationError.
+
+    The Strict() validator ensures file_path must be a Path object, never a string
+    (which YAML would produce from a user-written `file_path:` key). This forces
+    the engine to stamp file_path, not the user.
+    """
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {
+                    "c": {
+                        "name": "c",
+                        "file_path": "defs/c.yaml",
+                    }
+                }
+            }
+        )
+
+    errors = exc_info.value.errors()
+    assert any("file_path" in str(e["loc"]) for e in errors)
+
+
+def test_base_config_rejects_explicit_null_file_path():
+    """A nested config with explicit file_path=None is rejected as a ValidationError.
+
+    A catalog stamped with file_path can have child schemas/tables, but a child
+    that explicitly sets file_path: None (YAML ~) is rejected — only omission or
+    a Path value are allowed.
+    """
+    from pathlib import Path
+
+    with pytest.raises(ValidationError) as exc_info:
+        ResourcesConfig.model_validate(
+            {
+                "catalogs": {
+                    "c": {
+                        "name": "c",
+                        "file_path": Path("a.yaml"),
+                        "schemas": [
+                            {
+                                "name": "s",
+                                "file_path": None,
+                            }
+                        ],
+                    }
+                }
+            }
+        )
+
+    errors = exc_info.value.errors()
+    assert any("file_path" in str(e["loc"]) for e in errors)
+
+
+def test_catalog_config_drops_file_path_stamp_from_tag_maps():
+    """A Path-valued file_path key in plain dict fields (tags, has_tags) is dropped.
+
+    When a shared $ref fragment or resolver stamps file_path into a plain dict field
+    like tags (which is dict[str, str], not a config model), that Path value leaks
+    into the input data. The model must drop it during validation, retaining only
+    true user tags.
+    """
+    from pathlib import Path
+
+    file_path_stamp = Path("defs/tags.yaml")
+
+    # Test 1: file_path stamp in tags dict is dropped
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "c": {
+                    "name": "c",
+                    "tags": {
+                        "owner": "a",
+                        "file_path": file_path_stamp,
+                    },
+                }
+            }
+        }
+    )
+    catalog = config.catalogs["c"]
+    assert catalog.tags == {"owner": "a"}
+    assert "file_path" not in catalog.tags
+
+    # Test 2: file_path stamp in mask policy's has_tags is dropped
+    config2 = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "c": {
+                    "schemas": [
+                        {
+                            "name": "s",
+                            "tables": [
+                                {
+                                    "name": "t",
+                                    "policies": [
+                                        {
+                                            "name": "mask_policy",
+                                            "type": "mask",
+                                            "function": "c.s.fn",
+                                            "columns": [
+                                                {
+                                                    "alias": "col",
+                                                    "has_tags": {
+                                                        "pii": "email",
+                                                        "file_path": file_path_stamp,
+                                                    },
+                                                }
+                                            ],
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        }
+    )
+    policy_column = config2.catalogs["c"].schemas[0].tables[0].policies[0].columns[0]
+    assert policy_column.has_tags == {"pii": "email"}
+    assert "file_path" not in policy_column.has_tags
+
+
+def test_catalog_config_keeps_user_tag_named_file_path():
+    """A user tag literally named 'file_path' with a STRING value is preserved.
+
+    When a user intentionally tags a resource with a tag key named 'file_path' and
+    a string value (not a Path object), it should be kept as a normal tag. This
+    distinguishes user intent from engine-stamped Path objects.
+    """
+    config = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "c": {
+                    "name": "c",
+                    "tags": {
+                        "file_path": "some-value",
+                        "owner": "data-team",
+                    },
+                }
+            }
+        }
+    )
+    catalog = config.catalogs["c"]
+    assert catalog.tags == {"file_path": "some-value", "owner": "data-team"}
+    assert catalog.tags["file_path"] == "some-value"
+
+
+def test_base_config_excludes_file_path_from_dumps_and_repr():
+    """The engine-owned file_path attribute is excluded from model_dump() and repr().
+
+    file_path is engine-owned metadata (not user-configured), so a dumped config must
+    not include it. This allows re-validating the dump without triggering
+    "engine-owned" rejection. The attribute remains readable on the instance itself.
+    """
+    from pathlib import Path
+
+    # Create a catalog with file_path, including nested schemas
+    c = ResourcesConfig.model_validate(
+        {
+            "catalogs": {
+                "c": {
+                    "name": "c",
+                    "file_path": Path("a.yaml"),
+                    "schemas": [{"name": "s"}],
+                }
+            }
+        }
+    ).catalogs["c"]
+
+    # Verify file_path is readable on the instance
+    assert c.file_path == Path("a.yaml")
+    schema = c.schemas[0]
+    assert schema.file_path == Path("a.yaml")
+
+    # Verify file_path is excluded from model_dump()
+    dumped = c.model_dump()
+    assert "file_path" not in dumped
+    assert "file_path" not in dumped.get("schemas", [{}])[0]
+
+    # Computed fields (full_name) are excluded too, as they never round-trip under extra="forbid"
+    re_validated = type(c).model_validate(
+        c.model_dump(mode="json", exclude_computed_fields=True)
+    )
+    assert re_validated.name == "c"
+    assert re_validated.schemas is not None
+    assert len(re_validated.schemas) == 1
+
+    # Verify file_path is excluded from repr()
+    repr_str = repr(c)
+    assert "file_path" not in repr_str

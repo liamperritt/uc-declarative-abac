@@ -294,3 +294,184 @@ def test_discovery_accepts_valid_yaml_without_duplicates(tmp_path):
     )
     definitions, _resources = load_raw_configs([path])
     assert set(definitions["schemas"]) == {"ops|a", "ops|b"}
+
+
+def test_discovery_stamps_file_path_on_top_level_definition_entries(tmp_yaml_dir):
+    """Given two definition files, each top-level entry has file_path set to its source file."""
+    root = tmp_yaml_dir(
+        {
+            "definitions/schemas.yaml": {
+                "definitions": {
+                    "schemas": {
+                        "ops|sales": {"name": "sales"},
+                    },
+                },
+            },
+            "definitions/tables.yaml": {
+                "definitions": {
+                    "tables": {
+                        "ops|sales|orders": {"name": "orders"},
+                    },
+                },
+            },
+        }
+    )
+
+    paths = discover_yaml_files(root)
+    definitions, _resources = load_raw_configs(paths)
+
+    # Get the expected paths from the discovered files
+    schemas_path = root / "definitions" / "schemas.yaml"
+    tables_path = root / "definitions" / "tables.yaml"
+
+    # Assert that the schema entry has file_path set to its source file
+    assert "schemas" in definitions
+    assert "ops|sales" in definitions["schemas"]
+    assert definitions["schemas"]["ops|sales"]["file_path"] == schemas_path
+
+    # Assert that the table entry has file_path set to its source file
+    assert "tables" in definitions
+    assert "ops|sales|orders" in definitions["tables"]
+    assert definitions["tables"]["ops|sales|orders"]["file_path"] == tables_path
+
+
+def test_discovery_stamps_file_path_on_top_level_resource_entries(tmp_yaml_dir):
+    """Given two resource files, each top-level entry carries its own file's Path."""
+    root = tmp_yaml_dir(
+        {
+            "resources/a.yaml": {
+                "resources": {
+                    "catalogs": {
+                        "cat_a": {"comment": "Catalog A"},
+                    },
+                },
+            },
+            "resources/b.yaml": {
+                "resources": {
+                    "governed_tags": {
+                        "pii": {"description": "Personally Identifiable Information"},
+                    },
+                },
+            },
+        }
+    )
+
+    paths = discover_yaml_files(root)
+    _definitions, resources = load_raw_configs(paths)
+
+    # Get the expected paths from the discovered files
+    a_path = root / "resources" / "a.yaml"
+    b_path = root / "resources" / "b.yaml"
+
+    # Assert that the catalog entry has file_path set to its source file
+    assert "catalogs" in resources
+    assert "cat_a" in resources["catalogs"]
+    assert resources["catalogs"]["cat_a"]["file_path"] == a_path
+
+    # Assert that the governed_tags entry has file_path set to its source file
+    assert "governed_tags" in resources
+    assert "pii" in resources["governed_tags"]
+    assert resources["governed_tags"]["pii"]["file_path"] == b_path
+
+
+def test_discovery_stamps_file_path_on_items_of_list_bodied_definitions(tmp_yaml_dir):
+    """When a definition body is a list of dicts, each dict item has file_path set to that file's Path."""
+    root = tmp_yaml_dir(
+        {
+            "definitions/columns.yaml": {
+                "definitions": {
+                    "columns": {
+                        "pii_cols": [
+                            {"name": "email"},
+                            {"name": "phone"},
+                        ],
+                    },
+                },
+            },
+        }
+    )
+
+    paths = discover_yaml_files(root)
+    definitions, _resources = load_raw_configs(paths)
+
+    # Get the expected path from the discovered file
+    columns_path = root / "definitions" / "columns.yaml"
+
+    # Assert that the columns definition exists
+    assert "columns" in definitions
+    assert "pii_cols" in definitions["columns"]
+
+    # Assert that the list body is preserved
+    columns_def = definitions["columns"]["pii_cols"]
+    assert isinstance(columns_def, list)
+    assert len(columns_def) == 2
+
+    # Assert that each dict item in the list has file_path set to the source file
+    assert columns_def[0]["name"] == "email"
+    assert columns_def[0]["file_path"] == columns_path
+
+    assert columns_def[1]["name"] == "phone"
+    assert columns_def[1]["file_path"] == columns_path
+
+
+def test_discovery_keeps_user_supplied_top_level_file_path(tmp_yaml_dir):
+    """An entry with user-supplied file_path in YAML is kept unchanged; model validation
+    will reject user-supplied string values that are not Path objects."""
+    root = tmp_yaml_dir(
+        {
+            "definitions/schemas.yaml": {
+                "definitions": {
+                    "schemas": {
+                        "ops|sales": {
+                            "name": "sales",
+                            "file_path": "somewhere/else.yaml",
+                        },
+                    },
+                },
+            },
+        }
+    )
+
+    paths = discover_yaml_files(root)
+    definitions, _resources = load_raw_configs(paths)
+
+    # Assert that the user-supplied file_path is kept in the raw entry
+    assert "schemas" in definitions
+    assert "ops|sales" in definitions["schemas"]
+    assert definitions["schemas"]["ops|sales"]["file_path"] == "somewhere/else.yaml"
+
+
+def test_discovery_stamps_file_path_on_list_items_at_any_depth(tmp_yaml_dir):
+    """Every list-element dict in a file — however deeply nested, including override lists
+    on a $ref — is stamped with that file, while plain nested dict values (e.g. tags) are
+    not."""
+    root = tmp_yaml_dir(
+        {
+            "resources/prod.yaml": {
+                "resources": {
+                    "catalogs": {
+                        "cat1": {
+                            "tags": {"env": "prod"},
+                            "schemas": [
+                                {
+                                    "$ref": "$defs/schemas/s",
+                                    "tables": [{"name": "extra", "tags": {"a": "b"}}],
+                                }
+                            ],
+                        }
+                    }
+                }
+            },
+        }
+    )
+    prod_file = root / "resources/prod.yaml"
+
+    _, resources = load_raw_configs(discover_yaml_files(root))
+
+    catalog = resources["catalogs"]["cat1"]
+    ref_node = catalog["schemas"][0]
+    table = ref_node["tables"][0]
+    assert ref_node["file_path"] == prod_file
+    assert table["file_path"] == prod_file
+    assert "file_path" not in catalog["tags"]
+    assert "file_path" not in table["tags"]
