@@ -339,3 +339,28 @@ def test_workspace_helper_delete_domain_uses_sdk_resource_name() -> None:
     helper.delete_domain(domain)
 
     client.domains.delete_domain.assert_called_once_with(name="domains/domain-id")
+
+
+# ---
+# internal_id
+
+
+def test_workspace_helper_sets_domain_owner_ids_from_principal_internal_id() -> None:
+    """create_domain uses an owner principal's internal_id, even when its identifier is
+    absent from the helper's cache."""
+    client = _client_with_principals()
+    client.domains.create_domain.return_value = SdkDomain(
+        tag_key="finance", domain_id="id"
+    )
+    helper = WorkspaceHelper(client, manage_domain_owners=True)
+    helper.fetch_principals()
+
+    helper.create_domain(
+        "finance",
+        business_owners=frozenset(
+            {Principal(PrincipalType.GROUP, "stewards", "stewards", internal_id="555")}
+        ),
+    )
+
+    sdk_domain = client.domains.create_domain.call_args.args[0]
+    assert sdk_domain.business_owner_ids == [555]

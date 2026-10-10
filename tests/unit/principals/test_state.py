@@ -129,3 +129,48 @@ def test_principal_inequality_across_resolution_states():
         identifier="data_engineers",
     )
     assert unresolved != resolved
+
+
+# ---------------------------------------------------------------------------
+# internal_id
+# ---------------------------------------------------------------------------
+
+
+def test_principal_defaults_internal_id_to_none():
+    """Unresolved and resolved principals without internal_id both have internal_id None."""
+    unresolved = Principal(principal_type=PrincipalType.UNKNOWN, name="data_engineers")
+    resolved = Principal(
+        principal_type=PrincipalType.USER, name="alice", identifier="alice"
+    )
+    assert unresolved.internal_id is None
+    assert resolved.internal_id is None
+
+
+def test_principal_allows_resolved_with_internal_id():
+    """Principal can be constructed with an internal_id string."""
+    p = Principal(
+        principal_type=PrincipalType.USER,
+        name="alice@example.com",
+        identifier="alice@example.com",
+        internal_id="123",
+    )
+    assert p.internal_id == "123"
+
+
+def test_principal_equality_ignores_internal_id():
+    """Two principals identical except internal_id are equal and dedupe to one element in a set."""
+    p1 = Principal(
+        principal_type=PrincipalType.USER,
+        name="alice",
+        identifier="alice",
+        internal_id="123",
+    )
+    p2 = Principal(
+        principal_type=PrincipalType.USER,
+        name="alice",
+        identifier="alice",
+        internal_id=None,
+    )
+    assert p1 == p2
+    assert hash(p1) == hash(p2)
+    assert {p1, p2} == {p1}

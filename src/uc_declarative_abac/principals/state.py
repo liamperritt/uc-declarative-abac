@@ -21,11 +21,19 @@ class Principal:
     - USER: identifier = name = username
     - GROUP: identifier = name = display_name
     - SERVICE_PRINCIPAL: identifier = application_id, name = display_name
+
+    ``internal_id`` is the principal's numeric internal (account V2 / SCIM) id, as a
+    string. It is set best-effort by WorkspaceHelper on resolved principals whose id
+    is known, and is ``None`` otherwise — unresolved principals, groups pending
+    creation this run, account system groups, and principals fetched via the
+    workspace SCIM API. It is excluded from equality and hashing so that a principal
+    compares equal whether or not its id was known when it was resolved.
     """
 
     principal_type: PrincipalType
     identifier: str = ""
     name: str = ""
+    internal_id: str | None = field(default=None, compare=False)
 
     def __post_init__(self) -> None:
         if not self.name and not self.identifier:

@@ -43,6 +43,7 @@ A single frozen dataclass at `src/uc_declarative_abac/principals/state.py` repre
 
 - **Unresolved:** `principal_type == PrincipalType.UNKNOWN`, with exactly one of `name` / `identifier` truthy. Config-side has `name` set; UC-side has `identifier` set.
 - **Resolved:** `principal_type` ∈ {USER, GROUP, SERVICE_PRINCIPAL}, with both `name` and `identifier` truthy. This invariant is enforced by `__post_init__`.
+- **`internal_id`:** the numeric internal (account V2 / SCIM) id, set **best-effort** by `WorkspaceHelper` on resolved principals from its id cache (always built in account mode). It is `None` when unknown — unresolved principals, groups pending creation this run, account system groups, and `--use-workspace-scim` mode — and is `compare=False`, so it never affects equality/hashing or diffs. Write paths that need the id (group member add/remove, domain owner ids) go through `_principal_internal_id` in `helpers/workspace.py`, which falls back to the id cache for a group resolved while pending and created later in the run.
 
 #### Pipeline shape
 

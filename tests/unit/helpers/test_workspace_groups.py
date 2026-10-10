@@ -867,3 +867,99 @@ def test_workspace_helper_get_group_id_returns_none_for_unknown_group() -> None:
     result = helper.get_group_id("unknown_group")
 
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# internal_id
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_helper_leaves_internal_id_none_for_pending_group() -> None:
+    """A group registered as pending (not yet created) resolves with internal_id=None."""
+    client = _make_workspace_client(users=[_make_user("alice@example.com", "1")])
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    helper.register_pending_groups({"new_team"})
+    resolved = helper.resolve_by_name("new_team")
+
+    assert resolved.internal_id is None
+
+
+def test_workspace_helper_sets_internal_id_after_register_created_group() -> None:
+    """After register_created_group, the group resolves with the registered id as internal_id."""
+    client = _make_workspace_client()
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    helper.register_created_group("new_team", "500")
+    resolved = helper.resolve_by_name("new_team")
+
+    assert resolved.internal_id == "500"
+
+
+def test_workspace_helper_resolves_renamed_group_with_its_internal_id() -> None:
+    """After a pending rename, the new name resolves with the group's original internal_id."""
+    client = _make_workspace_client(
+        groups=[_make_group("old_name", "10")],
+    )
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    helper.register_pending_renames(
+        [
+            GroupRename(
+                id="10", old_display_name="old_name", new_display_name="new_name"
+            )
+        ],
+    )
+
+    resolved_by_new_name = helper.resolve_by_name("new_name")
+    resolved_by_old_identifier = helper.resolve_by_identifier("old_name")
+
+    assert resolved_by_new_name.internal_id == "10"
+    assert resolved_by_old_identifier.internal_id == "10"
+
+
+def _patched_member_values(client: MagicMock) -> list[str]:
+    """Collect the member values from every SCIM PATCH ``add`` operation issued."""
+    return [
+        member["value"]
+        for call in client.api_client.do.call_args_list
+        if call.args and call.args[0] == "PATCH"
+        for op in call.kwargs["body"]["Operations"]
+        if op["op"] == "add"
+        for member in op["value"]
+    ]
+
+
+def test_workspace_helper_adds_group_members_by_principal_internal_id() -> None:
+    """add_group_members sends the principal's internal_id as the member value, even
+    when its identifier is absent from the helper's cache."""
+    client = _make_workspace_client(groups=[_make_group("data_engineers", "10")])
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+
+    member = Principal(
+        PrincipalType.USER, "bob@example.com", "bob@example.com", internal_id="555"
+    )
+    helper.add_group_members("data_engineers", [member])
+
+    assert _patched_member_values(client) == ["555"]
+
+
+def test_workspace_helper_adds_group_member_created_this_run_without_internal_id() -> (
+    None
+):
+    """A group resolved while pending (internal_id None) is added as a member by the
+    id registered when it was created later in the run."""
+    client = _make_workspace_client(groups=[_make_group("parent_team", "10")])
+    helper = WorkspaceHelper(client, manage_groups=True)
+    helper.fetch_principals()
+    helper.register_pending_groups({"child_team"})
+    member = helper.resolve_by_name("child_team")
+
+    helper.register_created_group("child_team", "777")
+    helper.add_group_members("parent_team", [member])
+
+    assert _patched_member_values(client) == ["777"]
