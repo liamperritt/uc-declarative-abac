@@ -35,8 +35,17 @@ jobs:
       - name: Unit tests
         run: pytest tests/unit -q
 
+  validate-examples:
+    runs-on:
+      group: databricks-solutions-protected-runner-group
+      labels: linux-ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
       - name: Validate example project
-        run: uc-abac validate --config-dir examples/finance_demo/configs
+        uses: databricks-solutions/uc-declarative-abac/validate@feature/action-security-hardening
+        with:
+          config-dir: examples/finance_demo/configs
 
   docs:
     runs-on: ubuntu-latest
